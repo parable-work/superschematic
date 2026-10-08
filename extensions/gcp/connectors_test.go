@@ -126,7 +126,7 @@ func TestSQLConnectorUnderParameter(t *testing.T) {
 // to lower: Cloud SQL has no connector for Rust, and the password form is
 // not built.
 func TestSQLConnectorRefusesRust(t *testing.T) {
-	services := stacktest.AcmeShop()
+	services := stacktest.WithoutJobs(stacktest.AcmeShop())
 	for i := range services {
 		if services[i].Name == "shop-api" {
 			services[i].Language = registry.APILanguageRust
@@ -317,7 +317,7 @@ func TestAccountIDLength(t *testing.T) {
 			}
 		}
 	}
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "GCP allows 30") {
 		t.Fatalf("err = %v, want the service account id refused for its length", err)
 	}

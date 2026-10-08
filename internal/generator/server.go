@@ -9,8 +9,10 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
@@ -62,6 +64,7 @@ func (r run) generateServers() error {
 	}
 	var plans []planned
 	var tsPlans []*servergen.TypeScriptServer
+	scaffolding := map[string]bool{}
 	var tsScaffolds []*tsrestgen.APIOutput
 	for _, s := range servers {
 		switch s.Language {
@@ -71,6 +74,9 @@ func (r run) generateServers() error {
 				return err
 			}
 			plans = append(plans, planned{server, scaffolds})
+			for _, sc := range scaffolds {
+				scaffolding[sc.output.SchemaName] = true
+			}
 		case APILanguageTypeScript:
 			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name])
 			if err != nil {
@@ -81,6 +87,13 @@ func (r run) generateServers() error {
 		default:
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		}
+	}
+	jobs, err := stack.Jobs(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	if err := r.checkJobs(st.Name, jobs, services, scaffolding); err != nil {
+		return err
 	}
 
 	for _, p := range plans {
@@ -127,6 +140,50 @@ func (r run) generateServers() error {
 		}
 	}
 	r.Done(serverGenerator, dir)
+	return nil
+}
+
+// checkJobs refuses a stack one of whose Go APIs declares jobs while its
+// implementation declares no NewJobs (D52). The implementation exists, so
+// it is the engineer's, and the build writes into it no more: an API that
+// predates its jobs fails here, saying what to add, rather than in the
+// compile of a job's entrypoint. An API whose scaffold this build writes,
+// scaffolding, gets NewJobs from it.
+func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding map[string]bool) error {
+	checked := map[string]bool{}
+	for _, job := range jobs {
+		api := job.Job.API
+		if checked[api] || scaffolding[api] || job.Language != APILanguageGo {
+			continue
+		}
+		checked[api] = true
+		impl, _, err := r.implementation(api)
+		if err != nil {
+			return err
+		}
+		exists, err := apigen.ImplementationExists(impl.Dir)
+		if err != nil || !exists {
+			return err
+		}
+		declares, err := apigen.DeclaresFunc(impl.Dir, apigen.JobsFunc)
+		if err != nil || declares {
+			return err
+		}
+		var methods []string
+		for _, svc := range services {
+			if svc.Name != api {
+				continue
+			}
+			for _, j := range svc.Jobs {
+				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context) error", goutil.GoPublicIdentifier(j.Name)))
+			}
+		}
+		return fmt.Errorf("stack %s: %s declares jobs, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+			"\tfunc %s(deps api.Deps) (api.Jobs, error)\n\n"+
+			"returning a value with a method per job:\n\n%s\n\n"+
+			"where api is %s, whose api.JobsConstructor is %s's signature (docs/stack-model.md, section 8.7)",
+			stackName, api, impl.Dir, apigen.JobsFunc, apigen.JobsFunc, strings.Join(methods, "\n"), r.Options.Naming.GoAPIModule(api), apigen.JobsFunc)
+	}
 	return nil
 }
 

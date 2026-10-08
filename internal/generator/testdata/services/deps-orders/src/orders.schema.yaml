@@ -32,3 +32,10 @@ operationSets:
           - name: id
             typeRef: { name: string }
             required: true
+jobs:
+  - name: ShipOrders
+    comment: The warehouse's pick run.
+    schedule: "*/15 * * * *"
+    timeout: 5m
+    retries: 1
+  - name: ReindexOrders

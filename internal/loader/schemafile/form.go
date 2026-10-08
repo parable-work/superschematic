@@ -32,7 +32,7 @@ const (
 // *ir.ScalarDef, or *ir.OperationSet held by the document.
 func SingleDefinition(doc *Document) (SingleDefKind, any, bool) {
 	if doc.Name != "" || doc.Kind != "" || doc.Description != "" || doc.Comment != "" || len(doc.Imports) > 0 ||
-		len(doc.Documents) > 0 || len(doc.Extensions) > 0 {
+		len(doc.Documents) > 0 || len(doc.Extensions) > 0 || len(doc.Jobs) > 0 {
 		return SingleDefType, nil, false
 	}
 

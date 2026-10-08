@@ -137,7 +137,7 @@ var symbolPackages = map[string]string{
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
-	"mcp": "@superschematic/api",
+	"mcp": "@superschematic/api", "job": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 	// @superschematic/stack
@@ -214,6 +214,37 @@ func (e *emitter) emitDocument() {
 	for _, set := range e.doc.OperationSets {
 		e.emitOperationSet(set)
 	}
+	for _, job := range e.doc.Jobs {
+		e.emitJob(job)
+	}
+}
+
+// emitJob renders a job as the class the reader reads it from (D52):
+// `@job({ ... })` on an abstract class with no members.
+func (e *emitter) emitJob(job *ir.Job) {
+	if job == nil {
+		return
+	}
+	var parts []string
+	if job.Schedule != "" {
+		parts = append(parts, "schedule: "+quote(job.Schedule))
+	}
+	if job.TimeZone != "" {
+		parts = append(parts, "timeZone: "+quote(job.TimeZone))
+	}
+	if job.Timeout != "" {
+		parts = append(parts, "timeout: "+quote(job.Timeout))
+	}
+	if job.Retries != 0 {
+		parts = append(parts, fmt.Sprintf("retries: %d", job.Retries))
+	}
+	arg := ""
+	if len(parts) > 0 {
+		arg = objectLiteral(parts)
+	}
+	e.body.WriteString("\n")
+	e.comment("", job.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("job"), arg, e.ident(job.Name, "job"))
 }
 
 // checkScalars verifies every declared scalar is expressible: TypeScript

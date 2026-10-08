@@ -630,6 +630,7 @@ func TestPlan(t *testing.T) {
 		"create shop-db.database.shop-db",
 		"migrate shop-db.database.shop-db",
 		"create Orders.calls.shop-api.key",
+		"create shop-orders-ship-orders.calls.shop-api.key",
 		"start shop-api.process",
 		"start Orders.process",
 	}
