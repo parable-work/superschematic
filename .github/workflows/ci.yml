@@ -278,6 +278,9 @@ jobs:
           # The migration runner's tests apply plans to databases they
           # create on it; its SQLite tests need no service.
           SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The identity runtime's store and handler tests run on it in a
+          # schema of their own, as well as on SQLite.
+          SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The rustgen, rustsdkgen, rustrestgen and parity tests run cargo on
           # the crates they generate. Each uses CARGO_TARGET_DIR when set, so
           # one target directory compiles axum, tokio, reqwest and superscalar
