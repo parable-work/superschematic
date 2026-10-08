@@ -8,9 +8,10 @@ import (
 // when it expanded declarations: the types and enums a version graph
 // generates, and the fields, indexes and prune pins it adds to member types
 // (ir.OriginVersionGraph), and the tables, fields and indexes the user
-// model's traits add (ir.OriginIdentity). Any Origin marks loader output.
-// The declarations stay, so a written schema file expands to the same IR
-// when it is read back. schema itself is not modified.
+// model's traits add and the operations, types and enum its route sets add
+// (ir.OriginIdentity). Any Origin marks loader output. The declarations
+// stay, so a written schema file expands to the same IR when it is read
+// back. schema itself is not modified.
 func withoutExpansion(schema *ir.Schema) *ir.Schema {
 	expanded := false
 	for _, td := range schema.Types {
@@ -20,6 +21,11 @@ func withoutExpansion(schema *ir.Schema) *ir.Schema {
 	}
 	for _, def := range schema.Enums {
 		if def.Origin != "" {
+			expanded = true
+		}
+	}
+	for _, set := range schema.OperationSets {
+		if setHasExpansion(set) {
 			expanded = true
 		}
 	}
@@ -44,7 +50,38 @@ func withoutExpansion(schema *ir.Schema) *ir.Schema {
 			view.Enums[name] = def
 		}
 	}
+	view.OperationSets = make([]*ir.OperationSet, len(schema.OperationSets))
+	for i, set := range schema.OperationSets {
+		view.OperationSets[i] = set
+		if setHasExpansion(set) {
+			view.OperationSets[i] = authoredSet(set)
+		}
+	}
 	return &view
+}
+
+// setHasExpansion reports whether an operation set holds an operation the
+// loader added.
+func setHasExpansion(set *ir.OperationSet) bool {
+	for _, op := range set.Operations {
+		if op.Origin != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// authoredSet returns a copy of set without the operations the loader
+// added. A route set keeps an empty list, as the data forms write it.
+func authoredSet(set *ir.OperationSet) *ir.OperationSet {
+	copied := *set
+	copied.Operations = []*ir.FieldDef{}
+	for _, op := range set.Operations {
+		if op.Origin == "" {
+			copied.Operations = append(copied.Operations, op)
+		}
+	}
+	return &copied
 }
 
 // typeHasExpansion reports whether an authored type carries a field, index
