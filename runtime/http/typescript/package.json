@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/http-runtime",
   "version": "0.0.0",
-  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, and the Hono adapter. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, the readers of the config fields a stack derives, a JSON-lines logger, and a pg Pool over a derived database connection (./postgres). Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +13,10 @@
     "./hono": {
       "types": "./dist/hono.d.ts",
       "import": "./dist/hono.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js"
     }
   },
   "files": [
@@ -25,18 +29,29 @@
     "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src"
   },
   "peerDependencies": {
+    "@google-cloud/cloud-sql-connector": ">=1.12.0",
     "@hono/node-server": "2.1.1",
-    "hono": "4.13.8"
+    "hono": "4.13.8",
+    "pg": ">=8.11.0"
   },
   "peerDependenciesMeta": {
+    "@google-cloud/cloud-sql-connector": {
+      "optional": true
+    },
     "@hono/node-server": {
+      "optional": true
+    },
+    "pg": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@google-cloud/cloud-sql-connector": "1.12.0",
     "@hono/node-server": "2.1.1",
     "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
     "hono": "4.13.8",
+    "pg": "8.23.0",
     "typescript": "5.9.3"
   },
   "license": "Apache-2.0",
