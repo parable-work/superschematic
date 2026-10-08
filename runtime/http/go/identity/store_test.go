@@ -533,3 +533,35 @@ func TestNewSQLStoreRefuses(t *testing.T) {
 		t.Error("NewSQLStore accepted no database")
 	}
 }
+
+// TestStoreNameIsLogin: when the User trait names no name, the login is
+// the name, and a user is created with the login column alone.
+func TestStoreNameIsLogin(t *testing.T) {
+	ddl := strings.Replace(string(readFixture(t, "sqlite/create.sql")), `"display_name" TEXT NOT NULL`, `"display_name" TEXT`, 1)
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "login-name.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(ddl); err != nil {
+		t.Fatal(err)
+	}
+	s, err := identity.NewSQLStore(db, identity.SQLite, descriptorJSON(t, func(d map[string]any) {
+		d["user"].(map[string]any)["columns"].(map[string]any)["name"] = "email"
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := mustCreateUser(t, s, "Alice@Example.com", "Ignored")
+	if u.Name != "alice@example.com" {
+		t.Errorf("the user's name is %q, want the login", u.Name)
+	}
+	var displayName sql.NullString
+	if err := db.QueryRow(`SELECT "display_name" FROM "user"`).Scan(&displayName); err != nil || displayName.Valid {
+		t.Errorf("the store wrote a column the descriptor does not name: %v, %v", displayName, err)
+	}
+	mustSession(t, s, u, hashOf(1))
+	if rec := findSession(t, s, hashOf(1)); rec.User.Name != "alice@example.com" {
+		t.Errorf("a session's user is named %q", rec.User.Name)
+	}
+}
