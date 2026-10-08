@@ -87,8 +87,8 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)
 		}
-		// Mirror the output layout: types/typescript is a Bun workspace root.
-		if err := tsgen.WriteWorkspaceRoot(filepath.Dir(typesDir), naming.Naming{}); err != nil {
+		// Mirror the output layout: the output root is the Bun workspace root.
+		if err := (tsgen.WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 			t.Fatalf("write workspace root: %v", err)
 		}
 
@@ -175,7 +175,7 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 			if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 				t.Fatal(err)
 			}
-			if err := tsgen.WriteWorkspaceRoot(filepath.Dir(typesDir), naming.Naming{}); err != nil {
+			if err := (tsgen.WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 				t.Fatal(err)
 			}
 			install := exec.Command(bunPath, "install")

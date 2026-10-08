@@ -24,8 +24,15 @@ func assemble(t *testing.T, exts ...registry.Extension) *registry.Registry {
 	return reg
 }
 
-// shop returns the acceptance stack and services for an edit.
+// shop returns the acceptance stack and services for an edit, without
+// shop-orders' job, which jobShop keeps (jobs_test.go).
 func shop() (*ir.Stack, []stack.Service) {
+	return stacktest.WithoutJobSettings(stacktest.Shop()), stacktest.WithoutJobs(stacktest.AcmeShop())
+}
+
+// jobShop returns the acceptance stack and services with shop-orders' job,
+// ShipOrders, and the settings of it each environment makes.
+func jobShop() (*ir.Stack, []stack.Service) {
 	return stacktest.Shop(), stacktest.AcmeShop()
 }
 

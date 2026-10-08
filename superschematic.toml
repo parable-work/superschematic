@@ -106,6 +106,7 @@ versiongraph_rust = "runtime/versiongraph/rust-engine"
 versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
+http_runtime_typescript = "runtime/http/typescript"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, and the endpoint of each API it `calls`. {SERVICE} is

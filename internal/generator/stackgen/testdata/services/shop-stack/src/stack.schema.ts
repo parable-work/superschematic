@@ -18,7 +18,11 @@ export abstract class Orders {}
   fake: { project: "acme-staging", region: "us-east1" },
   domain: "staging.acme.dev",
   dns: { "fake.dns": { zone: "acme.dev" } },
-  settings: [{ of: Orders, env: { FULFILLMENT_REGION: "us" } }]
+  settings: [
+    { of: Orders, env: { FULFILLMENT_REGION: "us" } },
+    // shop-orders' job runs hourly, in New York's time.
+    { of: ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone: "America/New_York" }
+  ]
 })
 export abstract class Staging {}
 
@@ -29,7 +33,8 @@ export abstract class Staging {}
   settings: [
     { of: ShopDb, tier: "large", highAvailability: true },
     { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
-    { of: ShopOrders, env: { FULFILLMENT_REGION: "us" } }
+    { of: ShopOrders, env: { FULFILLMENT_REGION: "us" } },
+    { of: ShopOrders, job: "ShipOrders", cpu: "2" }
   ]
 })
 export abstract class Production {}

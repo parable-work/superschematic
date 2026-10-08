@@ -193,6 +193,32 @@ func TestRegisterConnectorRejects(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	// A job's edges are its API's, so a connector runs from a job platform
+	// too (D52), and from nothing else but a server platform.
+	jobPlatform := runPlatform("fake.job")
+	jobPlatform.Kind = ir.DeployableJob
+	fromJob := valid
+	fromJob.Name, fromJob.From = "job-sql", "fake.job"
+	t.Run("from a job platform", func(t *testing.T) {
+		if err := finalize(t, []PlatformSpec{jobPlatform, sqlPlatform("fake.sql")}, fromJob); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("from a database platform", func(t *testing.T) {
+		fromDB := valid
+		fromDB.Name, fromDB.From = "sql-sql", "fake.other"
+		err := finalize(t, []PlatformSpec{sqlPlatform("fake.other"), sqlPlatform("fake.sql")}, fromDB)
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.other", a database platform; a sql edge's from is a server or a job`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("a job platform without languages", func(t *testing.T) {
+		spec := jobPlatform
+		spec.Languages = nil
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `job platform "fake.job" declares no languages`) {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
 }
 
 // finalizeStack runs the stack part of Finalize, which the other parts of

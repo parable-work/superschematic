@@ -17,9 +17,18 @@ Generated TypeScript API server for the `fixture-nested-arrays-api` schema. Buil
   validators, applies the `@requirePermission` / `@publicRoute` gate, wraps
   results in the `{data, meta: {requestId}}` envelope and failures in
   RFC 9457 `application/problem+json`. `operationSpecs` is the operation table.
+- `deps.ts`: `Deps`, what the implementation is built from (its `config`
+  when it has one, a `pg` Pool `db` for its database, an SDK client per API
+  it calls, and a `logger`), and `Constructor`, the type of the
+  implementation's `create`.
 - `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
 - `values-schema.json`: the env-var contract, when the schema declares an
-  `@envVars` class.
+  `@envVars` class or its edges derive config fields.
+
+The implementation is a package of its own, `@schemas/fixture-nested-arrays-api-implementation`, at
+the naming file's `[implementation_paths] typescript` template, which a
+stack's build (or `build --scaffold`) writes once when it is missing. Its
+`create` is a `Constructor`.
 
 ## Routes
 

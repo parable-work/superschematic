@@ -37,8 +37,17 @@ const (
 	EdgePlatform = "fake.edge"
 	LitePlatform = "fake.lite"
 
+	// JobPlatform runs Go and TypeScript jobs, as gcp runs a job on Cloud
+	// Run jobs with a scheduler for its schedule (D52).
+	JobPlatform = "fake.job"
+
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
+
+	// JobSQLConnector and JobHTTPConnector connect a job, whose edges are
+	// its API's, as the server's connectors do.
+	JobSQLConnector  = "fake.job-sql"
+	JobHTTPConnector = "fake.job-run"
 
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
@@ -61,6 +70,8 @@ const (
 	TypeInstance = "fake:sql/instance:Instance"
 	TypeDatabase = "fake:sql/database:Database"
 	TypeRecord   = "fake:dns/record:Record"
+	TypeJob      = "fake:run/job:Job"
+	TypeSchedule = "fake:scheduler/job:Job"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -143,22 +154,30 @@ func (e *Extension) Register(r *registry.Registry) error {
 		server(EdgePlatform, registry.APILanguageTypeScript),
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
+		{
+			Name:      JobPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			Settings:  json.RawMessage(jobSettings),
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerJob,
+		},
 	} {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
 	}
-	if err := r.RegisterConnector(registry.ConnectorSpec{
-		Name: SQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunPlatform, To: SQLPlatform,
-		Connect: connectSQL,
-	}); err != nil {
-		return err
-	}
-	if err := r.RegisterConnector(registry.ConnectorSpec{
-		Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: RunPlatform, To: RunPlatform,
-		Connect: connectHTTP,
-	}); err != nil {
-		return err
+	for _, spec := range []registry.ConnectorSpec{
+		{Name: SQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: RunPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: JobPlatform, To: RunPlatform, Connect: connectHTTP},
+	} {
+		if err := r.RegisterConnector(spec); err != nil {
+			return err
+		}
 	}
 	if err := r.RegisterDNSPlatform(registry.DNSPlatformSpec{
 		Name: DNSPlatform, Extension: Name, Values: json.RawMessage(dnsValues), Lower: lowerRecords,
@@ -180,6 +199,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Platforms: map[ir.DeployableKind]string{
 			ir.DeployableServer:   RunPlatform,
 			ir.DeployableDatabase: SQLPlatform,
+			ir.DeployableJob:      JobPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -215,6 +235,14 @@ const serverSettings = `{
   "properties": {
     "minInstances": {"type": "integer", "minimum": 0},
     "public": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}`
+
+const jobSettings = `{
+  "type": "object",
+  "properties": {
+    "cpu": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }`
@@ -259,6 +287,22 @@ var resourceTypes = map[string]string{
 	TypeRecord: `{"type": "object", "required": ["zone", "name", "type", "value"],
 	  "properties": {"zone": {"type": "string"}, "name": {"type": "string"}, "type": {"type": "string"}, "value": {"type": "string"}},
 	  "additionalProperties": false}`,
+	TypeJob: `{"type": "object", "required": ["name", "image", "account", "language", "timeoutSeconds", "retries"],
+	  "properties": {
+	    "name": {"type": "string"}, "image": {"type": "string"}, "account": {"type": "string"},
+	    "language": {"type": "string"}, "timeoutSeconds": {"type": "integer", "minimum": 1},
+	    "retries": {"type": "integer", "minimum": 0}, "cpu": {"type": "string"},
+	    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
+	      "properties": {"name": {"type": "string"}, "value": {}, "secret": {"type": "string"}},
+	      "additionalProperties": false}}
+	  },
+	  "additionalProperties": false}`,
+	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
+	  "properties": {
+	    "name": {"type": "string"}, "schedule": {"type": "string"}, "timeZone": {"type": "string"},
+	    "job": {"type": "string"}, "account": {"type": "string"}
+	  },
+	  "additionalProperties": false}`,
 }
 
 // serverName names a server after its deployable, suffixed with each
@@ -279,45 +323,9 @@ func serverName(ctx registry.PlatformContext) any {
 // environment's.
 func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
-	account := d.Name + ".account"
-	member := ir.Output{Resource: account, Name: "email"}
-	inherited := len(ctx.Environment.Parameters) > 0
-	out := registry.Lowered{Resources: []*ir.Resource{{
-		ID:         account,
-		Type:       TypeAccount,
-		Properties: map[string]any{"name": d.ResourceName},
-		Phase:      ir.PhaseInfrastructure,
-	}}}
-	var env []any
-	for _, b := range d.Bindings {
-		entry := map[string]any{"name": b.Field}
-		switch b.Source {
-		case ir.BindingDerived:
-			vars, err := ir.DerivedVariables(b.Field, b.Value)
-			if err != nil {
-				return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
-			}
-			for _, v := range vars {
-				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
-			}
-			continue
-		case ir.BindingLiteral:
-			entry["value"] = b.Value
-		case ir.BindingParameter:
-			entry["value"] = ir.Parameter(b.Parameter)
-		case ir.BindingSecret:
-			secret := "secret." + b.Secret
-			entry["secret"] = ir.Output{Resource: secret, Name: "id"}
-			out.Resources = append(out.Resources,
-				&ir.Resource{ID: secret, Type: TypeSecret, Properties: map[string]any{"name": b.Secret}, Phase: ir.PhaseInfrastructure, Inherited: inherited},
-				&ir.Resource{ID: d.Name + ".reads." + b.Secret, Type: TypeGrant, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
-					"role": "secret.accessor", "member": member, "resource": ir.Output{Resource: secret, Name: "id"},
-				}},
-			)
-		default:
-			return registry.Lowered{}, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
-		}
-		env = append(env, entry)
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
 	}
 	service := map[string]any{
 		"name":     d.ResourceName,
@@ -346,6 +354,97 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 			Type:  "CNAME",
 			Value: ir.Output{Resource: d.Name + ".route", Name: "target"},
 		})
+	}
+	return out, nil
+}
+
+// lowerAccount lowers what a server and a job share: the deployable's
+// account, and a secret and an accessor grant per secret binding. It
+// returns them with the account's member and the deployable's environment,
+// which carries every binding, a derived one as the variables
+// ir.DerivedVariables encodes it in. Under a parameter the secrets are the
+// parent environment's.
+func lowerAccount(ctx registry.PlatformContext) (registry.Lowered, ir.Output, []any, error) {
+	d := ctx.Deployable
+	account := d.Name + ".account"
+	member := ir.Output{Resource: account, Name: "email"}
+	inherited := len(ctx.Environment.Parameters) > 0
+	out := registry.Lowered{Resources: []*ir.Resource{{
+		ID:         account,
+		Type:       TypeAccount,
+		Properties: map[string]any{"name": d.ResourceName},
+		Phase:      ir.PhaseInfrastructure,
+	}}}
+	var env []any
+	for _, b := range d.Bindings {
+		entry := map[string]any{"name": b.Field}
+		switch b.Source {
+		case ir.BindingDerived:
+			vars, err := ir.DerivedVariables(b.Field, b.Value)
+			if err != nil {
+				return registry.Lowered{}, member, nil, fmt.Errorf("binding %s: %w", b.Field, err)
+			}
+			for _, v := range vars {
+				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+			}
+			continue
+		case ir.BindingLiteral:
+			entry["value"] = b.Value
+		case ir.BindingParameter:
+			entry["value"] = ir.Parameter(b.Parameter)
+		case ir.BindingSecret:
+			secret := "secret." + b.Secret
+			entry["secret"] = ir.Output{Resource: secret, Name: "id"}
+			out.Resources = append(out.Resources,
+				&ir.Resource{ID: secret, Type: TypeSecret, Properties: map[string]any{"name": b.Secret}, Phase: ir.PhaseInfrastructure, Inherited: inherited},
+				&ir.Resource{ID: d.Name + ".reads." + b.Secret, Type: TypeGrant, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+					"role": "secret.accessor", "member": member, "resource": ir.Output{Resource: secret, Name: "id"},
+				}},
+			)
+		default:
+			return registry.Lowered{}, member, nil, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
+		}
+		env = append(env, entry)
+	}
+	return out, member, env, nil
+}
+
+// lowerJob lowers a job (D52) to an account and the secrets it reads, as a
+// server's, the job, which runs its image with its environment, one try
+// and the retries and timeout its run takes, and for a schedule the
+// environment runs, a scheduler entry that runs the job as its account.
+func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Job == nil {
+		return registry.Lowered{}, fmt.Errorf("job %s has no run", d.Name)
+	}
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	job := map[string]any{
+		"name":           d.ResourceName,
+		"image":          kebab(d.Name),
+		"account":        member,
+		"language":       strings.ToLower(d.Language),
+		"timeoutSeconds": d.Job.TimeoutSeconds,
+		"retries":        d.Job.Retries,
+	}
+	if cpu, ok := d.Settings["cpu"]; ok {
+		job["cpu"] = cpu
+	}
+	if len(env) > 0 {
+		job["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".job", Type: TypeJob, Properties: job})
+	if d.Job.Schedule != "" {
+		out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".schedule", Type: TypeSchedule, Properties: map[string]any{
+			"name":     d.ResourceName,
+			"schedule": d.Job.Schedule,
+			"timeZone": d.Job.TimeZone,
+			"job":      ir.Output{Resource: d.Name + ".job", Name: "id"},
+			"account":  member,
+		}})
 	}
 	return out, nil
 }

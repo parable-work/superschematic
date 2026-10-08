@@ -16,47 +16,92 @@ import (
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
-// The generated types packages install as one Bun workspace so their sibling
-// dependencies resolve from any package.
-func TestWriteWorkspaceRoot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "types", "typescript")
-	names := naming.Naming{NpmScope: "@acme"}
-
-	if err := WriteWorkspaceRoot(root, names); err != nil {
-		t.Fatalf("WriteWorkspaceRoot: %v", err)
+// The output root's package.json is the Bun workspace root of every
+// generated TypeScript package and the implementations (D51).
+func TestWorkspaceRootManifest(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Dir(root)
+	names := naming.Naming{NpmScope: "@acme", ImplementationPaths: naming.ImplementationPathsConfig{TypeScript: "services/{service}/ts"}}
+	w := WorkspaceRoot{
+		OutputRoot:     filepath.Join(repo, "schemas", "dist"),
+		RepositoryRoot: repo,
+		Naming:         names,
+		Paths: naming.LocalPaths{
+			ScalarTypeScript:      filepath.Join(repo, "third_party", "superscalar", "bindings", "typescript"),
+			HTTPRuntimeTypeScript: filepath.Join(repo, "runtime", "http", "typescript"),
+		},
+	}
+	got, err := w.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "name": "@acme/workspace",
+  "private": true,
+  "workspaces": [
+    "types/typescript/*",
+    "sdk/typescript/*",
+    "api/*",
+    "server/*/*",
+    "../../services/*/ts"
+  ],
+  "dependencies": {
+    "superscalar": "file:../../third_party/superscalar/bindings/typescript"
+  },
+  "overrides": {
+    "@superschematic/http-runtime": "file:../../runtime/http/typescript",
+    "superscalar": "file:../../third_party/superscalar/bindings/typescript"
+  }
+}
+`
+	if got != want {
+		t.Fatalf("manifest:\n%s\nwant:\n%s", got, want)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(root, "package.json"))
+	// Without [paths] or a repository root: the members the output root
+	// holds, and superscalar by name.
+	bare, err := (WorkspaceRoot{OutputRoot: root}).Manifest()
 	if err != nil {
-		t.Fatalf("read manifest: %v", err)
+		t.Fatal(err)
 	}
 	var manifest struct {
-		Name       string   `json:"name"`
-		Private    bool     `json:"private"`
-		Workspaces []string `json:"workspaces"`
+		Name         string            `json:"name"`
+		Private      bool              `json:"private"`
+		Workspaces   []string          `json:"workspaces"`
+		Dependencies map[string]string `json:"dependencies"`
+		Overrides    map[string]string `json:"overrides"`
 	}
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		t.Fatalf("manifest is not JSON: %v\n%s", err, raw)
+	if err := json.Unmarshal([]byte(bare), &manifest); err != nil {
+		t.Fatal(err)
 	}
-	if manifest.Name != "@acme/types-workspace" {
-		t.Fatalf("name = %q, want the naming file's npm scope", manifest.Name)
+	if manifest.Name != naming.Default().NpmScope+"/workspace" || !manifest.Private || len(manifest.Workspaces) != 4 ||
+		manifest.Dependencies["superscalar"] != "*" || manifest.Overrides != nil {
+		t.Fatalf("manifest without paths: %s", bare)
 	}
-	if !manifest.Private {
-		t.Fatal("workspace root must be private so it is never published")
+}
+
+// TestWriteWorkspaceRoot: builds that run in parallel each write the
+// root for their own package, and the result is one whole file; the
+// types-only root an earlier build wrote is removed, unless edited.
+func TestWriteWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	names := naming.Naming{NpmScope: "@acme"}
+	w := WorkspaceRoot{OutputRoot: root, Naming: names}
+	legacyDir := filepath.Join(root, "types", "typescript")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if len(manifest.Workspaces) != 1 || manifest.Workspaces[0] != "*" {
-		t.Fatalf("workspaces = %v, want every sibling package", manifest.Workspaces)
+	if err := os.WriteFile(filepath.Join(legacyDir, "package.json"), []byte(legacyTypesWorkspaceManifest(names)), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Parallel schema builds each write the manifest for their own package;
-	// the result must be the same file, not a torn or missing one.
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := WriteWorkspaceRoot(root, names); err != nil {
+			if err := w.Write(); err != nil {
 				errs <- err
 			}
 		}()
@@ -64,35 +109,42 @@ func TestWriteWorkspaceRoot(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		t.Fatalf("concurrent WriteWorkspaceRoot: %v", err)
+		t.Fatalf("concurrent Write: %v", err)
 	}
-	again, err := os.ReadFile(filepath.Join(root, "package.json"))
+	want, err := w.Manifest()
 	if err != nil {
-		t.Fatalf("re-read manifest: %v", err)
+		t.Fatal(err)
 	}
-	if string(again) != WorkspaceRootManifest(names) {
-		t.Fatalf("manifest drifted after concurrent writes:\n%s", again)
+	got, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("manifest drifted after concurrent writes:\n%s", got)
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name() != "package.json" {
-			t.Fatalf("unexpected leftover %q in types root", entry.Name())
+		if entry.Name() != "package.json" && entry.Name() != "types" {
+			t.Fatalf("unexpected leftover %q in the output root", entry.Name())
 		}
 	}
-}
-
-func TestWorkspaceRootManifestDefaultsScope(t *testing.T) {
-	var manifest struct {
-		Name string `json:"name"`
+	if _, err := os.Stat(filepath.Join(legacyDir, "package.json")); !os.IsNotExist(err) {
+		t.Fatalf("the types-only root is still there: %v", err)
 	}
-	if err := json.Unmarshal([]byte(WorkspaceRootManifest(naming.Naming{})), &manifest); err != nil {
+
+	// An edited types root is the engineer's, and stays.
+	edited := `{"name": "mine", "private": true, "workspaces": ["*"]}`
+	if err := os.WriteFile(filepath.Join(legacyDir, "package.json"), []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if want := naming.Default().NpmScope + "/types-workspace"; manifest.Name != want {
-		t.Fatalf("name = %q, want %q", manifest.Name, want)
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if kept, err := os.ReadFile(filepath.Join(legacyDir, "package.json")); err != nil || string(kept) != edited {
+		t.Fatalf("an edited types root was not kept: %q, %v", kept, err)
 	}
 }
 
@@ -132,7 +184,7 @@ func TestSiblingTypesDependencyIsWorkspaceSpec(t *testing.T) {
 }
 
 // TestWorkspaceInstallsFromAnyPackage runs `bun install` in the generated
-// types workspace the way the docs allow: in members and at the root, again
+// workspace the way the docs allow: in members and at the root, again
 // after a build adds a package that imports from a sibling. Every install
 // must succeed and share the root lockfile, and that package must
 // type-check against its installed sibling.
@@ -156,6 +208,7 @@ func TestWorkspaceInstallsFromAnyPackage(t *testing.T) {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
 	typesRoot := filepath.Join(tempRoot, "types", "typescript")
+	workspace := WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 	write := func(tc tsPackageCase) {
@@ -171,7 +224,7 @@ func TestWorkspaceInstallsFromAnyPackage(t *testing.T) {
 		if err := WriteTypes(output, dir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
 		}
-		if err := WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
+		if err := workspace.Write(); err != nil {
 			t.Fatalf("write workspace root: %v", err)
 		}
 	}
@@ -204,15 +257,15 @@ func TestWorkspaceInstallsFromAnyPackage(t *testing.T) {
 	write(enums)
 	install("fixture-db")
 	install(enums.name)
-	install(".")
+	install("../..")
 	// The next build adds a package that imports from a sibling.
 	write(consumer)
 	install(consumer.name)
-	install(".")
+	install("../..")
 	install("fixture-db")
 	install(consumer.name)
 
-	if _, err := os.Stat(filepath.Join(typesRoot, "bun.lock")); err != nil {
+	if _, err := os.Stat(filepath.Join(tempRoot, "bun.lock")); err != nil {
 		t.Fatalf("the workspace lockfile is not at the root: %v", err)
 	}
 	for _, name := range []string{enums.name, consumer.name, "fixture-db"} {

@@ -131,9 +131,9 @@ RUNTIME="$REPO_ROOT/runtime/http/typescript"
 TYPES="$DIST/types/typescript"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
-# The types packages form one Bun workspace; installing it links each to the
-# types packages of the services it depends on.
-(cd "$TYPES" && bun install >/dev/null)
+# The output root is one Bun workspace of the generated TypeScript packages
+# (D51); installing it links each to the packages it depends on.
+(cd "$DIST" && bun install >/dev/null)
 # Until the packages are published, every package the router, the SDKs and
 # the app import by name is linked into their node_modules, as a service's
 # own install would resolve it. hono comes from the runtime's install so the

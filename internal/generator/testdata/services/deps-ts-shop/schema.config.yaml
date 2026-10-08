@@ -1,0 +1,17 @@
+# A TypeScript API with a database, a callee and a service clause (D51):
+# it takes its database from its one DB-kind dependency, calls
+# deps-ts-pricing, holds one setting in its @envVars type, checks the end
+# user on one operation and admits a calling service on another. The
+# TypeScript Deps tests in internal/generator build it.
+name: deps-ts-shop
+kind: API
+dependencies:
+  - { name: deps-db, kind: DB }
+calls:
+  - { name: deps-ts-pricing, kind: API }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }
+  sdk:
+    typescript: { enabled: true }

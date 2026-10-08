@@ -3,10 +3,20 @@
 // This file defines Deps, what the implementation of {{ .SchemaName }} is built
 // from, and Constructor, the signature of the implementation's constructor
 // (docs/stack-model.md, section 8.5).
+{{- if .HasJobs }}
+//
+// It also defines Jobs, a method per job of {{ .SchemaName }}, and JobsConstructor,
+// the signature of the implementation's constructor of its jobs (section
+// 8.7).
+{{- end }}
 
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if .HasJobs }}
+	"context"
+
+{{ end }}
 {{- if .Deps.Database }}
 	orm "{{ .Deps.ORMModule }}"
 {{- end }}
@@ -43,3 +53,22 @@ type Deps struct {
 // New(deps Deps) (Implementations, error), which the entrypoint calls. The
 // scaffolded implementation asserts it: var _ {{ toPackageName .SchemaName }}.Constructor = New.
 type Constructor func(deps Deps) (Implementations, error)
+{{- if .HasJobs }}
+
+// Jobs are the jobs of {{ .SchemaName }}, a method per @job class. A job's
+// entrypoint calls its method once per run, with a context that SIGTERM
+// cancels, and the run fails when the method returns an error.
+type Jobs interface {
+{{- range .Jobs }}
+	// {{ .Method }} runs the job {{ .Name }}{{ if .Schedule }}, on {{ .Schedule }} unless an
+	// environment changes its schedule{{ end }}.
+	{{ .Method }}(ctx context.Context) error
+{{- end }}
+}
+
+// JobsConstructor is the signature of the implementation's constructor of
+// its jobs, NewJobs(deps Deps) (Jobs, error), which a job's entrypoint calls
+// with the API's Deps. The scaffolded implementation asserts it:
+// var _ {{ toPackageName .SchemaName }}.JobsConstructor = NewJobs.
+type JobsConstructor func(deps Deps) (Jobs, error)
+{{- end }}

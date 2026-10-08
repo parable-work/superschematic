@@ -564,3 +564,51 @@ func TestHistoryActorSettingRejectsNonSettingNames(t *testing.T) {
 		}
 	}
 }
+
+// TestImplementationPaths: each language's implementation directory is its
+// template under the repository root, typescript/{service} by default for
+// TypeScript (D51); the workspace pattern replaces the service with *; a
+// template that is absolute or names no service is refused.
+func TestImplementationPaths(t *testing.T) {
+	d := Default()
+	if got, want := d.TypeScriptImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "typescript", "shop-api"); got != want {
+		t.Fatalf("TypeScriptImplementationDir = %q, want %q", got, want)
+	}
+	if got, want := d.GoImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "go", "shop-api"); got != want {
+		t.Fatalf("GoImplementationDir = %q, want %q", got, want)
+	}
+	if got := d.TypeScriptImplementationGlob(); got != "typescript/*" {
+		t.Fatalf("TypeScriptImplementationGlob = %q", got)
+	}
+	if got := d.NpmImplementationPackage("shop-api"); got != "@schemas/shop-api-implementation" {
+		t.Fatalf("NpmImplementationPackage = %q", got)
+	}
+	if got := d.NpmWorkspacePackage(); got != "@schemas/workspace" {
+		t.Fatalf("NpmWorkspacePackage = %q", got)
+	}
+
+	n, err := Parse([]byte("[implementation_paths]\ntypescript = \"services/{service}/ts\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.TypeScriptImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "services", "shop-api", "ts"); got != want {
+		t.Fatalf("TypeScriptImplementationDir = %q, want %q", got, want)
+	}
+	if got := n.TypeScriptImplementationGlob(); got != "services/*/ts" {
+		t.Fatalf("TypeScriptImplementationGlob = %q", got)
+	}
+	if got := n.ImplementationPaths.Go; got != "go/{service}" {
+		t.Fatalf("an unset go template = %q, want the default", got)
+	}
+
+	for _, tc := range []struct{ key, value, want string }{
+		{"typescript", "/abs/{service}", "implementation_paths.typescript \"/abs/{service}\" is an absolute path"},
+		{"typescript", "typescript/impl", "implementation_paths.typescript \"typescript/impl\" does not contain {service}"},
+		{"go", "go/impl", "implementation_paths.go \"go/impl\" does not contain {service}"},
+	} {
+		_, err := Parse([]byte("[implementation_paths]\n"+tc.key+" = \""+tc.value+"\"\n"), "test")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("implementation_paths.%s = %q: err = %v, want it to contain %q", tc.key, tc.value, err, tc.want)
+		}
+	}
+}

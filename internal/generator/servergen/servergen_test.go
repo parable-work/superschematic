@@ -393,7 +393,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	edited := []byte("package shoporders\n\n// The engineer's code.\n")
+	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' constructor.\nfunc NewJobs() {}\n")
 	if err := os.WriteFile(file, edited, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +425,36 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 	f.build(t, repoRoot, fakePaths(repoRoot), "shop-stack")
 	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a build scaffolded into a package that holds orders.go: %v", err)
+	}
+}
+
+// TestAnImplementationThatPredatesItsJobsFails: shop-orders declares a
+// job, and its implementation, which exists and so is the engineer's,
+// declares no NewJobs. The build writes nothing into it and fails, saying
+// what to add (D52).
+func TestAnImplementationThatPredatesItsJobsFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
+	file := filepath.Join(dir, apigen.ImplementationFile)
+	before := []byte("package shoporders\n\n// The engineer's code, from before the job.\nfunc New() {}\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack shop-stack: shop-orders declares jobs, and its implementation at " + dir + ", which the build no longer writes into, declares no NewJobs",
+		"func NewJobs(deps api.Deps) (api.Jobs, error)",
+		"ExpireOrders(ctx context.Context) error",
+		"where api is example.com/schemas/api/shop-orders",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
+		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
 	}
 }
 
@@ -490,6 +520,68 @@ func TestNoRepositoryRootWritesNoEntrypoint(t *testing.T) {
 	}
 	if _, ok := result.Outputs["server"]; ok || !strings.Contains(strings.Join(result.Skipped, " "), "server") {
 		t.Errorf("outputs %v, skipped %v; want server skipped", result.Outputs, result.Skipped)
+	}
+}
+
+// TestATypeScriptServerScaffoldsItsImplementation: with shop-api served in
+// TypeScript, cloudStack's build scaffolds its implementation as a
+// TypeScript package at the [implementation_paths] typescript template,
+// writes no Go scaffold and no entrypoint for its server yet, and makes the
+// output root the Bun workspace of the generated TypeScript packages and
+// that implementation (D51). Storefront's Go entrypoint is written as
+// before. The build resolves cloudStack's Staging alone, on the fake
+// target, whose run platform takes a TypeScript server: the local target's
+// takes Go alone until stack dev runs TypeScript servers.
+func TestATypeScriptServerScaffoldsItsImplementation(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	cfg := *f.configs["shop-api"]
+	cfg.Outputs = map[string]any{
+		"types": map[string]any{"go": map[string]any{"enabled": true}, "typescript": map[string]any{"enabled": true}},
+		"api":   map[string]any{"enabled": true, "language": generator.APILanguageTypeScript},
+		"sdk":   map[string]any{"go": map[string]any{"enabled": true}},
+	}
+	f.configs["shop-api"] = &cfg
+	stack := *f.schemas[cloudStack]
+	stack.Types = maps.Clone(stack.Types)
+	delete(stack.Types, "Local")
+	f.schemas[cloudStack] = &stack
+	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
+
+	names := naming.Default()
+	impl := names.TypeScriptImplementationDir(repoRoot, "shop-api")
+	for _, file := range []string{"index.ts", "package.json", "tsconfig.json"} {
+		if _, err := os.Stat(filepath.Join(impl, file)); err != nil {
+			t.Errorf("the TypeScript scaffold lacks %s: %v", file, err)
+		}
+	}
+	index, err := os.ReadFile(filepath.Join(impl, "index.ts"))
+	if err != nil || !strings.Contains(string(index), "export const create: Constructor") {
+		t.Errorf("index.ts does not export create: %v\n%s", err, index)
+	}
+	if _, err := os.Stat(names.GoImplementationDir(repoRoot, "shop-api")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a TypeScript API got a Go scaffold: %v", err)
+	}
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	if _, err := os.Stat(servergen.ServerDir(out, cloudStack, "shop-api")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the TypeScript server got an entrypoint: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(servergen.ServerDir(out, cloudStack, "Storefront"), servergen.MainFile)); err != nil {
+		t.Errorf("Storefront's Go entrypoint is missing: %v", err)
+	}
+	root, err := os.ReadFile(filepath.Join(out, "package.json"))
+	if err != nil || !strings.Contains(string(root), `"../../typescript/*"`) {
+		t.Errorf("the output root's workspace does not hold the implementations: %v\n%s", err, root)
+	}
+
+	// Its package is the engineer's from then on.
+	edited := []byte("// The engineer's code.\n")
+	if err := os.WriteFile(filepath.Join(impl, "index.ts"), edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.build(t, repoRoot, fakePaths(repoRoot), cloudStack)
+	if got, err := os.ReadFile(filepath.Join(impl, "index.ts")); err != nil || string(got) != string(edited) {
+		t.Errorf("a second build rewrote index.ts: %q, %v", got, err)
 	}
 }
 
