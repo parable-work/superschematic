@@ -96,7 +96,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		Dependencies: map[string]string{n.ScalarNpmPackage: "*"},
 	}
 	if w.RepositoryRoot != "" {
-		rel, err := naming.RelPath(w.OutputRoot, w.RepositoryRoot)
+		rel, err := naming.PhysicalRelPath(w.OutputRoot, w.RepositoryRoot)
 		if err != nil {
 			return "", fmt.Errorf("workspace root: %w", err)
 		}
@@ -107,7 +107,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		{n.HTTPRuntimeNpmPackage, w.Paths.HTTPRuntimeTypeScript},
 		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScript},
 	} {
-		rel, err := naming.RelPath(w.OutputRoot, local.dir)
+		rel, err := naming.PhysicalRelPath(w.OutputRoot, local.dir)
 		if err != nil {
 			return "", fmt.Errorf("workspace root: %s: %w", local.pkg, err)
 		}

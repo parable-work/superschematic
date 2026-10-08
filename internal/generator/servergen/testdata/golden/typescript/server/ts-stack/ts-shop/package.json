@@ -1,0 +1,25 @@
+{
+  "name": "@schemas/ts-stack-ts-shop-server",
+  "version": "0.0.0",
+  "description": "Server ts-shop of stack ts-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/ts-pricing-sdk": "workspace:*",
+    "@schemas/ts-shop-api": "workspace:*",
+    "@schemas/ts-shop-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3"
+  }
+}

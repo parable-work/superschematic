@@ -1,0 +1,15 @@
+# A TypeScript API with a database, a callee and a setting: it takes ts-db
+# from its one DB-kind dependency, calls ts-pricing, holds one setting in
+# its @envVars type and checks the end user on one operation.
+name: ts-shop
+kind: API
+dependencies:
+  - { name: ts-db, kind: DB }
+calls:
+  - { name: ts-pricing, kind: API }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }
+  sdk:
+    typescript: { enabled: true }

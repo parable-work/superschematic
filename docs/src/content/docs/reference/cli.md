@@ -126,8 +126,9 @@ directory that holds a Go file. A TypeScript API's is a package at the
 `tsconfig.json` and an `index.ts` whose `create` is the generated
 `Constructor`, written only while the directory holds no `.ts` file.
 Without the flag a build writes nothing outside the output root, except a
-stack's: building a `Stack` service writes each Go server's entrypoint
-under `server/<stack>/<server>` in the output root and scaffolds, with no
+stack's: building a `Stack` service writes each Go and TypeScript server's
+entrypoint under `server/<stack>/<server>` in the output root and
+scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
 `go.mod` beside a Go one when no module holds the package.
 
@@ -511,10 +512,15 @@ design is section 8.3 of
    contract back to back. The runner must be on `PATH`, or named by
    `SUPERSCHEMATIC_MIGRATE`; [Schema migrations](/superschematic/reference/migrations/)
    says how to install it.
-5. Build each server's entrypoint module at `<out>/server/<stack>/<server>`
-   with `go build`, start it with its resolved config and `PORT`, callees
-   first, and wait until it answers `/readyz`. Each line a server prints is
-   printed with its name in front.
+5. Build each Go server's entrypoint module at
+   `<out>/server/<stack>/<server>` with `go build`, and for the TypeScript
+   servers run `bun install` once in `<out>`, the root of their Bun
+   workspace. Start each server with its resolved config and `PORT`,
+   callees first, a TypeScript one as `bun main.ts` in its entrypoint
+   package at the same place, and wait until it answers `/readyz`. Each
+   line a server prints is printed with its name in front. Go servers need
+   `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
+   run locally yet, and the environment does not resolve.
 
 Dev stays in the foreground until Ctrl-C or until a server exits, then
 stops the servers, callers first, and the container, which keeps its data
@@ -653,7 +659,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 Build the image of each server whose build context changed since the image
 the deploy manifest records, as `stack deploy` would, and deploy nothing.
-A Go server builds from the Dockerfile `superschematic build-all` writes at
+A Go or TypeScript server builds from the Dockerfile `superschematic build-all` writes at
 `<output-root>/server/<stack>/<server>/`, with the repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
 build runs on Cloud Build and pushes to the stack's Artifact Registry

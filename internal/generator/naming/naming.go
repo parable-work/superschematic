@@ -478,6 +478,65 @@ func RelPath(outputDir, target string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
+// PhysicalRelPath is RelPath for a path a package manager resolves, such
+// as a package.json's file: dependency or a Bun workspace's pattern. Bun
+// resolves it from the directory it runs in, whose path the kernel reports
+// with its symbolic links resolved, so a path that climbs out of a linked
+// directory, such as a temporary output root under macOS's /var, which
+// links to /private/var, climbs out of the link's target instead. The path
+// it returns climbs from outputDir's physical path to that of the deepest
+// directory outputDir and target share, then descends to target as
+// target names it, through any link on the way. Where no link is involved
+// it is RelPath's.
+func PhysicalRelPath(outputDir, target string) (string, error) {
+	if target == "" || outputDir == "" {
+		return "", nil
+	}
+	absOutput, err := filepath.Abs(outputDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", target, err)
+	}
+	common := absOutput
+	for {
+		if r, err := filepath.Rel(common, absTarget); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			break
+		}
+		parent := filepath.Dir(common)
+		if parent == common {
+			break
+		}
+		common = parent
+	}
+	up, err := filepath.Rel(physicalPath(absOutput), physicalPath(common))
+	if err != nil {
+		return "", fmt.Errorf("relate %s to %s: %w", common, outputDir, err)
+	}
+	down, err := filepath.Rel(common, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("relate %s to %s: %w", target, common, err)
+	}
+	return filepath.ToSlash(filepath.Join(up, down)), nil
+}
+
+// physicalPath is path with the symbolic links of its deepest existing
+// ancestor resolved, and the rest as it is.
+func physicalPath(path string) string {
+	rest := ""
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		if filepath.Dir(dir) == dir {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+	}
+}
+
 // CacheConfig is the [cache] table of superschematic.toml. Both keys are
 // optional; the zero value keeps the platform default root and hashes no
 // extra files.
@@ -760,6 +819,26 @@ func (n Naming) NpmAPIPackage(schemaName string) string {
 // implementation takes a suffix of its own.
 func (n Naming) NpmImplementationPackage(schemaName string) string {
 	return n.NpmScope + "/" + schemaName + "-implementation"
+}
+
+// NpmServerPackage returns the npm name of the entrypoint package of a
+// TypeScript server of a stack (D51): the stack's name and the server's,
+// in lower case with a hyphen before each capital (ShopStorefront is
+// shop-storefront), and a suffix of its own.
+func (n Naming) NpmServerPackage(stack, server string) string {
+	var b strings.Builder
+	for i, r := range server {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				if prev := server[i-1]; prev != '-' && prev != '_' && (prev < 'A' || prev > 'Z') {
+					b.WriteByte('-')
+				}
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return n.NpmScope + "/" + strings.ToLower(stack) + "-" + b.String() + "-server"
 }
 
 // NpmWorkspacePackage returns the npm name of the Bun workspace root the

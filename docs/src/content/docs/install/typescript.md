@@ -290,6 +290,16 @@ establishes no end user and a verifier for each `@hmacVerified` provider
 that refuses every request. It never writes into a directory that holds
 a `.ts` file.
 
+In a [stack](/superschematic/guides/stacks/), the build writes each
+TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
+a `package.json` in the output root's Bun workspace, which depends on the
+API packages, the implementations by their `package.json` names and the
+SDKs of the APIs called, a `main.ts` that builds each implementation from
+its `Deps` with `create(deps)` and `authenticate(deps)`, mounts each
+router on one Hono app and serves it with `Bun.serve` beside `/healthz`
+and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
+`bun main.ts` after one `bun install` in `schemas/dist`.
+
 An operation without an input type reads its other arguments from the JSON
 body object (on `GET`, from the query string). Each body argument is the
 JSON value it holds, alone, as a list (`T[]`) or as a list of lists

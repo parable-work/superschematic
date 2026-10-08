@@ -631,9 +631,10 @@ func newStackBuildCmd(a *app) *cobra.Command {
 		Long: `build builds, through the environment's target (Cloud Build on gcp), the
 image of each server whose build context changed since the image the
 deploy manifest records, as stack deploy would, and deploys nothing. Each
-Go server builds from the Dockerfile superschematic build-all writes at
-<output-root>/server/<stack>/<server>/, with the repository root as its
-context, cut down by the Dockerfile.dockerignore beside it.
+Go or TypeScript server builds from the Dockerfile superschematic
+build-all writes at <output-root>/server/<stack>/<server>/, with the
+repository root as its context, cut down by the Dockerfile.dockerignore
+beside it.
 
 It prints each image as a stack deploy --image flag; --format json prints
 the result, and --out writes it to a file. --server builds the servers it

@@ -50,8 +50,10 @@ var inheritedVariables = []string{
 //     ModelsDir, and applies it with the migration runner, expand and
 //     contract back to back, since no server of a previous version runs;
 //     migrate contract has nothing left to run;
-//   - rollout: it builds each server's entrypoint module with `go build`,
-//     starts it with its environment (its literals, its secrets from the
+//   - rollout: it builds each Go server's entrypoint module with `go
+//     build`, and installs the output root's Bun workspace once for the
+//     TypeScript servers, whose main.ts Bun runs as it is (D51); it starts
+//     each server with its environment (its literals, its secrets from the
 //     environment's secrets file, its derived variables, and PORT), and
 //     waits until it answers ReadinessPath.
 //
@@ -91,6 +93,11 @@ type Provisioner struct {
 	mu      sync.Mutex
 	console *console
 	running map[string][]*runningServer
+
+	// installed are the output roots whose Bun workspace this provisioner
+	// installed: one `bun install` serves every TypeScript server of every
+	// wave.
+	installed map[string]bool
 }
 
 var _ registry.Provisioner = (*Provisioner)(nil)
@@ -486,7 +493,9 @@ func (p *Provisioner) lookPath(name string) (string, error) {
 		case "docker":
 			return "", fmt.Errorf("local: docker is not on PATH; the local target runs Postgres in a Docker container: %w", err)
 		case "go":
-			return "", fmt.Errorf("local: go is not on PATH; the local target builds each server with go build: %w", err)
+			return "", fmt.Errorf("local: go is not on PATH; the local target builds each Go server with go build: %w", err)
+		case "bun":
+			return "", fmt.Errorf("local: bun is not on PATH; the local target runs each TypeScript server on Bun (https://bun.sh): %w", err)
 		}
 		return "", fmt.Errorf("local: %s is not on PATH: %w", name, err)
 	}
@@ -669,9 +678,10 @@ func (p *Provisioner) ensureDatabase(ctx context.Context, docker string, c *Cont
 	return nil
 }
 
-// startServers builds each server's entrypoint module, then starts each,
-// and waits until every one is ready. A server this provisioner already
-// runs is stopped first.
+// startServers builds each Go server's entrypoint module, and installs
+// the output root's Bun workspace once for the TypeScript servers, then
+// starts each server, and waits until every one is ready. A server this
+// provisioner already runs is stopped first.
 func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRequest, prog *Program, servers []*Server) error {
 	if req.OutputRoot == "" {
 		return errors.New("local: the request names no output root, where the build wrote each server's entrypoint module")
@@ -680,15 +690,21 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	if err != nil {
 		return err
 	}
-	goTool, err := p.lookPath("go")
-	if err != nil {
-		return err
+	tools := map[string]string{}
+	for _, s := range servers {
+		tool := "go"
+		if s.Language == LanguageTypeScript {
+			tool = "bun"
+		}
+		if tools[s.Language] == "" {
+			if tools[s.Language], err = p.lookPath(tool); err != nil {
+				return err
+			}
+		}
 	}
 	type built struct {
 		server *Server
-		binary string
-		module string
-		env    []string
+		cmd    Command
 	}
 	var builds []built
 	outputs := prog.outputs()
@@ -712,19 +728,26 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
 			return fmt.Errorf("local: server %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.Deployable, module)
 		}
-		binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(s.Binary)))
-		if err != nil {
-			return err
-		}
 		env, err := serverEnv(s, secrets, req.Parameters, outputs)
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
 		}
+		if s.Language == LanguageTypeScript {
+			if err := p.installWorkspace(ctx, req.OutputRoot, tools[s.Language]); err != nil {
+				return err
+			}
+			builds = append(builds, built{server: s, cmd: Command{Path: tools[s.Language], Args: []string{TypeScriptEntrypoint}, Dir: module, Env: env}})
+			continue
+		}
+		binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(s.Binary)))
+		if err != nil {
+			return err
+		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
-		builds = append(builds, built{server: s, binary: binary, module: module, env: env})
+		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
 	}
 	k := key(req.Environment)
 	for _, b := range builds {
@@ -736,7 +759,9 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		c := p.out()
 		stdout, stderr := c.writer(b.server.Deployable), c.writer(b.server.Deployable)
-		proc, err := p.runner().Start(Command{Path: b.binary, Dir: b.module, Env: b.env, Stdout: stdout, Stderr: stderr})
+		cmd := b.cmd
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		proc, err := p.runner().Start(cmd)
 		if err != nil {
 			return fmt.Errorf("local: start server %s: %w", b.server.Deployable, err)
 		}
@@ -754,6 +779,38 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		p.printf("%s is ready at %s", b.server.Deployable, b.server.URL)
 	}
+	return nil
+}
+
+// TypeScriptEntrypoint is the file of a TypeScript server's entrypoint
+// module that Bun runs (docs/stack-model.md, section 8.6).
+const TypeScriptEntrypoint = "main.ts"
+
+// installWorkspace installs the Bun workspace whose root is the output
+// root, which links each TypeScript server to the generated packages and
+// the implementations it imports, unless this provisioner installed it
+// already. The build writes the root's package.json; the install writes
+// the lockfile beside it.
+func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun string) error {
+	p.mu.Lock()
+	done := p.installed[outputRoot]
+	p.mu.Unlock()
+	if done {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(outputRoot, "package.json")); err != nil {
+		return fmt.Errorf("local: no Bun workspace at %s, whose package.json the stack's build writes for its TypeScript servers (docs/stack-model.md, section 8.6): %w", outputRoot, err)
+	}
+	p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
+	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: []string{"install"}, Dir: outputRoot, Env: os.Environ()}); err != nil {
+		return fmt.Errorf("local: install the TypeScript workspace at %s: %w", outputRoot, err)
+	}
+	p.mu.Lock()
+	if p.installed == nil {
+		p.installed = map[string]bool{}
+	}
+	p.installed[outputRoot] = true
+	p.mu.Unlock()
 	return nil
 }
 

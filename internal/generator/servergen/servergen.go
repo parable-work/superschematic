@@ -1,14 +1,15 @@
-// Package servergen writes the Go entrypoint of a stack's server
-// (docs/stack-model.md, sections 8.1 and 8.2): a module at
-// `<output-root>/server/<stack>/<server>/` holding main.go, go.mod and a
-// Dockerfile. main.go loads each served API's config, connects one pool per
-// database, builds one SDK client per API called, builds each API's
-// implementation from its Deps and mounts every API's routes on one
+// Package servergen writes the entrypoint of a stack's server
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6). A Go server's is a
+// module at `<output-root>/server/<stack>/<server>/` holding main.go,
+// go.mod and a Dockerfile. main.go loads each served API's config, connects
+// one pool per database, builds one SDK client per API called, builds each
+// API's implementation from its Deps and mounts every API's routes on one
 // handler beside /healthz and /readyz. cloudsql.go beside it connects a
 // database through the Cloud SQL connector, on a server that some
-// environment places on Cloud SQL. The generator package plans what each
-// server serves from the stack and the APIs' Go server outputs; this
-// package turns that plan into files.
+// environment places on Cloud SQL. A TypeScript server's is a package at
+// the same place, whose main.ts does the same on Bun (typescript.go). The
+// generator package plans what each server serves from the stack and the
+// APIs' server outputs; this package turns that plan into files.
 package servergen
 
 import (
@@ -167,6 +168,10 @@ type Input struct {
 	// links the Cloud SQL connector when one of them is a database it
 	// connects to.
 	CloudSQL []string
+
+	// manualRoutes counts a manually registered operation among an API's
+	// routes, as a router that mounts it does: a TypeScript one.
+	manualRoutes bool
 }
 
 // ServerDir is where the entrypoint of server in stack is written.
@@ -678,8 +683,9 @@ var routeParam = regexp.MustCompile(`\{[^}]*\}`)
 
 // checkRoutes refuses two served APIs that register one method and path:
 // one router answers each once. A manually registered operation is the
-// implementation's to route, so it is left out, as apigen leaves it out of
-// its own collision check.
+// implementation's to route on a Go server, so it is left out there, as
+// apigen leaves it out of its own collision check; a TypeScript router
+// mounts it (manualRoutes).
 func checkRoutes(in Input) error {
 	type route struct{ method, path string }
 	owner := map[route]string{}
@@ -687,7 +693,7 @@ func checkRoutes(in Input) error {
 	var problems []string
 	for _, a := range in.APIs {
 		for _, ep := range a.Output.Endpoints {
-			if ep.ManualRouteRegistration {
+			if ep.ManualRouteRegistration && !in.manualRoutes {
 				continue
 			}
 			key := route{ep.Method, routeParam.ReplaceAllString(ep.Path, "{}")}
@@ -869,5 +875,27 @@ func templateFuncs() template.FuncMap {
 		"anyServiceAuth": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.ServiceAuth })
 		},
+		"tsQuote": func(s string) string {
+			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
+		},
+		"join": strings.Join,
+		"tsServiceList": func(apis []*TypeScriptAPI) string {
+			names := make([]string, len(apis))
+			for i, a := range apis {
+				names[i] = a.Service
+			}
+			return joinNames(names)
+		},
 	}
+}
+
+// joinNames joins names as a sentence lists them: a, b and c.
+func joinNames(names []string) string {
+	switch len(names) {
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }

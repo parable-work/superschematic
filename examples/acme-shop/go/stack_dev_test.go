@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,16 +25,19 @@ import (
 	scalars "github.com/parable-work/superscalar/go"
 )
 
-// TestStackDevRunsTheShop is milestone 1 of docs/stack-model.md (section
-// 14) on this example. `superschematic stack dev` runs shop-stack's Dev
-// environment from examples/acme-shop, as the tutorial does: Postgres in a
-// container with shop-db migrated, and shop-api and shop-orders each on its
-// generated entrypoint, built with the implementations in go/shop-api and
-// go/shop-orders. Every connection string, URL and port the test uses comes
-// from the environment the build resolved. The test waits for each server's
-// /readyz, signs a user in through the generated ORM, calls each API
-// through its generated Go SDK, then stops the stack as Ctrl-C does, which
-// with --remove-database removes the container.
+// TestStackDevRunsTheShop is milestones 1 and 7 of docs/stack-model.md
+// (section 14) on this example. `superschematic stack dev` runs
+// shop-stack's Dev environment from examples/acme-shop, as the tutorial
+// does: Postgres in a container with shop-db migrated; shop-api and
+// shop-orders each on its generated Go entrypoint, built with the
+// implementations in go/shop-api and go/shop-orders; and shop-storefront on
+// its generated TypeScript entrypoint, which Bun runs with the
+// implementation in typescript/shop-storefront (D51). Every connection
+// string, URL and port the test uses comes from the environment the build
+// resolved. The test waits for each server's /readyz, signs a user in
+// through the generated ORM, calls each Go API through its generated Go
+// SDK and the storefront over HTTP, then stops the stack as Ctrl-C does,
+// which with --remove-database removes the container.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
@@ -51,6 +55,19 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// which scripts/check.sh compares with testdata/generated/, is left as
 	// build-all wrote it.
 	outputRoot := t.TempDir()
+	// stack dev installs the Bun workspace of that output root, whose
+	// members include the packages in typescript/, which the install links
+	// to it. Installing schemas/dist's workspace again links them back.
+	t.Cleanup(func() {
+		if _, err := os.Stat(filepath.Join("..", "schemas", "dist", "package.json")); err != nil {
+			return
+		}
+		install := exec.Command("bun", "install")
+		install.Dir = filepath.Join("..", "schemas", "dist")
+		if out, err := install.CombinedOutput(); err != nil {
+			t.Errorf("link typescript/ back to schemas/dist: %v\n%s", err, out)
+		}
+	})
 	output := &lockedBuffer{}
 	stack := exec.Command(binary, "stack", "dev", "--remove-database", "--out", outputRoot)
 	stack.Dir = ".."
@@ -97,7 +114,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
 	container = env.container
-	for _, server := range []string{"shop-api", "shop-orders"} {
+	for _, server := range []string{"shop-api", "shop-orders", "shop-storefront"} {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
 		}
@@ -148,6 +165,35 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if order.Status != orderstypes.OrderStatus_Placed || order.TotalCents != 900 || len(order.Lines) != 1 {
 		t.Fatalf("PlaceOrder returned %+v", order)
+	}
+
+	// shop-storefront, on Bun: a shopper puts two green teas in a cart,
+	// and a viewer reads the cart back. Its implementation keeps carts in
+	// memory and knows its callers by static tokens.
+	storefront := env.servers["shop-storefront"]
+	cart := fmt.Sprintf("%s/api/carts/00000000-0000-4000-8000-%012d", storefront, n%1_000_000_000_000)
+	if status, body := call(t, http.MethodPost, cart+"/lines", "shopper-token", `{"sku": "green-tea", "quantity": 2}`); status != http.StatusCreated {
+		t.Fatalf("add a cart line: %d %s", status, body)
+	}
+	status, body := call(t, http.MethodGet, cart, "viewer-token", "")
+	var read struct {
+		Data struct {
+			Lines []struct {
+				Sku      string `json:"sku"`
+				Quantity int    `json:"quantity"`
+			} `json:"lines"`
+			Total struct {
+				AmountCents int    `json:"amountCents"`
+				Currency    string `json:"currency"`
+			} `json:"total"`
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &read) != nil || len(read.Data.Lines) != 1 || read.Data.Lines[0].Quantity != 2 ||
+		read.Data.Total.AmountCents != 900 || read.Data.Total.Currency != "EUR" {
+		t.Fatalf("read the cart: %d %s", status, body)
+	}
+	if status, body := call(t, http.MethodGet, cart, "", ""); status != http.StatusUnauthorized {
+		t.Fatalf("read the cart without a token: %d %s, want 401", status, body)
 	}
 
 	// Ctrl-C stops the servers, then removes the container and its data.
@@ -259,6 +305,33 @@ func containsProduct(products []apitypes.ProductView, id apitypes.IdentityUUID) 
 		}
 	}
 	return false
+}
+
+// call sends a request with a bearer token, unless token is empty, and a
+// JSON body, unless body is empty, and returns the status and the body of
+// the answer.
+func call(t *testing.T, method, url, token, body string) (int, []byte) {
+	t.Helper()
+	request, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	answer, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode, answer
 }
 
 func get(t *testing.T, url string) int {

@@ -1,0 +1,10 @@
+# The TypeScript API ts-shop calls. Only a calling service may quote, so
+# its server verifies each caller's credential against its callers field.
+name: ts-pricing
+kind: API
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }
+  sdk:
+    typescript: { enabled: true }

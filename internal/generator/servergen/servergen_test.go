@@ -496,12 +496,10 @@ func TestNoRepositoryRootWritesNoEntrypoint(t *testing.T) {
 // TestATypeScriptServerScaffoldsItsImplementation: with shop-api served in
 // TypeScript, cloudStack's build scaffolds its implementation as a
 // TypeScript package at the [implementation_paths] typescript template,
-// writes no Go scaffold and no entrypoint for its server yet, and makes the
-// output root the Bun workspace of the generated TypeScript packages and
-// that implementation (D51). Storefront's Go entrypoint is written as
-// before. The build resolves cloudStack's Staging alone, on the fake
-// target, whose run platform takes a TypeScript server: the local target's
-// takes Go alone until stack dev runs TypeScript servers.
+// writes no Go scaffold, writes its server's TypeScript entrypoint, and
+// makes the output root the Bun workspace of the generated TypeScript
+// packages, the server and that implementation (D51). Storefront's Go
+// entrypoint is written as before.
 func TestATypeScriptServerScaffoldsItsImplementation(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadFixture(t, servicesRoot)
@@ -512,10 +510,6 @@ func TestATypeScriptServerScaffoldsItsImplementation(t *testing.T) {
 		"sdk":   map[string]any{"go": map[string]any{"enabled": true}},
 	}
 	f.configs["shop-api"] = &cfg
-	stack := *f.schemas[cloudStack]
-	stack.Types = maps.Clone(stack.Types)
-	delete(stack.Types, "Local")
-	f.schemas[cloudStack] = &stack
 	f.build(t, repoRoot, fakePaths(repoRoot), append(slices.Clone(apis), cloudStack)...)
 
 	names := naming.Default()
@@ -533,8 +527,11 @@ func TestATypeScriptServerScaffoldsItsImplementation(t *testing.T) {
 		t.Errorf("a TypeScript API got a Go scaffold: %v", err)
 	}
 	out := filepath.Join(repoRoot, "schemas", "dist")
-	if _, err := os.Stat(servergen.ServerDir(out, cloudStack, "shop-api")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the TypeScript server got an entrypoint: %v", err)
+	if _, err := os.Stat(filepath.Join(servergen.ServerDir(out, cloudStack, "shop-api"), servergen.TypeScriptMainFile)); err != nil {
+		t.Errorf("the TypeScript server got no entrypoint: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(servergen.ServerDir(out, cloudStack, "shop-api"), servergen.MainFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the TypeScript server got a Go entrypoint: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(servergen.ServerDir(out, cloudStack, "Storefront"), servergen.MainFile)); err != nil {
 		t.Errorf("Storefront's Go entrypoint is missing: %v", err)
@@ -919,7 +916,8 @@ func withServiceClause(f fixture) {
 }
 
 // TestToolchainPinsMatchToolsEnv: the go directive the modules state and
-// the images the Dockerfile builds in are tools.env's pins.
+// the images the Dockerfiles build and run in, Go's, Rust's and Bun's, are
+// tools.env's pins.
 func TestToolchainPinsMatchToolsEnv(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "tools.env"))
 	if err != nil {
@@ -936,6 +934,9 @@ func TestToolchainPinsMatchToolsEnv(t *testing.T) {
 	}
 	if pins["RUST_VERSION"] != servergen.RustVersion {
 		t.Errorf("tools.env pins Rust %s; servergen.RustVersion is %s", pins["RUST_VERSION"], servergen.RustVersion)
+	}
+	if pins["BUN_VERSION"] != servergen.BunVersion {
+		t.Errorf("tools.env pins Bun %s; servergen.BunVersion is %s", pins["BUN_VERSION"], servergen.BunVersion)
 	}
 }
 
