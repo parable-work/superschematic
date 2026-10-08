@@ -246,11 +246,16 @@ type TargetSpec struct {
 	// has a migration to run on the target is refused.
 	Migrations MigrationRunner
 
-	// Builder builds the images of the target's servers from the
+	// Builder builds the images of the target's servers and jobs from the
 	// Dockerfiles a stack's build writes (sections 8.2 and 11.2). Nil
-	// builds none, and every server's image comes from --image or the
-	// deploy manifest.
+	// builds none, and every image comes from --image or the deploy
+	// manifest.
 	Builder ImageBuilder
+
+	// Jobs runs a deployed job once on demand, outside its schedule
+	// (`stack run`, section 8.7, D52). Nil runs none, and `stack run`
+	// refuses the target's environments.
+	Jobs JobRunner
 
 	// CI says how a generated CI job signs in to the target's
 	// environments (section 11.3, D47). Nil gives CI no identity, and the
@@ -580,8 +585,9 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // values schema or resource type schema that does not compile, a resource
 // type another target registered with a different schema, a policy rule
 // without a name or Check, or with a repeated name, and a deploy seam it
-// cannot use: State, Bootstrap, Migrations, Builder or CI without a
-// provisioner, and Bootstrap, Migrations, Builder or CI without State.
+// cannot use: State, Bootstrap, Migrations, Builder, CI or Jobs without a
+// provisioner, and Bootstrap, Migrations, Builder, CI or Jobs without
+// State.
 // Finalize checks that the platforms, the DNS platform and the provisioner
 // it names are registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {

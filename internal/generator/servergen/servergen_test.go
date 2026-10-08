@@ -72,6 +72,10 @@ var order = []string{"shop-db", "shop-api", "shop-orders", "shop-reviews", "shop
 // apis are the services of order the stacks serve, in order.
 var apis = order[:len(order)-1]
 
+// expireOrders is the deployable of shop-orders' job ExpireOrders, whose
+// entrypoint each stack's build writes beside the servers' (D52).
+const expireOrders = "shop-orders-expire-orders"
+
 // fixture is the loaded fixture services.
 type fixture struct {
 	reg     *registry.Registry
@@ -166,7 +170,7 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 	files := map[string]string{}
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
-		for _, server := range []string{"Storefront", "shop-api"} {
+		for _, server := range []string{"Storefront", "shop-api", expireOrders} {
 			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
@@ -183,10 +187,12 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 
 // TestEntrypointGolden: each stack's build writes an entrypoint module per
 // server, Storefront serving two APIs on one database and calling
-// shop-api, and shop-api's default server, and scaffolds each API's
-// implementation with a module of its own. shop-stack's servers never run
-// on Cloud SQL and link no Cloud SQL connector; cloudStack's, whose
-// Staging places shop-db on Cloud SQL, do. Regenerate with:
+// shop-api, and shop-api's default server, and one per job, shop-orders'
+// ExpireOrders, which builds shop-orders' Deps as Storefront does and runs
+// the job (D52); and scaffolds each API's implementation with a module of
+// its own. shop-stack's entrypoints never run on Cloud SQL and link no
+// Cloud SQL connector; cloudStack's, whose Staging places shop-db on Cloud
+// SQL, do. Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestEntrypointGolden -update
 func TestEntrypointGolden(t *testing.T) {
@@ -210,8 +216,8 @@ func TestEntrypointGolden(t *testing.T) {
 		for _, e := range entries {
 			servers = append(servers, e.Name())
 		}
-		if got := strings.Join(servers, " "); got != "Storefront shop-api" {
-			t.Errorf("%s: servers = %s, want Storefront and shop-api", stack, got)
+		if got := strings.Join(servers, " "); got != "Storefront shop-api "+expireOrders {
+			t.Errorf("%s: entrypoints = %s, want Storefront, shop-api and %s", stack, got, expireOrders)
 		}
 	}
 }
@@ -786,6 +792,44 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	refused, err := cmd.CombinedOutput()
 	if want := "SHOP_DB_DATABASE is a Cloud SQL connector configuration, which server Storefront does not link"; err == nil || !strings.Contains(string(refused), want) {
 		t.Errorf("Storefront on a Cloud SQL configuration = %v, want it to stop saying %q:\n%s", err, want, refused)
+	}
+
+	// shop-orders' job builds the API's Deps from the same variables and
+	// runs ExpireOrders once: the scaffold's fails, and the job exits 1
+	// saying so; an implemented one succeeds, and the job exits 0. Its pool
+	// connects when first used, so the job runs with the database down.
+	jobDir := servergen.ServerDir(out, "shop-stack", expireOrders)
+	goCommand(t, jobDir, "mod", "tidy")
+	goCommand(t, jobDir, "vet", ".")
+	jobBinary := filepath.Join(t.TempDir(), expireOrders)
+	goCommand(t, jobDir, "build", "-o", jobBinary, ".")
+	runJob := func() (string, error) {
+		cmd := exec.Command(jobBinary)
+		cmd.Env = append(os.Environ(), append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+		output, err := cmd.CombinedOutput()
+		return string(output), err
+	}
+	output, err := runJob()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(output, `"msg":"job failed"`) || !strings.Contains(output, "job ExpireOrders") {
+		t.Errorf("the scaffold's job = %v, want exit 1 with the not-implemented error:\n%s", err, output)
+	}
+	impl := filepath.Join(naming.Default().GoImplementationDir(repoRoot, "shop-orders"), apigen.ImplementationFile)
+	source, err := os.ReadFile(impl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	implemented := strings.Replace(string(source), `return api.NotImplementedError("job ExpireOrders")`, `j.deps.Logger.Info("expired no order")
+	return nil`, 1)
+	if implemented == string(source) {
+		t.Fatalf("%s has no not-implemented ExpireOrders:\n%s", impl, source)
+	}
+	if err := os.WriteFile(impl, []byte(implemented), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goCommand(t, jobDir, "build", "-o", jobBinary, ".")
+	if output, err := runJob(); err != nil || !strings.Contains(output, `"msg":"expired no order"`) || !strings.Contains(output, `"msg":"job done"`) {
+		t.Errorf("the implemented job = %v, want exit 0 after the method's log:\n%s", err, output)
 	}
 }
 

@@ -150,8 +150,10 @@ type (
 	// Credentials, its Bootstrapper prepares a cloud project
 	// (BootstrapRequest) and returns the BootstrapValues the core records
 	// in the schema (BootstrapResult), its MigrationRunner runs
-	// MigrationPlans (MigrationRequest) between the deploy's steps, and its
-	// ImageBuilder builds a server's image (BuildRequest) before them.
+	// MigrationPlans (MigrationRequest) between the deploy's steps, its
+	// ImageBuilder builds a server's or a job's image (BuildRequest)
+	// before them, and its JobRunner runs a deployed job once on demand
+	// (JobRunRequest, D52).
 	Run              = registry.Run
 	StateStore       = registry.StateStore
 	SecretStore      = registry.SecretStore
@@ -164,6 +166,8 @@ type (
 	MigrationPlan    = registry.MigrationPlan
 	ImageBuilder     = registry.ImageBuilder
 	BuildRequest     = registry.BuildRequest
+	JobRunner        = registry.JobRunner
+	JobRunRequest    = registry.JobRunRequest
 	Credential       = registry.Credential
 
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI

@@ -14,11 +14,11 @@ kind, decorators and auth provider.
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
 | `schemas/services/shop-db` | DB: users, sessions, products, stock, orders and reviews |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs |
-| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust |
+| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; its job `ShipOrders` ships placed orders |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
-| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server whose entrypoint the build writes; its `Dev` environment runs on the `local` target |
+| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server whose entrypoint the build writes, and `shop-orders`' job; its `Dev` environment runs on the `local` target, the job every minute |
 | `go/` | the Go module: `auth.go`, the auth both APIs share, and the tests, which call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
-| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)` and `AuthMiddleware(deps)`, which the generated entrypoints call |
+| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)` and `AuthMiddleware(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)`, which its job's does |
 | `typescript/` | implements `shop-storefront` and tests it through the TypeScript SDK; a `shop-orders` client; type tests |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
@@ -30,10 +30,12 @@ kind, decorators and auth provider.
 ## Run it
 
 `superschematic stack dev`, from this directory, runs `shop-stack`'s `Dev`
-environment: Postgres in a container with `shop-db` migrated, and
-`shop-api` and `shop-orders` on their generated entrypoints. It needs
-Docker, Go and the migration runner, `superschematic-migrate`, on `PATH`;
-it derives every connection string, URL and port, and Ctrl-C stops it.
+environment: Postgres in a container with `shop-db` migrated,
+`shop-api` and `shop-orders` on their generated entrypoints, and
+`shop-orders`' job `ShipOrders` every minute. It needs Docker, Go and the
+migration runner, `superschematic-migrate`, on `PATH`; it derives every
+connection string, URL and port, and Ctrl-C stops it. While it runs,
+`superschematic stack run Dev shop-orders-ship-orders` runs the job once.
 
 ## Check it
 

@@ -68,8 +68,8 @@ func (b imageBuilder) Build(ctx context.Context, req registry.BuildRequest) (str
 		log = io.Discard
 	}
 	hex := strings.TrimPrefix(req.ContextDigest, "sha256:")
-	repo := imageRepository(v, env.Stack, req.Server)
-	object := buildPrefix + kebab(env.Stack) + "/" + kebab(req.Server) + "/" + hex + ".tar.gz"
+	repo := imageRepository(v, env.Stack, req.Deployable)
+	object := buildPrefix + kebab(env.Stack) + "/" + kebab(req.Deployable) + "/" + hex + ".tar.gz"
 	data, err := os.ReadFile(req.Context)
 	if err != nil {
 		return "", err

@@ -44,6 +44,10 @@ type fakeRunner struct {
 	probes   map[string]int
 	// exitOnStart makes every process exit as it starts.
 	exitOnStart bool
+	// exits, by the base name of a binary, are how its next processes
+	// exit, one each, as soon as they start; a process with none left
+	// runs until it is stopped.
+	exits map[string][]error
 }
 
 type rule struct {
@@ -94,6 +98,10 @@ func (f *fakeRunner) Start(cmd local.Command) (local.Process, error) {
 	_, _ = cmd.Stderr.Write([]byte("a line with no end"))
 	if f.exitOnStart {
 		p.exit(errors.New("exit status 2"))
+	}
+	if exits := f.exits[filepath.Base(cmd.Path)]; len(exits) > 0 {
+		f.exits[filepath.Base(cmd.Path)] = exits[1:]
+		p.exit(exits[0])
 	}
 	return p, nil
 }
@@ -214,7 +222,7 @@ func newFixture(t *testing.T, envName string) *fixture {
 	dir := filepath.Join(root, "program")
 	outputRoot := filepath.Join(root, "dist")
 	for _, d := range env.Deployables {
-		if d.Kind == ir.DeployableServer {
+		if d.Kind.HasImage() {
 			if err := os.MkdirAll(filepath.Join(outputRoot, local.ModulePath(env.Stack, d.Name)), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -322,6 +330,9 @@ func TestApplyFromNothing(t *testing.T) {
 		"DIR/bin/shop-api",
 		"/bin/go build -o DIR/bin/orders .",
 		"DIR/bin/orders",
+		// shop-orders' job builds in the rollout after its callee, and
+		// runs only on its schedule (D52).
+		"/bin/go build -o DIR/bin/shop-orders-ship-orders .",
 	}
 	if got := f.runner.lines(dir); !slices.Equal(got, want) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -492,6 +503,7 @@ func TestPlan(t *testing.T) {
 		"create shop-orders-ship-orders.calls.shop-api.key",
 		"start shop-api.process",
 		"start Orders.process",
+		"build shop-orders-ship-orders.job",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("plan = %v, want %v", got, want)

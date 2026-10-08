@@ -11,35 +11,37 @@ import (
 )
 
 // Images enter a deploy as parameters of the run: the image of each server
-// it rolls out, by digest (`--image shop-api=<repository>@sha256:...`). A
-// server the run names no image for keeps the one the deploy manifest
-// records. Building the images is not the deploy's job yet.
+// and job it rolls out, by digest (`--image shop-api=<repository>@sha256:...`).
+// A deployable with an image the run names none for is built from the
+// Dockerfile the stack's build wrote, or keeps the one the deploy manifest
+// records. A job has an image as a server does (D52).
 //
-// A platform writes a server's image into the graph as its repository
+// A platform writes a deployable's image into the graph as its repository
 // path, with no tag or digest (docs/stack-model.md, section 7.2), and the
-// deploy pins it: every string property of the server's own nodes equal to
-// the repository becomes `<repository>@<digest>`. The rendered program
+// deploy pins it: every string property of the deployable's own nodes equal
+// to the repository becomes `<repository>@<digest>`. The rendered program
 // then names each image by digest, so a deploy rolls out exactly what it
 // was given.
 
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// ParseImages reads `--image` values, `<server>=<image>`, into a map from
-// server to image. An image is `<repository>[:<tag>]@sha256:<digest>`;
-// the tag is dropped, since the digest names the image.
+// ParseImages reads `--image` values, `<deployable>=<image>`, into a map
+// from a server or a job to its image. An image is
+// `<repository>[:<tag>]@sha256:<digest>`; the tag is dropped, since the
+// digest names the image.
 func ParseImages(values []string) (map[string]string, error) {
 	images := map[string]string{}
 	for _, value := range values {
 		server, image, ok := strings.Cut(value, "=")
 		if !ok || server == "" || image == "" {
-			return nil, fmt.Errorf("--image %q: want <server>=<repository>@sha256:<digest>", value)
+			return nil, fmt.Errorf("--image %q: want <deployable>=<repository>@sha256:<digest>", value)
 		}
 		repo, digest, err := SplitImage(image)
 		if err != nil {
 			return nil, fmt.Errorf("--image %s: %w", server, err)
 		}
 		if _, dup := images[server]; dup {
-			return nil, fmt.Errorf("--image names server %s twice", server)
+			return nil, fmt.Errorf("--image names %s twice", server)
 		}
 		images[server] = repo + "@" + digest
 	}
@@ -63,28 +65,39 @@ func SplitImage(image string) (repository, digest string, err error) {
 }
 
 // checkImages refuses an image for a deployable env does not have or that
-// is not a server, and returns the servers images names none for, sorted.
+// has no image, a database, and returns the servers and jobs images names
+// none for, sorted by name.
 func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing []string, err error) {
-	var servers []string
+	var withImages []string
 	for _, d := range env.Deployables {
-		if d.Kind == ir.DeployableServer {
-			servers = append(servers, d.Name)
+		if d.Kind.HasImage() {
+			withImages = append(withImages, d.Name)
 			if _, ok := images[d.Name]; !ok {
 				missing = append(missing, d.Name)
 			}
 		}
 	}
 	for _, name := range sortedKeys(images) {
-		if d := env.Deployable(name); d == nil || d.Kind != ir.DeployableServer {
-			return nil, fmt.Errorf("--image names %s, which is not a server of environment %s (its servers: %s)", name, env.Environment, strings.Join(servers, ", "))
+		if d := env.Deployable(name); d == nil || !d.Kind.HasImage() {
+			return nil, fmt.Errorf("--image names %s, which is no server or job of environment %s (its servers and jobs: %s)", name, env.Environment, strings.Join(withImages, ", "))
 		}
 	}
 	return missing, nil
 }
 
-// PinImages returns a copy of env in which each server's image, by its
-// repository, is pinned to the digest images names for it. It refuses an
-// image whose repository no property of the server's own nodes holds.
+// kindOf names a deployable of env with its kind, as an error quotes it:
+// "server Orders", "job shop-orders-ship-orders".
+func kindOf(env *ir.ResolvedEnvironment, name string) string {
+	if d := env.Deployable(name); d != nil {
+		return string(d.Kind) + " " + name
+	}
+	return name
+}
+
+// PinImages returns a copy of env in which each server's and job's image,
+// by its repository, is pinned to the digest images names for it. It
+// refuses an image whose repository no property of the deployable's own
+// nodes holds.
 func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.ResolvedEnvironment, error) {
 	pinned, err := copyEnvironment(env)
 	if err != nil {
@@ -94,7 +107,7 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 		image := images[server]
 		repo, digest, err := SplitImage(image)
 		if err != nil {
-			return nil, fmt.Errorf("server %s: %w", server, err)
+			return nil, fmt.Errorf("%s: %w", kindOf(env, server), err)
 		}
 		ref := repo + "@" + digest
 		count := 0
@@ -107,8 +120,9 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 			count += n
 		}
 		if count == 0 {
-			return nil, fmt.Errorf("server %s: no property of its nodes holds the image repository %s; "+
-				"its platform writes the server's image as a repository path, and --image gives that path with a digest", server, repo)
+			kind := kindOf(env, server)
+			return nil, fmt.Errorf("%s: no property of its nodes holds the image repository %s; "+
+				"its platform writes the %s's image as a repository path, and --image gives that path with a digest", kind, repo, strings.Fields(kind)[0])
 		}
 	}
 	return pinned, nil

@@ -11,8 +11,8 @@ A Stack service declares which of your services run, how they group into
 servers and databases, and the environments they run in. Its build wires
 each server to its database and to the APIs it calls, checks the result
 offline, and writes three things: each environment as `environment.json`,
-an entrypoint module and Dockerfile for each Go server, and a scaffold of
-each API implementation that is missing. Wiring the schemas already say,
+an entrypoint module and Dockerfile for each Go server and job, and a
+scaffold of each API implementation that is missing. Wiring the schemas already say,
 such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
 
@@ -35,7 +35,7 @@ resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, and Go's `Jobs` and `NewJobs` | a job's entrypoint and image; `stack dev`'s schedules and `stack run`; jobs on gcp |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run` | jobs on gcp, where `stack run` refuses them until the target runs them; a TypeScript API's jobs |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -454,6 +454,45 @@ it on with `enabled: true`. Each job's resolved deployable records what
 runs in the environment: its schedule, empty for none, its time zone,
 timeout and retries.
 
+### Run a job
+
+The build writes each job an entrypoint module beside the servers',
+`server/shop-stack/shop-orders-ship-orders/`, whose `main` builds the
+API's `Deps`, calls your `NewJobs`, runs the job's method once with a
+context that SIGTERM cancels, and exits 1 when it returns an error. Its
+Dockerfile builds an image as a server's does, and `stack build` and
+`stack deploy` build and pin it beside the servers'.
+
+`stack dev` builds each job with the servers and runs it on its schedule
+while the environment runs, never two runs at once, each line of a run's
+output with the job's name in front:
+
+```text
+job shop-orders-ship-orders runs on * * * * * (UTC)
+...
+job shop-orders-ship-orders: start the run due at 2026-10-07T12:01:00Z, try 1 of 2
+[shop-orders-ship-orders] {"level":"info",...,"msg":"shipped the placed orders",...,"orders":1}
+job shop-orders-ship-orders: the run due at 2026-10-07T12:01:00Z, try 1 of 2 succeeded in 412ms
+```
+
+A run that outlives the job's timeout is stopped, a failed run is run
+again up to its retries, and a run's failure never stops the environment.
+To run a job once, now, run `stack run` from another terminal:
+
+```sh
+superschematic stack run Dev shop-orders-ship-orders
+```
+
+Locally it runs against the environment `stack dev` runs, with its
+values, secrets and keys. It builds no schema, but builds the job's
+binary again, so a change to your job's code is in the run. It exits
+non-zero when the run's last try fails, refuses an environment that is
+not running, and waits for no schedule: while its run goes on, the
+schedule skips the job's runs, and while a scheduled run goes on, it
+refuses to start. On a cloud environment it runs the deployed job, with
+the image the last deploy rolled out, through the target, which the gcp
+target does not do yet.
+
 ## Build a stack
 
 Build the stack like any service. A single build loads the services it
@@ -468,7 +507,8 @@ Under the output root, `schemas/dist` by default, the build writes:
 
 - `stack/shop-stack/<environment>/environment.json` for each environment;
 - `server/shop-stack/<server>/`, a Go module for each Go server, holding
-  `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`.
+  `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`, and
+  one the same for each job of a Go API, under the job's name.
 
 A TypeScript or Rust server gets no entrypoint yet, and the build log
 says so. The build also scaffolds each implementation a Go server serves
@@ -531,8 +571,9 @@ malformed declarations and names nothing registers.
 
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
 `shop-api` and `shop-orders`, each on a default server, and exposes both;
-`shop-db`, the `authDb` of both, joins as their database. Its one
-environment, `Dev`, is on the core's `local` target:
+`shop-db`, the `authDb` of both, joins as their database, and
+`shop-orders`' job `ShipOrders` as a job. Its one environment, `Dev`, is
+on the core's `local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -544,9 +585,14 @@ writes call its `New(deps)` and `AuthMiddleware(deps)`;
 `shop-api`'s.
 
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
-in a container with `shop-db` migrated, and both servers on their
-generated entrypoints. `go/stack_dev_test.go` runs it in the example's
-check whenever Docker is running, and calls each server through its SDK.
+in a container with `shop-db` migrated, both servers on their generated
+entrypoints, and the job on its schedule. `go/stack_dev_test.go` runs it
+in the example's check whenever Docker is running, calls each server
+through its SDK, and sees the job ship the order it placed, once with
+`stack run` and once on the schedule. The job's code is `NewJobs` in
+`go/shop-orders/jobs.go`:
+
+<Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
 `shop-storefront` stays out of the stack, since the `local` target runs
 only Go servers.
 
@@ -574,7 +620,9 @@ says how to install it). It then:
    expand and contract back to back;
 4. builds each server's entrypoint module with `go build`, starts it with
    its resolved config and `PORT`, callees first, and waits until it
-   answers `/readyz`. Each line a server prints carries its name.
+   answers `/readyz`. Each line a server prints carries its name;
+5. builds each job's entrypoint module the same way, and runs each job
+   with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the container, which keeps
 its data for the next run; `--remove-database` removes it instead.
@@ -582,6 +630,7 @@ its data for the next run; `--remove-database` removes it instead.
 | Stack concept | On `local` |
 | --- | --- |
 | server | a Go process, built from its entrypoint module. TypeScript and Rust servers do not run locally yet |
+| job | a Go process per run, built from its entrypoint module, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
 | sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
@@ -780,12 +829,12 @@ superschematic stack outputs Staging --out outputs.json
   asks for the missing values at a terminal.
 - **`plan`** changes nothing: the provisioner's plan of every resource,
   each database's migration plan, the secrets with no value and the
-  servers with no image.
-- **`build`** builds the image of each server whose build context
+  servers and jobs with no image.
+- **`build`** builds the image of each server and job whose build context
   changed, on Cloud Build, and prints each as a `--image` flag. It
   deploys nothing.
-- **`deploy`** first builds, as `build` does, each server whose context
-  changed and that `--image` names no image for. It then runs the deploy
+- **`deploy`** first builds, as `build` does, each server and job whose
+  context changed and that `--image` names no image for. It then runs the deploy
   order: infrastructure, each database's `expand` phase, the servers wave
   by wave, callees first, the `contract` phase, then exposure. Each
   migration phase runs as an execution of the stack's Cloud Run job,

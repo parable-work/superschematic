@@ -107,7 +107,7 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 		return nil, err
 	}
 	if len(missing) > 0 {
-		return nil, errors.New(describeMissing(missing, o.Sources != nil && s.target.Builder != nil))
+		return nil, errors.New(describeMissing(s.env, missing, o.Sources != nil && s.target.Builder != nil))
 	}
 
 	plans, pending, err := planMigrations(s.env, prev, o.Planner)
