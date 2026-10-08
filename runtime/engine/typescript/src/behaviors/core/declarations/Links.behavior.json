@@ -83,8 +83,8 @@
   },
   "fields": [
     {
-      "name": "links",
-      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it."
+      "name": "targets",
+      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none."
     }
   ],
   "operations": [

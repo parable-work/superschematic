@@ -120,7 +120,7 @@ const maker = defineBehavior({
       const behaviors = params.broken === true ? { 'test.Tags': { tags: [Number.NaN] } } : { 'test.Tags': { tags: params.tags as FrozenJSON } };
       try {
         const made = context.instances.create('Item', { title: String(params.id) }, { id: String(params.id), behaviors });
-        return { id: made.id, tags: made.data.tags, frozen: Object.isFrozen(made) };
+        return { id: made.id, tags: made.behaviors['test.Tags']?.tags, frozen: Object.isFrozen(made) };
       } catch (error) {
         if (params.catch === true && error instanceof CreateParamsError) {
           return { refused: error.issues };
@@ -164,7 +164,10 @@ for (const driver of drivers) {
       const engine = open();
       publishItem(engine, [{ name: 'test.Tags' }, { name: 'test.Counter', config: { start: 2 } }, { name: 'test.Flag' }]);
       const created = engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1', behaviors: { 'test.Tags': { tags: ['a', 'b'] } } });
-      assert.deepEqual(created.data, { title: 'Desk', tags: ['a', 'b'], count: 2, flagged: false });
+      assert.deepEqual([created.data, created.behaviors], [
+        { title: 'Desk' },
+        { 'test.Tags': { tags: ['a', 'b'] }, 'test.Counter': { count: 2 }, 'test.Flag': { flagged: false } },
+      ]);
       assert.deepEqual(seen, [
         {
           step: 'guard',
@@ -178,11 +181,11 @@ for (const driver of drivers) {
       ]);
       // The create event carries what the parameters set.
       assert.deepEqual(engine.events.read(alice, { schema: 'Item', instanceId: 'i1' }).events.map((event) => [event.kind, event.seq, event.change]), [
-        ['create', 1, { title: 'Desk', tags: ['a', 'b'], count: 2, flagged: false }],
+        ['create', 1, { data: { title: 'Desk' }, behaviors: { 'test.Tags': { tags: ['a', 'b'] }, 'test.Counter': { count: 2 }, 'test.Flag': { flagged: false } } }],
       ]);
       // A create that gives a behavior nothing hands its initialize {}.
       seen.length = 0;
-      assert.deepEqual(engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i2' }).data.tags, []);
+      assert.deepEqual(engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i2' }).behaviors['test.Tags']?.tags, []);
       assert.deepEqual(
         seen.map((entry) => (entry.step === 'guard' ? (entry.request as GuardRequest & { kind: 'create' }).behaviors : entry.params ?? entry.columns)),
         [{}, {}, { tags: '[]' }]
@@ -342,13 +345,14 @@ for (const driver of drivers) {
         });
       const created = await post({ id: 'i1', data: { title: 'Desk' }, behaviors: { 'test.Tags': { tags: ['a'] } } });
       assert.equal(created.status, 201);
-      assert.deepEqual(((await created.json()) as { data: { data: unknown } }).data.data, { title: 'Desk', tags: ['a'] });
+      const body = ((await created.json()) as { data: { data: unknown; behaviors: unknown } }).data;
+      assert.deepEqual([body.data, body.behaviors], [{ title: 'Desk' }, { 'test.Tags': { tags: ['a'] } }]);
       const refused = await post({ data: { title: 'Desk' }, behaviors: { 'test.Tags': { tags: 'a' } } });
       const problem = (await refused.json()) as { code: string; details: unknown };
       assert.deepEqual([refused.status, problem.code, problem.details], [400, 'invalid_argument', { issues: [{ path: '/behaviors/test.Tags/tags', message: 'must be array' }] }]);
       assert.equal((await post({ id: 'i2', data: { title: 'Lamp' }, behaviors: null })).status, 201);
       assert.deepEqual(engine.tools.call(alice, 'item_create', { id: 'i3', data: { title: 'Rug' }, behaviors: { 'test.Tags': { tags: ['b'] } } }), engine.instances.get(alice, 'Item', 'i3'));
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i3')?.data.tags, ['b']);
+      assert.deepEqual(engine.instances.get(alice, 'Item', 'i3')?.behaviors['test.Tags']?.tags, ['b']);
       assert.equal(thrown(() => engine.tools.call(alice, 'item_create', { data: { title: 'Rug' }, behaviors: { 'test.Nope': {} } }), CreateParamsError).code, 'invalid_argument');
     });
   });

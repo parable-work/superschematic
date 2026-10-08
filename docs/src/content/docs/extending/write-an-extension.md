@@ -692,9 +692,12 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `false` or a schema, so every key is checked.
 - `requires` and `conflicts` name other behaviors a type must, or may not,
   list with this one.
-- `fields` carry a name and a description. The loader refuses a field
-  that collides with another behavior's or with one of the type's own,
-  by its name or its JSON key.
+- `fields` carry a name and a description, each unique in the
+  declaration. An instance holds them under the behavior's name,
+  `behaviors["acme.Rating"].ratingCount`, apart from the type's own
+  fields and every other behavior's, so none collides, and a filter or a
+  display names one by its qualified name, `acme.Rating.ratingCount`.
+  A config never renames a field.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an
@@ -908,9 +911,10 @@ surface, each spec carrying the extension's `Name()`:
 Resolution checks every resource against the schema of its type, so a
 target checks in the provider schemas it emits from a pinned provider
 version, as the gcp target does with pulumi-gcp's. A target that deploys
-also fills six seams on its `TargetSpec`, `State`, `Secrets`,
-`Bootstrap`, `Migrations`, `Builder` and `CI`, the last of which says how
-a generated CI job signs in to an environment, and the core registers one
+also fills seven seams on its `TargetSpec`, `State`, `Secrets`,
+`Bootstrap`, `Migrations`, `Builder`, `CI`, which says how a generated
+CI job signs in to an environment, and `Jobs`, which runs a deployed job
+on demand, and the core registers one
 target of its own, `local`, for `stack dev`.
 [Stack targets](/superschematic/extending/stack-targets/) walks each
 registration, its seams and its offline tests.

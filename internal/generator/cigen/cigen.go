@@ -64,7 +64,7 @@ func Generate(c registry.GenerateContext) error {
 	if err != nil {
 		return err
 	}
-	ciStack, err := stackOf(c, st.Name)
+	ciStack, err := stackOf(c, st.Name, resolved)
 	if err != nil {
 		return err
 	}
@@ -165,8 +165,11 @@ func writeFiles(dir string, files []registry.CIFile) error {
 // repository root is the one the install resolves against, or the parent
 // of the schemas root outside a repository. The schemas root is the
 // parent of the services root, which holds the stack's service, as the CLI
-// reads it.
-func stackOf(c registry.GenerateContext, name string) (registry.CIStack, error) {
+// reads it. The implementations of the APIs a TypeScript server serves
+// lie under the build's repository root, the parent of the schemas root,
+// at the naming file's [implementation_paths] typescript template, where
+// the server generator finds them.
+func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnvironment) (registry.CIStack, error) {
 	if c.Options.ServicePath == "" {
 		return registry.CIStack{}, fmt.Errorf("stack %s: the ci generator locates the stack from its service path, and the build has none", name)
 	}
@@ -182,22 +185,22 @@ func stackOf(c registry.GenerateContext, name string) (registry.CIStack, error) 
 	if root == "" {
 		root = filepath.Dir(schemasRoot)
 	}
-	rel := func(p string) (string, error) {
+	rel := func(what, p string) (string, error) {
 		r, err := filepath.Rel(root, p)
 		if err != nil {
 			return "", err
 		}
 		r = filepath.ToSlash(r)
 		if r == ".." || strings.HasPrefix(r, "../") {
-			return "", fmt.Errorf("stack %s: the schemas root %s lies outside the repository at %s, where a CI job starts", name, schemasRoot, root)
+			return "", fmt.Errorf("stack %s: %s %s lies outside the repository at %s, where a CI job starts", name, what, p, root)
 		}
 		return r, nil
 	}
 	out := registry.CIStack{Name: name}
-	if out.SchemasRoot, err = rel(schemasRoot); err != nil {
+	if out.SchemasRoot, err = rel("the schemas root", schemasRoot); err != nil {
 		return registry.CIStack{}, err
 	}
-	if out.Dir, err = rel(dir); err != nil {
+	if out.Dir, err = rel("the stack's service", dir); err != nil {
 		return registry.CIStack{}, err
 	}
 	out.ServicesRoot = path.Dir(out.Dir)
@@ -205,6 +208,34 @@ func stackOf(c registry.GenerateContext, name string) (registry.CIStack, error) 
 	// the stack commands read.
 	out.OutputRoot = path.Join(out.SchemasRoot, "dist")
 	out.PackageManager = packageManager(schemasRoot)
+
+	implementationRoot := c.Options.RepositoryRoot
+	if implementationRoot == "" {
+		implementationRoot = filepath.Dir(schemasRoot)
+	}
+	if implementationRoot, err = filepath.Abs(implementationRoot); err != nil {
+		return registry.CIStack{}, err
+	}
+	for _, env := range envs {
+		for _, d := range env.Deployables {
+			if d.Kind != ir.DeployableServer || d.Language != registry.APILanguageTypeScript {
+				continue
+			}
+			for _, svc := range d.Services {
+				if _, ok := out.TypeScriptImplementations[svc.Name]; ok {
+					continue
+				}
+				dir, err := rel("the TypeScript implementation of "+svc.Name+",", c.Options.Naming.TypeScriptImplementationDir(implementationRoot, svc.Name))
+				if err != nil {
+					return registry.CIStack{}, err
+				}
+				if out.TypeScriptImplementations == nil {
+					out.TypeScriptImplementations = map[string]string{}
+				}
+				out.TypeScriptImplementations[svc.Name] = dir
+			}
+		}
+	}
 	return out, nil
 }
 

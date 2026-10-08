@@ -28,7 +28,7 @@ var displayArgs = json.RawMessage(`{
 				"plural": {"description": "What to call several.", "type": "string", "pattern": "\\S"},
 				"titleField": {"description": "The field whose value is an instance's title: one of the type's own, a single text value.", "type": "string", "minLength": 1},
 				"createLabel": {"description": "What a button that creates an instance says.", "type": "string", "pattern": "\\S"},
-				"summaryFields": {"description": "The fields that summarize an instance in a list, in order: the type's own, or fields its behaviors add.", "type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+				"summaryFields": {"description": "The fields that summarize an instance in a list, in order: the type's own, by name, or fields its behaviors add, by qualified name (Workflow.status).", "type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
 				"states": {"description": "Labels of states of the type's Workflow, by state.", "type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"$ref": "#/$defs/DisplayState"}},
 				"transitions": {"description": "Labels of transitions of the type's Workflow, by the state a transition leaves, then by the state it enters.", "type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"type": "string", "pattern": "\\S"}}}
 			}

@@ -286,10 +286,13 @@ dependencies, then runs the stack's environment on the local target
 DB schema, each migrated to the schema's model with superschematic-migrate,
 and each server built from its entrypoint module at
 <output-root>/server/<stack>/<server> and run as a process with its resolved
-config, callees first, each waited on until it answers /readyz. Every
-process's output is printed with its name in front. Dev stays in the
-foreground until Ctrl-C, then stops the servers and the container, which
-keeps its data for the next run.
+config, callees first, each waited on until it answers /readyz. Each job is
+built from its entrypoint module the same way and runs on its schedule,
+never two runs of one job at once, until Ctrl-C; superschematic stack run
+runs one once, from another terminal. Every process's output is printed
+with its name in front. Dev stays in the foreground until Ctrl-C, then
+stops the servers and the container, which keeps its data for the next
+run.
 
 The environment is --environment, or the stack's one environment on the local
 target. A secret a server reads comes from
@@ -481,14 +484,19 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 }
 
 // printLocalSummary prints where each server and database of a running
-// local environment is reached.
+// local environment is reached, and when each job runs.
 func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string) {
 	var lines []string
 	for _, d := range env.Deployables {
-		if d.Kind == ir.DeployableServer {
+		switch {
+		case d.Kind == ir.DeployableServer:
 			if address, ok := d.Address.(string); ok {
 				lines = append(lines, fmt.Sprintf("  server   %-24s %s", d.Name, address))
 			}
+		case d.Kind == ir.DeployableJob && d.Job != nil && d.Job.Schedule != "":
+			lines = append(lines, fmt.Sprintf("  job      %-24s on %s (%s)", d.Name, d.Job.Schedule, d.Job.TimeZone))
+		case d.Kind == ir.DeployableJob:
+			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
 		}
 	}
 	for _, res := range env.Resources.Resources {

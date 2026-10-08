@@ -159,8 +159,36 @@
   },
   "fields": [
     {
-      "name": "lease",
-      "description": "The lease: holder (null when free), token, acquiredAt, renewedAt (its acquire or its last heartbeat), expiresAt, active (held and not expired), expiries, and ended, how and when the last lease ended (null while one is held)."
+      "name": "holder",
+      "description": "The subject of the principal that holds the lease; absent when the instance is free."
+    },
+    {
+      "name": "token",
+      "description": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it."
+    },
+    {
+      "name": "acquiredAt",
+      "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "renewedAt",
+      "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "expiresAt",
+      "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "active",
+      "description": "Whether a lease is held and has not expired."
+    },
+    {
+      "name": "expiries",
+      "description": "How many leases have expired or been abandoned since the last resetExpiries."
+    },
+    {
+      "name": "ended",
+      "description": "How and when the last lease ended (reason and at); absent while one is held."
     }
   ],
   "operations": [

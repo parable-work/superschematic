@@ -488,6 +488,16 @@ describe('@rateLimit', () => {
     expect((await from('198.51.100.2')).status).toBe(200);
   });
 
+  test("on Bun the key is the peer address Bun's server reports, which a generated entrypoint hands app.fetch", async () => {
+    const app = limitedApp();
+    const from = (peer: string) =>
+      app.request('/api/limited', { headers: { 'x-forwarded-for': '203.0.113.7' } }, { requestIP: (request: Request) => (request instanceof Request ? { address: peer } : null) });
+    expect((await from('198.51.100.1')).status).toBe(200);
+    expect((await from('198.51.100.1')).status).toBe(200);
+    expect((await from('198.51.100.1')).status).toBe(429);
+    expect((await from('198.51.100.2')).status).toBe(200);
+  });
+
   test('behind a proxy the service trusts, clientIpKey keys by the client IP it reports', async () => {
     const app = limitedApp({ keyOf: clientIpKey });
     const from = (ip: string) => app.request('/api/limited', { headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` } });

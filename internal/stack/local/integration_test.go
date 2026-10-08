@@ -299,6 +299,131 @@ func TestLocalStackRuns(t *testing.T) {
 	}
 }
 
+// TestLocalTypeScriptServerRuns applies a local environment of one
+// TypeScript server for real, with Bun and no Docker: the provisioner
+// installs the output root's Bun workspace, which brings a stale lockfile
+// up to date as a developer's install does, runs a fake server's main.ts
+// that honours the entrypoint's contract, waits for /readyz, and the
+// server reads its resolved environment and no more of the test's. Destroy
+// stops it with SIGTERM, which it answers before it exits.
+func TestLocalTypeScriptServerRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: the local stack runs a server on Bun")
+	}
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skipf("bun is not available: %v", err)
+	}
+	stackName := fmt.Sprintf("local-target-ts-it-%d", os.Getpid())
+	port := freePort(t)
+	web := ir.ServiceRef{Name: "ledger-web", Kind: ir.SchemaKindAPI}
+	greeting := "hello"
+	services := []stack.Service{{
+		Name: "ledger-web", Kind: ir.SchemaKindAPI, Language: registry.APILanguageTypeScript,
+		Config: &stack.Config{
+			Type:   "WebConfig",
+			Fields: []stack.ConfigField{{Name: "GREETING", Required: true, Default: &greeting}},
+		},
+		Operations: []stack.Operation{{Name: "Pages.getHome"}},
+	}}
+	st := &ir.Stack{
+		Name:   stackName,
+		Deploy: []ir.ServiceRef{web},
+		Environments: []*ir.Environment{{
+			Name:     "Dev",
+			Target:   local.Target,
+			Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Service: &web}, Values: map[string]any{"port": float64(port)}}},
+		}},
+	}
+	reg, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRoot := filepath.Join(root, "dist")
+	if err := os.CopyFS(filepath.Join(outputRoot, local.ModulePath(stackName, "ledger-web")), os.DirFS(filepath.Join("testdata", "faketsserver"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputRoot, "package.json"), []byte(`{"name": "ledger-workspace", "private": true, "workspaces": ["server/*/*"]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A lockfile from before the server joined the workspace, as a project
+	// commits it (D51, amended): the install brings it up to date as a
+	// developer's would, even where CI is set, which a frozen install would
+	// refuse.
+	stale := "{\n  \"lockfileVersion\": 2,\n  \"configVersion\": 1,\n  \"workspaces\": {\n    \"\": {\n      \"name\": \"ledger-workspace\",\n    },\n  },\n  \"packages\": {},\n}\n"
+	if err := os.WriteFile(filepath.Join(outputRoot, "bun.lock"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CI", "true")
+	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), stackName, "Dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LEDGER_LEAK", "leaked")
+
+	out := &syncBuffer{}
+	prov := &local.Provisioner{Out: out, ReadyTimeout: time.Minute}
+	dir := filepath.Join(root, "program")
+	req := registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)}
+	t.Cleanup(func() {
+		_ = prov.Destroy(context.Background(), req)
+		if t.Failed() || testing.Verbose() {
+			t.Logf("provisioner output:\n%s", out)
+		}
+	})
+	if err := prov.Render(env, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range env.DeployOrder {
+		if err := prov.Apply(context.Background(), req, *step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lock, err := os.ReadFile(filepath.Join(outputRoot, "bun.lock")); err != nil || !strings.Contains(string(lock), `"fake-ts-server@workspace:server/`+stackName+`/ledger-web"`) {
+		t.Errorf("the provisioner's install did not bring the lockfile up to date with the server: %v\n%s", err, lock)
+	}
+
+	resp, err := http.Get(local.ServerURL(port) + "/env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&got)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["PORT"] != fmt.Sprint(port) || got["GREETING"] != "hello" {
+		t.Errorf("the server got PORT=%q GREETING=%q, want %d and hello", got["PORT"], got["GREETING"], port)
+	}
+	if _, leaked := got["LEDGER_LEAK"]; leaked {
+		t.Error("the server inherited a variable its environment does not bind")
+	}
+
+	if err := prov.Destroy(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := http.Get(local.ServerURL(port) + "/readyz"); err == nil {
+		t.Error("the server still answers after Destroy")
+	}
+	for _, want := range []string{
+		"[ledger-web] fake TypeScript server listening on 127.0.0.1:" + fmt.Sprint(port),
+		"[ledger-web] fake TypeScript server stopped",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 // checkToken checks a compact JWS as D37 says the callee does: its header's
 // alg is EdDSA and its kid the key's, its signature verifies with the
 // public JWK, iss and sub are the caller, aud the callee, and exp is 300

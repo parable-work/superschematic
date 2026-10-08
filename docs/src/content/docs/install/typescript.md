@@ -124,6 +124,25 @@ root, which sits in the output root, not above it, so add a dependency
 to an implementation's `package.json` and install in `schemas/dist`.
 Install with Bun: npm rejects the `workspace:` protocol.
 
+Commit `schemas/dist/bun.lock`, so every install of one commit takes the
+same versions: a TypeScript server's image and the generated CI install
+frozen to it. No build removes it, and the root `package.json` it pairs
+with is the same on every build of the same schemas, so the lockfile is
+the one file of `schemas/dist` to commit. Write it after building every
+service (`build-all`), so it names every package. Git cannot take back a
+file under an ignored directory, so ignore the output root's contents
+rather than the directory:
+
+```gitignore
+schemas/dist/*
+!schemas/dist/bun.lock
+```
+
+Where a broader rule such as `dist/` ignores the directory, add `!/dist/`,
+`/dist/*` and `!/dist/bun.lock` to `schemas/.gitignore`. The build of a
+stack with a TypeScript server names the rule that hides the lockfile in
+one line, and never edits your ignore files.
+
 ## Consume generated types
 
 ```ts
@@ -289,6 +308,16 @@ whose `create` is a `Constructor` and whose methods throw the runtime's
 establishes no end user and a verifier for each `@hmacVerified` provider
 that refuses every request. It never writes into a directory that holds
 a `.ts` file.
+
+In a [stack](/superschematic/guides/stacks/), the build writes each
+TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
+a `package.json` in the output root's Bun workspace, which depends on the
+API packages, the implementations by their `package.json` names and the
+SDKs of the APIs called, a `main.ts` that builds each implementation from
+its `Deps` with `create(deps)` and `authenticate(deps)`, mounts each
+router on one Hono app and serves it with `Bun.serve` beside `/healthz`
+and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
+`bun main.ts` after one `bun install` in `schemas/dist`.
 
 An operation without an input type reads its other arguments from the JSON
 body object (on `GET`, from the query string). Each body argument is the

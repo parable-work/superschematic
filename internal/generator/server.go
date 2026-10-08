@@ -2,9 +2,12 @@ package generator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -22,16 +26,17 @@ import (
 // entrypoints.
 const serverGenerator = "server"
 
-// generateServers writes the entrypoint of each Go server of the stack the
-// schema declares under servergen.StackDir (docs/stack-model.md, sections
-// 8.1 and 8.2), and scaffolds each served API's implementation that is
-// missing, a Go server's in Go and a TypeScript server's in TypeScript
-// (sections 8.5 and 8.6). No environment changes the servers, but the
+// generateServers writes the entrypoint of each Go and TypeScript server of
+// the stack the schema declares under servergen.StackDir (docs/stack-model.md,
+// sections 8.1, 8.2 and 8.6), and of each Go job beside them (section 8.7,
+// D52), and scaffolds each served API's implementation that is missing, a
+// Go server's in Go and a TypeScript server's in TypeScript (sections 8.5
+// and 8.6). No environment changes the servers or the jobs, but the
 // entrypoint of one that some environment connects to a database on Cloud
-// SQL links the Cloud SQL connector. It plans every server before it
-// writes anything, so a server it refuses leaves the last build's
-// entrypoints and every implementation as they were. A build without a
-// repository root writes none: the implementations live under it.
+// SQL links the Cloud SQL connector, or depends on the Node one. It plans
+// every entrypoint before it writes anything, so one it refuses leaves the
+// last build's entrypoints and every implementation as they were. A build
+// without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
 		r.Skip(serverGenerator)
@@ -59,12 +64,13 @@ func (r run) generateServers() error {
 		scaffold []scaffold
 	}
 	var plans []planned
+	var tsPlans []*servergen.TypeScriptServer
 	scaffolding := map[string]bool{}
 	var tsScaffolds []*tsrestgen.APIOutput
 	for _, s := range servers {
 		switch s.Language {
 		case APILanguageGo:
-			server, scaffolds, err := r.planServer(st.Name, s, cloudSQL[s.Name])
+			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
 			if err != nil {
 				return err
 			}
@@ -73,12 +79,12 @@ func (r run) generateServers() error {
 				scaffolding[sc.output.SchemaName] = true
 			}
 		case APILanguageTypeScript:
-			scaffolds, err := r.planTypeScriptServer(st.Name, s)
+			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name])
 			if err != nil {
 				return err
 			}
+			tsPlans = append(tsPlans, server)
 			tsScaffolds = append(tsScaffolds, scaffolds...)
-			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		default:
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		}
@@ -89,6 +95,18 @@ func (r run) generateServers() error {
 	}
 	if err := r.checkJobs(st.Name, jobs, services, scaffolding); err != nil {
 		return err
+	}
+	for _, j := range jobs {
+		if j.Language != APILanguageGo {
+			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
+			continue
+		}
+		// The servers' plans scaffold the job's API, which a server serves.
+		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name])
+		if err != nil {
+			return err
+		}
+		plans = append(plans, planned{server: job})
 	}
 
 	for _, p := range plans {
@@ -103,17 +121,19 @@ func (r run) generateServers() error {
 			return err
 		}
 	}
-	if len(tsScaffolds) > 0 {
-		// The implementations join the output root's Bun workspace.
+	if len(tsPlans) > 0 {
+		// The servers and the implementations join the output root's Bun
+		// workspace.
 		if err := r.writeTypeScriptWorkspace(); err != nil {
 			return fmt.Errorf("stack %s: %w", st.Name, err)
 		}
+		r.noteIgnoredLockfile()
 	}
 	dir := servergen.StackDir(r.Options.OutputRoot, st.Name)
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
-	if len(plans) == 0 {
+	if len(plans) == 0 && len(tsPlans) == 0 {
 		r.Skip(serverGenerator)
 		return nil
 	}
@@ -122,11 +142,37 @@ func (r run) generateServers() error {
 			return err
 		}
 		if p.server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", p.server.Name, p.server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", p.server.Kind, p.server.Name, p.server.NoDocker)
+		}
+	}
+	for _, server := range tsPlans {
+		if err := servergen.WriteTypeScript(server, servergen.ServerDir(r.Options.OutputRoot, st.Name, server.Name)); err != nil {
+			return err
+		}
+		if server.Docker == nil {
+			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
 		}
 	}
 	r.Done(serverGenerator, dir)
 	return nil
+}
+
+// noteIgnoredLockfile says, in one line, how to commit the lockfile of the
+// output root's Bun workspace when git ignores it (D51, amended): a
+// server's image and the generated CI install the versions it pins only
+// when the project commits it. The build leaves the project's ignore
+// rules as they are.
+func (r run) noteIgnoredLockfile() {
+	rule, ignored := tsgen.IgnoredLockfile(r.Options.OutputRoot)
+	if !ignored {
+		return
+	}
+	by := "git"
+	if rule != "" {
+		by = rule
+	}
+	r.Logf("  - %s is ignored by %s; commit it, so images and CI install the TypeScript versions it pins: ignore the output root's contents, not the directory (dist/* and !dist/%s in place of dist/; docs/stack-model.md, section 8.6)\n",
+		filepath.Join(r.Options.OutputRoot, tsgen.LockfileName), by, tsgen.LockfileName)
 }
 
 // checkJobs refuses a stack one of whose Go APIs declares jobs while its
@@ -199,13 +245,13 @@ func (sc scaffold) write(r run) error {
 	return nil
 }
 
-// planServer plans the entrypoint of server s of the stack: the Go server
-// output of each API it serves, read as that API's own build reads it,
-// where each implementation lives, and every module the build needs.
-// cloudSQL are the DB services some environment connects it to on Cloud
-// SQL. It returns the implementations that are missing, which the caller
-// scaffolds.
-func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
+// planEntrypoint plans the entrypoint of deployable s of the stack, a
+// server or a job: the Go server output of each API it serves, or of its
+// job's API, read as that API's own build reads it, where each
+// implementation lives, and every module the build needs. cloudSQL are the
+// DB services some environment connects it to on Cloud SQL. It returns the
+// implementations that are missing, which the caller scaffolds.
+func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
 	in := servergen.Input{
 		Stack:          stackName,
 		Server:         s.Name,
@@ -215,6 +261,9 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		ScalarGo:       r.Options.Paths.ScalarGo,
 		Release:        r.Options.ReleaseInfo(),
 		CloudSQL:       cloudSQL,
+	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
 	}
 	var scaffolds []scaffold
 	var versionGraph bool
@@ -257,34 +306,75 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 	return server, scaffolds, nil
 }
 
-// planTypeScriptServer reads the TypeScript API package of each API the
-// TypeScript server s of the stack serves, as that API's own build writes
-// it, and returns those whose implementation, at the naming file's
-// [implementation_paths] typescript template, is missing, which the caller
-// scaffolds (D51). The server's entrypoint comes with section 8.6.
-func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable) ([]*tsrestgen.APIOutput, error) {
+// planTypeScriptServer plans the entrypoint of the TypeScript server s of
+// the stack (D51): the TypeScript API package of each API it serves, as
+// that API's own build writes it, its EnvConfig, and where each
+// implementation lives, at the naming file's [implementation_paths]
+// typescript template. cloudSQL are the DB services some environment
+// connects it to on Cloud SQL. It returns the APIs whose implementation is
+// missing, which the caller scaffolds.
+func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
+	out := r.Options.OutputRoot
+	in := servergen.TypeScriptInput{
+		Stack:              stackName,
+		Server:             s.Name,
+		Dir:                servergen.ServerDir(out, stackName, s.Name),
+		OutputRoot:         out,
+		Naming:             r.Options.Naming,
+		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		ImplementationRoot: r.Options.RepositoryRoot,
+		PackageDirs:        map[string]string{},
+		Paths:              r.Options.Paths,
+		CloudSQL:           cloudSQL,
+	}
 	var scaffolds []*tsrestgen.APIOutput
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		output, _, err := served.typeScriptAPI()
+		output, config, err := served.typeScriptAPI()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if output == nil {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
 		}
-		exists, err := tsrestgen.ImplementationExists(r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name))
+		routes, err := served.APIOutput()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name)
+		exists, err := tsrestgen.ImplementationExists(dir)
+		if err != nil {
+			return nil, nil, err
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
+		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
+		}
+		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		in.APIs = append(in.APIs, servergen.TypeScriptAPIInput{
+			Output:         output,
+			Routes:         routes,
+			Config:         config,
+			Implementation: servergen.TypeScriptImplementation{Dir: dir, Package: pkg},
+		})
+		in.PackageDirs[output.PackageName] = APIDir(out, ref.Name)
+		in.PackageDirs[pkg] = dir
+		for _, call := range output.Deps.Calls {
+			in.PackageDirs[call.Package] = SDKDir(out, LangTypeScript, call.Service)
 		}
 	}
-	return scaffolds, nil
+	server, err := servergen.PlanTypeScript(in)
+	if err != nil {
+		return nil, nil, err
+	}
+	return server, scaffolds, nil
 }
 
 // cloudSQLDatabases resolves every environment of the stack and returns, by

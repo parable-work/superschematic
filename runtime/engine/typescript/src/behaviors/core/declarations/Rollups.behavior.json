@@ -145,7 +145,7 @@
   },
   "fields": [
     {
-      "name": "rollups",
+      "name": "values",
       "description": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent."
     }
   ],

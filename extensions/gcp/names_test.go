@@ -49,7 +49,7 @@ func TestCheckLength(t *testing.T) {
 		{ir.Concat{"shop-api-pr", ir.Parameter("pr")}, ""},
 		{ir.Concat{strings.Repeat("a", 30), ir.Parameter("pr")}, "before its parameter values"},
 	} {
-		err := checkLength("id", c.name, 6, 30)
+		err := checkLength("id", c.name, 6, 30, "the deployable")
 		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
 			t.Errorf("checkLength(%v) = %v, want %q", c.name, err, c.want)
 		}

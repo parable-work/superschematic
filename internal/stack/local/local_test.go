@@ -130,6 +130,24 @@ func TestServiceAuthGolden(t *testing.T) {
 	}
 }
 
+// storefront is the shop with shop-storefront deployed and exposed too: a
+// TypeScript API, whose server Bun runs (D51).
+func storefront() *ir.Stack {
+	s := shop()
+	s.Name = "storefront-stack"
+	ref := ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}
+	s.Deploy = append(s.Deploy, ref)
+	s.Expose = append(s.Expose, stacktest.Of(ref))
+	return s
+}
+
+// TestTypeScriptGolden resolves the shop with its TypeScript storefront
+// in Dev: the storefront's process is a TypeScript one, which runs its
+// entrypoint's main.ts on Bun with no binary to build.
+func TestTypeScriptGolden(t *testing.T) {
+	checkGoldenEnvironment(t, assemble(t), storefront(), stacktest.AcmeShop(), "Dev")
+}
+
 // checkGoldenEnvironment resolves env of s and checks its environment.json
 // and the program the provisioner renders from it against the golden
 // files.
@@ -301,14 +319,14 @@ func TestRefusals(t *testing.T) {
 		s.Environments[1].Settings[1].Values["port"] = float64(55432)
 		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and the Postgres container listen on one port, 55432")
 	})
-	t.Run("a TypeScript server", func(t *testing.T) {
+	t.Run("a Rust server", func(t *testing.T) {
 		services := stacktest.AcmeShop()
 		for i := range services {
 			if services[i].Name == "shop-api" {
-				services[i].Language = registry.APILanguageTypeScript
+				services[i].Language = registry.APILanguageRust
 			}
 		}
-		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO")
+		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO, TYPESCRIPT")
 	})
 	t.Run("a PORT field", func(t *testing.T) {
 		services := stacktest.AcmeShop()

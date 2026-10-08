@@ -32,7 +32,7 @@
             "copyFields": ["topic"]
           }
         },
-        { "name": "Rollups", "config": { "rollups": { "steps": { "schema": "jobs", "link": "batch", "function": "countBy", "field": "status" } } } },
+        { "name": "Rollups", "config": { "rollups": { "steps": { "schema": "jobs", "link": "batch", "function": "countBy", "field": "Workflow.status" } } } },
         {
           "name": "Reactions",
           "config": {

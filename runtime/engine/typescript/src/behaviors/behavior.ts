@@ -70,6 +70,7 @@ status one behavior owns changes at another's request only through its
 operations, so its guards always run, on this instance or another.
 */
 
+import type { InstanceFields } from './fields.js';
 import type { Principal } from '../access.js';
 import type { ValidationIssue, Veto } from '../errors.js';
 import type { EngineEvent } from '../events/log.js';
@@ -129,9 +130,10 @@ export interface BehaviorMigration {
 
 /**
  * A field of the behavior's a list may filter on (list's where), or a
- * member of one whose value is an object (`lease.holder`): its value is
- * one of the behavior's columns, which where compares for equality in
- * SQL, a null column holding no value. A migration's index on that column
+ * member of one whose value is an object (`<field>.<member>`): its value
+ * is one of the behavior's columns, which where compares for equality in
+ * SQL, a null column holding no value. A list names it by its qualified
+ * name, the behavior's name and a dot before it (`Lease.holder`). A migration's index on that column
  * alone lets a page read only the instances that hold a value, in
  * creation order.
  */
@@ -248,10 +250,10 @@ export interface ValueWriter extends ValueReader {
 /** How much of another instance a read returns. */
 export interface ReadOptions {
   /**
-   * The behavior fields to read, by name; every one when absent, none for
-   * []. A name the schema's behaviors do not declare is left out. A field
-   * that reads other instances in turn nests the call deeper, so a
-   * behavior names the fields it needs.
+   * The behavior fields to read, by qualified name (`Workflow.status`);
+   * every one when absent, none for []. A name without a dot is a
+   * BehaviorError; one the schema's behaviors do not declare is left out. A field that reads other instances in turn
+   * nests the call deeper, so a behavior names the fields it needs.
    */
   readonly fields?: readonly string[];
 }
@@ -357,8 +359,9 @@ export interface Schemas {
 
 /**
  * What a reference hears of its target besides its delete: 'delete', the
- * delete alone; or one value of the target, at a JSON pointer into its
- * record's data (its own fields and its behaviors' fields), heard when a
+ * delete alone; or one value of the target, at a JSON pointer into what a
+ * read returns of it, { data, behaviors }: `/data/<field>` for an own
+ * field, `/behaviors/<behavior>/<field>` for a behavior's, heard when a
  * change moves it, or, with crosses, when a change moves it across that
  * number. A value's side of crosses is one of three: not a number, below
  * it, or at or above it.
@@ -510,13 +513,14 @@ export interface WorkContext<Config> extends BehaviorScope<Config> {
 /** A reaction's context. */
 export interface ReactionContext<Config> extends WorkContext<Config> {
   /**
-   * The instance of an event as the log had it just before the event: its
-   * own fields and its behaviors' fields, as the events before it recorded
-   * them; undefined when the event is its create. After a delete this is
-   * all that is left of it. A field that reads other instances holds what
-   * the last event recorded. Asks read on the event's schema.
+   * The instance of an event as the log had it just before the event, as a
+   * read returns it: its own fields in data and its behaviors' fields in
+   * behaviors, by behavior name, as the events before it recorded them;
+   * undefined when the event is its create. After a delete this is all
+   * that is left of it. A field that reads other instances holds what the
+   * last event recorded. Asks read on the event's schema.
    */
-  before(event: EngineEvent): FrozenJSON | undefined;
+  before(event: EngineEvent): InstanceFields | undefined;
 }
 
 /**
@@ -646,9 +650,10 @@ export interface InstanceContext<Config> extends InstanceView<Config> {
 export interface OperationContext<Config> extends InstanceContext<Config> {
   /**
    * Applies a JSON merge patch (RFC 7386) to the instance's own fields and
-   * returns them after it. A behavior's field in the patch is refused
-   * (InstanceValidationError, rule readOnly), and so is a result the live
-   * version refuses; then every behavior's guard is asked, in list order,
+   * returns them after it. A behavior's field is no member of the patch's,
+   * whose keys are the own fields' (InstanceValidationError, rule unknown,
+   * for another), and a result the live version refuses is refused; then
+   * every behavior's guard is asked, in list order,
    * with an update request whose caller is this behavior. A patch that
    * changes nothing writes nothing. The access policy is not asked again,
    * since it allowed the operation, and no event is appended: the

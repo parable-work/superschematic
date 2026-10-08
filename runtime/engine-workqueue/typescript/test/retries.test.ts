@@ -79,13 +79,16 @@ for (const driver of drivers) {
   const attempt = (engine: Engine, params: Record<string, unknown> = {}, id = 'j1', who: Principal = worker) =>
     invoke(engine, who, 'recordAttempt', params, id) as Attempt;
   const dataOf = (engine: Engine, id = 'j1') => engine.instances.get(alice, 'Job', id)?.data as Record<string, unknown>;
+  const retriesOf = (engine: Engine, id = 'j1') => engine.instances.get(alice, 'Job', id)?.behaviors.Retries as Record<string, unknown>;
+  const statusOf = (engine: Engine, id = 'j1') => engine.instances.get(alice, 'Job', id)?.behaviors.Workflow?.status;
+  const leaseOf = (engine: Engine, id = 'j1') => engine.instances.get(alice, 'Job', id)?.behaviors.Lease as Record<string, unknown>;
   const veto = (fn: () => unknown) => thrown(fn, BehaviorVetoError);
   const counts = (timeout: number, invalid: number, rejected: number) => ({ timeout, invalid, rejected });
 
   describe(`Retries: attempts (${driver})`, () => {
     test('a success is kept, its result written to resultField, and counts nothing; score is optional', () => {
       const engine = world({ ...base, resultField: 'report' });
-      assert.deepEqual(dataOf(engine).retries, { total: 0, classAttempts: counts(0, 0, 0), bestScore: null, exhausted: false, stuck: false });
+      assert.deepEqual(retriesOf(engine), { total: 0, classAttempts: counts(0, 0, 0), exhausted: false, stuck: false });
       assert.deepEqual(attempt(engine, { score: 0.5, result: { ok: true } }), {
         failure: null,
         score: 0.5,
@@ -98,7 +101,7 @@ for (const driver of drivers) {
       });
       assert.deepEqual(dataOf(engine).report, { ok: true });
       assert.deepEqual(attempt(engine, { result: { ok: 'again' } }).score, null);
-      assert.deepEqual([dataOf(engine).report, (dataOf(engine).retries as { bestScore: number }).bestScore], [{ ok: 'again' }, 0.5]);
+      assert.deepEqual([dataOf(engine).report, retriesOf(engine).bestScore], [{ ok: 'again' }, 0.5]);
     });
 
     test('a failure names a class of the config, a result needs resultField, and each attempt is one event of its caller', () => {
@@ -137,7 +140,7 @@ for (const driver of drivers) {
         stuck: false,
         hint: null,
       });
-      assert.equal(dataOf(engine).status, 'failed');
+      assert.equal(statusOf(engine), 'failed');
       engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(1 as number));
       assert.equal(veto(() => invoke(engine, other, 'acquire')).reason, 'its retries are exhausted, so it is not taken again');
       assert.equal(veto(() => attempt(engine, { failure: 'timeout' })).reason, 'its retries are exhausted');
@@ -160,7 +163,7 @@ for (const driver of drivers) {
         stuck: false,
         hint: null,
       });
-      assert.equal(dataOf(engine).status, 'failed');
+      assert.equal(statusOf(engine), 'failed');
       const fresh = world(base);
       for (let n = 0; n < 3; n += 1) {
         attempt(fresh, { failure: 'timeout' });
@@ -218,7 +221,7 @@ for (const driver of drivers) {
 
       // A cap of 0 makes the first failure of that class exhaust; nothing is exhausted before it, and other classes count as before.
       const zero = world(config, { caps: { timeout: 0 } });
-      assert.equal((dataOf(zero).retries as { exhausted: boolean }).exhausted, false);
+      assert.equal(retriesOf(zero).exhausted, false);
       assert.equal((invoke(zero, worker, 'acquire') as { token: number }).token, 1);
       assert.deepEqual(attempt(zero, { failure: 'invalid' }), { ...attempt0(1), failure: 'invalid', classAttempts: counts(0, 1, 0) });
       assert.deepEqual(attempt(zero, { failure: 'timeout' }), { ...attempt0(1), exhausted: true, classAttempts: counts(0, 1, 0) });
@@ -256,12 +259,12 @@ for (const driver of drivers) {
 
     test('a config whose classes are all terminal exhausts nothing before the first failure', () => {
       const engine = world({ classes: { rejected: 'terminal', crashed: 'terminal' }, totalAttempts: 3, exhaustedState: 'failed' });
-      assert.deepEqual(dataOf(engine).retries, { total: 0, classAttempts: { crashed: 0, rejected: 0 }, bestScore: null, exhausted: false, stuck: false });
+      assert.deepEqual(retriesOf(engine), { total: 0, classAttempts: { crashed: 0, rejected: 0 }, exhausted: false, stuck: false });
       assert.equal((invoke(engine, worker, 'acquire') as { token: number }).token, 1);
       invoke(engine, worker, 'transition', { to: 'running' });
       assert.equal(attempt(engine, {}).exhausted, false);
       assert.equal(attempt(engine, { failure: 'crashed' }).exhausted, true);
-      assert.equal(dataOf(engine).status, 'failed');
+      assert.equal(statusOf(engine), 'failed');
     });
   });
 
@@ -273,18 +276,18 @@ for (const driver of drivers) {
       assert.equal(failed(0.55, true, 2).kept, false);
       // A higher score that loses a predicate the kept result had is recorded, not kept.
       assert.deepEqual(failed(0.9, false, 3), { ...attempt0(3), score: 0.9, classAttempts: counts(3, 0, 0) });
-      assert.deepEqual([dataOf(engine).report, (dataOf(engine).retries as { bestScore: number }).bestScore], [{ v: 1 }, 0.5]);
+      assert.deepEqual([dataOf(engine).report, retriesOf(engine).bestScore], [{ v: 1 }, 0.5]);
       // A predicate the attempt does not report counts as failed.
       assert.equal(attempt(engine, { failure: 'invalid', score: 0.9, result: { v: 4 } }).kept, false);
       assert.equal(attempt(engine, { failure: 'invalid', score: 0.9, predicates: { compiles: true }, result: { v: 5 } }).kept, true);
-      assert.deepEqual([dataOf(engine).report, (dataOf(engine).retries as { bestScore: number }).bestScore], [{ v: 5 }, 0.9]);
+      assert.deepEqual([dataOf(engine).report, retriesOf(engine).bestScore], [{ v: 5 }, 0.9]);
     });
 
     test("without keepBest only a success's result is kept, so no failure is measured against it", () => {
       const engine = world({ ...base, resultField: 'report' });
       assert.equal(attempt(engine, { score: 0.2, result: { v: 'success' } }).kept, true);
       assert.equal(attempt(engine, { failure: 'timeout', score: 0.9, result: { v: 'failure' } }).kept, false);
-      assert.deepEqual([dataOf(engine).report, (dataOf(engine).retries as { bestScore: number }).bestScore], [{ v: 'success' }, 0.2]);
+      assert.deepEqual([dataOf(engine).report, retriesOf(engine).bestScore], [{ v: 'success' }, 0.2]);
     });
 
     test('stuckAfter: the same signature in a row, none kept, exhausts as stuck; another signature, a kept attempt or a success ends the streak', () => {
@@ -293,7 +296,7 @@ for (const driver of drivers) {
       invoke(stuck, worker, 'transition', { to: 'running' });
       assert.equal(attempt(stuck, { failure: 'timeout', signature: 'a' }).stuck, false);
       assert.deepEqual(attempt(stuck, { failure: 'invalid', signature: 'a' }), { ...attempt0(2), failure: 'invalid', classAttempts: counts(1, 1, 0), exhausted: true, stuck: true });
-      assert.equal(dataOf(stuck).status, 'failed');
+      assert.equal(statusOf(stuck), 'failed');
       assert.equal(veto(() => attempt(stuck, {})).reason, 'its retries are exhausted, stuck on one failure');
 
       const wide = { timeout: { attempts: 5 }, invalid: { attempts: 5 } };
@@ -328,15 +331,15 @@ for (const driver of drivers) {
       invoke(engine, worker, 'transition', { to: 'running' });
       invoke(engine, worker, 'transition', { to: 'done' });
       assert.equal(attempt(engine, { failure: 'rejected' }).exhausted, true);
-      assert.equal(dataOf(engine).status, 'done');
+      assert.equal(statusOf(engine), 'done');
 
       const narrow = world({ ...base, from: ['running'] });
       assert.equal(attempt(narrow, { failure: 'rejected' }).exhausted, true);
-      assert.equal(dataOf(narrow).status, 'queued');
+      assert.equal(statusOf(narrow), 'queued');
       // Exhausted, its status moves only into exhaustedState.
       assert.equal(veto(() => invoke(narrow, alice, 'transition', { to: 'running' })).reason, 'its retries are exhausted, so its status moves only to failed');
       invoke(narrow, alice, 'transition', { to: 'failed' });
-      assert.equal(dataOf(narrow).status, 'failed');
+      assert.equal(statusOf(narrow), 'failed');
     });
 
     test('recordAttempt needs the permission the config names', () => {
@@ -379,11 +382,11 @@ for (const driver of drivers) {
     test('an exhausted instance still in a claimable state is not claimed, and is no candidate claimNext tries', () => {
       const engine = queued({ ...base, from: ['running'] });
       assert.equal(attempt(engine, { failure: 'rejected' }).exhausted, true);
-      assert.equal(dataOf(engine).status, 'queued');
+      assert.equal(statusOf(engine), 'queued');
       assert.equal(veto(() => invoke(engine, worker, 'claim')).reason, 'its retries are exhausted, so it is not taken again');
       assert.equal((engine.instances.invokeSchema(worker, 'Job', 'countClaimable', {}) as { count: number }).count, 1);
       assert.equal(claimNext(engine)?.id, 'j2');
-      assert.deepEqual([dataOf(engine).status, (dataOf(engine).lease as { holder: string | null }).holder], ['queued', null]);
+      assert.deepEqual([statusOf(engine), leaseOf(engine).holder], ['queued', undefined]);
       assert.equal(claimNext(engine, other), null);
     });
 
@@ -394,13 +397,13 @@ for (const driver of drivers) {
         assert.equal(claimed?.id, 'j1');
         assert.equal(attempt(engine, { failure: 'timeout' }).exhausted, false);
         engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(claimed?.token as number));
-        assert.equal(dataOf(engine).status, 'queued');
+        assert.equal(statusOf(engine), 'queued');
       }
       const last = claimNext(engine);
       assert.deepEqual(attempt(engine, { failure: 'invalid' }), { ...attempt0(4), failure: 'invalid', classAttempts: counts(3, 1, 0), exhausted: true });
-      assert.equal(dataOf(engine).status, 'failed');
+      assert.equal(statusOf(engine), 'failed');
       engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(last?.token as number));
-      assert.equal(dataOf(engine).status, 'failed');
+      assert.equal(statusOf(engine), 'failed');
       assert.equal(claimNext(engine)?.id, 'j2');
     });
   });

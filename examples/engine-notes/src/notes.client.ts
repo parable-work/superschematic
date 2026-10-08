@@ -21,16 +21,25 @@ export type NoteFields = {
   tags?: string[] | null;
 };
 
-/** A Note as a read returns it: its own fields, then its behaviors'. */
-export type Note = NoteFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: NoteState;
-  /** Comments: How many comments the instance has. */
-  readonly commentCount: number;
-  /** Revisions: The number of the instance's latest revision. */
-  readonly revision?: number;
-  /** Revisions: With review in the config, how many of the instance's proposals are pending; absent without review. */
-  readonly pendingProposals?: unknown;
+/** A Note's data as a read returns it: its own fields. Its behaviors' fields are in NoteBehaviors. */
+export type Note = NoteFields;
+
+/** The fields of a Note's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type NoteBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: NoteState;
+  };
+  readonly Comments: {
+    /** How many comments the instance has. */
+    readonly commentCount: number;
+  };
+  readonly Revisions: {
+    /** The number of the instance's latest revision. */
+    readonly revision?: number;
+    /** With review in the config, how many of the instance's proposals are pending; absent without review. */
+    readonly pendingProposals?: unknown;
+  };
 };
 
 /** A merge patch of a Note's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -300,13 +309,13 @@ export function isNoteVeto<B extends keyof NoteVetoes>(error: unknown, behavior?
 /** The notes schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface NotesClient {
   /** create stores a new Note, with its behaviors' create parameters. */
-  create(data: NoteFields, options?: NoteCreateOptions): Promise<Instance<Note>>;
+  create(data: NoteFields, options?: NoteCreateOptions): Promise<Instance<Note, NoteBehaviors>>;
   /** get reads a Note; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Note>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Note, NoteBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Note>>;
+  list(options?: ListOptions): Promise<InstancePage<Note, NoteBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: NotePatch, options?: NoteWriteOptions): Promise<Instance<Note>>;
+  update(id: string, patch: NotePatch, options?: NoteWriteOptions): Promise<Instance<Note, NoteBehaviors>>;
   /** delete removes a Note. */
   delete(id: string, options?: NoteWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -335,16 +344,16 @@ export interface NotesClient {
 export function notesClient(client: EngineClient): NotesClient {
   return {
     create(data, options) {
-      return client.instances.create<Note>('notes', data, options);
+      return client.instances.create<Note, NoteBehaviors>('notes', data, options);
     },
     get(id, options) {
-      return client.instances.get<Note>('notes', id, options);
+      return client.instances.get<Note, NoteBehaviors>('notes', id, options);
     },
     list(options) {
-      return client.instances.list<Note>('notes', options);
+      return client.instances.list<Note, NoteBehaviors>('notes', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Note>('notes', id, patch, options);
+      return client.instances.update<Note, NoteBehaviors>('notes', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('notes', id, options);

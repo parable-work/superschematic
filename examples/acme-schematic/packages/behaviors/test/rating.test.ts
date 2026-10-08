@@ -55,27 +55,35 @@ test('an engine with acme.Rating publishes shop-ratings and rates a product', ()
   ]);
 
   const created = engine.instances.create(shopper, 'Product', { sku: 'walnut-desk', name: 'Walnut desk' }, { id: 'p1' });
-  assert.deepEqual(created.data, { sku: 'walnut-desk', name: 'Walnut desk', ratingCount: 0, ratingAverage: 0 });
+  assert.deepEqual(created.data, { sku: 'walnut-desk', name: 'Walnut desk' });
+  assert.deepEqual(created.behaviors, { 'acme.Rating': { ratingCount: 0, ratingAverage: 0 } });
 
   assert.deepEqual(engine.instances.invoke(shopper, 'Product', 'p1', 'rate', { stars: 4 }), { ratingCount: 1, ratingAverage: 4 });
   assert.deepEqual(engine.instances.invoke(shopper, 'Product', 'p1', 'rate', { stars: 5 }), { ratingCount: 2, ratingAverage: 4.5 });
-  assert.deepEqual(engine.instances.get(shopper, 'Product', 'p1')?.data, { sku: 'walnut-desk', name: 'Walnut desk', ratingCount: 2, ratingAverage: 4.5 });
+  assert.deepEqual(engine.instances.get(shopper, 'Product', 'p1')?.behaviors, { 'acme.Rating': { ratingCount: 2, ratingAverage: 4.5 } });
   assert.deepEqual(engine.instances.invoke(shopper, 'Product', 'p1', 'ratingSummary'), { ratingCount: 2, ratingAverage: 4.5 });
 
   // Above the type's maxStars, below the declaration's minimum, and the
-  // fields themselves: each is refused and changes nothing.
+  // fields themselves, which an update's own fields cannot name: each is
+  // refused and changes nothing.
   assert.equal(thrown(() => engine.instances.invoke(shopper, 'Product', 'p1', 'rate', { stars: 6 })).code, 'invalid_argument');
   assert.ok(thrown(() => engine.instances.invoke(shopper, 'Product', 'p1', 'rate', { stars: 0 })) instanceof OperationParamsError);
   assert.equal(thrown(() => engine.instances.update(shopper, 'Product', 'p1', { ratingCount: 9 })).code, 'invalid_instance');
-  assert.equal(engine.instances.get(shopper, 'Product', 'p1')?.data.ratingCount, 2);
+  assert.equal(engine.instances.get(shopper, 'Product', 'p1')?.behaviors['acme.Rating'].ratingCount, 2);
 
   const events = engine.events.read(shopper, { schema: 'Product', instanceId: 'p1' }).events;
   assert.deepEqual(
     events.map((event) => [event.kind, event.change]),
     [
-      ['create', { sku: 'walnut-desk', name: 'Walnut desk', ratingCount: 0, ratingAverage: 0 }],
-      ['operation', { behavior: 'acme.Rating', operation: 'rate', params: { stars: 4 }, patch: { ratingCount: 1, ratingAverage: 4 } }],
-      ['operation', { behavior: 'acme.Rating', operation: 'rate', params: { stars: 5 }, patch: { ratingCount: 2, ratingAverage: 4.5 } }],
+      ['create', { data: { sku: 'walnut-desk', name: 'Walnut desk' }, behaviors: { 'acme.Rating': { ratingCount: 0, ratingAverage: 0 } } }],
+      [
+        'operation',
+        { behavior: 'acme.Rating', operation: 'rate', params: { stars: 4 }, patch: { behaviors: { 'acme.Rating': { ratingCount: 1, ratingAverage: 4 } } } },
+      ],
+      [
+        'operation',
+        { behavior: 'acme.Rating', operation: 'rate', params: { stars: 5 }, patch: { behaviors: { 'acme.Rating': { ratingCount: 2, ratingAverage: 4.5 } } } },
+      ],
     ]
   );
 });

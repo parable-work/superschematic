@@ -54,7 +54,10 @@ Three entry points:
   parameter decoding, JSON parsing, the generated strict body parser and
   the implementation, and the envelope. It maps every failure to the
   problem envelope. `@rateLimit` keys a client by the transport's peer
-  address (`remoteAddressKey`); behind a proxy you trust, pass
+  address (`remoteAddressKey`), which the adapter reads from
+  `@hono/node-server`'s bindings, or from Bun's server when `app.fetch`
+  gets it as its bindings, as a generated entrypoint hands it; behind a
+  proxy you trust, pass
   `rateLimit: { keyOf: clientIpKey }` to key by the client IP it reports in
   `X-Forwarded-For`, which a client could otherwise write itself. `mountManualOperation` gates a `@manualRouteRegistration`
   operation and hands the Hono context to the service's own handler (a

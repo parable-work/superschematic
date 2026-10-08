@@ -78,11 +78,11 @@ for (const driver of drivers) {
         const principal = holding(...permissions);
         if (allowed) {
           assert.equal(engine.instances.invoke(principal, 'Item', id, 'open'), true, JSON.stringify(permissions));
-          assert.equal(engine.instances.get(alice, 'Item', id)?.data.opened, true);
+          assert.equal(engine.instances.get(alice, 'Item', id)?.behaviors['test.Gate']?.opened, true);
         } else {
           const veto = thrown(() => engine.instances.invoke(principal, 'Item', id, 'open'), BehaviorVetoError);
           assert.equal(veto.reason, 'opening it needs orders.approve', JSON.stringify(permissions));
-          assert.equal(engine.instances.get(alice, 'Item', id)?.data.opened, false);
+          assert.equal(engine.instances.get(alice, 'Item', id)?.behaviors['test.Gate']?.opened, false);
         }
       }
     });
@@ -113,7 +113,7 @@ for (const driver of drivers) {
       const later = open({ permissionMatcher: (() => Promise.resolve(true)) as unknown as () => boolean });
       later.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'a' });
       assert.match(thrown(() => later.instances.invoke(holding('x'), 'Item', 'a', 'open'), TypeError).message, /synchronous/);
-      assert.equal(later.instances.get(alice, 'Item', 'a')?.data.opened, false);
+      assert.equal(later.instances.get(alice, 'Item', 'a')?.behaviors['test.Gate']?.opened, false);
 
       const engine = open();
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'a' });

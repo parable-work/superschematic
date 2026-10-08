@@ -165,17 +165,17 @@ function builtinGuidance(type: string, takers: readonly string[], fields: FieldG
       doNotUseWhen: `Do not use to change one that exists; call update.${
         keys.length > 0 ? ` Do not create a ${type} whose ${list(keys, 'or')} another holds; call lookup to find it.` : ''
       }`,
-      success: "Returns the new instance with its id, its seq and its behaviors' fields.",
+      success: "Returns the new instance with its id, its seq, its own fields in data and its behaviors' fields in behaviors, by behavior name.",
     },
     get: {
       useWhen: `Use when you have the id of the ${type} to read.`,
       doNotUseWhen: `Do not use to find ${type} instances; call ${keys.length > 0 ? `lookup with a ${list(keys, 'or')}, or ` : ''}list.`,
-      success: "Returns the instance with its seq and its behaviors' fields.",
+      success: "Returns the instance with its seq, its own fields in data and its behaviors' fields in behaviors, by behavior name.",
     },
     list: {
       useWhen: `Use to page through ${type} instances, oldest first.${
         fields.filters.length > 0
-          ? ` where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: ${list(fields.filters, 'or')}.`
+          ? ` where keeps the ones whose fields hold the values it gives, null meaning no value and a list of values any of them: ${list(fields.filters, 'or')}; a behavior's field by its qualified name, the behavior's, a dot and the field's.`
           : ''
       }`,
       doNotUseWhen: `Do not use to read one instance whose id you have; call get.${keys.length > 0 ? ` Do not use to find one by its ${list(keys, 'or')}; call lookup.` : ''}`,
@@ -187,7 +187,7 @@ function builtinGuidance(type: string, takers: readonly string[], fields: FieldG
       useWhen: `Use to change the own fields of the ${type} with the id, as a JSON merge patch; with expectedSeq, the update is refused if the instance changed since that seq.${
         unique === undefined ? '' : ` ${unique}`
       }`,
-      doNotUseWhen: "Do not use to set a behavior's field, which is read-only; call the behavior's operation.",
+      doNotUseWhen: "Do not use to set a behavior's field: the patch holds own fields only, and a behavior's fields change only through its operations.",
       success: 'Returns the instance as the patch left it, with its next seq.',
     },
     delete: {
@@ -202,7 +202,7 @@ function builtinGuidance(type: string, takers: readonly string[], fields: FieldG
               fields.unique.some((index) => index.length > 1) ? 's of one unique index' : ''
             } and the value, as { ${fields.unique[0].map((key) => `"${key}": ...`).join(', ')} }; a value may hold a slash.`,
             doNotUseWhen: `Do not use when you have the id; call get. Do not use to find instances by another field; call list with where.`,
-            success: "Returns the instance whose fields hold the values, with its seq and its behaviors' fields; not_found when none does.",
+            success: "Returns the instance whose fields hold the values, with its seq, its own fields in data and its behaviors' fields in behaviors; not_found when none does.",
           },
         }),
   };

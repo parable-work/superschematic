@@ -159,8 +159,22 @@ export function jsonBodyLimit(limitBytes: number): MiddlewareHandler {
   });
 }
 
-interface NodeSocketBindingsLike {
+/**
+ * Where a request's peer address comes from: @hono/node-server's bindings,
+ * or Bun's server, which a generated TypeScript server hands app.fetch as
+ * its bindings (D51).
+ */
+interface SocketBindingsLike {
   incoming?: { socket?: { remoteAddress?: string } };
+  requestIP?: (request: Request) => { address?: string } | null;
+}
+
+function remoteAddressOf(bindings: SocketBindingsLike, raw: Request): string | undefined {
+  let address = bindings.incoming?.socket?.remoteAddress;
+  if (address === undefined && typeof bindings.requestIP === 'function') {
+    address = bindings.requestIP(raw)?.address;
+  }
+  return address?.trim() || undefined;
 }
 
 /**
@@ -178,8 +192,7 @@ export function requestContextOf<E extends Env>(c: Context<E>, operation: Operat
   for (const [name, value] of Object.entries(c.req.param() as Record<string, string | undefined>)) {
     if (value !== undefined) pathParams[name] = value;
   }
-  const bindings = (c.env ?? {}) as NodeSocketBindingsLike;
-  const remoteAddress = bindings.incoming?.socket?.remoteAddress?.trim() || undefined;
+  const remoteAddress = remoteAddressOf((c.env ?? {}) as SocketBindingsLike, raw);
   const clientIp = clientIpOf(raw.headers, remoteAddress);
   return {
     requestId: requestIdOf(raw),

@@ -4,9 +4,10 @@
 // narrows: the Go test internal/generator/engineclientgen writes both
 // (-update) and fails when one is stale. Here the generator's create
 // parameters are held to the describe document's, the behavior fields it
-// types to what reads return, and the wrappers run against an engine over
-// HTTP. typos() is never called: each of its lines must fail to compile,
-// which tsc -p tsconfig.test.json checks.
+// types, by behavior, to the describe document's and to what reads return,
+// and the wrappers run against an engine over HTTP. typos() is never
+// called: each of its lines must fail to compile, which tsc -p
+// tsconfig.test.json checks.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
@@ -18,7 +19,7 @@ import { Hono } from 'hono';
 import { EngineClient } from '../dist/client/index.js';
 import { engineApp } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
-import { isProjectVeto, isTaskVeto, projectClient, specClient, taskClient, type Task, type TaskClient } from './generated/fixture.ts';
+import { isProjectVeto, isTaskVeto, projectClient, specClient, taskClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
 import { isNoteVeto, notesClient, type NotesClient } from './generated/notes.ts';
 import { cleanup, openTestEngine } from './helpers.ts';
@@ -32,7 +33,8 @@ interface ParityField {
 
 interface ParityCorpus {
   documents: Array<Record<string, unknown> & { name: string }>;
-  schemas: Record<string, { createParams: Record<string, unknown>; fields: Record<string, ParityField> }>;
+  /** Per schema: each behavior's create parameters, and each behavior's fields by behavior name, then field name. */
+  schemas: Record<string, { createParams: Record<string, unknown>; fields: Record<string, Record<string, ParityField>> }>;
 }
 
 const corpus = JSON.parse(readFileSync(new URL('../../testdata/client_codegen_parity.json', import.meta.url), 'utf8')) as ParityCorpus;
@@ -89,6 +91,16 @@ describe('the generated client', () => {
     assert.deepEqual(Object.keys(corpus.schemas.Spec.createParams), ['Dependencies']);
   });
 
+  test("names each behavior's fields as the engine's describe document does", () => {
+    const engine = open();
+    for (const [name, expected] of Object.entries(corpus.schemas)) {
+      const described = engine.tools.describe(editor, name).instanceBehaviors as { properties: Record<string, { properties: Record<string, unknown> }> };
+      const describedNames = Object.fromEntries(Object.entries(described.properties).map(([behavior, schema]) => [behavior, Object.keys(schema.properties).sort()]));
+      const generatedNames = Object.fromEntries(Object.entries(expected.fields).map(([behavior, fields]) => [behavior, Object.keys(fields).sort()]));
+      assert.deepEqual(describedNames, generatedNames, name);
+    }
+  });
+
   test('types each behavior field as the reads return it', () => {
     const engine = open();
     engine.instances.create(editor, 'Spec', { title: 'Search' }, { id: 's1' });
@@ -112,22 +124,29 @@ describe('the generated client', () => {
     let checked = 0;
     for (const [name, expected] of Object.entries(corpus.schemas)) {
       for (const instance of engine.instances.list(editor, name, { limit: 50 }).items) {
-        for (const [field, shape] of Object.entries(expected.fields)) {
-          if (!(field in instance.data)) {
-            assert.equal(shape.present, false, `${name} ${instance.id} has no ${field}, which the generator types as always there`);
-            continue;
+        assert.deepEqual(Object.keys(instance.behaviors).sort(), Object.keys(expected.fields).sort(), `${name} ${instance.id}'s behaviors`);
+        for (const [behavior, fields] of Object.entries(expected.fields)) {
+          const values = instance.behaviors[behavior] ?? {};
+          for (const field of Object.keys(values)) {
+            assert.ok(field in fields, `${name} ${instance.id} has ${behavior}.${field}, which the generator does not type`);
           }
-          const valid = ajv.validate(shape.schema, instance.data[field]);
-          assert.ok(valid, `${name} ${instance.id} ${field} = ${JSON.stringify(instance.data[field])}: ${ajv.errorsText()}`);
-          checked += 1;
+          for (const [field, shape] of Object.entries(fields)) {
+            if (!(field in values)) {
+              assert.equal(shape.present, false, `${name} ${instance.id} has no ${behavior}.${field}, which the generator types as always there`);
+              continue;
+            }
+            const valid = ajv.validate(shape.schema, values[field]);
+            assert.ok(valid, `${name} ${instance.id} ${behavior}.${field} = ${JSON.stringify(values[field])}: ${ajv.errorsText()}`);
+            checked += 1;
+          }
         }
       }
     }
     assert.ok(checked >= 20, `checked ${checked} fields`);
-    const project = engine.instances.get(editor, 'Project', 'p1')?.data as Record<string, any>;
-    assert.deepEqual(project.rollups, { tasks: 3, byStatus: { todo: 2, doing: 1 }, hours: 3, longest: 3, finished: false });
-    const task = engine.instances.get(editor, 'Task', 't1')?.data as Record<string, any>;
-    assert.deepEqual(task.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true } });
+    const project = engine.instances.get(editor, 'Project', 'p1')?.behaviors as Record<string, any>;
+    assert.deepEqual(project.Rollups.values, { tasks: 3, byStatus: { todo: 2, doing: 1 }, hours: 3, longest: 3, finished: false });
+    const task = engine.instances.get(editor, 'Task', 't1')?.behaviors as Record<string, any>;
+    assert.deepEqual(task.Links.targets, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true } });
   });
 
   test('wraps the client with the schemas types, and the engine takes what they allow', async () => {
@@ -139,8 +158,8 @@ describe('the generated client', () => {
     const specs = specClient(client);
 
     const note = await notes.create({ title: 'Launch', tags: ['plan'] }, { id: 'launch' });
-    assert.equal(note.data.status, 'draft');
-    assert.equal(note.data.commentCount, 0);
+    assert.equal(note.behaviors.Workflow.status, 'draft');
+    assert.equal(note.behaviors.Comments.commentCount, 0);
     assert.deepEqual(await notes.transition('launch', { to: 'review' }), { from: 'draft', to: 'review' });
     const commented = await notes.operate('launch', 'comment', { body: 'Looks good' });
     assert.equal(commented.result.body, 'Looks good');
@@ -155,22 +174,22 @@ describe('the generated client', () => {
 
     await specs.create({ title: 'Search' }, { id: 's1' });
     await projects.create({ name: 'Launch' }, { id: 'p1' });
-    const built: { data: Task } = await tasks.create(
+    const built: { data: Task; behaviors: TaskBehaviors } = await tasks.create(
       { title: 'Index', kind: 'build', detail: { target: 'index', flags: ['fast'] } },
       { id: 't1', behaviors: { Links: { project: 'p1', spec: { id: 's1', revision: 1 } } } }
     );
-    assert.deepEqual(built.data.links, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false } });
+    assert.deepEqual(built.behaviors.Links.targets, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false } });
     if (built.data.kind === 'build') {
       assert.equal(built.data.detail?.target, 'index');
     }
     await tasks.create({ title: 'Review', kind: 'review', detail: { pullRequest: 7 } }, { id: 't2', behaviors: { Links: { project: 'p1' }, Dependencies: { blockers: [{ id: 't1' }] } } });
-    assert.equal((await tasks.get('t2')).data.blocked, true);
+    assert.equal((await tasks.get('t2')).behaviors.Dependencies.blocked, true);
     assert.deepEqual(await tasks.listLinked({ name: 'project', id: 'p1' }), { items: [{ id: 't1' }, { id: 't2' }], next: null });
     assert.deepEqual(await tasks.addBlocker('t1', { schema: 'Spec', id: 's1' }), { schema: 'Spec', id: 's1', status: 'draft', open: true });
     await tasks.transition('t2', { to: 'doing' });
     await assert.rejects(tasks.transition('t2', { to: 'done' }), (error) => isTaskVeto(error, 'Dependencies', ['blocked', 'gated']));
     await assert.rejects(tasks.unlink('t1', { name: 'project' }), (error) => isTaskVeto(error, 'Links', 'required_link'));
-    assert.equal((await projects.get('p1')).data.rollups.tasks, 2);
+    assert.equal((await projects.get('p1')).behaviors.Rollups.values.tasks, 2);
     await assert.rejects(projects.transition('p1', { to: 'closed' }), (error) => isProjectVeto(error, 'Rollups', 'not_held'));
     await tasks.delete('t2');
     assert.equal((await tasks.list()).items.length, 1);
@@ -185,8 +204,12 @@ describe('the generated client', () => {
 export function typos(notes: NotesClient, tasks: TaskClient, jobs: JobsClient, workers: WorkersClient): void {
   // @ts-expect-error titel is not a field of a Note
   void notes.create({ titel: 'Launch' });
-  // @ts-expect-error status is not an own field: transition moves it
+  // @ts-expect-error status is not an own field: it is Workflow's, which transition moves
   void notes.update('launch', { status: 'published' });
+  // @ts-expect-error a note's status is under its Workflow, not in its data
+  void notes.get('launch').then((note) => note.data.status);
+  // @ts-expect-error commentCount is Comments' field, not Workflow's
+  void notes.get('launch').then((note) => note.behaviors.Workflow.commentCount);
   // @ts-expect-error publshed is not a state of a Note's Workflow
   void notes.transition('launch', { to: 'publshed' });
   // @ts-expect-error comment takes body, not text

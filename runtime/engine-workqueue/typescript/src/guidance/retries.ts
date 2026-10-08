@@ -17,7 +17,7 @@ export function retriesGuidance(config: RetriesConfig, target: DescribeTarget): 
   });
   const operations = new Set(target.operations.map((operation) => operation.name));
   const exhausted: OperationGuidance = {
-    doNotUseWhen: 'Do not use once retries.exhausted is true.',
+    doNotUseWhen: 'Do not use once behaviors.Retries.exhausted is true.',
     errors: [{ code: 'exhausted', commonCorrection: 'None: the instance takes no more attempts; create new work instead.' }],
   };
   const limits = config.limitsField;
@@ -42,7 +42,7 @@ export function retriesGuidance(config: RetriesConfig, target: DescribeTarget): 
         errors: exhausted.errors,
       },
       list: {
-        useWhen: `where: { "retries.exhausted": true } lists the ${target.type} instances whose retries are exhausted, and false the ones that may run again.`,
+        useWhen: `where: { "Retries.exhausted": true } lists the ${target.type} instances whose retries are exhausted, and false the ones that may run again.`,
       },
       ...(operations.has('acquire') ? { acquire: exhausted } : {}),
       ...(operations.has('claim') ? { claim: exhausted } : {}),

@@ -15,7 +15,7 @@ import {
   type InstanceChange,
 } from '../dist/index.js';
 import { flag, openMetaSchema, publishItem } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, openTestEngine, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -118,7 +118,8 @@ const fields = [
   { name: 'size', typeRef: { name: 'number' }, validateMin: 1 },
 ];
 
-// replay applies an instance's events in order to its create's instance.
+// replay applies an instance's events in order to its create's instance,
+// each a merge patch of { data, behaviors } as a read returns them.
 function replay(engine: Engine, id: string): Record<string, unknown> {
   const events = engine.events.read(alice, { schema: 'Item', instanceId: id }).events;
   let instance: Record<string, unknown> = {};
@@ -165,7 +166,7 @@ for (const driver of drivers) {
       const engine = open();
       assert.equal(engine.instances.invoke(alice, 'Item', 'a', 'rename', { title: 'Table' }), 'Table');
       const instance = engine.instances.get(alice, 'Item', 'a');
-      assert.deepEqual(instance?.data, { title: 'Table', note: 'oak', renames: 1 });
+      assert.deepEqual(fieldsOf(instance), { data: { title: 'Table', note: 'oak' }, behaviors: { 'test.Editor': { renames: 1 } } });
       assert.equal(instance?.seq, 2);
       // The handler's context reads the fields as update() left them.
       assert.deepEqual(seen.data, [{ title: 'Table', note: 'oak' }]);
@@ -181,9 +182,9 @@ for (const driver of drivers) {
         behavior: 'test.Editor',
         operation: 'rename',
         params: { title: 'Table' },
-        patch: { title: 'Table', renames: 1 },
+        patch: { data: { title: 'Table' }, behaviors: { 'test.Editor': { renames: 1 } } },
       });
-      assert.deepEqual(replay(engine, 'a'), instance?.data);
+      assert.deepEqual(replay(engine, 'a'), fieldsOf(instance));
     });
 
     test('two updates in one operation are one change, and a patch that changes nothing writes nothing', () => {
@@ -194,20 +195,21 @@ for (const driver of drivers) {
       const events = engine.events.read(alice, { schema: 'Item', instanceId: 'a' }).events.slice(-3);
       assert.deepEqual(
         events.map((event) => (event.change as { patch: unknown }).patch),
-        [{ title: 'Table' }, { note: null }, {}]
+        [{ data: { title: 'Table' } }, { data: { note: null } }, {}]
       );
       assert.deepEqual(
         seen.changes.map((change) => (change.kind === 'operation' ? change.before : undefined)),
         [{ title: 'Desk', note: 'oak' }, { title: 'Table', note: 'oak' }, undefined]
       );
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'a')?.data, { title: 'Table', renames: 0 });
-      assert.deepEqual(replay(engine, 'a'), { title: 'Table', renames: 0 });
+      const fields = { data: { title: 'Table' }, behaviors: { 'test.Editor': { renames: 0 } } };
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'a')), fields);
+      assert.deepEqual(replay(engine, 'a'), fields);
     });
 
-    test("refuses a behavior's field, a result the live version refuses, and what a guard vetoes, and writes nothing", () => {
+    test("refuses a behavior field's name in the patch as unknown, a result the live version refuses, and what a guard vetoes, and writes nothing", () => {
       const engine = open([{ name: 'test.Editor' }, { name: 'test.Flag' }]);
-      const readOnly = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'setRenames'), InstanceValidationError);
-      assert.deepEqual(readOnly.issues, [{ path: 'renames', rule: 'readOnly', message: 'renames is a field of behavior test.Editor, which only its operations change' }]);
+      const unknown = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'setRenames'), InstanceValidationError);
+      assert.deepEqual(unknown.issues, [{ path: 'renames', rule: 'unknown', message: 'Item has no field renames' }]);
       const invalid = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'setSize', { size: 0 }), InstanceValidationError);
       assert.deepEqual(invalid.issues.map((issue) => [issue.path, issue.rule]), [['size', 'min']]);
       const own = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'rename', { title: 'forbidden' }), BehaviorVetoError);
@@ -218,7 +220,10 @@ for (const driver of drivers) {
       const flagged = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'rename', { title: 'Table' }), BehaviorVetoError);
       assert.deepEqual([flagged.behavior, flagged.action], ['test.Flag', 'rename']);
       const instance = engine.instances.get(alice, 'Item', 'a');
-      assert.deepEqual(instance?.data, { title: 'Desk', note: 'oak', renames: 0, flagged: true, flagReason: 'audit' });
+      assert.deepEqual(fieldsOf(instance), {
+        data: { title: 'Desk', note: 'oak' },
+        behaviors: { 'test.Editor': { renames: 0 }, 'test.Flag': { flagged: true, flagReason: 'audit' } },
+      });
       assert.equal(instance?.seq, 2);
     });
 
@@ -234,7 +239,7 @@ for (const driver of drivers) {
     test('a called operation that fails takes its update back with its savepoint', () => {
       const engine = open();
       assert.equal(engine.instances.invoke(alice, 'Item', 'a', 'tryRename', { title: 'Table' }), 'Desk');
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'a')?.data, { title: 'Desk', note: 'oak', renames: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'a')), { data: { title: 'Desk', note: 'oak' }, behaviors: { 'test.Editor': { renames: 0 } } });
       assert.equal(seen.changes.length, 1);
       assert.equal((seen.changes[0] as { before?: unknown }).before, undefined);
     });
@@ -242,8 +247,10 @@ for (const driver of drivers) {
     test('validateUpdate reports without writing; a read-only operation cannot update; a patch is an object', () => {
       const engine = open();
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'a', 'check', { patch: { title: 'Table' } }), []);
+      // A behavior field's name is unknown as any other key, beside what else the result breaks.
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'a', 'check', { patch: { size: 0, renames: 1 } }), [
-        { path: 'renames', rule: 'readOnly', message: 'renames is a field of behavior test.Editor, which only its operations change' },
+        { path: 'renames', rule: 'unknown', message: 'Item has no field renames' },
+        { path: 'size', rule: 'min', message: 'size must be at least 1.' },
       ]);
       assert.deepEqual(
         (engine.instances.invoke(alice, 'Item', 'a', 'check', { patch: { title: null } }) as Array<{ path: string; rule: string }>).map(
@@ -253,7 +260,7 @@ for (const driver of drivers) {
       );
       assert.match(thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'renameInRead', { title: 'Table' }), BehaviorError).message, /read-only operation cannot update/);
       assert.match(thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'notAPatch'), BehaviorError).message, /a JSON object/);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'a')?.data, { title: 'Desk', note: 'oak', renames: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'a')), { data: { title: 'Desk', note: 'oak' }, behaviors: { 'test.Editor': { renames: 0 } } });
     });
   });
 }

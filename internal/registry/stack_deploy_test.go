@@ -24,6 +24,7 @@ func (nopState) Migrate(context.Context, MigrationRequest) error { return nil }
 func (nopState) Build(context.Context, BuildRequest) (string, error) {
 	return "", nil
 }
+func (nopState) RunJob(context.Context, JobRunRequest) error { return nil }
 
 // TestRegisterTargetDeploySeams covers the refusals of a deploy seam a
 // target cannot use.
@@ -35,10 +36,12 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 	}{
 		{"state without provisioner", TargetSpec{Name: "fake", State: nopState{}}, `target "fake" has State but names no provisioner`},
 		{"bootstrap without provisioner", TargetSpec{Name: "fake", State: nopState{}, Bootstrap: nopState{}}, "has State, Bootstrap but names no provisioner"},
-		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
-		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
+		{"bootstrap without state", TargetSpec{Name: "fake", Provisioner: "fake", Bootstrap: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
+		{"migrations without state", TargetSpec{Name: "fake", Provisioner: "fake", Migrations: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
 		{"builder without provisioner", TargetSpec{Name: "fake", State: nopState{}, Builder: nopState{}}, "has State, Builder but names no provisioner"},
-		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations, Builder or CI but no State"},
+		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
+		{"jobs without provisioner", TargetSpec{Name: "fake", State: nopState{}, Jobs: nopState{}}, "has State, Jobs but names no provisioner"},
+		{"jobs without state", TargetSpec{Name: "fake", Provisioner: "fake", Jobs: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,7 +51,7 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 			}
 		})
 	}
-	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}, Builder: nopState{}}
+	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}, Builder: nopState{}, Jobs: nopState{}}
 	if err := New(naming.Default()).RegisterTarget(sound); err != nil {
 		t.Errorf("a target with every seam: %v", err)
 	}
@@ -91,13 +94,19 @@ func TestBuildRequestCheck(t *testing.T) {
 	env := &ir.ResolvedEnvironment{Environment: "Staging", Deployables: []*ir.ResolvedDeployable{
 		{Name: "shop-api", Kind: ir.DeployableServer},
 		{Name: "shop-db", Kind: ir.DeployableDatabase},
+		{Name: "shop-orders-ship-orders", Kind: ir.DeployableJob},
 	}}
 	sound := BuildRequest{
-		Run: Run{Environment: env}, Server: "shop-api", Context: "/tmp/ctx.tar.gz",
+		Run: Run{Environment: env}, Deployable: "shop-api", Context: "/tmp/ctx.tar.gz",
 		ContextDigest: "sha256:" + strings.Repeat("ab", 32), Dockerfile: "schemas/dist/server/Shop/shop-api/Dockerfile",
 	}
 	if err := sound.Check(); err != nil {
 		t.Fatalf("a sound request: %v", err)
+	}
+	job := sound
+	job.Deployable, job.Dockerfile = "shop-orders-ship-orders", "schemas/dist/server/Shop/shop-orders-ship-orders/Dockerfile"
+	if err := job.Check(); err != nil {
+		t.Fatalf("a job's request (D52): %v", err)
 	}
 	for _, tc := range []struct {
 		name   string
@@ -105,7 +114,7 @@ func TestBuildRequestCheck(t *testing.T) {
 		want   string
 	}{
 		{"no run", func(r *BuildRequest) { r.Run = Run{} }, "no environment"},
-		{"a database", func(r *BuildRequest) { r.Server = "shop-db" }, `has no server "shop-db"`},
+		{"a database", func(r *BuildRequest) { r.Deployable = "shop-db" }, `has no server or job "shop-db"`},
 		{"no context", func(r *BuildRequest) { r.Context = "" }, "no context archive"},
 		{"a bad digest", func(r *BuildRequest) { r.ContextDigest = "sha256:abc" }, "is not sha256:<64 hex digits>"},
 		{"an absolute Dockerfile", func(r *BuildRequest) { r.Dockerfile = "/Dockerfile" }, "not a slash-separated path inside the context"},

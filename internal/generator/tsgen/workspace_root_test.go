@@ -80,6 +80,79 @@ func TestWorkspaceRootManifest(t *testing.T) {
 	}
 }
 
+// TestIgnoredLockfile: the workspace's lockfile, which the project commits
+// (D51, amended), is ignored under a rule that ignores the output root
+// itself, which names the rule, and not under one that ignores its
+// contents and takes the lockfile back, nor once git tracks it; outside a
+// repository nothing is ignored.
+func TestIgnoredLockfile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	// No global or system ignore file of this machine's.
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(global, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	repo := t.TempDir()
+	git(repo, "init", "--quiet")
+	out := filepath.Join(repo, "schemas", "dist")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ignore := func(rules string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(rules), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ignore("node_modules/\ndist/\n")
+	if rule, ignored := IgnoredLockfile(out); !ignored || rule != ".gitignore:2:dist/" {
+		t.Errorf("under dist/: %q, %v; want .gitignore:2:dist/", rule, ignored)
+	}
+	ignore("dist/*\n!dist/bun.lock\n")
+	if rule, ignored := IgnoredLockfile(out); ignored {
+		t.Errorf("under dist/* and !dist/bun.lock: ignored by %q", rule)
+	}
+	// A nested ignore file takes the directory back from a broader rule.
+	ignore("dist/\n")
+	if err := os.WriteFile(filepath.Join(repo, "schemas", ".gitignore"), []byte("!/dist/\n/dist/*\n!/dist/bun.lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rule, ignored := IgnoredLockfile(out); ignored {
+		t.Errorf("under schemas/.gitignore's exception: ignored by %q", rule)
+	}
+	// A tracked lockfile is not ignored, whatever the rules say.
+	if err := os.Remove(filepath.Join(repo, "schemas", ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, LockfileName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ignored := IgnoredLockfile(out); !ignored {
+		t.Error("an untracked lockfile under dist/ is not ignored")
+	}
+	git(repo, "add", "--force", "schemas/dist/bun.lock")
+	if rule, ignored := IgnoredLockfile(out); ignored {
+		t.Errorf("a tracked lockfile: ignored by %q", rule)
+	}
+
+	if rule, ignored := IgnoredLockfile(t.TempDir()); ignored {
+		t.Errorf("outside a repository: ignored by %q", rule)
+	}
+}
+
 // TestWriteWorkspaceRoot: builds that run in parallel each write the
 // root for their own package, and the result is one whole file; the
 // types-only root an earlier build wrote is removed, unless edited.

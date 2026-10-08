@@ -101,13 +101,17 @@ describe('the describe document', () => {
     const patch = (operationOf(engine, 'Order', 'update').params.properties as Record<string, any>).patch;
     assert.equal(patch.required, undefined);
     assert.equal(patch.properties.lines.items.required[0], 'sku', "a list is replaced whole, so its items keep what they require");
-    // create, get and update return the instance, whose data is the instance schema.
+    // create, get and update return the instance, whose data is the instance
+    // schema and whose behaviors the instanceBehaviors one: with no behavior, no entry.
     const result = operationOf(engine, 'Order', 'get').result as Record<string, any>;
     assert.deepEqual(result.properties.data, described.instance);
+    assert.deepEqual(result.properties.behaviors, described.instanceBehaviors);
+    assert.deepEqual([described.instanceBehaviors.properties, described.instanceBehaviors.required], [{}, []]);
+    assert.ok(result.required.includes('behaviors'));
     assert.deepEqual(operationOf(engine, 'Order', 'delete').result, { type: 'null' });
   });
 
-  test("describes a schema with behaviors: their fields read-only in the instance, their config, and their operations", () => {
+  test("describes a schema with behaviors: their fields read-only under each one's name apart from the instance, their config, and their operations", () => {
     const engine = openBehaviorEngine();
     publishItem(engine, [{ name: 'test.Counter', config: { start: 2, limit: 9 } }, { name: 'test.Flag' }]);
     const described = engine.tools.describe(alice, 'Item');
@@ -132,10 +136,35 @@ describe('the describe document', () => {
         vetoes: [],
       },
     ]);
-    const properties = described.instance.properties as Record<string, unknown>;
-    assert.deepEqual(properties.count, { description: 'The count.', readOnly: true });
-    assert.deepEqual(properties.flagged, { description: 'Whether the instance is flagged.', readOnly: true });
+    // The instance schema is the own fields alone; instanceBehaviors holds each behavior's, read-only.
+    assert.deepEqual(Object.keys(described.instance.properties as object), ['title']);
     assert.deepEqual(described.instance.required, ['title']);
+    assert.deepEqual(described.instanceBehaviors, {
+      type: 'object',
+      description: "The instance's behaviors' fields, by behavior name, apart from its own fields",
+      additionalProperties: false,
+      properties: {
+        'test.Counter': {
+          type: 'object',
+          description: 'The fields of behavior test.Counter',
+          additionalProperties: false,
+          readOnly: true,
+          properties: { count: { description: 'The count.', readOnly: true } },
+        },
+        'test.Flag': {
+          type: 'object',
+          description: 'The fields of behavior test.Flag',
+          additionalProperties: false,
+          readOnly: true,
+          properties: {
+            flagged: { description: 'Whether the instance is flagged.', readOnly: true },
+            flagReason: { description: 'Why; absent when it is not flagged.', readOnly: true },
+          },
+        },
+      },
+      required: ['test.Counter', 'test.Flag'],
+    });
+    assert.deepEqual((operationOf(engine, 'Item', 'get').result as Record<string, any>).properties.behaviors, described.instanceBehaviors);
     // create's data is the type's own fields: a behavior's are not given.
     const data = (operationOf(engine, 'Item', 'create').params.properties as Record<string, any>).data;
     assert.deepEqual(Object.keys(data.properties), ['title']);
@@ -550,7 +579,7 @@ describe("the core's behaviors", () => {
     });
 
     // The describe document names each operation's behavior and policy, and
-    // holds the behaviors' fields read-only in the instance.
+    // holds the behaviors' fields read-only under their names, apart from the instance's own.
     const described = engine.tools.describe(alice, 'documents');
     assert.deepEqual(
       described.operations.filter((operation) => operation.behavior !== undefined).map((operation) => [operation.behavior, operation.name, operation.writes, operation.invocationPolicy]),
@@ -566,11 +595,23 @@ describe("the core's behaviors", () => {
         ['Revisions', 'listProposals', false, 'auto'],
       ]
     );
-    const properties = described.instance.properties as Record<string, { readOnly?: boolean }>;
+    const behaviors = described.instanceBehaviors.properties as Record<string, { readOnly?: boolean; properties: Record<string, { readOnly?: boolean }> }>;
     assert.deepEqual(
-      ['status', 'commentCount', 'revision', 'pendingProposals', 'title'].map((field) => properties[field]?.readOnly === true),
-      [true, true, true, true, false]
+      Object.entries(behaviors).map(([name, behavior]) => [name, behavior.readOnly, Object.entries(behavior.properties).map(([field, schema]) => [field, schema.readOnly])]),
+      [
+        ['Workflow', true, [['status', true]]],
+        ['Comments', true, [['commentCount', true]]],
+        [
+          'Revisions',
+          true,
+          [
+            ['revision', true],
+            ['pendingProposals', true],
+          ],
+        ],
+      ]
     );
+    assert.deepEqual(Object.keys(described.instance.properties as object), ['body', 'title']);
   });
 
   test("under a distribution's policy they take its default, and the engine still opens", () => {
@@ -603,15 +644,15 @@ describe('tool calls', () => {
   test('run the operation their handle names, through the engine', () => {
     const engine = openBehaviorEngine({ policy });
     publishItem(engine, [{ name: 'test.Counter' }]);
-    const created = engine.tools.call(alice, 'item_create', { id: 'i1', data: { title: 'Desk' } }) as { id: string; seq: number; data: unknown };
-    assert.deepEqual([created.id, created.seq, created.data], ['i1', 1, { title: 'Desk', count: 0 }]);
+    const created = engine.tools.call(alice, 'item_create', { id: 'i1', data: { title: 'Desk' } }) as { id: string; seq: number; data: unknown; behaviors: unknown };
+    assert.deepEqual([created.id, created.seq, created.data, created.behaviors], ['i1', 1, { title: 'Desk' }, { 'test.Counter': { count: 0 } }]);
     assert.match((engine.tools.call(alice, 'item_create', { data: { title: 'Lamp' } }) as { id: string }).id, /^[0-9a-f-]{36}$/);
     assert.deepEqual(engine.tools.call(alice, 'item_get', { id: 'i1' }), engine.instances.get(alice, 'Item', 'i1'));
     assert.equal((engine.tools.call(alice, 'item_list', { limit: 1 }) as { items: unknown[] }).items.length, 1);
     assert.deepEqual(engine.tools.call(alice, 'item_increment', { id: 'i1', params: { by: 3 }, expectedSeq: 1 }), { count: 3 });
     assert.deepEqual(engine.tools.call(alice, 'item_history', { id: 'i1' }), [3]);
-    const updated = engine.tools.call(alice, 'item_update', { id: 'i1', patch: { title: 'Table' }, expectedSeq: 2 }) as { seq: number; data: unknown };
-    assert.deepEqual([updated.seq, updated.data], [3, { title: 'Table', count: 3 }]);
+    const updated = engine.tools.call(alice, 'item_update', { id: 'i1', patch: { title: 'Table' }, expectedSeq: 2 }) as { seq: number; data: unknown; behaviors: unknown };
+    assert.deepEqual([updated.seq, updated.data, updated.behaviors], [3, { title: 'Table' }, { 'test.Counter': { count: 3 } }]);
     assert.equal(thrown(() => engine.tools.call(alice, 'item_delete', { id: 'i1', expectedSeq: 2 }), EngineError).code, 'seq_mismatch');
     assert.equal(engine.tools.call(alice, 'item_delete', { id: 'i1', expectedSeq: 3 }), null);
     assert.equal(thrown(() => engine.tools.call(alice, 'item_get', { id: 'i1' }), EngineError).code, 'not_found');

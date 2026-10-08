@@ -34,29 +34,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-{{- if .Databases }}
-	"github.com/jackc/pgx/v5/pgxpool"
-{{- end }}
 {{- if anyPrivate .APIs }}
 	runtimemiddleware "{{ .Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
-{{- if .Clients }}
-	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
-{{- end }}
-{{- if or .Databases .Clients }}
-	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
-{{- end }}
-	"go.uber.org/zap"
-{{ range .APIs }}
-	{{ .Package }} "{{ .Module }}"
-	{{ .Impl }} "{{ .Import }}"
-{{- end }}
-{{- range .Databases }}
-	{{ .Package }} "{{ .Module }}"
-{{- end }}
-{{- range .Clients }}
-	{{ .Package }} "{{ .Module }}"
-{{- end }}
+{{- template "imports" . }}
 )
 
 const (
@@ -93,58 +74,11 @@ func main() {
 func run(logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-{{- range .APIs }}
-{{- if .Config }}
-
-	{{ .Var }}Config, err := {{ .Package }}.LoadEnvConfig()
-	if err != nil {
-		return fmt.Errorf("configuration of {{ .Service }}: %w", err)
-	}
-{{- end }}
-{{- end }}
-{{- if .Databases }}
-
-	// One pool per database, shared by every API on it. A pool connects when
-	// it is first used, so the server starts while its database is not up yet
-	// and /readyz reports it.
-{{- range .Databases }}
-	{{ .Var }}Pool, err := connect(ctx, {{ quote .Field }}, {{ .From }})
-	if err != nil {
-		return fmt.Errorf("database {{ .Service }}: %w", err)
-	}
-	defer {{ .Var }}Pool.Close()
-	{{ .Var }}, err := {{ .Package }}.ConnectWithPool({{ .Var }}Pool)
-	if err != nil {
-		return fmt.Errorf("database {{ .Service }}: %w", err)
-	}
-{{- end }}
-{{- end }}
-{{- if .Clients }}
-
-	// One client per API called, shared by every API that calls it.
-{{- range .Clients }}
-	{{ .Var }}, err := {{ .Constructor }}({{ .From }})
-	if err != nil {
-		return fmt.Errorf("client of {{ .Service }}: %w", err)
-	}
-{{- end }}
-{{- end }}
+{{- template "connections" . }}
 {{- range .APIs }}
 
 	// {{ .Service }}: its implementation, built from its Deps, and its routes.
-	{{ .Var }}Logger := logger.With(zap.String("api", {{ quote .Service }}))
-	{{ .Var }}Deps := {{ .Package }}.Deps{
-{{- if .Config }}
-		Config: *{{ .Var }}Config,
-{{- end }}
-{{- if .Database }}
-		DB: {{ .Database.Var }},
-{{- end }}
-{{- range .Calls }}
-		{{ .Field }}: {{ .Client.Var }},
-{{- end }}
-		Logger: {{ .Var }}Logger,
-	}
+{{- template "deps" . }}
 	{{ .Var }}Implementations, err := {{ .Impl }}.New({{ .Var }}Deps)
 	if err != nil {
 		return fmt.Errorf("implementation of {{ .Service }}: %w", err)
@@ -316,82 +250,7 @@ func serve(ctx context.Context, stop context.CancelFunc, logger *zap.Logger, dra
 	logger.Info("stopped")
 	return nil
 }
-{{- if .Databases }}
-
-{{ if .CloudSQL -}}
-// connect builds the pool of the database field named field, which the
-// environment sets as field_URL, a connection string, or as a Cloud SQL
-// connector configuration, which connectCloudSQL connects (cloudsql.go).
-// The pool connects when it is first used.
-{{ else -}}
-// connect builds the pool of the database field named field, which the
-// environment sets as field_URL, a connection string. The pool connects
-// when it is first used. No environment places a database of the server
-// on Cloud SQL, so it does not link the Cloud SQL connector, and a Cloud
-// SQL connector configuration is refused.
-{{ end -}}
-func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpool.Pool, error) {
-	if db.CloudSQL != nil {
-{{- if .CloudSQL }}
-		return connectCloudSQL(ctx, field, *db.CloudSQL)
-{{- else }}
-		return nil, fmt.Errorf("%s is a Cloud SQL connector configuration, which server {{ .Name }} does not link: no environment of stack {{ .Stack }} placed its databases on Cloud SQL when it was built; set %s_URL, or build the stack again", field, field)
-{{- end }}
-	}
-	pool, err := pgxpool.New(ctx, db.URL)
-	if err != nil {
-		return nil, fmt.Errorf("%s_URL: %w", field, err)
-	}
-	return pool, nil
-}
-{{- end }}
-{{- range .Clients }}
-
-// {{ .Constructor }} builds the client of {{ .Service }}, which the server calls
-// at endpoint, the field its edge derives. The client sends the service
-// credential the edge's connector chose, and forwards the end user of the
-// request on each call's context (docs/stack-model.md, sections 9.4 and
-// 9.6).
-func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type }}, error) {
-	cfg := {{ .Package }}.SDKConfig{
-		BaseURL: endpoint.URL,
-		Auth:    &{{ .Package }}.AuthConfig{GetToken: serviceauth.ForwardedToken},
-	}
-	token, headers, err := serviceCredential(endpoint)
-	if err != nil {
-		return nil, err
-	}
-	if token != nil {
-		cfg.ServiceCredential = &{{ .Package }}.ServiceCredentialConfig{Token: token, Headers: headers}
-	}
-	return {{ .Package }}.New(cfg)
-}
-{{- end }}
-{{- if .Clients }}
-
-// serviceCredential is the source of the service credential a client
-// built for an edge sends, which the edge's connector names in the
-// endpoint, and the headers that carry it: none without one (section 9.6).
-func serviceCredential(endpoint stackconfig.Service) (serviceauth.TokenSource, []string, error) {
-	c := endpoint.Credential
-	if c == nil {
-		return nil, nil, nil
-	}
-	switch c.Source {
-	case stackconfig.SourceGoogleIDToken:
-		return serviceauth.GoogleIDToken(c.Audience), c.HeaderNames(), nil
-	case stackconfig.SourceTokenFile:
-		return serviceauth.TokenFile(c.TokenFile), c.HeaderNames(), nil
-	case stackconfig.SourceSignedToken:
-		token, err := serviceauth.SignedToken([]byte(c.Key), c.Issuer, c.Issuer, c.Audience)
-		if err != nil {
-			return nil, nil, err
-		}
-		return token, c.HeaderNames(), nil
-	}
-	return nil, nil, fmt.Errorf("service credential source %q is not one the runtime ships", c.Source)
-}
-{{- end }}
+{{- template "functions" . }}
 
 // writeJSON answers with status and body as JSON.
 func writeJSON(w http.ResponseWriter, status int, body any) {

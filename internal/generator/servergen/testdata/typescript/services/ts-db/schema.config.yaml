@@ -1,0 +1,8 @@
+# The database of ts-shop, which takes it from its one DB-kind dependency.
+# Its TypeScript server opens a pg Pool on it, so it generates no
+# TypeScript.
+name: ts-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }

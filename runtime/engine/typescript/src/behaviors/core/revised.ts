@@ -13,6 +13,7 @@ has moved past (stale), so an instance linked to the new revision or
 release since is left alone; any other link moves every one on.
 */
 
+import { behaviorField } from '../fields.js';
 import { BehaviorError } from '../../errors.js';
 import type { EngineEvent, OperationChange } from '../../events/log.js';
 import type { BehaviorScope, FrozenJSON } from '../behavior.js';
@@ -49,13 +50,19 @@ export function targetMove(scope: BehaviorScope<unknown>, behavior: string, form
   }
   const change = event.change as Record<string, unknown> | null;
   const operation = event.kind === 'operation' ? (change as OperationChange | null) : null;
-  const patch = operation !== null ? (operation.patch as Record<string, unknown> | undefined) : event.kind === 'update' ? change : undefined;
+  // The patch of { data, behaviors } the event records.
+  const patch = (operation !== null ? operation.patch : event.kind === 'update' ? change : undefined) as
+    | { readonly behaviors?: Readonly<Record<string, Readonly<Record<string, unknown>>>> }
+    | null
+    | undefined;
   if (branches && operation?.behavior === 'Branches' && operation.operation === 'releaseCommit') {
-    const release = typeof patch?.release === 'number' ? patch.release : Number(operation.params.version) + 1;
+    const moved = behaviorField(patch, 'Branches', 'release');
+    const release = typeof moved === 'number' ? moved : Number(operation.params.version) + 1;
     return { kind: 'release', release, commit: String(operation.params.commit) };
   }
-  if (revisions && patch !== undefined && patch !== null && Object.prototype.hasOwnProperty.call(patch, 'revision')) {
-    return { kind: 'revision', revision: Number(patch.revision) };
+  const revision = behaviorField(patch, 'Revisions', 'revision');
+  if (revisions && revision !== undefined) {
+    return { kind: 'revision', revision: Number(revision) };
   }
   return undefined;
 }

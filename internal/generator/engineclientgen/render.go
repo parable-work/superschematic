@@ -350,11 +350,11 @@ func scalarJSONType(scalar *ir.ScalarDef) string {
 	return "string"
 }
 
-// instanceTypes writes <T>Fields, <T> and <T>Patch.
+// instanceTypes writes <T>Fields, <T>, <T>Behaviors and <T>Patch.
 func (m *module) instanceTypes(s *schemaModel) error {
 	owner := "schema " + s.name
-	fieldsName, readName, patchName := s.base+"Fields", s.base, s.base+"Patch"
-	for _, name := range []string{fieldsName, readName, patchName} {
+	fieldsName, readName, behaviorsName, patchName := s.base+"Fields", s.base, s.base+"Behaviors", s.base+"Patch"
+	for _, name := range []string{fieldsName, readName, behaviorsName, patchName} {
 		if err := m.export(name, owner); err != nil {
 			return err
 		}
@@ -378,25 +378,34 @@ func (m *module) instanceTypes(s *schemaModel) error {
 	}
 
 	m.line("")
-	m.doc("", fmt.Sprintf("%s as a read returns it: its own fields, then its behaviors'.", capitalAn(s.base)))
-	var fields strings.Builder
+	m.doc("", fmt.Sprintf("%s's data as a read returns it: its own fields. Its behaviors' fields are in %s.", capitalAn(s.base), behaviorsName))
+	m.line("export type %s = %s;", readName, fieldsName)
+
+	m.line("")
+	m.doc("", fmt.Sprintf("The fields of %s's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value.", an(s.base)))
+	var behaviors strings.Builder
 	for _, behavior := range s.behaviors {
+		if len(behavior.declaration.Fields) == 0 {
+			continue
+		}
+		fmt.Fprintf(&behaviors, "  readonly %s: {\n", propertyKey(behavior.declaration.Name))
 		for _, declared := range behavior.declaration.Fields {
 			shape := behavior.narrowed.fields[declared.Name]
 			if doc := descriptionOf(shape.schema); doc != "" {
-				fields.WriteString("  " + jsDoc(behavior.declaration.Name+": "+doc) + "\n")
+				behaviors.WriteString("    " + jsDoc(doc) + "\n")
 			}
 			optional := "?"
 			if shape.present {
 				optional = ""
 			}
-			fmt.Fprintf(&fields, "  readonly %s%s: %s;\n", propertyKey(declared.Name), optional, m.ts.render(withoutDescription(shape.schema), "  "))
+			fmt.Fprintf(&behaviors, "    readonly %s%s: %s;\n", propertyKey(declared.Name), optional, m.ts.render(withoutDescription(shape.schema), "    "))
 		}
+		behaviors.WriteString("  };\n")
 	}
-	if fields.Len() == 0 {
-		m.line("export type %s = %s;", readName, fieldsName)
+	if behaviors.Len() == 0 {
+		m.line("export type %s = Record<string, never>;", behaviorsName)
 	} else {
-		m.line("export type %s = %s & {\n%s};", readName, fieldsName, fields.String())
+		m.line("export type %s = {\n%s};", behaviorsName, behaviors.String())
 	}
 
 	m.line("")
@@ -673,6 +682,8 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 		m.uses[name] = true
 	}
 	read, fields, patch := s.base, s.base+"Fields", s.base+"Patch"
+	// typeArgs are Instance's: the data, then the behaviors' fields.
+	typeArgs := read + ", " + s.base + "Behaviors"
 	createOptions, writeOptions := s.base+"CreateOptions", s.base+"WriteOptions"
 	createOptional := "?"
 	if createRequired {
@@ -689,13 +700,13 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 	m.doc("", fmt.Sprintf("The %s schema's calls, typed: the engine's built-in operations, then each operation its behaviors add.", s.name))
 	m.line("export interface %s {", s.client)
 	m.doc("  ", fmt.Sprintf("create stores a new %s, with its behaviors' create parameters.", s.base))
-	m.line("  create(data: %s, options%s: %s): Promise<Instance<%s>>;", fields, createOptional, createOptions, read)
+	m.line("  create(data: %s, options%s: %s): Promise<Instance<%s>>;", fields, createOptional, createOptions, typeArgs)
 	m.doc("  ", fmt.Sprintf("get reads %s; one that does not exist is 404 not_found.", an(s.base)))
-	m.line("  get(id: string, options?: CallOptions): Promise<Instance<%s>>;", read)
+	m.line("  get(id: string, options?: CallOptions): Promise<Instance<%s>>;", typeArgs)
 	m.doc("  ", "list returns a page in creation order.")
-	m.line("  list(options?: ListOptions): Promise<InstancePage<%s>>;", read)
+	m.line("  list(options?: ListOptions): Promise<InstancePage<%s>>;", typeArgs)
 	m.doc("  ", "update applies a merge patch of the own fields.")
-	m.line("  update(id: string, patch: %s, options?: %s): Promise<Instance<%s>>;", patch, writeOptions, read)
+	m.line("  update(id: string, patch: %s, options?: %s): Promise<Instance<%s>>;", patch, writeOptions, typeArgs)
 	m.doc("  ", fmt.Sprintf("delete removes %s.", an(s.base)))
 	m.line("  delete(id: string, options?: %s): Promise<void>;", writeOptions)
 	if instanceOps {
@@ -724,16 +735,16 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 	m.line("export function %s(client: EngineClient): %s {", factory, s.client)
 	m.line("  return {")
 	m.line("    create(data, options) {")
-	m.line("      return client.instances.create<%s>(%s, data, options);", read, schemaName)
+	m.line("      return client.instances.create<%s>(%s, data, options);", typeArgs, schemaName)
 	m.line("    },")
 	m.line("    get(id, options) {")
-	m.line("      return client.instances.get<%s>(%s, id, options);", read, schemaName)
+	m.line("      return client.instances.get<%s>(%s, id, options);", typeArgs, schemaName)
 	m.line("    },")
 	m.line("    list(options) {")
-	m.line("      return client.instances.list<%s>(%s, options);", read, schemaName)
+	m.line("      return client.instances.list<%s>(%s, options);", typeArgs, schemaName)
 	m.line("    },")
 	m.line("    update(id, patch, options) {")
-	m.line("      return client.instances.update<%s>(%s, id, patch, options);", read, schemaName)
+	m.line("      return client.instances.update<%s>(%s, id, patch, options);", typeArgs, schemaName)
 	m.line("    },")
 	m.line("    delete(id, options) {")
 	m.line("      return client.instances.delete(%s, id, options);", schemaName)

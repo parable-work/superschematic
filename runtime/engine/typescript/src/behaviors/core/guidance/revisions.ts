@@ -28,8 +28,8 @@ export function revisionsGuidance(config: RevisionsConfig, target: DescribeTarge
   return {
     summary:
       review === undefined
-        ? `Every change of the own fields of a ${target.type} records a numbered revision of them; revision holds the latest. There is no review step.`
-        : `Every change of the own fields of a ${target.type} records a numbered revision of them; revision holds the latest. A change may also be proposed, and a caller with permission ${review.permission} approves or rejects it; pendingProposals counts the proposals waiting.`,
+        ? `Every change of the own fields of a ${target.type} records a numbered revision of them; behaviors.Revisions.revision holds the latest. There is no review step.`
+        : `Every change of the own fields of a ${target.type} records a numbered revision of them; behaviors.Revisions.revision holds the latest. A change may also be proposed, and a caller with permission ${review.permission} approves or rejects it; behaviors.Revisions.pendingProposals counts the proposals waiting.`,
     operations: {
       listRevisions: {
         useWhen: "Use to read the instance's revisions, oldest first: each its number and the own fields as that change left them.",

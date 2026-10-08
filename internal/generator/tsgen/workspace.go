@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
@@ -45,6 +47,12 @@ import (
 // the install after a manifest gains such a spec; that pass reads the
 // scalar path the lockfile stores relative to the root as if it were
 // relative to the member, and the install fails.
+//
+// The install writes the workspace's lockfile, bun.lock, beside the root.
+// The project commits it (D51, amended), so a server's image and the
+// generated CI install the versions it pins: no build removes it, and the
+// root it pairs with is the same bytes on every build of the same schemas,
+// so a committed lockfile stays current until a manifest changes.
 
 // The directories under the output root that hold the generated
 // TypeScript packages, as the generator's paths.go lays them out: a
@@ -54,6 +62,35 @@ var workspacePackagePatterns = []string{
 	"sdk/typescript/*",
 	"api/*",
 	"server/*/*",
+}
+
+// LockfileName is the Bun workspace's lockfile, which an install at the
+// output root writes beside the root's package.json.
+const LockfileName = "bun.lock"
+
+// IgnoredLockfile reports whether git ignores the workspace's lockfile in
+// outputRoot, which the project commits (D51, amended), and the rule that
+// does, as `git check-ignore --verbose` names it: `<file>:<line>:<pattern>`.
+// A lockfile git tracks is not ignored, whatever the rules say. An output
+// root outside a repository, or a machine without git, reports none.
+func IgnoredLockfile(outputRoot string) (rule string, ignored bool) {
+	checkIgnore := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", append(append([]string{"check-ignore"}, args...), "--", LockfileName)...)
+		cmd.Dir = outputRoot
+		return cmd.Output()
+	}
+	// git exits 1 when no rule ignores the path and 128 outside a
+	// repository. With --verbose it exits 0 for a path a negated rule
+	// takes back too, so it only names the rule.
+	if _, err := checkIgnore(); err != nil {
+		return "", false
+	}
+	out, err := checkIgnore("--verbose")
+	if err != nil {
+		return "", true
+	}
+	rule, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\t")
+	return rule, true
 }
 
 // WorkspaceRoot is the Bun workspace root a build writes at the output
@@ -96,7 +133,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		Dependencies: map[string]string{n.ScalarNpmPackage: "*"},
 	}
 	if w.RepositoryRoot != "" {
-		rel, err := naming.RelPath(w.OutputRoot, w.RepositoryRoot)
+		rel, err := naming.PhysicalRelPath(w.OutputRoot, w.RepositoryRoot)
 		if err != nil {
 			return "", fmt.Errorf("workspace root: %w", err)
 		}
@@ -107,7 +144,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		{n.HTTPRuntimeNpmPackage, w.Paths.HTTPRuntimeTypeScript},
 		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScript},
 	} {
-		rel, err := naming.RelPath(w.OutputRoot, local.dir)
+		rel, err := naming.PhysicalRelPath(w.OutputRoot, local.dir)
 		if err != nil {
 			return "", fmt.Errorf("workspace root: %s: %w", local.pkg, err)
 		}

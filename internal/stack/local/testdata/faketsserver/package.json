@@ -1,0 +1,6 @@
+{
+  "name": "fake-ts-server",
+  "private": true,
+  "type": "module",
+  "main": "main.ts"
+}
