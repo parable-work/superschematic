@@ -306,7 +306,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	assert.Equal(t, []string{"Workflow", "Rollups"}, []string{rollupsJSON.Behaviors[0].Name, rollupsJSON.Behaviors[1].Name})
 	assert.JSONEq(t, `{"rollups": {
 		"tasks": {"schema": "tasks", "link": "project", "function": "count"},
-		"tasksByStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "status"},
+		"tasksByStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status"},
 		"tasksFinished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]}}}`, string(rollupsJSON.Behaviors[1].Config))
 	assert.Equal(t, rollupsJSON, load(filepath.Join(tsreaderTestdata, "fixture-rollups")).Types["Project"])
 

@@ -679,21 +679,19 @@ describe('behaviors', () => {
     return served;
   }
 
-  test("an instance carries its behaviors' fields, which POST and PATCH may not set", async () => {
+  test("an instance carries its behaviors' fields under each behavior's name, which POST and PATCH may not set: their data holds own fields only", async () => {
     const { app } = await withItems();
     const created = await data(call(app, 'POST', ITEMS, { body: { id: 'i1', data: { title: 'Desk' } } }), 201);
-    assert.deepEqual(created.data, { title: 'Desk', count: 0, flagged: false });
-    assert.deepEqual((await data(call(app, 'GET', `${ITEMS}/i1`))).data, created.data);
+    assert.deepEqual([created.data, created.behaviors], [{ title: 'Desk' }, { 'test.Counter': { count: 0 }, 'test.Flag': { flagged: false } }]);
+    const read = await data(call(app, 'GET', `${ITEMS}/i1`));
+    assert.deepEqual([read.data, read.behaviors], [created.data, created.behaviors]);
     for (const [method, path, body] of [
       ['POST', ITEMS, { data: { title: 'Lamp', count: 3 } }],
       ['PATCH', `${ITEMS}/i1`, { count: 3 }],
     ] as const) {
       const refused = await problem(call(app, method, path, { body }), 422);
       assert.equal(refused.code, 'invalid_instance');
-      assert.deepEqual(
-        refused.details.issues.map((issue: { path: string; rule: string }) => [issue.path, issue.rule]),
-        [['count', 'readOnly']]
-      );
+      assert.deepEqual(refused.details.issues, [{ path: 'count', rule: 'unknown', message: 'Item has no field count' }]);
     }
   });
 
@@ -743,7 +741,7 @@ describe('behaviors', () => {
     assert.deepEqual(engine.instances.invoke(everything, 'Item', 'i1', 'history'), [1]);
     assert.equal(await etag(), '"3"');
     const updated = await data(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' }, headers: { 'if-match': '"3"' } }));
-    assert.deepEqual([updated.seq, updated.data], [4, { title: 'Lamp', count: 1, flagged: false }]);
+    assert.deepEqual([updated.seq, updated.data, updated.behaviors], [4, { title: 'Lamp' }, { 'test.Counter': { count: 1 }, 'test.Flag': { flagged: false } }]);
   });
 
   test('the JSON event pages carry operation events like any other', async () => {
@@ -755,12 +753,17 @@ describe('behaviors', () => {
     assert.deepEqual(
       page.events.map((event: { kind: string; seq: number; change: unknown }) => [event.kind, event.seq, event.change]),
       [
-        ['create', 1, { title: 'Desk', count: 0, flagged: false }],
-        ['operation', 2, { behavior: 'test.Counter', operation: 'increment', params: { by: 2 }, patch: { count: 2 } }],
+        ['create', 1, { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 0 }, 'test.Flag': { flagged: false } } }],
+        ['operation', 2, { behavior: 'test.Counter', operation: 'increment', params: { by: 2 }, patch: { behaviors: { 'test.Counter': { count: 2 } } } }],
         [
           'operation',
           3,
-          { behavior: 'test.Flag', operation: 'flag', params: { reason: 'on hold' }, patch: { flagged: true, flagReason: 'on hold' } },
+          {
+            behavior: 'test.Flag',
+            operation: 'flag',
+            params: { reason: 'on hold' },
+            patch: { behaviors: { 'test.Flag': { flagged: true, flagReason: 'on hold' } } },
+          },
         ],
       ]
     );

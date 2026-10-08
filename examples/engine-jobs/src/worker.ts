@@ -8,7 +8,7 @@
 import type { EngineClient } from '@superschematic/engine/client';
 import { QueueWorker, WorkFailure, type Job, type QueueWorkerOptions, type WorkResult } from '@superschematic/engine-workqueue/worker';
 
-/** A job's fields as a read returns them, its behaviors' included. */
+/** A job's own fields, as a read returns them in data; its behaviors' fields are apart, in behaviors. */
 export interface JobFields {
   title: string;
   topic?: string;

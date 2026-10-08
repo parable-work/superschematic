@@ -184,18 +184,24 @@ A worker that dies stops renewing. Once its lease passes `expiresAt`, or
 the job's `timeLimitMs`, the runner's `expire` sweep clears the holder,
 advances the token, counts the expiry, settles the budget reservation
 and moves the job back to `queued`, where the next `claimNext` finds it.
-After the test's run, a job that timed out reads:
+After the test's run, a job that timed out reads, its own fields in
+`data` and each behavior's under its name in `behaviors`:
 
 ```json
 {
-  "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000,
-  "status": "queued",
-  "lease": { "holder": null, "token": 2, "acquiredAt": null, "renewedAt": null, "expiresAt": null, "active": false, "expiries": 1,
-             "ended": { "reason": "maxHold", "at": 1045000 } },
-  "budget": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } },
-  "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
+  "data": { "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000 },
+  "behaviors": {
+    "Workflow": { "status": "queued" },
+    "Lease": { "token": 2, "active": false, "expiries": 1, "ended": { "reason": "maxHold", "at": 1045000 } },
+    "Assignment": {},
+    "Budget": { "meters": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } } },
+    "Retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "exhausted": false, "stuck": false }
+  }
 }
 ```
+
+A free lease has no `holder`, and no `acquiredAt`, `renewedAt` or
+`expiresAt`: a behavior's field with no value is absent.
 
 ## Write a worker
 
@@ -272,7 +278,7 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 | --- | --- |
 | Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`) |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }`; a list filters on `lease.holder`, null for a free instance |
+| Fields | `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries`, `ended`, under `Lease`; a list filters on `Lease.holder`, null for a free instance |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
 | Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
@@ -302,7 +308,7 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 - **Expiries say why.** `expire` returns `reason`: `ttl` (the holder
   stopped renewing), `maxHold` (it renewed past its longest hold, so it
   is stuck) or `holder` (an active lease expired by its holder's name).
-  `lease.ended` keeps how the last lease ended, and the event of each end
+  `Lease.ended` keeps how the last lease ended, and the event of each end
   carries it.
 - **Directives** are messages to the holder: `direct` sends one, every
   heartbeat returns those not yet acknowledged, and `acknowledge`, or a
@@ -319,7 +325,7 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   `directPermission`, once per lease and move. A step with no lease
   hears nothing, and nothing waits for its next holder, who takes it
   after the move.
-- **List by holder.** `where: { "lease.holder": "worker-1" }` lists the
+- **List by holder.** `where: { "Lease.holder": "worker-1" }` lists the
   instances whose lease worker-1 holds, a lapsed one until its expiry is
   applied, and `null` the free ones: what a worker reads at a restart.
 - **A gone holder.** `expireHolder` expires every lease one principal
@@ -352,7 +358,7 @@ One principal the instance is assigned to, or none.
 | | |
 | --- | --- |
 | Config | `permission`, optional |
-| Field | `assignee`, the principal's subject; a list filters on it, null for the unassigned |
+| Field | `assignee`, the principal's subject; a list filters on `Assignment.assignee`, null for the unassigned |
 | Operations | `assign({ to })`, `unassign()` |
 | Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
 
@@ -361,7 +367,7 @@ itself; every other move needs `permission`. `claimNext` skips work
 assigned to someone else, so in the test above a worker never claims the
 job assigned to another, whatever its priority. A list of my work, or of
 work no one has, filters on the assignee:
-`where: { "assignee": [null, "worker-1"] }`.
+`where: { "Assignment.assignee": [null, "worker-1"] }`.
 
 ## Queue
 
@@ -430,7 +436,7 @@ it.
 | | |
 | --- | --- |
 | Config | `ttlMs` and `principalField`, required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (5000) |
-| Field | `presence`: `{ deadline, lastBeatAt, missed, released }` |
+| Fields | `deadline`, `lastBeatAt`, `missed`, `released`, under `Presence` |
 | Operations | `beat()`, `miss()` |
 | Schedule | `miss`, every `sweepMs`, on the runner |
 
@@ -456,7 +462,7 @@ renewed strictly after the worker's last beat is spared: its heartbeats
 show the process holding it is alive, and it expires on its own if they
 stop. A lease taken in the same millisecond as the beat is not spared.
 Keep lease heartbeats at most the presence `ttlMs` apart. The miss
-records the ids it expired in `presence.released`, which its event
+records the ids it expired in `Presence.released`, which its event
 carries. The runner's principal needs `read` and `write` on the worker
 schema, which the sweep reads (`workers.read` in the example), and
 `read` and Lease's `overridePermission` on each `releaseLeases` schema.
@@ -482,7 +488,7 @@ of a child schema an instance has, and which block which.
 | --- | --- |
 | Config | `schema` (the child schema, which keeps `keyField` and the copied fields with `Constants`), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
 | Steps | by key: `{ after?, when?, data? }`; `after` lists the steps that block this one, `when` is `{ field, equals }` or `{ field, includes }` |
-| Field | `blueprint`: `{ children: [{ key, id }] }` |
+| Field | `children`: `[{ key, id }]`, under `Blueprint` |
 | Guard | once stamped, moving the `from` link is `vetoed` (`stamped`); a stamp that cannot read its steps is too (`no_revision`, `unreadable`, `invalid_steps`, `no_dependencies`), and so is one whose child schema's live version no longer keeps `keyField` and the copied fields with `Constants` (`not_constant`), which refuses the create or the link that stamps |
 
 ```ts
@@ -539,7 +545,7 @@ the enclosing scopes its `scope` link points at.
 | | |
 | --- | --- |
 | Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
-| Field | `budget`: by meter, `{ used, reserved, limit, remaining }` |
+| Field | `meters`: by meter, `{ used, reserved, limit, remaining }`, under `Budget` |
 | Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
 - A claim reserves each meter's amount, the instance's `reserveField`
@@ -568,7 +574,7 @@ once.
 | | |
 | --- | --- |
 | Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
-| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }`; a list filters on `retries.exhausted` |
+| Fields | `total`, `classAttempts`, `bestScore`, `exhausted`, `stuck`, under `Retries`; a list filters on `Retries.exhausted` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
 | Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 

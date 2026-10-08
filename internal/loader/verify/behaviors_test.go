@@ -76,10 +76,8 @@ func TestBehaviorsVerify(t *testing.T) {
 			[]string{"src/item.schema.json: type Item: behavior Audit requires behavior Stock, which the type does not list"}},
 		{"conflict", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Clearance"}},
 			[]string{"src/item.schema.json: type Item: behavior Clearance conflicts with behavior Stock, which the type also lists"}},
-		{"field collides with the type's own", []ir.BehaviorRef{{Name: "Shelved"}},
-			[]string{"src/item.schema.json: type Item: behavior Shelved adds field shelf, which the type declares"}},
-		{"field collides with another behavior's", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Shelved"}},
-			[]string{"src/item.schema.json: type Item: behaviors Stock and Shelved both add field onHand"}},
+		{"field named like the type's own", []ir.BehaviorRef{{Name: "Shelved"}}, nil},
+		{"field named like another behavior's", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Shelved"}}, nil},
 		{"operation collides", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Recount"}},
 			[]string{"src/item.schema.json: type Item: behaviors Stock and Recount both add operation restock"}},
 	} {
@@ -101,10 +99,10 @@ func TestBehaviorsVerify(t *testing.T) {
 	}
 }
 
-// A behavior field may not take the JSON key of one of the type's own
-// fields any more than its name, as the engine refuses it: an instance's
-// JSON holds the behavior's fields beside the type's own. The wording is
-// the engine's for both.
+// A behavior field never collides with one of the type's own fields, by
+// its name or its JSON key: an instance keeps a behavior's fields under the
+// behavior's name, apart from the type's own (D16, amended: a behavior's
+// fields sit under its name).
 func TestBehaviorsVerifyFieldJSONKey(t *testing.T) {
 	reg := behaviorRegistry(t)
 	for _, field := range []*ir.FieldDef{
@@ -114,24 +112,16 @@ func TestBehaviorsVerifyFieldJSONKey(t *testing.T) {
 	} {
 		schema := behaviorSchema(stock(`{"aisles":2}`))
 		schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, field)
-		r := Run(schema, Input{Registry: reg})
-		want := "src/item.schema.json: type Item: behavior Stock adds field onHand, which the type declares"
-		if got := errorStrings(r); len(got) != 1 || got[0] != want {
-			t.Errorf("field %s (jsonTag %q): errors = %v, want [%q]", field.Name, field.JSONTag, got, want)
+		if got := errorStrings(Run(schema, Input{Registry: reg})); len(got) != 0 {
+			t.Errorf("field %s (jsonTag %q): errors = %v, want none", field.Name, field.JSONTag, got)
 		}
-	}
-
-	// A JSON key that is no behavior field's collides with nothing.
-	schema := behaviorSchema(stock(`{"aisles":2}`))
-	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, &ir.FieldDef{Name: "count", JSONTag: "item_count", TypeRef: ir.TypeRef{Name: "string"}})
-	if got := errorStrings(Run(schema, Input{Registry: reg})); len(got) != 0 {
-		t.Fatalf("errors = %v, want none", got)
 	}
 }
 
 // The core registry accepts the core's behaviors with no extension linked,
 // and holds them to the same rules: a behavior it does not register fails
-// the load, and so does a core behavior's field the type already declares.
+// the load. A type may declare a field a core behavior also adds, since the
+// behavior's sits under its name.
 func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 	core := registry.New(naming.Naming{})
 	workflow := ir.BehaviorRef{Name: "Workflow", Config: json.RawMessage(`{"states":["open","done"],"transitions":[{"from":"open","to":"done"}]}`)}
@@ -156,8 +146,7 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 
 	schema := behaviorSchema(workflow)
 	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, &ir.FieldDef{Name: "status", TypeRef: ir.TypeRef{Name: "string"}})
-	r = Run(schema, Input{Registry: core})
-	if want := "type Item: behavior Workflow adds field status, which the type declares"; !hasError(r, want) {
-		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
+	if got := errorStrings(Run(schema, Input{Registry: core})); len(got) != 0 {
+		t.Fatalf("an own status beside Workflow's: errors = %v, want none", got)
 	}
 }

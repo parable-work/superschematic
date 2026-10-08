@@ -21,7 +21,7 @@ func TestDisplayDecorator(t *testing.T) {
 	var arg any
 	if err := json.Unmarshal([]byte(`{
 		"noun": "Ticket", "plural": "Tickets", "titleField": "title", "createLabel": "New ticket",
-		"summaryFields": ["status", "assignee"],
+		"summaryFields": ["Workflow.status", "assignee"],
 		"states": {"todo": {"label": "To do", "tone": "muted"}, "implementing": {"label": "Implement", "activeForm": "Implementing", "tone": "active"}},
 		"transitions": {"todo": {"implementing": "Start"}}
 	}`), &arg); err != nil {
@@ -36,7 +36,7 @@ func TestDisplayDecorator(t *testing.T) {
 	}
 	want := &ir.TypeDisplay{
 		Noun: "Ticket", Plural: "Tickets", TitleField: "title", CreateLabel: "New ticket",
-		SummaryFields: []string{"status", "assignee"},
+		SummaryFields: []string{"Workflow.status", "assignee"},
 		States: map[string]ir.DisplayState{
 			"todo":         {Label: "To do", Tone: ir.DisplayToneMuted},
 			"implementing": {Label: "Implement", ActiveForm: "Implementing", Tone: ir.DisplayToneActive},

@@ -692,9 +692,12 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `false` or a schema, so every key is checked.
 - `requires` and `conflicts` name other behaviors a type must, or may not,
   list with this one.
-- `fields` carry a name and a description. The loader refuses a field
-  that collides with another behavior's or with one of the type's own,
-  by its name or its JSON key.
+- `fields` carry a name and a description, each unique in the
+  declaration. An instance holds them under the behavior's name,
+  `behaviors["acme.Rating"].ratingCount`, apart from the type's own
+  fields and every other behavior's, so none collides, and a filter or a
+  display names one by its qualified name, `acme.Rating.ratingCount`.
+  A config never renames a field.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an

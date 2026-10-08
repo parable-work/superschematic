@@ -9,9 +9,10 @@ presents another token, whoever calls (token_stale), so a process of the
 holder's principal that lost its lease cannot write once a sibling holds
 a new one. A heartbeat, an acknowledgement and the holder's release need
 the token; with requireToken, so does every other write while a lease is
-active, the holder's own included. The token is no capability: the lease
-field shows it to every reader, and the guard still checks who calls. It
-fences a principal's processes from each other, not principals.
+active, the holder's own included. The token is no capability: its
+field, Lease.token, shows it to every reader, and the guard still checks
+who calls. It fences a principal's processes from each other, not
+principals.
 
 A lease is active while it is held, before its expiry time and within its
 longest hold since acquire (maxHoldMs, or the instance's own maxHoldField).
@@ -40,8 +41,8 @@ A release applies onExpiry too, without counting an expiry, so a holder
 that hands work back leaves it where it can be taken again; a release
 with abandon is the holder giving the work up as failed, and counts as
 an expiry, escalate included, so a worker that keeps taking and dropping
-an instance reaches maxExpiries. The lease field's ended says how the
-last lease ended: release, abandon, or the expiry's reason, ttl (its
+an instance reaches maxExpiries. The ended field says how the last lease
+ended: release, abandon, or the expiry's reason, ttl (its
 holder stopped renewing it), maxHold (it reached its longest hold) or
 holder (it was active and expired by its holder's name). acquire clears
 it, so every end's event carries it.
@@ -89,9 +90,10 @@ name; one that lacks it fails the subscription, forbidden. Without
 directOn the reactions are off (watches returns null), and the version
 that adds it starts the subscription at its publish.
 
-A list filters on lease.holder (where: { 'lease.holder': 'wren' }), the
+A list filters on the holder (where: { 'Lease.holder': 'wren' }), the
 holder's column through an index on it: a lapsed lease's holder until
-its expiry is applied, as the field reads, and null for a free instance.
+its expiry is applied, as the field reads, and null for a free instance,
+whose holder field is absent.
 Whether a lease is active turns on the clock, which no column holds, so
 active is not filtered on.
 
@@ -110,6 +112,8 @@ import {
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
   isTerminalState,
   linkPin,
@@ -196,22 +200,23 @@ export interface LeaseConfig {
   readonly directOn: readonly LeaseDirectOn[];
 }
 
-/** The lease field. */
+/** Lease's fields, as a read returns them under behaviors.Lease: a field with no value is absent. */
 export interface LeaseRecord {
-  /** The principal that holds the lease; null when it is free. */
-  readonly holder: string | null;
+  /** The principal that holds the lease; absent when it is free. */
+  readonly holder?: string;
   readonly token: number;
-  readonly acquiredAt: number | null;
-  /** When its holder last acquired or renewed it; null when free. */
-  readonly renewedAt: number | null;
-  /** When the lease stops being active: its expiry time, or its longest hold if that comes first; null when free. */
-  readonly expiresAt: number | null;
+  /** Absent when free. */
+  readonly acquiredAt?: number;
+  /** When its holder last acquired or renewed it; absent when free. */
+  readonly renewedAt?: number;
+  /** When the lease stops being active: its expiry time, or its longest hold if that comes first; absent when free. */
+  readonly expiresAt?: number;
   /** Whether it is held and neither expired nor past its longest hold. */
   readonly active: boolean;
   /** How many expiries the instance has had, abandons included. */
   readonly expiries: number;
-  /** How and when the last lease ended; null while one is held, and before the first. */
-  readonly ended: { readonly reason: LeaseEnd; readonly at: number } | null;
+  /** How and when the last lease ended; absent while one is held, and before the first. */
+  readonly ended?: { readonly reason: LeaseEnd; readonly at: number };
 }
 
 /** A directive, as heartbeat returns it. */
@@ -364,7 +369,7 @@ function statusOf(view: InstanceView<LeaseConfig>): Status | undefined {
   if (flow === undefined) {
     return undefined;
   }
-  const status = view.instances.get(view.schema, view.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(view.instances.get(view.schema, view.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   return typeof status === 'string' ? { flow, status } : undefined;
 }
 
@@ -833,13 +838,13 @@ export const lease = defineBehavior<LeaseConfig>({
         sql.run(`ALTER TABLE ${sql.table('directives')} ADD COLUMN dedupe_key TEXT`);
       },
     },
-    // The holder alone, which a list that filters on lease.holder reads in
+    // The holder alone, which a list that filters on Lease.holder reads in
     // creation order; held, which leads with it, orders by expires_at.
     { version: 4, name: 'holder index', indexes: { holder: ['holder'] } },
   ],
 
   filters: {
-    'lease.holder': {
+    holder: {
       column: 'holder',
       type: 'string',
       description: 'The principal that holds its lease, a lapsed one included until its expiry is applied; null for a free instance.',
@@ -1183,19 +1188,25 @@ export const lease = defineBehavior<LeaseConfig>({
     },
   },
 
+  // Each field reads the lease's columns; a free instance has no holder,
+  // acquiredAt, renewedAt or expiresAt, and a held one no ended.
   fields: {
-    lease(view): LeaseRecord {
+    holder: (view): LeaseRecord['holder'] => held(view).holder ?? undefined,
+    token: (view): LeaseRecord['token'] => held(view).token,
+    acquiredAt: (view): LeaseRecord['acquiredAt'] => held(view).acquiredAt ?? undefined,
+    renewedAt(view): LeaseRecord['renewedAt'] {
       const lease = held(view);
-      return {
-        holder: lease.holder,
-        token: lease.token,
-        acquiredAt: lease.acquiredAt,
-        renewedAt: lease.holder === null ? null : (lease.renewedAt ?? lease.acquiredAt),
-        expiresAt: lease.holder === null ? null : deadline(view, lease),
-        active: isActive(view, lease),
-        expiries: lease.expiries,
-        ended: lease.endedReason === null ? null : { reason: lease.endedReason, at: lease.endedAt as number },
-      };
+      return lease.holder === null ? undefined : (lease.renewedAt ?? lease.acquiredAt ?? undefined);
+    },
+    expiresAt(view): LeaseRecord['expiresAt'] {
+      const lease = held(view);
+      return lease.holder === null ? undefined : deadline(view, lease);
+    },
+    active: (view): LeaseRecord['active'] => isActive(view, held(view)),
+    expiries: (view): LeaseRecord['expiries'] => held(view).expiries,
+    ended(view): LeaseRecord['ended'] {
+      const lease = held(view);
+      return lease.endedReason === null ? undefined : { reason: lease.endedReason, at: lease.endedAt as number };
     },
   },
 

@@ -20,9 +20,11 @@ const workflowBehavior = "Workflow"
 //     JSON key, that holds a single text value: the string primitive or a
 //     scalar whose values are strings, not a list or a map, and neither
 //     secret nor @uiHidden;
-//   - each summaryFields entry names one of the type's own fields, or a
-//     field one of its behaviors adds, that is neither secret nor
-//     @uiHidden;
+//   - each summaryFields entry names one of the type's own fields that is
+//     neither secret nor @uiHidden, or a field one of its behaviors adds,
+//     by its qualified name (Workflow.status): an instance keeps a
+//     behavior's fields under the behavior's name (D16, amended: a
+//     behavior's fields sit under its name);
 //   - states and transitions label the states and transitions of the
 //     type's Workflow config, so a type that does not compose Workflow
 //     takes neither.
@@ -56,6 +58,9 @@ func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *
 	}
 
 	behaviorField := map[string]string{}
+	// bare holds each behavior field's qualified names by its bare name,
+	// for the hint a summary field named bare gets.
+	bare := map[string][]string{}
 	var workflow *ir.BehaviorRef
 	for i, ref := range td.Behaviors {
 		if ref.Name == workflowBehavior {
@@ -63,7 +68,9 @@ func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *
 		}
 		if behavior, ok := reg.Behavior(ref.Name); ok {
 			for _, field := range behavior.Fields {
-				behaviorField[field.Name] = ref.Name
+				path := registry.BehaviorFieldPath(ref.Name, field.Name)
+				behaviorField[path] = ref.Name
+				bare[field.Name] = append(bare[field.Name], path)
 			}
 		}
 	}
@@ -87,7 +94,11 @@ func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *
 			continue
 		}
 		if behaviorField[name] == "" {
-			r.errorf(td.Owner, "type %s: @display summaryFields lists %q, which is not a field of the type or of its behaviors%s", td.Name, name, fieldList(td))
+			hint := ""
+			if qualified := bare[name]; len(qualified) > 0 {
+				hint = "; a behavior's field is named by its qualified name: " + strings.Join(qualified, " or ")
+			}
+			r.errorf(td.Owner, "type %s: @display summaryFields lists %q, which is not a field of the type or of its behaviors%s%s", td.Name, name, fieldList(td), hint)
 		}
 	}
 

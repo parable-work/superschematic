@@ -4,10 +4,10 @@ bound to their configs. The engine checks a schema's list at define and at
 publish as the compiler's loader does (internal/loader/verify), with the
 same wording, and refuses what the loader would: a behavior listed twice,
 a config its configSchema rejects, a requirement the type does not list, a
-conflict it does, a field that collides with another behavior's or with
-one of the type's own, by its name or its JSON key (behavior fields sit
-beside the type's own in an instance), and two behaviors that add an
-operation of the same name. It refuses two things more:
+conflict it does, and two behaviors that add an operation of the same
+name. A behavior's field collides with nothing: an instance keeps it under
+the behavior's name, apart from the type's own fields and every other
+behavior's. It refuses two things more:
 
 - a behavior with no implementation registered with this engine, which
   covers one the deployment's binary does not declare;
@@ -51,6 +51,7 @@ import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
 import { arrayDepth, fieldTypeIssue, jsonKey, pointer, reachableTypes, refKind } from '../registry/document.js';
+import { fieldPath } from './fields.js';
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import {
   BehaviorConfigError,
@@ -83,7 +84,11 @@ export interface BoundBehavior {
 
 /** The behaviors of a schema's instance type, in list order. */
 export class Composition {
-  /** Each behavior field's owner, by field name. */
+  /**
+   * Each behavior field's owner, by its qualified name,
+   * `<behavior>.<field>`: how a read, a list's filter, a rollup and a
+   * display name it.
+   */
   readonly fields: ReadonlyMap<string, BoundBehavior>;
   /** Every behavior operation on the type, by name. */
   readonly operations: ReadonlyMap<string, OperationSpec>;
@@ -103,7 +108,7 @@ export class Composition {
     const operations = new Map<string, OperationSpec>();
     for (const bound of behaviors) {
       for (const field of bound.behavior.fields) {
-        fields.set(field.name, bound);
+        fields.set(fieldPath(bound.behavior.name, field.name), bound);
       }
       for (const [name, operation] of bound.behavior.operations) {
         operations.set(name, operation);
@@ -158,11 +163,6 @@ export function compose(
   const typePath = pointer('types', target.instanceType);
   const refs = type.behaviors ?? [];
   const listed = refs.map((ref) => ref.name);
-  const own = new Set<string>();
-  for (const field of type.fields ?? []) {
-    own.add(field.name);
-    own.add(jsonKey(field));
-  }
   const typeNames = otherTypes(target);
 
   const bound: BoundBehavior[] = [];
@@ -226,7 +226,6 @@ export function compose(
     });
   }
 
-  const fieldOwner = new Map<string, string>();
   const operationOwner = new Map<string, string>();
   for (const { behavior, index } of bound) {
     const path = `${typePath}/behaviors/${index}`;
@@ -245,16 +244,6 @@ export function compose(
           path,
           message: `type ${target.instanceType}: behavior ${name} conflicts with behavior ${conflict}, which the type also lists`,
         });
-      }
-    }
-    for (const field of behavior.fields) {
-      const previous = fieldOwner.get(field.name);
-      if (own.has(field.name)) {
-        issues.push({ path, message: `type ${target.instanceType}: behavior ${name} adds field ${field.name}, which the type declares` });
-      } else if (previous !== undefined) {
-        issues.push({ path, message: `type ${target.instanceType}: behaviors ${previous} and ${name} both add field ${field.name}` });
-      } else {
-        fieldOwner.set(field.name, name);
       }
     }
     for (const operation of behavior.operations.keys()) {

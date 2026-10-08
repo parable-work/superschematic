@@ -63,6 +63,7 @@ heartbeat) neither hashes nor rewrites a large value, and an operation
 whose behaviors never read the instance's own fields never loads one.
 */
 
+import type { BehaviorFields, InstanceFields } from '../behaviors/fields.js';
 import { randomUUID } from 'node:crypto';
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
@@ -93,7 +94,6 @@ import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
 import { checkSchemaName } from '../registry/document.js';
-import { readOnlyIssue } from '../registry/validator.js';
 import { SQLITE_CONSTRAINT_UNIQUE, SqliteError, type Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { diffPatch, isPlainObject, jsonEqual, mergePatch, setMember } from './patch.js';
@@ -116,11 +116,16 @@ export interface InstanceRecord {
   version: number;
   /** The per-instance sequence of its last event. */
   seq: number;
-  /**
-   * The instance: its own fields as stored, then each field its behaviors
-   * declare that has a value, in the type's behavior order.
-   */
+  /** The instance's own fields, as stored. */
   data: Record<string, unknown>;
+  /**
+   * Its behaviors' fields, by behavior name, in the type's behavior order:
+   * each an object of the fields the behavior declares that have a value,
+   * in its declaration's order. A behavior that declares no field has no
+   * entry, so nothing here can collide with an own field or another
+   * behavior's.
+   */
+  behaviors: BehaviorFields;
   createdAt: number;
   createdBy: string;
   updatedAt: number;
@@ -360,9 +365,10 @@ export class InstanceStore {
       execution.afterChange({ kind: 'create' });
       const fields = execution.fields();
       const instance = toInstance(this.row(namespace, schema, id) as Row, own, fields);
-      // The event's instance keeps the row's refs, and a large field of a
+      // The event's instance is what a read returns, { data, behaviors }:
+      // its own fields keep the row's refs, and a large field of a
       // behavior's goes to the store as an own field does.
-      const change = this.values.stow({ ...stowed.value, ...fields }, '', new Set(stowed.refs));
+      const change = this.values.stowChange('', stowed.value, fields, { whole: true, known: new Set(stowed.refs.map((at) => `/data${at}`)) });
       appendEvent(this.storage, {
         kind: 'create',
         namespace,
@@ -469,16 +475,6 @@ export class InstanceStore {
       chain.write(schema, id, () => {
         const record = this.live(namespace, schema);
         const runtime = this.catalog.runtimeOf(record);
-        const readOnly: ValidationIssue[] = [];
-        for (const [key, value] of Object.entries(patch)) {
-          const behavior = runtime.composition.fields.get(key);
-          if (behavior !== undefined && value !== undefined) {
-            readOnly.push(readOnlyIssue(key, behavior.behavior.name));
-          }
-        }
-        if (readOnly.length > 0) {
-          throw new InstanceValidationError(namespace, schema, record.version as number, readOnly);
-        }
         const preconditions = checkPreconditions(runtime.composition, schema, options.preconditions);
         const row = this.existing(namespace, schema, id);
         matchSeq(row, options.expectedSeq);
@@ -516,7 +512,7 @@ export class InstanceStore {
         const change: InstanceChange = { kind: 'update', patch: frozenPatch, before: frozen };
         execution.afterChange(change);
         const after = execution.fields();
-        const logged = this.values.stow({ ...frozenPatch, ...diffPatch(before, after) });
+        const logged = this.values.stowChange('', frozenPatch, diffPatch(before, after) as BehaviorFields);
         appendEvent(this.storage, {
           kind: 'update',
           namespace,
@@ -531,7 +527,7 @@ export class InstanceStore {
           values: logged,
         });
         const updated = toInstance(this.row(namespace, schema, id) as Row, merged, after);
-        this.referenced(chain, schema, id, change, moves({ ...current, ...before }, updated.data));
+        this.referenced(chain, schema, id, change, moves({ data: current, behaviors: before }, { data: updated.data, behaviors: updated.behaviors }));
         return updated;
       })
     );
@@ -741,7 +737,7 @@ export class InstanceStore {
         [record.version as number, record.namespace, seq, chain.now, chain.principal.subject, namespace, schema, id]
       );
       const params = this.values.stow(checked, '/params');
-      const patch = this.values.stow({ ...(own === undefined ? {} : diffPatch(own, ownAfter as FrozenJSON)), ...diffPatch(before, after) }, '/patch');
+      const patch = this.values.stowChange('/patch', own === undefined ? undefined : diffPatch(own, ownAfter as FrozenJSON), diffPatch(before, after) as BehaviorFields);
       const logged = joinStowed({ behavior: spec.behavior.name, operation: spec.name }, { params, patch });
       appendEvent(this.storage, {
         kind: 'operation',
@@ -756,7 +752,13 @@ export class InstanceStore {
         cause: chain.cause,
         values: logged,
       });
-      this.referenced(chain, schema, id, change, own === undefined ? moves(before, after) : moves({ ...own, ...before }, { ...ownAfter, ...after }));
+      this.referenced(
+        chain,
+        schema,
+        id,
+        change,
+        own === undefined ? moves({ behaviors: before }, { behaviors: after }) : moves({ data: own, behaviors: before }, { data: ownAfter, behaviors: after })
+      );
       return { result, seq };
     });
   }
@@ -871,14 +873,14 @@ export class InstanceStore {
   }
 
   // beforeFor folds an instance's events before one of them into the
-  // instance as the log had it then, as the chain's principal, who needs
-  // read on the event's schema. The log records each change as a merge
-  // patch of what a read returns (a create the whole instance, an update
-  // its patch, an operation its patch), so folding them from its last
-  // create gives it. Retention folds the events it prunes into the
+  // instance as the log had it then, { data, behaviors }, as the chain's
+  // principal, who needs read on the event's schema. The log records each
+  // change as a merge patch of what a read returns (a create the whole
+  // instance, an update its patch, an operation its patch), so folding
+  // them from its last create gives it. Retention folds the events it prunes into the
   // instance's base, which the fold starts from; an event retention has
   // pruned is cursor_expired.
-  private beforeFor(chain: Chain, from: string, event: EngineEvent): FrozenJSON | undefined {
+  private beforeFor(chain: Chain, from: string, event: EngineEvent): InstanceFields | undefined {
     if (
       typeof event !== 'object' ||
       event === null ||
@@ -911,7 +913,7 @@ export class InstanceStore {
       const change: unknown = row.change === null ? null : this.values.fill(JSON.parse(String(row.change)) as unknown, refsOf(row.value_refs));
       data = foldEvent(data, String(row.kind), change);
     }
-    return data === undefined ? undefined : deepFreeze(data as FrozenJSON);
+    return data === undefined ? undefined : (deepFreeze(data as FrozenJSON) as unknown as InstanceFields);
   }
 
   // configFor returns the config a schema's live version gives a
@@ -1237,7 +1239,7 @@ function decodeCursor(cursor: string): number {
   return Number(match[1]);
 }
 
-function toInstance(row: Row, own: Readonly<Record<string, unknown>>, fields: Record<string, unknown>): InstanceRecord {
+function toInstance(row: Row, own: Readonly<Record<string, unknown>>, fields: BehaviorFields): InstanceRecord {
   return {
     namespace: String(row.namespace),
     schema: String(row.schema),
@@ -1245,7 +1247,8 @@ function toInstance(row: Row, own: Readonly<Record<string, unknown>>, fields: Re
     schemaNamespace: String(row.schema_namespace),
     version: Number(row.version),
     seq: Number(row.seq),
-    data: { ...own, ...fields },
+    data: { ...own },
+    behaviors: fields,
     createdAt: Number(row.created_at),
     createdBy: String(row.created_by),
     updatedAt: Number(row.updated_at),

@@ -39,7 +39,7 @@ export function blueprintGuidance(config: BlueprintConfig, target: DescribeTarge
       summary: `The create of a ${target.type} stamps a child per step, ${list(keys)}, a step whose when does not hold left out. ${holds}; ${after}.`,
       operations: {
         create: {
-          success: `The create stamps the children (${list(keys)}) in its own write; blueprint lists them.`,
+          success: `The create stamps the children (${list(keys)}) in its own write; behaviors.Blueprint.children lists them.`,
           errors: stampErrors,
         },
       },
@@ -51,7 +51,7 @@ export function blueprintGuidance(config: BlueprintConfig, target: DescribeTarge
     summary: `When the ${from.link} link of a ${target.type} is first set, at its create or by link, the steps are read from ${from.field} of the revision it pins, and a child is stamped per step. ${holds}; ${after}. Once stamped, ${from.link} does not move.`,
     operations: {
       create: {
-        success: `A create that gives the ${from.link} link stamps its children in the same write; blueprint lists them.`,
+        success: `A create that gives the ${from.link} link stamps its children in the same write; behaviors.Blueprint.children lists them.`,
         errors: errors('no_revision', 'unreadable', 'invalid_steps', 'no_dependencies', 'not_constant'),
       },
       link: {

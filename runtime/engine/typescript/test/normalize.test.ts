@@ -102,7 +102,8 @@ for (const driver of drivers) {
       assert.deepEqual(created.data, stored);
       assert.deepEqual(engine.instances.get(alice, 'Contact', 'ada')?.data, stored);
       const event = engine.events.read(alice, { schema: 'Contact', instanceId: 'ada' }).events[0];
-      assert.deepEqual(event.change, stored);
+      // test.Mailer declares no field, so the create's behaviors hold no entry.
+      assert.deepEqual(event.change, { data: stored, behaviors: {} });
     });
 
     test('an update normalizes its patch and fills no default; one whose normalized patch changes nothing writes nothing', () => {
@@ -114,7 +115,7 @@ for (const driver of drivers) {
       assert.equal(updated.data.score, undefined);
       assert.deepEqual(updated.data.address, { city: 'Auckland' });
       const events = engine.events.read(alice, { schema: 'Contact', instanceId: 'ada' }).events;
-      assert.deepEqual(events.at(-1)?.change, { color: '#AABBCCFF', score: null, address: { city: 'Auckland' } });
+      assert.deepEqual(events.at(-1)?.change, { data: { color: '#AABBCCFF', score: null, address: { city: 'Auckland' } } });
       // The same email in capitals is no change.
       assert.equal(engine.instances.update(alice, 'Contact', 'ada', { email: 'ADA@EXAMPLE.COM' }).seq, updated.seq);
       assert.equal(engine.events.read(alice, { schema: 'Contact', instanceId: 'ada' }).events.length, events.length);

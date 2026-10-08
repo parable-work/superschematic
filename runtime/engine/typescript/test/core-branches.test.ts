@@ -79,7 +79,9 @@ for (const driver of drivers) {
           updatedBy: 'alice',
         }
       );
-      assert.deepEqual(engine.instances.get(alice, 'Recipe', 'soup')?.data, { title: 'Soup' });
+      // Branches' entry is empty until a release gives its release field a value.
+      const read = engine.instances.get(alice, 'Recipe', 'soup');
+      assert.deepEqual([read?.data, read?.behaviors], [{ title: 'Soup' }, { Branches: {} }]);
       // The config names the primary line.
       const trunk = opened({ ...recipeConfig, primary: 'trunk' });
       assert.deepEqual(
@@ -168,7 +170,7 @@ for (const driver of drivers) {
       );
       const first = merged.commit as Commit;
       // The release field is the release pointer's version, absent before the first release.
-      const release = () => soup.engine.instances.get(alice, 'Recipe', 'soup')?.data.release;
+      const release = () => soup.engine.instances.get(alice, 'Recipe', 'soup')?.behaviors.Branches.release;
       assert.equal(release(), undefined);
       assert.deepEqual(soup.invoke('releaseCommit', { commit: first.id, version: 0 }), { commit: first.id, version: 1 });
       assert.equal(release(), 1);
@@ -176,7 +178,7 @@ for (const driver of drivers) {
         behavior: 'Branches',
         operation: 'releaseCommit',
         params: { commit: first.id, version: 0 },
-        patch: { release: 1 },
+        patch: { behaviors: { Branches: { release: 1 } } },
       });
       assert.equal(vetoOf(() => soup.invoke('releaseCommit', { commit: first.id, version: 0 })), 'version_conflict');
       const second = soup.as(bob).change('more', { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } });

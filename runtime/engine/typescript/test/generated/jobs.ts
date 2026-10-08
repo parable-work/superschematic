@@ -21,16 +21,25 @@ export type BatchFields = {
   topic?: string | null;
 };
 
-/** A Batch as a read returns it: its own fields, then its behaviors'. */
-export type Batch = BatchFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: BatchState;
-  /** Blueprint: What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped. */
-  readonly blueprint?: JSONObject;
-  /** Rollups: Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
-  readonly rollups: {
-    /** countBy over the jobs instances whose batch points here. */
-    steps: { [key: string]: number } | { over: true };
+/** A Batch's data as a read returns it: its own fields. Its behaviors' fields are in BatchBehaviors. */
+export type Batch = BatchFields;
+
+/** The fields of a Batch's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type BatchBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: BatchState;
+  };
+  readonly Blueprint: {
+    /** What was stamped: each step's key and its child's id, in the order they were created; absent until the instance is stamped. */
+    readonly children?: Array<{ id: string; key: string }>;
+  };
+  readonly Rollups: {
+    /** Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
+    readonly values: {
+      /** countBy over the jobs instances whose batch points here. */
+      steps: { [key: string]: number } | { over: true };
+    };
   };
 };
 
@@ -89,13 +98,13 @@ export function isBatchVeto<B extends keyof BatchVetoes>(error: unknown, behavio
 /** The batches schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface BatchesClient {
   /** create stores a new Batch, with its behaviors' create parameters. */
-  create(data: BatchFields, options?: BatchCreateOptions): Promise<Instance<Batch>>;
+  create(data: BatchFields, options?: BatchCreateOptions): Promise<Instance<Batch, BatchBehaviors>>;
   /** get reads a Batch; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Batch>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Batch, BatchBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Batch>>;
+  list(options?: ListOptions): Promise<InstancePage<Batch, BatchBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: BatchPatch, options?: BatchWriteOptions): Promise<Instance<Batch>>;
+  update(id: string, patch: BatchPatch, options?: BatchWriteOptions): Promise<Instance<Batch, BatchBehaviors>>;
   /** delete removes a Batch. */
   delete(id: string, options?: BatchWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -108,16 +117,16 @@ export interface BatchesClient {
 export function batchesClient(client: EngineClient): BatchesClient {
   return {
     create(data, options) {
-      return client.instances.create<Batch>('batches', data, options);
+      return client.instances.create<Batch, BatchBehaviors>('batches', data, options);
     },
     get(id, options) {
-      return client.instances.get<Batch>('batches', id, options);
+      return client.instances.get<Batch, BatchBehaviors>('batches', id, options);
     },
     list(options) {
-      return client.instances.list<Batch>('batches', options);
+      return client.instances.list<Batch, BatchBehaviors>('batches', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Batch>('batches', id, patch, options);
+      return client.instances.update<Batch, BatchBehaviors>('batches', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('batches', id, options);
@@ -147,23 +156,70 @@ export type JobFields = {
   result?: string | null;
 };
 
-/** A Job as a read returns it: its own fields, then its behaviors'. */
-export type Job = JobFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: JobState;
-  /** Lease: The lease: holder (null when free), token, acquiredAt, renewedAt (its acquire or its last heartbeat), expiresAt, active (held and not expired), expiries, and ended, how and when the last lease ended (null while one is held). */
-  readonly lease?: JSONObject;
-  /** Budget: Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0. */
-  readonly budget?: JSONObject;
-  /** Retries: The instance's retries: total (failures counted), classAttempts (failures counted by class), bestScore (null when no scored result is kept), exhausted and stuck. */
-  readonly retries?: JSONObject;
-  /** Links: The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it. */
-  readonly links?: {
-    /** The batches instance batch points at. */
-    batch?: { id: string; schema: 'batches' };
+/** A Job's data as a read returns it: its own fields. Its behaviors' fields are in JobBehaviors. */
+export type Job = JobFields;
+
+/** The fields of a Job's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type JobBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: JobState;
   };
-  /** Dependencies: Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
-  readonly blocked: boolean;
+  readonly Lease: {
+    /** The subject of the principal that holds the lease; absent when the instance is free. */
+    readonly holder?: string;
+    /** The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it. */
+    readonly token: number;
+    /** When the lease was acquired, in epoch milliseconds; absent when the instance is free. */
+    readonly acquiredAt?: number;
+    /** Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free. */
+    readonly renewedAt?: number;
+    /** When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free. */
+    readonly expiresAt?: number;
+    /** Whether a lease is held and has not expired. */
+    readonly active: boolean;
+    /** How many leases have expired or been abandoned since the last resetExpiries. */
+    readonly expiries: number;
+    /** How and when the last lease ended (reason and at); absent while one is held. */
+    readonly ended?: {
+      at: number;
+      reason: 'release' | 'abandon' | 'ttl' | 'maxHold' | 'holder';
+    };
+  };
+  readonly Budget: {
+    /** Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0. */
+    readonly meters: {
+      cpuSeconds: {
+        limit: number | null;
+        remaining: number | null;
+        reserved: number;
+        used: number;
+      };
+    };
+  };
+  readonly Retries: {
+    /** Failures counted. */
+    readonly total: number;
+    /** Failures counted, by failure class. */
+    readonly classAttempts: { cancelled: number; invalid: number; transient: number };
+    /** The score of the kept result; absent when no scored result is kept. */
+    readonly bestScore?: number;
+    /** Whether the instance has run out of attempts. */
+    readonly exhausted: boolean;
+    /** Whether the instance failed with the same signature stuckAfter times in a row. */
+    readonly stuck: boolean;
+  };
+  readonly Links: {
+    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none. */
+    readonly targets?: {
+      /** The batches instance batch points at. */
+      batch?: { id: string; schema: 'batches' };
+    };
+  };
+  readonly Dependencies: {
+    /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
+    readonly blocked: boolean;
+  };
 };
 
 /** A merge patch of a Job's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -429,7 +485,7 @@ export type JobCheckReserveResult = {
   fits: boolean;
   /** The enclosing scopes the answer read, innermost first, each with the values of it the answer turns on: a move of one can change it. */
   scopes: Array<{
-    /** The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope's data, and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope. */
+    /** The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope as a read returns it (/behaviors/Budget/meters/<meter>/remaining, /behaviors/Links/targets/<link>), and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope. */
     hears: Array<{ crosses?: number; path: string }>;
     id: string;
     schema: string;
@@ -910,13 +966,13 @@ export function isJobVeto<B extends keyof JobVetoes>(error: unknown, behavior?: 
 /** The jobs schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface JobsClient {
   /** create stores a new Job, with its behaviors' create parameters. */
-  create(data: JobFields, options?: JobCreateOptions): Promise<Instance<Job>>;
+  create(data: JobFields, options?: JobCreateOptions): Promise<Instance<Job, JobBehaviors>>;
   /** get reads a Job; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Job>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Job, JobBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Job>>;
+  list(options?: ListOptions): Promise<InstancePage<Job, JobBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: JobPatch, options?: JobWriteOptions): Promise<Instance<Job>>;
+  update(id: string, patch: JobPatch, options?: JobWriteOptions): Promise<Instance<Job, JobBehaviors>>;
   /** delete removes a Job. */
   delete(id: string, options?: JobWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -993,16 +1049,16 @@ export interface JobsClient {
 export function jobsClient(client: EngineClient): JobsClient {
   return {
     create(data, options) {
-      return client.instances.create<Job>('jobs', data, options);
+      return client.instances.create<Job, JobBehaviors>('jobs', data, options);
     },
     get(id, options) {
-      return client.instances.get<Job>('jobs', id, options);
+      return client.instances.get<Job, JobBehaviors>('jobs', id, options);
     },
     list(options) {
-      return client.instances.list<Job>('jobs', options);
+      return client.instances.list<Job, JobBehaviors>('jobs', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Job>('jobs', id, patch, options);
+      return client.instances.update<Job, JobBehaviors>('jobs', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('jobs', id, options);
@@ -1120,12 +1176,25 @@ export type WorkerFields = {
   subject: string;
 };
 
-/** A Worker as a read returns it: its own fields, then its behaviors'. */
-export type Worker = WorkerFields & {
-  /** Workflow: The state the instance is in. */
-  readonly status: WorkerState;
-  /** Presence: The heartbeat: deadline, when the instance is missed unless beaten, lastBeatAt, both in epoch milliseconds or null, missed, and released, the instances whose lease the last miss expired, by schema (null before a miss). */
-  readonly presence?: JSONObject;
+/** A Worker's data as a read returns it: its own fields. Its behaviors' fields are in WorkerBehaviors. */
+export type Worker = WorkerFields;
+
+/** The fields of a Worker's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type WorkerBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: WorkerState;
+  };
+  readonly Presence: {
+    /** When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat. */
+    readonly deadline?: number;
+    /** When the instance was last beaten, in epoch milliseconds; absent before the first beat. */
+    readonly lastBeatAt?: number;
+    /** Whether the instance missed its deadline and has not been beaten since. */
+    readonly missed: boolean;
+    /** The instances whose lease the last miss expired, by schema; absent before a miss. */
+    readonly released?: { [key: string]: string[] };
+  };
 };
 
 /** A merge patch of a Worker's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
@@ -1201,13 +1270,13 @@ export function isWorkerVeto<B extends keyof WorkerVetoes>(error: unknown, behav
 /** The workers schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
 export interface WorkersClient {
   /** create stores a new Worker, with its behaviors' create parameters. */
-  create(data: WorkerFields, options?: WorkerCreateOptions): Promise<Instance<Worker>>;
+  create(data: WorkerFields, options?: WorkerCreateOptions): Promise<Instance<Worker, WorkerBehaviors>>;
   /** get reads a Worker; one that does not exist is 404 not_found. */
-  get(id: string, options?: CallOptions): Promise<Instance<Worker>>;
+  get(id: string, options?: CallOptions): Promise<Instance<Worker, WorkerBehaviors>>;
   /** list returns a page in creation order. */
-  list(options?: ListOptions): Promise<InstancePage<Worker>>;
+  list(options?: ListOptions): Promise<InstancePage<Worker, WorkerBehaviors>>;
   /** update applies a merge patch of the own fields. */
-  update(id: string, patch: WorkerPatch, options?: WorkerWriteOptions): Promise<Instance<Worker>>;
+  update(id: string, patch: WorkerPatch, options?: WorkerWriteOptions): Promise<Instance<Worker, WorkerBehaviors>>;
   /** delete removes a Worker. */
   delete(id: string, options?: WorkerWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
@@ -1224,16 +1293,16 @@ export interface WorkersClient {
 export function workersClient(client: EngineClient): WorkersClient {
   return {
     create(data, options) {
-      return client.instances.create<Worker>('workers', data, options);
+      return client.instances.create<Worker, WorkerBehaviors>('workers', data, options);
     },
     get(id, options) {
-      return client.instances.get<Worker>('workers', id, options);
+      return client.instances.get<Worker, WorkerBehaviors>('workers', id, options);
     },
     list(options) {
-      return client.instances.list<Worker>('workers', options);
+      return client.instances.list<Worker, WorkerBehaviors>('workers', options);
     },
     update(id, patch, options) {
-      return client.instances.update<Worker>('workers', id, patch, options);
+      return client.instances.update<Worker, WorkerBehaviors>('workers', id, patch, options);
     },
     delete(id, options) {
       return client.instances.delete('workers', id, options);

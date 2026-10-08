@@ -64,9 +64,10 @@ func TestEngineClientTypesAnExtensionsBehavior(t *testing.T) {
 	module, err := os.ReadFile(out)
 	require.NoError(t, err)
 	for _, want := range []string{
-		"  /** acme.Stock: Units on hand. */\n  readonly onHand?: unknown;\n",
+		"export type ItemBehaviors = {\n  readonly 'acme.Stock': {\n    /** Units on hand. */\n    readonly onHand?: unknown;\n  };\n",
 		"export type ItemRestockParams = { quantity: number };\n",
-		"/** An Item as a read returns it: its own fields, then its behaviors'. */\n",
+		"/** An Item's data as a read returns it: its own fields. Its behaviors' fields are in ItemBehaviors. */\n",
+		"  get(id: string, options?: CallOptions): Promise<Instance<Item, ItemBehaviors>>;\n",
 		"  'acme.Stock': never;\n",
 		"  restock(id: string, params: ItemRestockParams, options?: ItemWriteOptions): Promise<ItemRestockResult>;\n",
 		"  countStock(id: string, params?: ItemCountStockParams, options?: ItemWriteOptions): Promise<ItemCountStockResult>;\n",

@@ -446,7 +446,8 @@ exports:
 | Export | What it is |
 | --- | --- |
 | `<T>Fields` | the instance type's own fields, as a create gives them; with `Variants`, a union by the field that picks the type |
-| `<T>` | an instance's data as a read returns it: `<T>Fields` and each behavior's fields, `readonly` |
+| `<T>` | an instance's data as a read returns it: its own fields, `<T>Fields` |
+| `<T>Behaviors` | an instance's behaviors as a read returns them: by behavior name, each behavior that declares a field, with its fields `readonly`, optional where the engine can leave one out |
 | `<T>Patch` | a merge patch of the own fields |
 | `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
 | `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |

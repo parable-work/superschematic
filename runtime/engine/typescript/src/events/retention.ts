@@ -32,7 +32,7 @@ A pruned event takes its value holders with it, so a value the store
 kept only for events goes with the last of them (values/store.ts).
 Before it goes, each instance event folds into its instance's base
 (engine_event_bases): the instance as the log had it after the event,
-its behaviors' fields included, or none after a delete, and the event's
+{ data, behaviors } as a read returns it, or none after a delete, and the event's
 sequence. A reaction's before() folds the instance from the base and the
 events still there, and a create after a delete takes the sequence after
 the base's, so the sequences an instance's events carry never repeat.
@@ -309,7 +309,8 @@ export class Retention {
       );
       return;
     }
-    const stowed = values.stow(data as Record<string, unknown>);
+    const state = data as { data?: Record<string, unknown>; behaviors?: Record<string, Record<string, unknown>> };
+    const stowed = values.stowChange('', state.data, state.behaviors, { whole: true });
     values.hold(holder, stowed.hashes);
     this.storage.run(
       `INSERT INTO engine_event_bases (namespace, schema, instance_id, seq, data, value_refs) VALUES (?, ?, ?, ?, ?, ?)
@@ -334,7 +335,8 @@ function lowest(a: number | undefined, b: number | undefined): number | undefine
  * the instance as the log had it before: a create gives the instance, an
  * update merges its patch, an operation its patch, and a delete leaves
  * none. The log records each change as a merge patch of what a read
- * returns, so folding an instance's events from its create gives it.
+ * returns, { data, behaviors }, so folding an instance's events from its
+ * create gives it.
  */
 export function foldEvent(data: unknown, kind: string, change: unknown): unknown {
   if (kind === 'create') {

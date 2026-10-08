@@ -51,7 +51,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
       const invoke = <T>(who: Principal, operation: string, params: Record<string, unknown> = {}, token?: number): T =>
         engine.instances.invoke(who, 'Recipe', 'soup', operation, params, token === undefined ? {} : fenced(token)) as T;
-      const lease = () => engine.instances.get(alice, 'Recipe', 'soup')?.data.lease as { holder: string | null; active: boolean; ended: { reason: string } | null };
+      const lease = () => engine.instances.get(alice, 'Recipe', 'soup')?.behaviors.Lease as { holder?: string; active: boolean; ended?: { reason: string } };
 
       assert.deepEqual(
         engine.schemas.behaviors(alice, 'Recipe').map(({ name }) => name),
@@ -78,7 +78,7 @@ for (const driver of drivers) {
       assert.deepEqual([lease().holder, lease().active], [worker.subject, true]);
       // Lease's release ends the lease, and leaves the release pointer as it is.
       assert.deepEqual(invoke(worker, 'release', {}, token), {});
-      assert.deepEqual([lease().holder, lease().active, lease().ended?.reason], [null, false, 'release']);
+      assert.deepEqual([lease().holder, lease().active, lease().ended?.reason], [undefined, false, 'release']);
       assert.deepEqual(
         invoke<{ items: Array<{ version: number; commit: string }> }>(other, 'releases').items.map(({ version, commit }) => [version, commit]),
         [[1, merged.commit.id]]

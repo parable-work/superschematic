@@ -151,11 +151,11 @@ export function recipesDocument(behaviors: readonly BehaviorRef[] = []): Record<
 /**
  * releaseRecipe releases a new tagged commit of a recipe as alice: a step
  * saved on a draft, committed and merged into its primary line. It returns
- * the recipe's release field, the new release's number.
+ * the recipe's Branches release field, the new release's number.
  */
 export function releaseRecipe(engine: Engine, id: string): number {
   const invoke = <T>(operation: string, params: Record<string, unknown> = {}) => engine.instances.invoke(alice, 'Recipe', id, operation, params) as T;
-  const version = (engine.instances.get(alice, 'Recipe', id)?.data.release as number | undefined) ?? 0;
+  const version = (engine.instances.get(alice, 'Recipe', id)?.behaviors.Branches?.release as number | undefined) ?? 0;
   const draft = invoke<{ id: string; version: number }>('branch', { name: `release${version + 1}` });
   const saved = invoke<{ ref: { version: number } }>('save', {
     ref: draft.id,
