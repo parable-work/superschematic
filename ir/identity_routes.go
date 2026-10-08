@@ -17,6 +17,45 @@ package ir
 // read them as any other operation. A server routes an operation whose
 // IdentityOperation is set to its runtime's identity package: the
 // implementation the project writes has no method for it.
+//
+// An operation's input type travels as its argument IdentityInputArgument,
+// and the {id} and {roleId} of its route are its arguments IdentityIDArgument
+// and IdentityRoleIDArgument, typed by the User or UserRole table's key. An
+// operation that answers nothing else answers the boolean true, since every
+// route answers a value. login, register, changePassword, createUser and
+// setUserPassword carry a password an agent does not hold, so each is @mcp
+// hidden with IdentityPasswordToolReason; the rest are tools as any
+// operation is.
+
+// IsIdentityRoutes reports whether the set is @userSessions or
+// @userAdministration, whose operations the loader adds.
+func (s *OperationSet) IsIdentityRoutes() bool {
+	return s != nil && (s.UserSessions != nil || s.UserAdministration != nil)
+}
+
+// The argument names of the expanded operations.
+const (
+	// IdentityInputArgument is the argument an operation's input type
+	// travels as: the request body.
+	IdentityInputArgument = "input"
+	// IdentityIDArgument is the {id} of a route: a user's under users/, a
+	// role's under roles/.
+	IdentityIDArgument = "id"
+	// IdentityRoleIDArgument is the {roleId} of a grant's route,
+	// users/{id}/roles/{roleId}.
+	IdentityRoleIDArgument = "roleId"
+)
+
+// The requests per minute the rate-limited operations allow, per client.
+const (
+	IdentityLoginRateLimit          = 10
+	IdentityRegisterRateLimit       = 5
+	IdentityChangePasswordRateLimit = 10
+)
+
+// IdentityPasswordToolReason is the @mcp hidden reason of the operations
+// that carry a password.
+const IdentityPasswordToolReason = "It carries a password, which an agent does not hold."
 
 // UserSessionsConfig is @userSessions on an operation set: the routes a user
 // signs in, out and about themselves with.
@@ -75,8 +114,8 @@ const (
 	// @publicRoute and rate-limited. With session "cookie" it sets the
 	// session cookie and returns no token.
 	IdentityOpLogin = "login"
-	// IdentityOpLogout is POST <path>/logout: @auth; revokes the caller's
-	// session and clears the cookie.
+	// IdentityOpLogout is POST <path>/logout, to true: @auth; revokes the
+	// caller's session and clears the cookie.
 	IdentityOpLogout = "logout"
 	// IdentityOpMe is GET <path>/me, to CurrentUser: @auth.
 	IdentityOpMe = "me"
@@ -85,13 +124,17 @@ const (
 	// the route admits the caller.
 	IdentityOpCapabilities = "capabilities"
 	// IdentityOpChangePassword is POST <path>/password,
-	// ChangePasswordInput: @auth and rate-limited; revokes the user's other
-	// sessions.
+	// ChangePasswordInput to true: @auth and rate-limited; revokes the
+	// user's other sessions.
 	IdentityOpChangePassword = "changePassword"
 	// IdentityOpRegister is POST <path>/register, RegisterInput to
 	// LoginResult: @publicRoute and rate-limited, only with Register.
 	IdentityOpRegister = "register"
 )
+
+// A set with NoLogin has IdentityOpMe and IdentityOpCapabilities alone;
+// IdentityOpLogin, IdentityOpLogout and IdentityOpChangePassword need the
+// login.
 
 // The operations of @userAdministration, under the set's path. Each needs
 // a permission under the naming key identity_permission_prefix
@@ -114,7 +157,7 @@ const (
 	// IdentityUser (users.write).
 	IdentityOpEnableUser = "enableUser"
 	// IdentityOpSetUserPassword is PUT <path>/users/{id}/password,
-	// SetPasswordInput (users.write); revokes the user's sessions.
+	// SetPasswordInput to true (users.write); revokes the user's sessions.
 	IdentityOpSetUserPassword = "setUserPassword"
 	// IdentityOpListRoles is GET <path>/roles, to IdentityRole[]
 	// (roles.read).
@@ -125,7 +168,8 @@ const (
 	// IdentityOpUpdateRole is PUT <path>/roles/{id}, RoleInput to
 	// IdentityRole (roles.write).
 	IdentityOpUpdateRole = "updateRole"
-	// IdentityOpDeleteRole is DELETE <path>/roles/{id} (roles.write).
+	// IdentityOpDeleteRole is DELETE <path>/roles/{id}, to true
+	// (roles.write).
 	IdentityOpDeleteRole = "deleteRole"
 	// IdentityOpGrantRole is PUT <path>/users/{id}/roles/{roleId}, to
 	// IdentityUser (roles.write).
@@ -141,11 +185,28 @@ const (
 // identity.roles.write.
 const DefaultIdentityPermissionPrefix = "identity"
 
+// The permissions of the administration routes, after the prefix and a dot.
+const (
+	IdentityPermissionUsersRead  = "users.read"
+	IdentityPermissionUsersWrite = "users.write"
+	IdentityPermissionRolesRead  = "roles.read"
+	IdentityPermissionRolesWrite = "roles.write"
+)
+
+// IdentityPermission returns the permission an administration route needs:
+// prefix, a dot and permission, one of the IdentityPermission constants.
+func IdentityPermission(prefix, permission string) string {
+	return prefix + "." + permission
+}
+
 // The types the loader adds to an API with @userSessions or
-// @userAdministration, each with Origin OriginIdentity. A type the author
-// names one of these in such an API is refused. The login and key fields
-// take the User table's login and key scalars, read from the API's authDb
-// schema.
+// @userAdministration, each with Origin OriginIdentity: the ones its
+// operations take and return. A type the author names one of these in
+// such an API is refused, whether or not its sets use it. The login and
+// key fields take the User table's login and key scalars, and a name field
+// the type of the table's name field (the login's without one), read from
+// the API's authDb schema. A role's id and name take the UserRole table's
+// key and name types, or string when the authDb has no UserRole table.
 const (
 	// IdentitySessionTransportEnum is "bearer" or "cookie".
 	IdentitySessionTransportEnum = "SessionTransport"
@@ -153,7 +214,8 @@ const (
 	// (SessionTransport, optional; bearer when absent).
 	IdentityLoginInputType = "LoginInput"
 	// IdentityRegisterInputType: login, name (optional; the login when
-	// absent), password, session (optional).
+	// absent), password, session (optional). name is there only when the
+	// User trait names a name field.
 	IdentityRegisterInputType = "RegisterInput"
 	// IdentityLoginResultType: user (SessionUser), expiresAt
 	// (Temporal.DateTime), token (a Secret string; absent for a cookie
@@ -172,7 +234,8 @@ const (
 	// IdentityChangePasswordInputType: current, password (both
 	// Auth.Password).
 	IdentityChangePasswordInputType = "ChangePasswordInput"
-	// IdentityCreateUserInputType: login, name (optional), password.
+	// IdentityCreateUserInputType: login, name (optional, and only when the
+	// User trait names a name field), password.
 	IdentityCreateUserInputType = "CreateUserInput"
 	// IdentitySetPasswordInputType: password.
 	IdentitySetPasswordInputType = "SetPasswordInput"
@@ -182,4 +245,10 @@ const (
 	IdentityRoleInputType = "RoleInput"
 	// IdentityRoleType: id, name, permissions (string[]).
 	IdentityRoleType = "IdentityRole"
+)
+
+// The values of IdentitySessionTransportEnum.
+const (
+	IdentitySessionBearer = "bearer"
+	IdentitySessionCookie = "cookie"
 )
