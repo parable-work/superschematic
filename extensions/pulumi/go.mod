@@ -120,7 +120,7 @@ require (
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20260928143325-10cf493f485e // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261006180731-8bb3cbb31da5 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect

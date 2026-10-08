@@ -1298,7 +1298,6 @@
           },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
-            "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
             "type": [
               "object",
               "null"
@@ -2003,7 +2002,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:63b9139615387b301900b5e6f9262212d90108dfc1fcf8544fc13d033a163731"
+      "inputSchemaDigest": "sha256:305a42db05000b750a42c6168b30d873abbe328a9eacc3873c60adbd0c469ba3"
     },
     {
       "name": "a distribution's keys",
@@ -2452,7 +2451,6 @@
           },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
-            "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
             "type": [
               "object",
               "null"
@@ -3159,7 +3157,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:17d7adcfe377e67e9b8dbae796edc4e4fe2180b49118e1ed23629d7b30314648"
+      "inputSchemaDigest": "sha256:7c855e0d5879f67fddbe4b87aae77a2b77acb08d99f3969c6c7584c226524e43"
     },
     {
       "name": "no keys",
@@ -3577,7 +3575,6 @@
           },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
-            "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
             "type": [
               "object",
               "null"
@@ -4234,7 +4231,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:48630724847549ef067d16b49968fee96dbc49ac93fd7982d4fa2739ff611013"
+      "inputSchemaDigest": "sha256:78777cf2f7016bc32d0d2280a9876bd65ecba931a8b401819fe6155b2b2a93d5"
     }
   ],
   "defaults": {

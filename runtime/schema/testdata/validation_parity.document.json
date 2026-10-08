@@ -60,7 +60,7 @@
       "maxLength": 16,
       "pattern": "^\\+[1-9]\\d{1,14}$",
       "type": "string",
-      "x-example": "+1234567890",
+      "x-example": "+14155552671",
       "x-hasCustomNormalize": true,
       "x-hasCustomValidate": true,
       "x-scalar": "Contact_PhoneNumber",
@@ -222,14 +222,16 @@
     },
     "Geo_Location": {
       "description": "Geographic location with latitude and longitude",
-      "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
-      "type": "string",
-      "x-example": "37.7749,-122.4194",
+      "type": "object",
+      "x-hasCustomParse": true,
       "x-scalar": "Geo_Location",
       "x-typeMapping": {
         "go": "GeoLocation",
         "json_schema": "object",
-        "sql": "POINT"
+        "python": "superscalar.GeoLocation",
+        "rust": "superscalar::metadata::geo_location::Location",
+        "sql": "POINT",
+        "typescript": "{ lat: number; lon: number }"
       }
     },
     "Git_PathPattern": {
@@ -465,6 +467,27 @@
         "json_schema": "string",
         "sql": "VARCHAR(35)"
       }
+    },
+    "LocationMatrix": {
+      "properties": {
+        "locList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Geo_Location"
+          },
+          "type": "array"
+        },
+        "optLoc": {
+          "$ref": "#/definitions/scalars/Geo_Location"
+        },
+        "reqLoc": {
+          "$ref": "#/definitions/scalars/Geo_Location"
+        }
+      },
+      "required": [
+        "reqLoc"
+      ],
+      "type": "object",
+      "x-kind": "type"
     },
     "Network_DnsLabel": {
       "description": "Single DNS label (RFC 1035): one hostname segment, no dots",

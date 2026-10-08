@@ -110,6 +110,31 @@ func keepsJSONNull(field FieldInfo) bool {
 		strings.HasPrefix(field.GoType, "*")
 }
 
+// JSONObjectFields returns the fields of t that hold JSON-object scalar
+// values (isJSONObjectField), in field order. UnmarshalJSON checks each
+// value's JSON with superscalar and notes a required struct value the JSON
+// left absent or null (decodeJSONObjects); Validate reports what it found.
+func (t TypeInfo) JSONObjectFields() []FieldInfo {
+	var fields []FieldInfo
+	for _, field := range t.Fields {
+		if isJSONObjectField(field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+// HasJSONObjectFields reports whether any type in types.go has a field
+// JSONObjectFields returns, so the file carries decodeJSONObjects.
+func (o *ModuleOutput) HasJSONObjectFields() bool {
+	for _, typeInfo := range o.Types {
+		if len(typeInfo.JSONObjectFields()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // HasKeptNullJSONFields reports whether any type in types.go has a field
 // KeptNullJSONFields returns, so the file carries nullJSONMembers.
 func (o *ModuleOutput) HasKeptNullJSONFields() bool {
@@ -133,7 +158,7 @@ func (o *ModuleOutput) HasListFields() bool {
 }
 
 // NeedsJSONValueMissing reports whether types.go's Validate checks a
-// required any-JSON field (requiredAnyJSONField) or JSON object field
+// required any-JSON field (requiredAnyJSONField) or JSON array field
 // (requiredStructuredJSONField), which call the jsonValueMissing helper.
 func (o *ModuleOutput) NeedsJSONValueMissing() bool {
 	for _, typeInfo := range o.Types {

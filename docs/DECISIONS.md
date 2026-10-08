@@ -1111,7 +1111,9 @@ with create parameters narrowed by them (an amendment below on each). A
 typed client of its HTTP API with the event stream and a reconciler
 (`@superschematic/engine/client`), and a worker over the client
 (`@superschematic/engine-workqueue/worker`), are built (the amendment "a
-typed client over the HTTP API, a worker and a reconciler" below). Each change that
+typed client over the HTTP API, a worker and a reconciler" below). A
+large field is stored once, by hash, in a value store in the same file
+(the amendment "a large value is stored once" below). Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
@@ -1580,6 +1582,37 @@ engine's server does not change here.
 The tests are `runtime/engine-workqueue/typescript/test/worker.test.ts`
 ("the worker's presence") and `examples/engine-jobs/test/jobs.test.ts`.
 The names and rules are reversible until the first release.
+
+### D16, amended: a large value is stored once
+
+A step's result document can run to hundreds of kilobytes, and it sat
+inline in the instance's row. SQLite rewrites a whole row at any write,
+and the behaviors' columns are on that row, so every lease heartbeat
+rewrote the result. The create and every patch that touched the field
+copied it into the event log, a retried attempt's operation event twice
+(its params and its patch), and `Revisions` copied it into each revision.
+Nothing bounded any of it but the HTTP body limit. A field whose JSON is
+long is now stored once, by hash, and what holds it keeps a ref. This
+changes D16's Storage row: the engine owns two more tables, the value
+store's, beside its schemas, instances and log, and an instance's row no
+longer holds every field's value. The file still holds everything, and
+one process still writes it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A top-level member whose JSON is longer than a threshold is stored once, under the SHA-256 of its canonical JSON, and a ref takes its place: in an instance's row, its own fields; in an instance event, a create's instance, an update's patch, and an operation's `params` and `patch`; in a behavior's table, an object it stows. The ref is `{ "$value": <hex hash>, "bytes": <the canonical JSON's length> }`, and the row, the event or the behavior's row keeps beside it the JSON pointers of the members that hold one (`value_refs`). One value written by two instances, by an instance, its events and its revisions, or in two namespaces, is stored once. | Members at any depth, which every merge patch, diff and fold of the log would have to look through; a ref alone, without the pointers, which a `Generic.JSON` value can imitate; the whole row or event by hash, which a heartbeat still rewrites in full |
+| The canonical JSON is RFC 8785's (JCS): compact, members sorted, strings and numbers as `JSON.stringify` writes them, so any language with a JCS library computes a value's hash, and a client that fetches a value can check it. A value reads back in that form, its objects' members sorted; no JSON reader may rely on member order anyway. | `ir.CanonicalJSON`, whose Go escaping of `<`, `>` and `&` no other language's encoder writes by default; storing the value as written beside the hash of its canonical form, which a fetch cannot check against its hash |
+| The threshold is an engine option, `values.thresholdBytes`: 65536 by default, at least 1024, in UTF-8 bytes, for every schema. | Per schema, a document key or a decorator that every generator would read for a fact of the engine's storage, or an option keyed by schema name, which a namespace's copy of a schema escapes; per field, which no case needs yet |
+| The values live in the engine's file: `engine_payloads` (hash, canonical JSON, length), written in the write's transaction, and `engine_payload_holders`, which records who holds each value, an instance's row, an event or a behavior's row, by namespace and schema (engine migration 9, which also adds `value_refs` to `engine_instances` and `engine_events`). Where the values live is a driver (`values.driver`, a `ValueDriver`: `read`, `write`, `remove`), synchronous as everything in a write is; the default writes `engine_payloads`. A driver over other storage is not transactional: the engine removes a value only after the commit that dropped its last holder, and a write that rolls back can leave a value nothing holds. The holders stay in the file whatever the driver. No object-storage driver ships. | Files beside the database, which breaks D16's one file; an asynchronous driver, which a write inside D16's synchronous transaction cannot call, so an object store needs a synchronous read path, a local cache say, or the asynchronous transactions D16 leaves to a later entry |
+| Reads are transparent: `get`, `list`, a behavior's view and context (`data`), its reads of other instances, the field readers, the live version's validation and the behaviors' `validate` (`Variants`), `Search`'s index at a write and at a publish's rebuild (`eachInstance`), `before()` and `Revisions`' revisions and proposals see the value. The API's shapes and the fields' types do not change. The engine keeps the values it read last parsed and deep-frozen in memory (`values.cacheBytes`, 32 MiB by default), shared by its own reads, since a value never changes under its hash; a caller gets a copy. | Refs everywhere with a fetch per read, which changes every API shape and every behavior that reads a field; a getter per member that loads on access, which every spread, merge patch and freeze loads anyway |
+| An event read returns the event as the log keeps it, refs and all, with `valueRefs`, the pointers, and so does the stream. A reaction gets the same event, and its `before()` puts the values back. `get` and `list` return values by default and refs with `valueRefs: true` (`?valueRefs=true`, the tools' `valueRefs` argument), listing them in the record's `valueRefs`, so a dashboard pages through instances without their results. | An event read that fills the values, which loads every large value of a page inside one synchronous read for a stream that mostly wants statuses; refs by default on `list`, which changes what every client gets |
+| `sql.instances()` reads the rows as stored: a field the store holds is its ref in `data`. A behavior's statements filter and order on small fields and its own columns. | Resolving refs in the relation's SQL, which loads every large value a scan touches, the cost the store exists to save, and needs a SQL function the driver seam cannot register |
+| A write reuses the ref of each own field its patch leaves alone, neither hashing nor writing it again, and an operation reads the instance's own fields only when a behavior does. So a heartbeat, which writes Lease's columns, rewrites a row of refs and loads no large value, which a test with `Lease` and a counting driver checks. | Reading the own fields at every operation, as before, which loads each large value at each heartbeat; hashing every member at every write |
+| `engine.values.get(principal, hash, { namespace })`, `GET /namespaces/{namespace}/values/{hash}` and the MCP tool `get_value` return `{ hash, bytes, value }` to a caller the access policy allows `read` on a schema of the namespace that references the value: its instances, events or a behavior's rows, by the holders. Knowing a hash grants nothing: a value no schema of the namespace references, one only schemas the caller may not read reference, and one no namespace holds are all `not_found`. | Any authenticated caller who knows the hash, which makes a hash a capability anyone holds who reads it in a log line or computes it from a document they guess; `forbidden` where the caller may not read the referencing schema, which tells a caller whether the namespace holds a value it guessed; a route under one schema, which a client reading a ref from the event stream of many schemas would have to pick |
+| A value goes when its last holder does, in the transaction that drops it: an instance's row holds what it holds now, its delete drops them, a behavior's `stow` holds and `release` drops, and an event holds its values for good while the log has no retention. So today a field an instance held stays while an event records it, and a value that only a behavior's rows held, which a schema-level operation or a schedule wrote with no event, goes with its last row. The log's retention, a later change, is what will free most values. | A sweep on a runner schedule, which runs per behavior and schema, needs the runner started with a principal and reads every holder at each run, where one writer and synchronous transactions leave no orphan for it to find; bare reference counts, which a release run twice takes below the truth, removing a value still held |
+| A behavior keeps an object with large members in its own tables through `values` in its context: `stow(key, object)` returns the JSON text and the pointers its row keeps and holds the values for the row named by the behavior, the call's namespace and schema, the context's instance and key; `load(json, refs)` puts them back; `release(key?)` drops them. A read loads only. `Revisions` stows each revision's fields and each proposal's patch (its migration 2 adds `value_refs`) and releases them when the instance goes. | The engine writing behaviors' tables for them, which D16 rules out; `Revisions` copying the fields as before, a large field in every revision |
+| A row or an event written before migration 9 keeps its values inline. An instance's row moves a large field to the store at its next write; an event is never rewritten. | Moving every large value in migration 9, which hashes each one inside one migration's transaction and still cannot touch the append-only log |
+| The store sets no limit of its own on a value's size: the HTTP runtime's body limit bounds what a caller sends, and dedupe and refs bound the copies. | A maximum per value, which no case has asked for and which a client that hits it can only split by hand |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -3963,6 +3996,96 @@ bootstrap's `planner` and `deployer`. Designing it settled the rest.
 Status: not built. `projectNumber` is in gcp's values schema; bootstrap
 does not record it yet, the readers do not number environments, and no
 renderer, generator or CI seam exists.
+
+The rule is reversible until the first release.
+
+### D14, amended: Geo.Location is a {lat, lon} object
+
+The amendment that made a JSON object or array scalar hold that object or
+array left `Geo.Location` as it was: its row declared an object but also
+a `"lat,lon"` pattern, so every validator checked it as a string, and the
+generated types disagreed on its wire form. superscalar#55 settles the row,
+and this repository moves to it: `superscalar.pin`, and the nine `go.mod`
+files that require `github.com/parable-work/superscalar/go`, are at
+`8bb3cbb31da512b9252d4d4f856b4648ff7c9ec6`, which also carries
+superscalar#56's `Contact.PhoneNumber` example. The catalogs are
+regenerated from it.
+
+`Geo.Location` is now a point, the JSON object `{"lat": <number>, "lon":
+<number>}` in decimal degrees: `lat` in [-90, 90] and `lon` in [-180, 180],
+and no other key. superscalar refuses the `"lat,lon"` string, an unknown
+or duplicate key, a missing one, a member that is not a number and a
+degree out of range, and writes each number of its canonical text as
+`JSON.stringify` does. Its row has the `String` primitive, `json_schema`
+`object`, no pattern, the parse hook, and the object as its example; Go
+types it as a struct tagged `json:"lat"` and `json:"lon"`, TypeScript as
+`{ lat: number; lon: number }`, Python as `superscalar.GeoLocation`, Rust as
+`superscalar::metadata::geo_location::Location`, and SQL as `POINT`. With
+no pattern, `StructuredJSONType` reads it as an object, so every validator
+already gives it `Generic.StringMap`'s path. The rows below are where the
+generators, the runtimes and the ORM still fell short of the object.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `{"lat": 0, "lon": 0}` is a location, and the generated Go types tell it from an absent or null value. A JSON-object scalar (`Generic.StringMap`, `Geo.Location`) is a validatable field, so `Validate` hands every value, required, optional, in a list, a list of lists, a map, a map of lists or an `InputField`, to the scalar package's `Validate` or `ValidateRequired`, which treats a zero `GeoLocation` as a value; a map of lists of any validatable scalar, which did not compile, now checks each element. A type with such fields checks each value's own JSON with superscalar in `UnmarshalJSON`, under the key `encoding/json` reads (exact, else without regard to case, the last one winning), and records, in an unexported pointer that is nil for a valid payload, what the decoded value cannot show: a failure only the JSON has (an unknown, missing or duplicate key, which `encoding/json` drops, zero-fills or overwrites), a required struct value the JSON left absent or null and that decoded to the zero value, and a null value of a required map of them. `Validate` reports the record under the core's name, or `required`, while the field still holds the value decoded; a field set afterwards is checked as set. | `jsonValueMissing`, which read the zero struct as missing. A pointer for a required location, which changes the Go type of every required field. Refusing an absent or null one in `UnmarshalJSON`, which a type without `@strictJSON` leaves to `Validate`. A defined type with an `UnmarshalJSON` of its own in each types package, which ends the zero-cast interoperability the scalar aliases give between packages. Refusing a failing value at decode, which the parity matrix would see as a decode refusal rather than a named failure. |
+| rustgen keeps the catalog's type path and rewrites the `superscalar::` prefix to the scalar crate's name, as it does for `Uuid` and `DateTime`, so a generated crate aliases the struct and a renamed scalar crate still names it. | `serde_json::Value`, which the loader gave it while the row declared a struct instead of naming a type |
+| pygen gives the scalar the type its Python mapping names in the scalar library, imported from the configured scalar Python module inside a `try`, with `Dict[str, Any]` for an object scalar when the library is absent; a JSON-parsed scalar skips the name-based location branch and is parsed by superscalar; its example is the decoded object. | The `Dict[str, float]` that read `"lat,lon"` strings by the scalar's name and never called the parser it defined |
+| The parity matrix holds `Geo.Location` (`LocationMatrix`), core-only failures included. A vector lists the paths only the scalar core fails in `core`, and `want` names them as the core does (`parse`, `custom`, `range`), which the generated Go, TypeScript and Rust validators and the TypeScript runtime report. The harness renames them for the others, as D14 recorded: the generated Python validator says `invalid`, once at the field for a list it checks whole; the Go runtime `pattern` and the Python runtime `custom`, which their suites read from the corpus's `core`. The generated Python driver runs in `runtime/schema/python`'s environment, which has superscalar. | Leaving core-only failures out of the matrix, which is how `Geo.Location`'s old row went unnoticed |
+| The Python runtime's validator, parse and normalize registries read a flat name (`Geo_Location`, as the schema JSON form keys a scalar) as its canonical one, as the TypeScript registries do, so validation and parsing reach the core; an empty string, no JSON text, is a missing value it does not ask the core about. | Keeping the gap D14 recorded, under which the Python runtime never checked what a JSON-object scalar holds, nor parsed one to its canonical form |
+| The Go ORM reads and writes a `Geo.Location` column through a `pgtype.Point`, as a date goes through a `pgtype.Date`: a `POINT` is `(x, y)`, x the longitude and y the latitude, and the versioned history decoder reads the `"(x,y)"` text `to_jsonb` writes. sqlgen no longer requires PostGIS for `POINT`, a type of Postgres's own; `geography` and `geometry` still do. | Handing pgx the struct, which sent its JSON text to the column and refused every write; storing the location as `JSONB`, a column type change |
+| A version graph still cannot hold a `Geo.Location`: no value class reads `POINT`. graphdesc's refusal now names what the value holds, `Geo.Location holds a JSON object but is stored as POINT`, where it named a JSON string. | A value class for `POINT`, which needs a canonical form for the version graph's rows first |
+| A Go API route checks a body argument of a JSON-object scalar (`Generic.StringMap`, `Geo.Location`), alone, in a list, a list of lists, a map or a map of lists, on its own JSON. `bodyargs.CheckJSON` takes a `func(raw string) error`, which the route passes in from the scalar Go module (`scalars.ValidatorFor("Geo.Location")`), and runs it on each value's JSON text once the value is a JSON object, before any other rule and before decoding. Its failure is the value's one error, named by the core's kind (`parse`, `custom`, `range`) as the generated types name one. `routes.go` imports the scalar module as `scalars` only for such an argument, and a raw-body check may no longer import its package under that name. | `runtime/http/go` importing superscalar, a direct dependency it has not had; checking after decoding, so the decoded value's failure came first, which names a member that is not a number `type` where every validator says `custom`; checking only `Geo.Location`, which leaves a `Generic.StringMap` value that is not a string `type` in a route and `custom` in every validator |
+
+`TestCatalogRustTypes` builds a crate against superscalar's struct, and
+`TestRemapScalarLibTypeFollowsTheScalarCrate` renames the crate.
+`TestGeneratedGeoLocationIsAnObject` (tsgen) and
+`TestGeneratedGeoLocationIsATypedObject` (pygen, with and without
+superscalar importable) run the generated packages.
+`TestGeneratedJSONObjectScalarsCheckTheirJSON` builds a Go types module
+with `Geo.Location` in every field shape and pins each verdict.
+`LocationMatrix`'s vectors run through the four generated validators and
+the three runtimes. `TestGeoLocationColumnsOnPostgres` writes and reads
+locations through the generated ORM against Postgres, `{0, 0}` among them,
+checks the stored point's coordinates with SQL and reads the history.
+`TestLocationArgsRoutesCheckTheirJSON` (apigen) runs a generated API
+module whose route takes `Geo.Location` in every body-argument shape, and
+`TestWriteAPIGoldenLocationArgs` pins its `routes.go`;
+`TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded` pins where
+`bodyargs` runs the check.
+
+Not built: the ORM does not read or write a list of locations (`POINT[]`),
+and a `POINT` column's generated filter is the string filter, whose
+equality Postgres cannot evaluate for a point.
+
+The rule is reversible until the first release.
+
+### D14, amended: the Go ORM reads and writes a list of locations, and a location filters on IS NULL
+
+The amendment that made `Geo.Location` a {lat, lon} object left two gaps
+in the Go ORM. A list of locations, which sqlgen stores as `POINT[]`, was
+handed to pgx and scanned as a `[]GeoLocation`, which fails, and its
+history decoder read the column's JSON list of `"(x,y)"` texts as
+locations. A single location's filter was `StringFilter`, whose `Eq`, `In`
+and `ILike` Postgres cannot evaluate: a point has no `=` and no `ILIKE`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A list of a scalar stored as `POINT` (`Field.IsGeoPointList`) goes through a `[]pgtype.Point` as a single one goes through a `pgtype.Point`. CreateOne, CreateMany, UpdateOne and UpdateMany write each location as `(lon, lat)`; every scan path reads a `[]pgtype.Point` and converts it, refusing a NULL element at `field[i]` as any native list does; the versioned history decoder reads the JSON list of `"(x,y)"` texts `to_jsonb` writes and refuses a null element. A nil list stays nil, which pgx writes as NULL, and an empty one is an empty `POINT[]`. `utils.go` holds the three conversions once per element type, named after it (`geoLocationPoints`, `copyGeoLocationPoints`, `unmarshalGeoLocationPoints`). | Scanning through `[]*pgtype.Point` and `copyListElements`, which still needs a conversion per element. Inlining the loops at each write and scan site, about ten copies per field. |
+| A single location's filter is `GeoPointFilter`, which has `IsNull` only: `IS NULL` or `IS NOT NULL`. It is the one predicate on a point that needs no choice of geometry, and it is what an optional location is filtered on. Every ORM declares the type, as it does the other filter types. A caller that set `Eq`, `In` or `ILike` on a location no longer compiles; the query it built failed in Postgres. | No filter, which leaves an optional location unfilterable on presence. `Eq` and `In` through `~=`, which Postgres evaluates within 1e-6 on a plane in raw degrees: an exact-coordinate match is rarely what a caller of a location wants, and it would commit the API to that equality before a distance or bounding-box filter, which needs a geodesic choice, exists. |
+
+`TestGeoLocationColumnsOnPostgres` now has a required and an optional list
+of locations. It writes them through CreateOne, CreateMany,
+UpdateOneIfVersion and UpdateMany, a nil list, an empty one and `{0, 0}`
+among them, checks the stored points with SQL, writes points with SQL and
+reads them all back through GetOne, FindMany, ListVersions and GetAsOf. A
+NULL element written with SQL is refused by GetOne and by ListVersions. It
+filters on a location's `IS NULL` and `IS NOT NULL`, and UpdateMany writes a
+list where that filter matches. `TestGenerateGeoLocationColumns` checks the
+generated filter and list conversions without a database, so the quick tier
+covers them too.
+
+Not built: a list of locations keeps `ArrayStringFilter`, which, as for
+every list, adds no condition.
 
 The rule is reversible until the first release.
 

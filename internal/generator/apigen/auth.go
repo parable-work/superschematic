@@ -81,7 +81,9 @@ type AuthModel struct {
 // routes snippet does not reference types. routes.go also imports the
 // package of each raw-body check an endpoint runs (RawBodyCheckImports); a
 // routesImports snippet that needs one of those packages leaves its own
-// import out when ImportsRawBodyCheckPackage reports it.
+// import out when ImportsRawBodyCheckPackage reports it, and one that needs
+// the scalar Go module leaves it out when RoutesNeedScalars reports that
+// routes.go imports it as scalars.
 var AuthSnippets = []string{
 	// context.tmpl
 	"contextImports", // imports the auth context shims need, in the runtime import group

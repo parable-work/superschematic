@@ -441,8 +441,9 @@ func isCatalogReference(def *ir.ScalarDef) bool {
 
 // isRustTypeExpression reports whether a catalog Rust type can stand where
 // a type goes. A row may describe its shape as a declaration instead
-// (`struct Location { lat: f64, lon: f64 }`); rustgen then keeps its own
-// mapping for the scalar.
+// (`struct Point { x: f64, y: f64 }`); rustgen then keeps its own mapping
+// for the scalar. Every core row names a type, Geo.Location's struct as
+// superscalar::metadata::geo_location::Location.
 func isRustTypeExpression(rustType string) bool {
 	return rustType != "" && !strings.ContainsAny(rustType, "{};")
 }
