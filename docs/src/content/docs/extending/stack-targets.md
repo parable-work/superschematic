@@ -111,7 +111,11 @@ environment runs, empty when it runs only on demand, its time zone, the
 timeout in seconds and the retries. A job has a server's bindings, from
 its API's config and its own edges, and no callers field.
 `stack/stacktest`'s `fake.job` lowers one to a job with its own account
-and, for a schedule, a scheduler entry.
+and, for a schedule, a scheduler entry. gcp's `gcp.cloudrunjob` lowers
+one to a Cloud Run job, sharing the Cloud Run service's lowering of the
+account, secrets, config, Cloud SQL volume and egress, and for a schedule
+to a Cloud Scheduler job and the grant that lets the job's account run
+it.
 
 ## A connector
 
@@ -138,8 +142,8 @@ cannot serve, as the gcp sql connector does for a Rust server.
 A connector's `From` is a server or a job platform. A job takes its API's
 edges, so a target with a job platform registers a connector from it for
 each edge its server platform has; it may share the server connector's
-`Connect`, which sees the job as `From`. For an http edge, the callee's
-issuer lists the job as a caller that serves its API.
+`Connect`, which sees the job as `From`, as gcp's do. For an http edge,
+the callee's issuer lists the job as a caller that serves its API.
 
 ## A target
 
@@ -187,12 +191,14 @@ without a provisioner, and `Bootstrap`, `Migrations`, `Builder`, `CI` or
 `Jobs` without `State`. With no `Migrations`, a deploy that has a
 migration to run is refused; with no `Builder`, every image comes from
 `--image` or the deploy manifest; with no `Jobs`, `stack run` refuses the
-target's environments. The gcp target fills all but `Jobs`: its migrations run
+target's environments. The gcp target fills all seven: its migrations run
 each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
 takes a runner of your own instead), its builder builds each changed
-server's image on Cloud Build (D46), and its CI identity signs a job in
-through Workload Identity Federation (D47). Each operation works on a
+server's and job's image on Cloud Build (D46), its CI identity signs a
+job in through Workload Identity Federation (D47), and its job runner
+runs an execution of a job's Cloud Run job and reads a failed one's error
+from Cloud Logging (D52). Each operation works on a
 `registry.Run`: the resolved environment and the values of its
 parameters.
 

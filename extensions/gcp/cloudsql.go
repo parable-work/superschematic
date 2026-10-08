@@ -96,7 +96,7 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}}}
 	for _, svc := range d.Services {
 		name := suffixed(env, snake(svc.Name), "_")
-		if err := checkLength("the database name of "+svc.Name, name, 1, 63); err != nil {
+		if err := checkLength("the database name of "+svc.Name, name, 1, 63, "the DB service"); err != nil {
 			return registry.Lowered{}, err
 		}
 		out.Resources = append(out.Resources, &ir.Resource{
