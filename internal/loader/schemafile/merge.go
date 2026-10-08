@@ -193,6 +193,17 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		}
 	}
 
+	for _, job := range doc.Jobs {
+		if job == nil {
+			continue
+		}
+		if schema.Job(job.Name) != nil {
+			fail("duplicate job %q", job.Name)
+			continue
+		}
+		schema.Jobs = append(schema.Jobs, job)
+	}
+
 	errs = append(errs, applyDocumentDecorators(doc, schema, owner, reg)...)
 	return errs
 }

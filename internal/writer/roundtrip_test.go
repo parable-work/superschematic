@@ -46,6 +46,9 @@ var corpus = []roundtripFixture{
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
 	// Operation @docs records in the data forms.
 	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
+	// An API's @job classes (D52), which every form writes as the
+	// schema's jobs, not as types.
+	{name: "fixture-jobs-api", dir: tsFixtures + "/fixture-jobs-api", native: FormatTS},
 	// Operation @mcp, @icon and @docs replay keys in the data forms.
 	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both
@@ -161,6 +164,46 @@ func TestTSWriterRoundTripsArraysOfArrays(t *testing.T) {
 				t.Errorf("written TypeScript does not spell T[][]:\n%s", source.String())
 			}
 		})
+	}
+}
+
+// TestTSWriterRoundTripsJobs: an API's jobs are written back to
+// TypeScript as @job on an abstract class with no members, with each
+// argument they set and their comments, and read back to the same jobs
+// (D52).
+func TestTSWriterRoundTripsJobs(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-jobs-api")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	if len(schema.Jobs) != 2 {
+		t.Fatalf("jobs = %+v, want ShipOrders and ReindexOrders", schema.Jobs)
+	}
+	want := normalizeIR(t, schema)
+	if got := normalizeIR(t, writeAndReload(t, schema, FormatTS)); got != want {
+		t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	dir := t.TempDir()
+	written, err := WriteService(schema, FormatTS, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("wrote %v, want the one schema file", written)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(written[0])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		`import { HttpMethod, job, rest } from "@superschematic/api";`,
+		"// The warehouse's pick run: ships each placed order.\n" +
+			`@job({ schedule: "*/15 * * * *", timeZone: "Europe/Paris", timeout: "5m", retries: 1 })` + "\nexport abstract class ShipOrders {}\n",
+		"// Runs only on demand.\n@job()\nexport abstract class ReindexOrders {}\n",
+	} {
+		if !strings.Contains(string(data), line) {
+			t.Errorf("written TypeScript lacks %q:\n%s", line, data)
+		}
 	}
 }
 

@@ -78,13 +78,17 @@ export interface DatabaseDecl {
 
 export interface DeployableRef {
   deployable?: string;
+  job?: string;
   service?: ServiceRef;
 }
 
 export interface DeployableSettings {
+  enabled?: boolean;
   env?: { [key: string]: EnvValue };
   of: DeployableRef;
   platform?: string;
+  schedule?: string;
+  timeZone?: string;
   values?: { [key: string]: unknown };
 }
 
@@ -106,6 +110,7 @@ export interface Document {
   enums?: { [key: string]: EnumDef };
   extensions?: Extensions;
   imports?: Import[];
+  jobs?: Job[];
   kind?: SchemaKind;
   name?: string;
   operationSets?: OperationSet[];
@@ -256,6 +261,15 @@ export interface IndexDef {
   keys: string[];
   name?: string;
   unique?: boolean;
+}
+
+export interface Job {
+  comment?: string;
+  name: string;
+  retries?: number;
+  schedule?: string;
+  timeZone?: string;
+  timeout?: string;
 }
 
 export interface MCPIcon {

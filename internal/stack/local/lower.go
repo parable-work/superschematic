@@ -271,42 +271,14 @@ func processID(deployable string) string { return deployable + ".process" }
 // PORT, so no binding may take it.
 func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
-	var env []any
-	claim := func(name string) error {
+	env, err := processEnv(d, func(name string) error {
 		if name == PortVariable {
 			return fmt.Errorf("config field %s is the variable the local platform sets to the server's port; set the port with the server's port setting instead", PortVariable)
 		}
 		return nil
-	}
-	for _, b := range d.Bindings {
-		if b.Source == ir.BindingDerived {
-			vars, err := ir.DerivedVariables(b.Field, b.Value)
-			if err != nil {
-				return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
-			}
-			for _, v := range vars {
-				if err := claim(v.Name); err != nil {
-					return registry.Lowered{}, err
-				}
-				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
-			}
-			continue
-		}
-		if err := claim(b.Field); err != nil {
-			return registry.Lowered{}, err
-		}
-		entry := map[string]any{"name": b.Field}
-		switch b.Source {
-		case ir.BindingLiteral:
-			entry["value"] = b.Value
-		case ir.BindingParameter:
-			entry["value"] = ir.Parameter(b.Parameter)
-		case ir.BindingSecret:
-			entry["secret"] = b.Secret
-		default:
-			return registry.Lowered{}, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
-		}
-		env = append(env, entry)
+	})
+	if err != nil {
+		return registry.Lowered{}, err
 	}
 	props := map[string]any{
 		"name":      d.ResourceName,
@@ -321,6 +293,88 @@ func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return registry.Lowered{Resources: []*ir.Resource{{
 		ID:         processID(d.Name),
 		Type:       TypeProcess,
+		Properties: props,
+	}}}, nil
+}
+
+// processEnv is an environment variable per binding of a server or a job:
+// a literal is its value, a secret names the secret the provisioner reads
+// from the environment's secrets file, a parameter references the
+// parameter, and a derived field is one variable per member of its value,
+// as ir.DerivedVariables encodes it (section 3.4). claim refuses a name
+// the platform sets itself.
+func processEnv(d ir.ResolvedDeployable, claim func(string) error) ([]any, error) {
+	var env []any
+	for _, b := range d.Bindings {
+		if b.Source == ir.BindingDerived {
+			vars, err := ir.DerivedVariables(b.Field, b.Value)
+			if err != nil {
+				return nil, fmt.Errorf("binding %s: %w", b.Field, err)
+			}
+			for _, v := range vars {
+				if err := claim(v.Name); err != nil {
+					return nil, err
+				}
+				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+			}
+			continue
+		}
+		if err := claim(b.Field); err != nil {
+			return nil, err
+		}
+		entry := map[string]any{"name": b.Field}
+		switch b.Source {
+		case ir.BindingLiteral:
+			entry["value"] = b.Value
+		case ir.BindingParameter:
+			entry["value"] = ir.Parameter(b.Parameter)
+		case ir.BindingSecret:
+			entry["secret"] = b.Secret
+		default:
+			return nil, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
+		}
+		env = append(env, entry)
+	}
+	return env, nil
+}
+
+// jobID is the ID of a job's node.
+func jobID(deployable string) string { return deployable + ".job" }
+
+// lowerJob lowers a job to its node (D52): the entrypoint module the build
+// wrote at `server/<stack>/<job>`, its environment as a server's is but
+// with no port, the method of its API's Jobs interface it runs, and the
+// schedule, time zone, timeout and retries resolution decided. The
+// provisioner builds it with the servers and runs it on its schedule while
+// the environment runs; `stack run` runs it once.
+func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Job == nil {
+		return registry.Lowered{}, fmt.Errorf("job %s has no run", d.Name)
+	}
+	env, err := processEnv(d, func(string) error { return nil })
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	props := map[string]any{
+		"name":           d.ResourceName,
+		"module":         ModulePath(ctx.Environment.Stack, d.Name),
+		"language":       strings.ToLower(d.Language),
+		"api":            d.Job.API,
+		"job":            d.Job.Name,
+		"timeZone":       d.Job.TimeZone,
+		"timeoutSeconds": d.Job.TimeoutSeconds,
+		"retries":        d.Job.Retries,
+	}
+	if d.Job.Schedule != "" {
+		props["schedule"] = d.Job.Schedule
+	}
+	if len(env) > 0 {
+		props["env"] = env
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{
+		ID:         jobID(d.Name),
+		Type:       TypeJob,
 		Properties: props,
 	}}}, nil
 }

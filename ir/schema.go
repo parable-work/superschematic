@@ -120,6 +120,11 @@ type Schema struct {
 	// intent, and each operation carries its HTTP method explicitly.
 	OperationSets []*OperationSet `json:"operationSets,omitempty" yaml:"operationSets,omitempty"`
 
+	// Jobs lists the jobs an API service declares with `@job`, in
+	// declaration order (D52). A job's class is no type, so Types does not
+	// hold it.
+	Jobs []*Job `json:"jobs,omitempty" yaml:"jobs,omitempty"`
+
 	// Documents holds the loaded sidecar documents keyed by document name
 	// (the registered DocumentSpec.Name), each in canonical JSON (see
 	// [CanonicalJSON]). The registering extension owns the codec; typed

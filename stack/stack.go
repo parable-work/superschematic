@@ -72,6 +72,10 @@ func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) 
 // see internal/stack.Servers.
 func Servers(in Input) ([]*ir.ResolvedDeployable, error) { return stack.Servers(in) }
 
+// Jobs returns the jobs of a stack, which no environment changes; see
+// internal/stack.Jobs.
+func Jobs(in Input) ([]*ir.ResolvedDeployable, error) { return stack.Jobs(in) }
+
 // DerivedField returns the config field an edge fills; see
 // internal/stack.DerivedField.
 func DerivedField(kind ir.EdgeKind, service string) string { return stack.DerivedField(kind, service) }

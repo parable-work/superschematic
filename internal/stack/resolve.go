@@ -73,6 +73,38 @@ func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
 	return servers, nil
 }
 
+// Jobs returns the jobs of in.Stack, which no environment changes: a job
+// per `@job` of every API service the stack reaches (D52), sorted by name.
+// Each has its Name, Services (its API), Calls (its API's), Language and
+// Job's API and Name; the rest is the environment's to resolve.
+// in.Environment is not read. The error is an *Errors with every failure
+// found among the checks that decide the jobs.
+func Jobs(in Input) ([]*ir.ResolvedDeployable, error) {
+	if in.Stack == nil {
+		return nil, &Errors{List: []Error{{Code: CodeInvalidStack, Message: "no stack to read jobs from"}}}
+	}
+	in.Environment = ""
+	r := newResolver(nil, in)
+	r.indexServices()
+	r.collectMembers()
+	r.declareDeployables()
+	r.defaultDeployables()
+	r.resolveCalls()
+	var jobs []*ir.ResolvedDeployable
+	for _, name := range sortedKeys(r.deployables) {
+		res := r.deployables[name].res
+		if res.Kind != ir.DeployableJob {
+			continue
+		}
+		res.Language, _ = r.serverLanguage(res)
+		jobs = append(jobs, res)
+	}
+	if r.failed() {
+		return nil, r.errs
+	}
+	return jobs, nil
+}
+
 func newResolver(reg *registry.Registry, in Input) *resolver {
 	return &resolver{
 		reg:         reg,
@@ -83,6 +115,7 @@ func newResolver(reg *registry.Registry, in Input) *resolver {
 		declared:    map[string]*ir.DeployableDecl{},
 		deployables: map[string]*deployable{},
 		byService:   map[string]string{},
+		byJob:       map[string]string{},
 		edges:       map[string]*edge{},
 		errs:        &Errors{Stack: in.Stack.Name, Environment: in.Environment},
 	}
@@ -106,8 +139,9 @@ type resolver struct {
 
 	deployables map[string]*deployable
 	// byService maps a member service to the deployable that hosts or
-	// serves it.
+	// serves it; byJob maps a job, `<api>/<job>`, to its deployable.
 	byService map[string]string
+	byJob     map[string]string
 	edges     map[string]*edge
 
 	// produced are the resources producers returned, in order.
@@ -116,8 +150,9 @@ type resolver struct {
 	// nodes' check.
 	parentEnv *ir.ResolvedEnvironment
 	parentErr error
-	// serverWaves are the servers' rollout waves, callees first.
-	serverWaves map[string]int
+	// rolloutWaves are the rollout waves of the servers and jobs, callees
+	// first.
+	rolloutWaves map[string]int
 }
 
 // deployable is one deployable while it is resolved.
@@ -126,8 +161,10 @@ type deployable struct {
 	decl     *ir.DeployableDecl
 	settings settings
 	platform registry.PlatformSpec
-	// fields are a server's config fields by name.
+	// fields are a server's or a job's config fields by name.
 	fields map[string]*field
+	// job is a job's declaration, nil for every other kind.
+	job *ir.Job
 }
 
 // settings are a deployable's settings merged over the environment chain.
@@ -137,6 +174,16 @@ type settings struct {
 	env      map[string]ir.EnvValue
 	// envFrom names the environment that set each env key.
 	envFrom map[string]string
+	// inherited are a job's env keys taken from its API's server, which a
+	// job whose fields lack one leaves out rather than refuses.
+	inherited map[string]bool
+
+	// schedule, timeZone and enabled are a job's: what the environment
+	// chain sets, the later over the earlier. scheduleFrom names the
+	// environment that set each.
+	schedule, timeZone string
+	enabled            *bool
+	scheduleFrom       map[string]string
 }
 
 // effectiveEnv is an environment with its parents' values merged in.
@@ -173,12 +220,13 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.expose()
 	r.resolveCalls()
 	r.checkCalls()
+	r.scheduleJobs()
 	if r.failed() {
 		return nil
 	}
 	r.nameDeployables()
 	r.deriveEdges()
-	r.orderServers()
+	r.orderRollout()
 	r.bindConfig()
 	if r.failed() {
 		return nil
@@ -483,7 +531,9 @@ func (r *resolver) declareDeployables() {
 
 // defaultDeployables gives each member API service no declared server
 // serves a server of its own, and each member DB service no declared
-// database hosts a database of its own (section 3.2).
+// database hosts a database of its own (section 3.2). Then each job of a
+// member API service is a job of its own, named after its API and its
+// class (ir.JobDeployableName, D52).
 func (r *resolver) defaultDeployables() {
 	for _, name := range sortedKeys(r.members) {
 		if _, claimed := r.byService[name]; claimed {
@@ -510,6 +560,39 @@ func (r *resolver) defaultDeployables() {
 		}}
 		r.byService[name] = name
 	}
+	for _, name := range sortedKeys(r.members) {
+		svc := r.services[name]
+		if svc.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		for i := range svc.Jobs {
+			job := &svc.Jobs[i]
+			key := name + "/" + job.Name
+			if _, dup := r.byJob[key]; dup {
+				r.fail(CodeInvalidStack, "service %s declares job %s twice", name, job.Name)
+				continue
+			}
+			jobName := ir.JobDeployableName(name, job.Name)
+			if !namePattern.MatchString(jobName) {
+				r.fail(CodeInvalidStack, "job %s of %s would be named %q; a deployable's name is letters, digits, hyphens and underscores", job.Name, name, jobName)
+				continue
+			}
+			if other, clash := r.deployables[jobName]; clash {
+				r.fail(CodeInvalidStack, "job %s of %s would be named %s, like the %s %s; rename the job or the %s", job.Name, name, jobName, other.res.Kind, jobName, other.res.Kind)
+				continue
+			}
+			r.deployables[jobName] = &deployable{
+				res: &ir.ResolvedDeployable{
+					Name:     jobName,
+					Kind:     ir.DeployableJob,
+					Services: []ir.ServiceRef{{Name: svc.Name, Kind: svc.Kind}},
+					Job:      &ir.ResolvedJob{API: name, Name: job.Name},
+				},
+				job: job,
+			}
+			r.byJob[key] = jobName
+		}
+	}
 }
 
 // resolveDeployableRef finds the deployable a settings `of` or an
@@ -519,6 +602,31 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 	case ref.Service != nil && ref.Deployable != "":
 		r.fail(CodeInvalidStack, "%s names both service %s and deployable %s", where, ref.Service.Name, ref.Deployable)
 		return nil, false
+	case ref.Job != "" && ref.Service == nil:
+		r.fail(CodeInvalidStack, "%s names job %s but no API service; a job is named beside its API's handle", where, ref.Job)
+		return nil, false
+	case ref.Job != "":
+		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI) {
+			return nil, false
+		}
+		if !r.members[ref.Service.Name] {
+			r.fail(CodeUnknownDeployable, "%s names service %s, which is not in stack %s", where, ref.Service.Name, r.stack.Name)
+			return nil, false
+		}
+		name, ok := r.byJob[ref.Service.Name+"/"+ref.Job]
+		if !ok {
+			var jobs []string
+			for _, job := range r.services[ref.Service.Name].Jobs {
+				jobs = append(jobs, job.Name)
+			}
+			declared := "none"
+			if len(jobs) > 0 {
+				declared = strings.Join(jobs, ", ")
+			}
+			r.fail(CodeUnknownDeployable, "%s names job %s of %s, which declares no such @job class (its jobs: %s)", where, ref.Job, ref.Service.Name, declared)
+			return nil, false
+		}
+		return r.deployables[name], true
 	case ref.Service != nil:
 		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI, ir.SchemaKindDB) {
 			return nil, false
@@ -579,7 +687,114 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
+			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil {
+				continue
+			}
+			if d.res.Kind != ir.DeployableJob {
+				r.fail(CodeInvalidSettings, "%s sets a schedule, a time zone or enabled on %s %s; only a job takes them, named beside its API's handle with `job`", where, d.res.Kind, d.res.Name)
+				continue
+			}
+			if s.scheduleFrom == nil {
+				s.scheduleFrom = map[string]string{}
+			}
+			if entry.Schedule != "" {
+				if err := registry.CheckSchedule(entry.Schedule); err != nil {
+					r.fail(CodeInvalidSettings, "%s schedule: %v", where, err)
+				}
+				s.schedule, s.scheduleFrom["schedule"] = entry.Schedule, env.Name
+			}
+			if entry.TimeZone != "" {
+				if err := registry.CheckTimeZone(entry.TimeZone); err != nil {
+					r.fail(CodeInvalidSettings, "%s timeZone: %v", where, err)
+				}
+				s.timeZone, s.scheduleFrom["timeZone"] = entry.TimeZone, env.Name
+			}
+			if entry.Enabled != nil {
+				enabled := *entry.Enabled
+				s.enabled, s.scheduleFrom["enabled"] = &enabled, env.Name
+			}
 		}
+	}
+	r.inheritServerEnv()
+}
+
+// inheritServerEnv gives each job the env its API's server is given, under
+// the job's own (D52): a job's config is its API's, so a value a person
+// sets on the server reaches the job too. A key the server takes for
+// another API it serves is left out of the job's fields when they are
+// bound, not refused.
+func (r *resolver) inheritServerEnv() {
+	for _, name := range sortedKeys(r.deployables) {
+		d := r.deployables[name]
+		if d.res.Kind != ir.DeployableJob {
+			continue
+		}
+		server, ok := r.deployables[r.byService[d.res.Job.API]]
+		if !ok {
+			continue
+		}
+		for key, value := range server.settings.env {
+			if _, own := d.settings.env[key]; own {
+				continue
+			}
+			if d.settings.env == nil {
+				d.settings.env = map[string]ir.EnvValue{}
+				d.settings.envFrom = map[string]string{}
+			}
+			if d.settings.inherited == nil {
+				d.settings.inherited = map[string]bool{}
+			}
+			d.settings.env[key] = value
+			d.settings.envFrom[key] = server.settings.envFrom[key]
+			d.settings.inherited[key] = true
+		}
+	}
+}
+
+// scheduleJobs decides what each job runs on in the environment (D52): the
+// decorator's schedule and time zone, each replaced by the environment's
+// settings, and run unless the settings turn it off. A parameterized
+// environment's members run no schedule unless their settings turn it on.
+// The timeout and retries are the decorator's, the timeout ten minutes
+// unless it sets one.
+func (r *resolver) scheduleJobs() {
+	parameterized := len(r.env.parameters) > 0
+	for _, name := range sortedKeys(r.deployables) {
+		d := r.deployables[name]
+		if d.res.Kind != ir.DeployableJob || d.job == nil {
+			continue
+		}
+		job, s := d.res.Job, d.settings
+		if err := registry.CheckJob(d.job); err != nil {
+			r.fail(CodeInvalidStack, "job %s of %s: %v", d.job.Name, job.API, err)
+			continue
+		}
+		schedule := d.job.Schedule
+		if s.schedule != "" {
+			schedule = s.schedule
+		}
+		job.TimeZone = ir.DefaultJobTimeZone
+		if d.job.TimeZone != "" {
+			job.TimeZone = d.job.TimeZone
+		}
+		if s.timeZone != "" {
+			job.TimeZone = s.timeZone
+		}
+		enabled := !parameterized
+		if s.enabled != nil {
+			enabled = *s.enabled
+		}
+		switch {
+		case schedule == "" && s.enabled != nil && *s.enabled:
+			r.fail(CodeInvalidSettings, "environment %s turns on the schedule of job %s of %s, which has none; set its schedule", s.scheduleFrom["enabled"], d.job.Name, job.API)
+		case enabled:
+			job.Schedule = schedule
+		}
+		job.TimeoutSeconds = ir.DefaultJobTimeoutSeconds
+		if d.job.Timeout != "" {
+			job.TimeoutSeconds, _ = registry.TimeoutSeconds(d.job.Timeout) // CheckJob read it
+		}
+		job.Retries = d.job.Retries
 	}
 }
 
@@ -613,7 +828,7 @@ func (r *resolver) place() {
 		res.Platform = platformName
 		d.platform = platform
 		switch res.Kind {
-		case ir.DeployableServer:
+		case ir.DeployableServer, ir.DeployableJob:
 			r.placeServer(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
@@ -627,6 +842,8 @@ func (r *resolver) place() {
 	}
 }
 
+// placeServer gives a server, or a job, the language of its APIs, and
+// checks its platform runs it. A job is written in its API's language.
 func (r *resolver) placeServer(d *deployable) {
 	lang, ok := r.serverLanguage(d.res)
 	if !ok {
@@ -634,7 +851,7 @@ func (r *resolver) placeServer(d *deployable) {
 	}
 	d.res.Language = lang
 	if !slices.Contains(d.platform.Languages, d.res.Language) {
-		r.fail(CodeUnrealizable, "server %s is a %s server, and platform %s runs only %s", d.res.Name, d.res.Language, d.platform.Name, strings.Join(d.platform.Languages, ", "))
+		r.fail(CodeUnrealizable, "%s %s is a %s %s, and platform %s runs only %s", d.res.Kind, d.res.Name, d.res.Language, d.res.Kind, d.platform.Name, strings.Join(d.platform.Languages, ", "))
 	}
 }
 
@@ -710,11 +927,12 @@ func (r *resolver) expose() {
 
 // resolveCalls gives each server the APIs it calls: the union of the
 // `calls` of the APIs it serves. A call to an API the same server serves
-// stays a call, to the server's own address.
+// stays a call, to the server's own address. A job calls what its API
+// calls (D52).
 func (r *resolver) resolveCalls() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if d.res.Kind != ir.DeployableServer {
+		if !d.res.Kind.HasImage() {
 			continue
 		}
 		seen := map[string]bool{}
@@ -844,6 +1062,10 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	}
 	c.ResourceName = deepCopy(d.ResourceName)
 	c.Address = deepCopy(d.Address)
+	if d.Job != nil {
+		job := *d.Job
+		c.Job = &job
+	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))
 		for i, b := range d.Bindings {

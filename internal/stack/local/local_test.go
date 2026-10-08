@@ -36,7 +36,8 @@ func assemble(t *testing.T) *registry.Registry {
 
 // shop is stacktest's shop stack of docs/stack-model.md, section 4.1, with
 // local environments: Dev takes every default, and Pinned sets the
-// Postgres image and port and each server's port.
+// Postgres image and port, each server's port, and runs shop-orders' job
+// every minute.
 func shop() *ir.Stack {
 	s := stacktest.Shop()
 	orders := ir.DeployableRef{Deployable: "Orders"}
@@ -55,6 +56,7 @@ func shop() *ir.Stack {
 			Settings: []*ir.DeployableSettings{
 				{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"port": float64(8080)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "debug"}}},
 				{Of: orders, Values: map[string]any{"port": float64(8081)}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "eu"}}},
+				{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "* * * * *"},
 			},
 		},
 	}
@@ -196,7 +198,18 @@ func TestWiring(t *testing.T) {
 		t.Errorf("Orders SHOP_API_SERVICE = %v, want %v", got, wantAPI)
 	}
 
-	clause := resolve(t, reg, shop(), stacktest.RequireServiceShop(), "Dev")
+	// shop-orders' job is a caller of its own, with a key pair of its own
+	// (D52).
+	for _, b := range dev.Deployable(stacktest.ShipOrdersJob).Bindings {
+		values[b.Field] = b.Value
+	}
+	wantAPI["credential"].(map[string]any)["issuer"] = stacktest.ShipOrdersJob
+	wantAPI["credential"].(map[string]any)["key"] = ir.Output{Resource: stacktest.ShipOrdersJob + ".calls.shop-api.key", Name: "privateJwk"}
+	if got := values["SHOP_API_SERVICE"]; !equalJSON(t, got, wantAPI) {
+		t.Errorf("the job's SHOP_API_SERVICE = %v, want %v", got, wantAPI)
+	}
+
+	clause := resolve(t, reg, shop(), stacktest.WithoutJobs(stacktest.RequireServiceShop()), "Dev")
 	var callers *ir.Binding
 	for _, b := range clause.Deployable("shop-api").Bindings {
 		if b.Field == "SHOP_API_CALLERS" {

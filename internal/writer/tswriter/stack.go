@@ -80,16 +80,29 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 	return objectLiteral(parts)
 }
 
-// settingsLiteral renders one settings element: of, platform, env, and the
-// platform settings in every other key.
+// settingsLiteral renders one settings element: of, a job's name beside its
+// API's handle, platform, a job's schedule, timeZone and enabled, env, and
+// the platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
+	if settings.Of.Job != "" {
+		parts = append(parts, "job: "+quote(settings.Of.Job))
+	}
 	if settings.Platform != "" {
 		parts = append(parts, "platform: "+quote(settings.Platform))
 	}
+	if settings.Schedule != "" {
+		parts = append(parts, "schedule: "+quote(settings.Schedule))
+	}
+	if settings.TimeZone != "" {
+		parts = append(parts, "timeZone: "+quote(settings.TimeZone))
+	}
+	if settings.Enabled != nil {
+		parts = append(parts, fmt.Sprintf("enabled: %t", *settings.Enabled))
+	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
-		case "of", "platform", "env":
+		case "of", "job", "platform", "env", "schedule", "timeZone", "enabled":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}
@@ -134,6 +147,8 @@ func (e *emitter) deployableRef(owner string, ref ir.DeployableRef) string {
 		e.failf("%s names both service %s and deployable %s", owner, ref.Service.Name, ref.Deployable)
 	case ref.Service != nil:
 		return e.handle(*ref.Service)
+	case ref.Job != "":
+		e.failf("%s names job %s of no API service; the TypeScript form writes a job beside its API's handle", owner, ref.Job)
 	case ref.Deployable != "":
 		return e.ident(ref.Deployable, "deployable")
 	default:

@@ -10,10 +10,10 @@ import (
 // (examples/acme-shop/schemas/services) as the resolver reads them. The
 // names, kinds, `authDb`, dependencies and languages are those of the
 // services' schema configs, and the operations, with their user clauses,
-// those of the services' schema files. The services declare no `calls` and
-// no `@envVars` yet, so the fixture adds them: shop-orders calls shop-api,
-// and both APIs' configs extend PaymentsSecrets, as in
-// docs/stack-model.md, section 4.2.
+// and shop-orders' job, ShipOrders, those of the services' schema files.
+// The services declare no `calls` and no `@envVars` yet, so the fixture
+// adds them: shop-orders calls shop-api, and both APIs' configs extend
+// PaymentsSecrets, as in docs/stack-model.md, section 4.2.
 func AcmeShop() []stack.Service {
 	def := func(v string) *string { return &v }
 	user := func(name string) stack.Operation { return stack.Operation{Name: name, UserClause: true} }
@@ -59,6 +59,7 @@ func AcmeShop() []stack.Service {
 				user("OrderMutations.placeOrder"), user("OrderMutations.cancelOrder"),
 				open("ProductReviews.listReviews"), user("ProductReviews.writeReview"),
 			},
+			Jobs: []ir.Job{ShipOrders},
 		},
 		{
 			Name:         "shop-storefront",
@@ -117,6 +118,32 @@ func AllowServiceShop() []stack.Service {
 	return services
 }
 
+// WithoutJobs returns services with no jobs: the shop for a target that
+// places no job yet, or a test about the rest of the stack.
+func WithoutJobs(services []stack.Service) []stack.Service {
+	out := make([]stack.Service, len(services))
+	for i, svc := range services {
+		svc.Jobs = nil
+		out[i] = svc
+	}
+	return out
+}
+
+// WithoutJobSettings returns s with no settings element that names a job,
+// to resolve over services WithoutJobs returns.
+func WithoutJobSettings(s *ir.Stack) *ir.Stack {
+	for _, env := range s.Environments {
+		var kept []*ir.DeployableSettings
+		for _, settings := range env.Settings {
+			if settings == nil || settings.Of.Job == "" {
+				kept = append(kept, settings)
+			}
+		}
+		env.Settings = kept
+	}
+	return s
+}
+
 // Handles to the acme-shop services.
 var (
 	ShopDB     = ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
@@ -124,8 +151,20 @@ var (
 	ShopOrders = ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
 )
 
+// ShipOrders is shop-orders' job (D52): the warehouse's pick run, which
+// ships each placed order every fifteen minutes, in five minutes at most
+// and with one retry. ShipOrdersJob is its deployable's name.
+var ShipOrders = ir.Job{Name: "ShipOrders", Schedule: "*/15 * * * *", Timeout: "5m", Retries: 1}
+
+const ShipOrdersJob = "shop-orders-ship-orders"
+
 // Of names the deployable that hosts or serves a service.
 func Of(ref ir.ServiceRef) ir.DeployableRef { return ir.DeployableRef{Service: &ref} }
+
+// JobOf names a job of an API service.
+func JobOf(ref ir.ServiceRef, job string) ir.DeployableRef {
+	return ir.DeployableRef{Service: &ref, Job: job}
+}
 
 // Shop returns the stack of docs/stack-model.md, section 4.1, on the fake
 // target, named after the service that declares it, shop-stack: shop-api
@@ -133,7 +172,9 @@ func Of(ref ir.ServiceRef) ir.DeployableRef { return ir.DeployableRef{Service: &
 // the declared server Orders serves shop-orders in place of its default
 // server, and takes its edges from shop-orders' authDb and calls; Staging
 // and Production are environments, and Preview extends Staging with a
-// parameter.
+// parameter. shop-orders' job ShipOrders runs hourly in New York's time in
+// Staging, on its decorator's schedule and two CPUs in Production, and on
+// none in Preview, whose members run no schedule they do not turn on.
 func Shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "shop-stack",
@@ -153,6 +194,7 @@ func Shop() *ir.Stack {
 				DNS:    &ir.DNSPlacement{Platform: DNSPlatform, Values: map[string]any{"zone": "acme.dev"}},
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
+					{Of: JobOf(ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
 				},
 			},
 			{
@@ -164,6 +206,7 @@ func Shop() *ir.Stack {
 					{Of: Of(ShopDB), Values: map[string]any{"tier": "large", "highAvailability": true}},
 					{Of: Of(ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: Of(ShopOrders), Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
+					{Of: JobOf(ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2"}},
 				},
 			},
 			{

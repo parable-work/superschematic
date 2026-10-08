@@ -95,8 +95,14 @@ An edge is a need met by something that provides it. v1 has two kinds:
 
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
-| sql | server | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
-| http | server | server | `calls` in the config of each API the calling server serves |
+| sql | server or job | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
+| http | server or job | server | `calls` in the config of each API the calling server serves |
+
+A job takes its API's edges, from itself (D52): the sql edge to the API's
+database and an http edge to the server of each API its API calls. A job
+of an API that a declared server serves with the API it calls still
+calls over HTTP, with a credential, since it runs in a process of its
+own.
 
 `calls` is the one wiring fact a person writes, because no schema says that
 one API's implementation calls another API. It sits in the API service's
@@ -291,6 +297,7 @@ export abstract class Staging {}
   settings: [
     { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
     { of: Backend, minInstances: 1, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, job: "ShipOrders", schedule: "*/5 * * * *" },
   ],
 })
 export abstract class Production {}
@@ -323,12 +330,21 @@ export abstract class Preview extends Staging {}
   Production omits `dns` and gets the target's default, Cloud DNS.
 - **`settings`** sets values per deployable. `of` is a service handle or
   an `@server` or `@database` class. `platform` places the deployable on
-  another platform than the target's, and every key but `of`, `platform`
-  and `env` is a platform setting, which the loader checks against that
-  platform's settings schema. `env` binds the server's `@envVars` fields,
-  each to a literal or to `{ parameter }`, a parameter of the environment
-  that the deploy run supplies. tsc checks the same in the editor
-  (section 4.3).
+  another platform than the target's, and every key but `of`, `job`,
+  `platform`, `env`, `schedule`, `timeZone` and `enabled` is a platform
+  setting, which the loader checks against that platform's settings
+  schema. `env` binds the server's `@envVars` fields, each to a literal
+  or to `{ parameter }`, a parameter of the environment that the deploy
+  run supplies. tsc checks the same in the editor (section 4.3).
+- **A job's settings** name the job beside its API's handle: `{ of:
+  ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone:
+  "America/New_York", enabled: false }` (D52). `schedule` and `timeZone`
+  replace the `@job` decorator's, and `enabled` turns the schedule on or
+  off; every other key is the job platform's setting, and `env` binds the
+  job's fields, its API's, over what the API's server is given. Settings
+  merge over the `extends` chain as a server's do. A schedule runs unless
+  the settings turn it off, except in a parameterized environment, whose
+  members run none unless their settings turn it on (section 8.7).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
   makes it a family of environments, one per value (section 5.4). An
   `@environment` class extends only another `@environment` class.
@@ -352,9 +368,11 @@ and leaves the property out.
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
 handle is written `{name, kind}`, and a settings `of` or an `expose` entry
-`{service: {name, kind}}` or `{deployable: Backend}`. The target's values
-are `values`, the DNS platform `{platform, values}`, an env value `{value}`
-or `{parameter}`, and the parent the type's `extends`:
+`{service: {name, kind}}` or `{deployable: Backend}`, and a job's `of`
+`{service: {name, kind}, job: ShipOrders}`. The target's values are
+`values`, a job's `schedule`, `timeZone` and `enabled` keys of their own,
+the DNS platform `{platform, values}`, an env value `{value}` or
+`{parameter}`, and the parent the type's `extends`:
 
 ```yaml
 types:
@@ -372,6 +390,8 @@ types:
         - of: { deployable: Backend }
           values: { minInstances: 1 }
           env: { LOG_LEVEL: { value: warn } }
+        - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
+          schedule: "*/5 * * * *"
 ```
 
 A stack is named by no other service, so it has no sentinel, and its
@@ -474,7 +494,11 @@ line that holds it.
   an API without a TypeScript `@envVars` class, and `service()` infers the
   kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
-  so tsc refuses a DB handle there.
+  so tsc refuses a DB handle there. A third parameter, `J`, names an API's
+  jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
+  "ShipOrders">`, with `unknown` for the config type of an API without
+  one. It defaults to `string`, any job, and the sweep keeps it as it
+  keeps the config type.
 - **Targets type their own values and settings.** `@superschematic/stack`
   declares an empty `Targets` interface. Each target's authoring package
   augments it with the target's environment values and a settings type per
@@ -496,6 +520,9 @@ line that holds it.
   the `settings` tuple. Each element is checked by its `of`:
   - an API handle takes the target's `server` settings, and an `env`
     typed from the handle's config type;
+  - an API handle beside a `job`, which must be one of the handle's jobs,
+    takes the target's `job` settings, a `schedule`, a `timeZone` and
+    `enabled`, and an `env` typed from the handle's config type (D52);
   - a DB handle takes the target's `database` settings and no `env`;
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
@@ -574,8 +601,9 @@ The order comes from the graph:
 
 1. infrastructure;
 2. the migrations' `expand` steps, which the running servers survive;
-3. servers, callees before callers, so a new caller never meets an old
-   callee;
+3. servers and jobs, callees before callers, so a new caller never meets
+   an old callee (a job calls what its API calls, and nothing calls a
+   job);
 4. the migrations' `contract` steps, once no server of the previous
    version runs (D27);
 5. exposure.
@@ -613,9 +641,10 @@ Cloud SQL databases, local processes, a local Postgres container. It
 registers a `PlatformSpec`:
 
 - `Kind`, the deployable kind, and what it accepts: `Languages` for a
-  server platform, spelt as `outputs.api.language` spells them (`GO`,
-  `TYPESCRIPT`, `RUST`), or `Dialects` for a database platform
-  (`postgres`, `sqlite`), in order of preference;
+  server or job platform, spelt as `outputs.api.language` spells them
+  (`GO`, `TYPESCRIPT`, `RUST`), since a job is written in its API's
+  language, or `Dialects` for a database platform (`postgres`, `sqlite`),
+  in order of preference;
 - `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
@@ -626,8 +655,10 @@ registers a `PlatformSpec`:
   exposed server, the DNS records it needs (section 6.9).
 
 A resource a platform leaves without a phase gets the default of its
-producer: rollout for a server's own resources, infrastructure for a
-database's.
+producer: rollout for a server's or a job's own resources, infrastructure
+for a database's. A job platform's `AddressOf` may return nothing, since
+no edge reaches a job, and its `Lower` reads the job's run from the
+deployable's `Job` (D52).
 
 ### 6.2 Connector
 
@@ -639,6 +670,10 @@ Cloud SQL connection on the service) and the value of the derived binding.
 One connector serves an edge kind between two platforms; a second is
 refused. An http edge between two APIs one server serves runs from the
 server to itself, and its connector derives the server's own address.
+`From` is a server or a job platform: a job takes its API's edges, so a
+target that places jobs registers a connector from its job platform for
+each edge its servers take, which may share the server connector's
+`Connect`.
 
 A generic connector covers a pair of platforms on different providers that
 no specific connector serves, such as a Cloudflare Worker calling a Cloud
@@ -659,7 +694,10 @@ mix with.
 
 A target is a named bundle, registered as a `TargetSpec`, of:
 
-- a platform for each deployable kind;
+- a platform for each deployable kind. A kind it names none for is
+  refused in its environments: a stack whose APIs declare jobs resolves
+  only on a target with a job platform, or with each job placed on one by
+  a settings `platform`;
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
@@ -674,9 +712,9 @@ A target is a named bundle, registered as a `TargetSpec`, of:
 Registry, and a load balancer. `local` is processes, one Postgres container
 per environment and a gitignored secrets file (section 8.3). The core
 registers `local`, so every binary has it. Its resource types are the
-core's own `local` provider's (a container, a database, an edge's key pair
-and a process), not a Pulumi package's, since its own provisioner is the
-only one that applies them.
+core's own `local` provider's (a container, a database, an edge's key
+pair, a process and a job), not a Pulumi package's, since its own
+provisioner is the only one that applies them.
 
 Every deployable records its own placement in the IR from the start; the
 environment's target is only the default. A `settings` entry can place one
@@ -1594,9 +1632,13 @@ found with no declaration:
   not-implemented error, which answers 501. For an API whose generated
   `Config` takes them, it also writes `AuthMiddleware(deps)`, which
   refuses every request with 401 until it verifies the end user, and
-  `PayloadDecryptor(deps)`, which refuses every encrypted payload. It never
-  writes into a directory that holds a Go file, so the package is the
-  engineer's from then on. A stack's build scaffolds each API its servers
+  `PayloadDecryptor(deps)`, which refuses every encrypted payload. For an
+  API with jobs it writes `NewJobs`, whose value has a method per job that
+  returns the not-implemented error (D52). It never writes into a
+  directory that holds a Go file, so the package is the engineer's from
+  then on: a stack's build fails on an API whose package declares no
+  `NewJobs` while the API declares jobs, an implementation that predates
+  them, and says what to add. A stack's build scaffolds each API its servers
   serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
   API built, outside a stack. A service the cache would restore builds
   again when its implementation is missing, and so does a stack that
@@ -1629,6 +1671,21 @@ found with no declaration:
   ORM) for the database and its Go SDK for a callee, and the build refuses
   one whose config does not. The generated `Config` and `RegisterRoutes`
   do not change.
+
+  For an API with jobs, `deps.go` also declares `Jobs`, a method per job
+  sorted by name, and `JobsConstructor`, which the scaffold asserts with
+  `var _ api.JobsConstructor = NewJobs` (D52). A job is built from the
+  same `Deps` as the API:
+
+  ```go
+  type Jobs interface {
+      // ShipOrders runs the job ShipOrders, on */15 * * * * unless an
+      // environment changes its schedule.
+      ShipOrders(ctx context.Context) error
+  }
+
+  type JobsConstructor func(deps Deps) (Jobs, error)
+  ```
 
 Outside a stack the scaffold stays opt-in. Nothing imports the package
 but a server's generated `main` (section 8.1), and a build of a tree whose
@@ -1692,36 +1749,77 @@ A job is a run to completion that an API service declares, with `@job` on
 a class of its schema (D52):
 
 ```ts
-@job({ schedule: "*/15 * * * *", timeZone: "UTC", timeout: "10m", retries: 1 })
-export abstract class ExpireCarts {}
+// The warehouse's pick run: ships each placed order.
+@job({ schedule: "*/15 * * * *", timeZone: "UTC", timeout: "5m", retries: 1 })
+export abstract class ShipOrders {}
 ```
 
+- **Declaration.** `@job` comes from `@superschematic/api` and goes on a
+  class of an API schema that holds no fields and extends nothing. Every
+  argument is optional: `schedule`, a five-field cron (minute, hour, day of
+  the month, month, day of the week; no descriptor such as `@hourly`, and
+  no time zone prefix); `timeZone`, an IANA name, UTC unless set;
+  `timeout`, a duration of whole seconds as Go writes one (`90s`, `10m`,
+  `1h30m`), ten minutes unless set, Cloud Run's default for a task; and
+  `retries`, zero or more, none unless set. The class is no type: the IR
+  records it in `Schema.Jobs` (`ir.Job`), with its name and comment, and
+  the data forms write it under `jobs:`. No type, operation set or other
+  job of the schema takes its name, nor another job its Go method.
 - **Code.** The API's implementation package implements it, with the same
   `Deps` as the API: the API generator writes a `Jobs` interface, a method
   per job taking a context and returning an error, and the scaffold writes
-  a method that returns the not-implemented error.
+  `NewJobs` with a method that returns the not-implemented error (section
+  8.5).
 - **Deployable.** Each job of an API in the stack is a deployable of kind
-  `job` by default, named after its API and its class
-  (`shop-orders-expire-carts`). Its edges are its API's, so it connects to
-  the same database and calls the same services.
+  `job`, named after its API service and its class in kebab case
+  (`shop-orders-ship-orders`, `ir.JobDeployableName`). Not after the
+  server that serves the API: grouping APIs into an `@server` leaves a
+  job's name, and every cloud resource named after it, as they were, and
+  two APIs of one server may each declare a job of one name. No class
+  declares a job's deployable, so a name another deployable takes is
+  refused. The name is lower case, digits and hyphens, as a Cloud Run
+  job's and a service account's are; a target refuses one longer than its
+  resources take, as it does a server's.
+- **Edges and config.** A job's edges are its API's (section 3.3), so it
+  connects to the same database and calls the same services, through the
+  connectors from its platform, which a target registers beside its
+  server's. Its config fields are its API's `@envVars` fields and the
+  fields its edges derive, and it takes the `env` its API's server is
+  given, under its own; a key the server takes for another API it serves
+  does not reach it. It reads the API's secrets, and has no callers field,
+  since it serves no request. It rolls out after its callees, as a server
+  does (section 5.3).
 - **Identity.** A job serves its API in a callee's callers field. A
   callee's `from: [ShopOrders]` therefore admits ShopOrders' server and
-  its jobs alike, and `Caller.Deployable` tells them apart.
+  its jobs alike, and `Caller.Deployable` tells them apart. Resolution's
+  check that each edge reaches an operation its caller may invoke (section
+  9.3) covers the API's calls through its server; a job takes the edges
+  whether or not it makes the calls, so its own are not checked. It
+  forwards no end user, so it reaches what admits its API's identity or
+  anyone.
 - **Entrypoint.** A job gets a module of its own at
   `<output-root>/server/<stack>/<job>/`: a `main` that builds `Deps` as a
   server's does, runs the job with a context SIGTERM cancels, and exits
   non-zero when it fails. Its image is built and pinned as a server's is.
 - **Schedule.** The decorator's schedule, a five-field cron in its time
   zone (UTC unless set), is the default. An environment's settings change
-  it or turn it off. A member of a parameterized environment runs no
-  schedule unless its settings turn one on. A job with no schedule runs
-  only on demand.
+  it or turn it off: `{ of: ShopOrders, job: "ShipOrders", schedule,
+  timeZone, enabled }` (section 4.1). A member of a parameterized
+  environment runs no schedule unless its settings turn one on, with
+  `enabled: true`. A job with no schedule runs only on demand, and turning
+  on a schedule a job does not have is refused. Resolution records what
+  runs on the job's deployable (`ir.ResolvedJob`): its API and class, the
+  schedule it runs on in the environment, empty for none, the time zone,
+  the timeout in seconds and the retries.
 - **Running.** `stack dev` runs each schedule beside the servers, never
   two runs of one job at once, with the job's name before each line of its
   output. A job that exits never stops the environment. `superschematic
   stack run <environment> <job>` runs a job once: against the running
   `stack dev`, or in the cloud through the target, waiting for it and
-  reporting its error.
+  reporting its error. The entrypoint, the image, `stack dev`'s schedules
+  and `stack run` are not built yet: the local target places a job and
+  lowers it to a `local:process/job:Job` node, which `stack dev` does not
+  run.
 - **gcp.**
   - A job is a Cloud Run job, with its own account, its API's Cloud SQL
     and egress, one task, and the decorator's timeout and retries.

@@ -393,7 +393,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	edited := []byte("package shoporders\n\n// The engineer's code.\n")
+	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' constructor.\nfunc NewJobs() {}\n")
 	if err := os.WriteFile(file, edited, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +425,36 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 	f.build(t, repoRoot, fakePaths(repoRoot), "shop-stack")
 	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a build scaffolded into a package that holds orders.go: %v", err)
+	}
+}
+
+// TestAnImplementationThatPredatesItsJobsFails: shop-orders declares a
+// job, and its implementation, which exists and so is the engineer's,
+// declares no NewJobs. The build writes nothing into it and fails, saying
+// what to add (D52).
+func TestAnImplementationThatPredatesItsJobsFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
+	file := filepath.Join(dir, apigen.ImplementationFile)
+	before := []byte("package shoporders\n\n// The engineer's code, from before the job.\nfunc New() {}\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack shop-stack: shop-orders declares jobs, and its implementation at " + dir + ", which the build no longer writes into, declares no NewJobs",
+		"func NewJobs(deps api.Deps) (api.Jobs, error)",
+		"ExpireOrders(ctx context.Context) error",
+		"where api is example.com/schemas/api/shop-orders",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
+		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
 	}
 }
 

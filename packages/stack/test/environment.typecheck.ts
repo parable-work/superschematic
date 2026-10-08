@@ -12,6 +12,7 @@ declare module "../src/index" {
       values: { project: string; region: string; production?: boolean };
       server: { minInstances?: number };
       database: { tier?: string; highAvailability?: boolean };
+      job: { cpu?: string };
     };
   }
 }
@@ -38,6 +39,9 @@ const ShopApi = service<"API", ShopApiConfig>({ name: "shop-api", kind: SchemaKi
 const ShopOrders = service({ name: "shop-orders", kind: SchemaKind.API });
 const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
+// An API with @job classes, whose names the sentinel writes as the third
+// type argument.
+const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
 
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
@@ -193,3 +197,66 @@ export abstract class LocalDatabaseSetting {}
   settings: [{ of: ShopApi, port: "8080" }],
 })
 export abstract class LocalPortString {}
+
+// A job's element names its API's handle and the job's class; it changes
+// the schedule, takes the target's job settings, and an env of its API's
+// config (D52).
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [
+    { of: ShopCart, job: "ExpireCarts", schedule: "0 * * * *", timeZone: "Europe/Paris", cpu: "1", env: { LOG_LEVEL: "warn" } },
+    { of: ShopCart, job: "SendDigest", enabled: false },
+    // A handle with no jobs type takes any job name, which the loader checks.
+    { of: ShopOrders, job: "Anything", enabled: true },
+  ],
+})
+export abstract class JobSettings {}
+
+@environment({
+  target: "local",
+  settings: [{ of: ShopCart, job: "ExpireCarts", schedule: "* * * * *" }],
+})
+export abstract class LocalJob {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a job the API does not declare
+  settings: [{ of: ShopCart, job: "ExpireCrats" }],
+})
+export abstract class UnknownJob {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a schedule is a job's setting
+  settings: [{ of: ShopApi, schedule: "0 * * * *" }],
+})
+export abstract class ScheduleOnServer {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a DB service declares no job
+  settings: [{ of: ShopDb, job: "ExpireCarts" }],
+})
+export abstract class JobOfDatabase {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a server's settings on a job
+  settings: [{ of: ShopCart, job: "ExpireCarts", minInstances: 1 }],
+})
+export abstract class ServerSettingOnJob {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error enabled is a boolean
+  settings: [{ of: ShopCart, job: "ExpireCarts", enabled: "no" }],
+})
+export abstract class EnabledString {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local job takes no settings
+  settings: [{ of: ShopCart, job: "ExpireCarts", port: 8080 }],
+})
+export abstract class LocalJobPort {}

@@ -86,18 +86,22 @@ type ResolvedDeployable struct {
 	Platform string `json:"platform"`
 
 	// Services are the DB services a database hosts or the API services a
-	// server serves, sorted by name.
+	// server serves, sorted by name. A job's is its API, which it serves
+	// in a callee's callers field (D52).
 	Services []ServiceRef `json:"services"`
 
 	// Calls are the API services a server calls: the union of the `calls`
-	// of the APIs it serves, sorted by name.
+	// of the APIs it serves, sorted by name. A job's are its API's.
 	Calls []ServiceRef `json:"calls,omitempty"`
 
-	// Language is a server's language; Dialect is the SQL dialect a
-	// database runs, the first of its platform's dialects every hosted
-	// schema supports.
+	// Language is a server's or a job's language; Dialect is the SQL
+	// dialect a database runs, the first of its platform's dialects every
+	// hosted schema supports.
 	Language string `json:"language,omitempty"`
 	Dialect  string `json:"dialect,omitempty"`
+
+	// Job is what a job runs and when; nil for every other kind.
+	Job *ResolvedJob `json:"job,omitempty"`
 
 	// Exposed is true for a server reachable from outside the environment.
 	Exposed bool `json:"exposed,omitempty"`
@@ -114,9 +118,32 @@ type ResolvedDeployable struct {
 	// addresses it.
 	Address any `json:"address,omitempty"`
 
-	// Bindings bind every config field of a server, sorted by field. An
-	// optional field with no value and no default has none.
+	// Bindings bind every config field of a server or a job, sorted by
+	// field. An optional field with no value and no default has none.
 	Bindings []*Binding `json:"bindings,omitempty"`
+}
+
+// ResolvedJob is a job's run in one environment (D52): the method of its
+// API's Jobs interface it calls, and the schedule, time zone, timeout and
+// retries that apply, each the decorator's unless the environment's
+// settings change it.
+type ResolvedJob struct {
+	// API is the API service that declares the job; Name is its `@job`
+	// class's name.
+	API  string `json:"api"`
+	Name string `json:"name"`
+
+	// Schedule is the five-field cron the job runs on in this environment,
+	// in TimeZone. Empty runs it only on demand: it declares none, or the
+	// environment turns it off, or the environment is parameterized and
+	// turns none on.
+	Schedule string `json:"schedule,omitempty"`
+	TimeZone string `json:"timeZone"`
+
+	// TimeoutSeconds bounds one run; Retries is how many times a failed
+	// run is run again.
+	TimeoutSeconds int `json:"timeoutSeconds"`
+	Retries        int `json:"retries,omitempty"`
 }
 
 // UnmarshalJSON decodes a deployable and turns the references in its name
@@ -146,7 +173,8 @@ type Edge struct {
 	// Kind is sql or http.
 	Kind EdgeKind `json:"kind"`
 
-	// From is the server with the need; To is the deployable that meets it.
+	// From is the server or job with the need; To is the deployable that
+	// meets it.
 	From string `json:"from"`
 	To   string `json:"to"`
 
@@ -251,7 +279,8 @@ type StackSecret struct {
 	Type  string `json:"type"`
 	Field string `json:"field"`
 
-	// Readers are the servers whose config includes the field, sorted.
+	// Readers are the servers and jobs whose config includes the field,
+	// sorted.
 	Readers []string `json:"readers"`
 }
 
@@ -346,8 +375,8 @@ const (
 	// StepMigrate runs one migration phase on the databases.
 	StepMigrate DeployStepKind = "migrate"
 
-	// StepRollout applies one wave of servers: each server's callees roll
-	// out in an earlier wave.
+	// StepRollout applies one wave of servers and jobs: the callees of
+	// each roll out in an earlier wave.
 	StepRollout DeployStepKind = "rollout"
 
 	// StepExposure applies the exposure resources.
@@ -381,7 +410,7 @@ type DeployStep struct {
 	Wave int `json:"wave,omitempty"`
 
 	// Deployables are the databases a migrate step migrates, or the
-	// servers a rollout wave rolls out, sorted.
+	// servers and jobs a rollout wave rolls out, sorted.
 	Deployables []string `json:"deployables,omitempty"`
 
 	// Resources are the IDs of the resources the step applies, sorted.
