@@ -23,17 +23,17 @@ func (s slot) after(o slot) bool {
 }
 
 // order writes the deploy order of section 5.3 onto out: infrastructure;
-// the migrations' expand steps; the servers in waves, callees before
-// callers; the migrations' contract steps; exposure. A migrate step names
-// the databases and holds no resource: the deploy runs the migration
+// the migrations' expand steps; the servers and jobs in waves, callees
+// before callers; the migrations' contract steps; exposure. A migrate step
+// names the databases and holds no resource: the deploy runs the migration
 // there. A resource lands in its phase, or in a later step when one of its
 // dependencies does, and its Phase is set to where it landed; a server's
-// own rollout resources land in its wave, and a database's resources land
-// in infrastructure, before the migration that needs them. An inherited
-// resource is the parent environment's: no step applies it, and nothing
-// waits on it.
+// or a job's own rollout resources land in its wave, and a database's
+// resources land in infrastructure, before the migration that needs them.
+// An inherited resource is the parent environment's: no step applies it,
+// and nothing waits on it.
 func (r *resolver) order(out *ir.ResolvedEnvironment) {
-	waves := r.serverWaves
+	waves := r.rolloutWaves
 	graph := out.Resources
 	slots := map[string]slot{}
 	var slotOf func(res *ir.Resource) slot
@@ -75,11 +75,15 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 				r.fail(CodeGraph, "resource %s of database %s lands in %s, after the migration that needs it", res.ID, owner, landed)
 				continue
 			}
-			w, server := waves[owner]
-			if !server || res.Phase != ir.PhaseRollout || !s.after(slot{phase: ir.PhaseRollout, wave: w}) {
+			w, rolls := waves[owner]
+			if !rolls || res.Phase != ir.PhaseRollout || !s.after(slot{phase: ir.PhaseRollout, wave: w}) {
 				continue
 			}
-			r.fail(CodeGraph, "resource %s of server %s lands in %s through its dependencies, after the server's rollout wave %d", res.ID, owner, landed, w)
+			kind := ir.DeployableServer
+			if d := out.Deployable(owner); d != nil {
+				kind = d.Kind
+			}
+			r.fail(CodeGraph, "resource %s of %s %s lands in %s through its dependencies, after the %s's rollout wave %d", res.ID, kind, owner, landed, kind, w)
 		}
 	}
 	if r.failed() {
@@ -142,12 +146,13 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 	out.DeployOrder = steps
 }
 
-// orderServers numbers each server's rollout wave from 1: a server rolls
-// out one wave after the latest of its callees, so a new caller never
-// meets an old callee. A server's calls to the APIs it serves itself do
+// orderRollout numbers each server's and each job's rollout wave from 1:
+// a server rolls out one wave after the latest of its callees, so a new
+// caller never meets an old callee, and a job rolls out after its callees
+// as a server does (D52). A server's calls to the APIs it serves itself do
 // not order it. A cycle of calls between servers has no such order and
 // fails.
-func (r *resolver) orderServers() {
+func (r *resolver) orderRollout() {
 	callees := map[string][]string{}
 	for _, id := range sortedKeys(r.edges) {
 		if e := r.edges[id].res; e.Kind == ir.EdgeHTTP && e.From != e.To {
@@ -182,9 +187,9 @@ func (r *resolver) orderServers() {
 		return wave
 	}
 	for _, name := range sortedKeys(r.deployables) {
-		if r.deployables[name].res.Kind == ir.DeployableServer && !cycle {
+		if r.deployables[name].res.Kind.HasImage() && !cycle {
 			visit(name)
 		}
 	}
-	r.serverWaves = waves
+	r.rolloutWaves = waves
 }

@@ -323,13 +323,25 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 			name: "a literal for a secret, which tsc refuses",
 			from: `env: { LOG_LEVEL: "warn" }`,
 			to:   `env: { LOG_LEVEL: "warn", STRIPE_KEY: "sk_live" }`,
-			want: []string{"stack.schema.ts:31:63:", "Type 'string' is not assignable to type 'never'"},
+			want: []string{"stack.schema.ts:35:63:", "Type 'string' is not assignable to type 'never'"},
 		},
 		{
 			name: "settings of a class that is no deployable",
-			from: `settings: [{ of: Orders, env: { FULFILLMENT_REGION: "us" } }]`,
-			to:   `settings: [{ of: Shop }]`,
+			from: `{ of: Orders, env: { FULFILLMENT_REGION: "us" } },`,
+			to:   `{ of: Shop },`,
 			want: []string{"@environment class Staging settings[0] of names class Shop, which is not an @server or @database class"},
+		},
+		{
+			name: "a job the API does not declare, which tsc refuses",
+			from: `job: "ShipOrders", schedule`,
+			to:   `job: "ShipOrder", schedule`,
+			want: []string{"stack.schema.ts:24:", "is not assignable to type 'never'"},
+		},
+		{
+			name: "a schedule that is no five-field cron",
+			from: `schedule: "0 * * * *"`,
+			to:   `schedule: "0 * * *"`,
+			want: []string{"@environment class Staging settings[1] schedule:", "has 4 fields; a schedule has five"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

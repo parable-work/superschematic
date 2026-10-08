@@ -18,6 +18,12 @@ import (
 // serves has an operation with a user clause. A from handle naming a
 // service the stack does not deploy lists no server here, and is not an
 // error: an API is written once and deployed in many stacks.
+//
+// A job's edges are its API's (D52), and the check of its API's server
+// covers the API's calls. A job takes its edges whether or not it makes the
+// calls, so its own are not checked: it serves its API, as its server does,
+// and forwards no end user, so it reaches what admits its API's service
+// identity or anyone.
 func (r *resolver) checkCalls() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]

@@ -101,9 +101,11 @@ func shop() *ir.Stack {
 	}
 }
 
+// resolve resolves an environment of s over services without their jobs:
+// the gcp target places no job yet (D52).
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: services, Environment: env})
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(services), Environment: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +278,7 @@ func TestProjectNumber(t *testing.T) {
 	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
 		s := shop()
 		s.Environments[0].Values["projectNumber"] = bad
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: "Staging"})
 		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
 			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
 		}

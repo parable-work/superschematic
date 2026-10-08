@@ -745,6 +745,12 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 		w.applySource(td, src)
 	}
 
+	// A @job class declares a job of the API, which @job's Apply recorded
+	// in Schema.Jobs: it is no type (D52).
+	if findDecorator(decorators, "job") != nil {
+		return
+	}
+
 	if _, exists := w.schema.Types[name]; exists {
 		w.addErr(errorAtNode(node, "duplicate type %q", name))
 		return

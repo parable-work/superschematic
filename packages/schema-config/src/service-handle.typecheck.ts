@@ -19,17 +19,25 @@ const handWrittenApi: ServiceHandle<"API"> = service({ name: "shop-orders", kind
 const typedApi: ServiceHandle<"API", ShopApiConfig> = ShopApi;
 const dbHandle: ServiceHandle<"DB"> = ShopDb;
 
+// An API with @job classes: the sentinel writes their names as the third
+// type argument, and the handle is still an API handle.
+const ShopOrders = service<"API", unknown, "ExpireCarts" | "SendDigest">({ name: "shop-orders", kind: SchemaKind.API });
+const ordersAsApi: ServiceHandle<"API"> = ShopOrders;
+
 // Every handle is a ServiceHandle, so authDb and dependencies take any kind.
-const anyHandles: readonly ServiceHandle[] = [ShopApi, ShopDb, ShopCommon, ShopCatalog, handWrittenApi];
+const anyHandles: readonly ServiceHandle[] = [ShopApi, ShopDb, ShopCommon, ShopCatalog, handWrittenApi, ShopOrders];
 
 export const accepted = defineConfig({
   name: "shop-storefront",
   kind: SchemaKind.API,
   authDb: ShopDb,
   dependencies: [ShopDb, ShopCommon],
-  calls: [ShopApi, handWrittenApi],
+  calls: [ShopApi, handWrittenApi, ShopOrders],
   outputs: {}
 });
+
+// @ts-expect-error a handle that may have any job does not stand for one whose jobs are named
+const untypedJobs: ServiceHandle<"API", unknown, "ExpireCarts"> = handWrittenApi;
 
 export const refusedDbCall = defineConfig({
   name: "shop-storefront",
@@ -64,4 +72,4 @@ const mismatchedKind = service<"API">({ name: "shop-db", kind: SchemaKind.DB });
 // @ts-expect-error a DB handle is not an API handle
 const dbForApi: ServiceHandle<"API"> = ShopDb;
 
-export const checked = { typedApi, dbHandle, anyHandles, untypedForTyped, mismatchedKind, dbForApi };
+export const checked = { typedApi, dbHandle, anyHandles, untypedForTyped, mismatchedKind, dbForApi, ordersAsApi, untypedJobs };

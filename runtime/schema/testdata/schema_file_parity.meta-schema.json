@@ -1842,6 +1842,10 @@
           "default": "",
           "type": "string"
         },
+        "job": {
+          "default": "",
+          "type": "string"
+        },
         "service": {
           "$ref": "#/$defs/ServiceRef"
         }
@@ -1851,6 +1855,9 @@
     "DeployableSettings": {
       "additionalProperties": false,
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "env": {
           "additionalProperties": {
             "$ref": "#/$defs/EnvValue"
@@ -1862,6 +1869,14 @@
           "$ref": "#/$defs/DeployableRef"
         },
         "platform": {
+          "default": "",
+          "type": "string"
+        },
+        "schedule": {
+          "default": "",
+          "type": "string"
+        },
+        "timeZone": {
           "default": "",
           "type": "string"
         },
@@ -1963,6 +1978,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/Import"
+          },
+          "type": "array"
+        },
+        "jobs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Job"
           },
           "type": "array"
         },
@@ -2601,6 +2623,38 @@
       },
       "required": [
         "keys"
+      ],
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "retries": {
+          "default": 0,
+          "type": "integer"
+        },
+        "schedule": {
+          "default": "",
+          "type": "string"
+        },
+        "timeZone": {
+          "default": "",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },

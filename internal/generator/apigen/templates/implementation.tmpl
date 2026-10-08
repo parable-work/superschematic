@@ -3,6 +3,9 @@
 // superschematic wrote this package once, as a scaffold, because it was
 // missing. It never writes it again: the package is yours. Each method
 // answers 501 Not Implemented until you implement it.
+{{- if .HasJobs }} Each job fails
+// until you implement it.
+{{- end }}
 package {{ toPackageName .SchemaName }}
 
 import (
@@ -44,6 +47,28 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+{{- if .HasJobs }}
+
+// NewJobs builds the jobs of {{ .SchemaName }} from the API's dependencies. Its
+// signature is the generated one, api.JobsConstructor.
+func NewJobs(deps api.Deps) (api.Jobs, error) {
+	return &jobs{deps: deps}, nil
+}
+
+var _ api.JobsConstructor = NewJobs
+
+// jobs implements api.Jobs.
+type jobs struct {
+	deps api.Deps
+}
+{{- range .Jobs }}
+
+// {{ .Method }} runs the job {{ .Name }}.
+func (j *jobs) {{ .Method }}(ctx context.Context) error {
+	return api.NotImplementedError("job {{ .Name }}")
+}
+{{- end }}
+{{- end }}
 {{- if .IsPublic }}
 
 // AuthMiddleware authenticates the end user on the protected routes of

@@ -31,6 +31,9 @@ types:
       settings:
         - of: { deployable: Orders }
           env: { FULFILLMENT_REGION: { value: us } }
+        - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
+          schedule: "0 * * * *"
+          timeZone: America/New_York
   Production:
     name: Production
     role: EmbeddedStruct
@@ -47,6 +50,8 @@ types:
           env: { LOG_LEVEL: { value: warn } }
         - of: { service: { name: shop-orders, kind: API } }
           env: { FULFILLMENT_REGION: { value: us } }
+        - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
+          values: { cpu: "2" }
   Preview:
     name: Preview
     role: EmbeddedStruct

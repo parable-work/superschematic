@@ -48,7 +48,7 @@ func newFixture(t *testing.T) *fixture {
 // env resolves an environment of the shop stack.
 func (f *fixture) env(t *testing.T, name string) *ir.ResolvedEnvironment {
 	t.Helper()
-	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: name})
+	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.WithoutJobSettings(stacktest.Shop()), Services: stacktest.WithoutJobs(stacktest.AcmeShop()), Environment: name})
 	if err != nil {
 		t.Fatal(err)
 	}

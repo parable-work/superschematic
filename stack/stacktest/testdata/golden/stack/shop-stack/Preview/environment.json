@@ -233,6 +233,108 @@
           "name": "connectionName"
         }
       }
+    },
+    {
+      "name": "shop-orders-ship-orders",
+      "kind": "job",
+      "platform": "fake.job",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "job": {
+        "api": "shop-orders",
+        "name": "ShipOrders",
+        "timeZone": "America/New_York",
+        "timeoutSeconds": 300,
+        "retries": 1
+      },
+      "resourceName": {
+        "$concat": [
+          "shop-orders-ship-orders-",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": {
+                "$concat": [
+                  "shop-api-",
+                  {
+                    "$parameter": "pr"
+                  }
+                ]
+              },
+              "source": "google-id-token"
+            },
+            "url": {
+              "$output": {
+                "resource": "shop-api.service",
+                "name": "url"
+              }
+            }
+          },
+          "edge": "http:shop-orders-ship-orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.account",
+                  "name": "email"
+                }
+              }
+            }
+          },
+          "edge": "sql:shop-orders-ship-orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
     }
   ],
   "edges": [
@@ -246,6 +348,18 @@
         "kind": "API"
       },
       "connector": "fake.run-run",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-ship-orders->shop-api",
+      "kind": "http",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "fake.job-run",
       "field": "SHOP_API_SERVICE"
     },
     {
@@ -271,6 +385,18 @@
       },
       "connector": "fake.run-sql",
       "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-orders-ship-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "fake.job-sql",
+      "field": "SHOP_DB_DATABASE"
     }
   ],
   "secrets": [
@@ -280,7 +406,8 @@
       "field": "STRIPE_KEY",
       "readers": [
         "Orders",
-        "shop-api"
+        "shop-api",
+        "shop-orders-ship-orders"
       ]
     }
   ],
@@ -532,7 +659,8 @@
         "inherited": true,
         "owners": [
           "Orders",
-          "shop-api"
+          "shop-api",
+          "shop-orders-ship-orders"
         ]
       },
       {
@@ -757,6 +885,210 @@
         "owners": [
           "shop-db"
         ]
+      },
+      {
+        "id": "shop-orders-ship-orders.account",
+        "type": "fake:iam/account:Account",
+        "properties": {
+          "name": {
+            "$concat": [
+              "shop-orders-ship-orders-",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.invokes.shop-api",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "shop-api.service",
+              "name": "id"
+            }
+          },
+          "role": "run.invoker"
+        },
+        "dependsOn": [
+          "shop-api.service",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "http:shop-orders-ship-orders->shop-api"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.job",
+        "type": "fake:run/job:Job",
+        "properties": {
+          "account": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "email"
+            }
+          },
+          "env": [
+            {
+              "name": "FULFILLMENT_REGION",
+              "value": "us"
+            },
+            {
+              "name": "MAX_LINE_ITEMS",
+              "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": {
+                "$concat": [
+                  "shop-api-",
+                  {
+                    "$parameter": "pr"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "google-id-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": {
+                "$output": {
+                  "resource": "shop-api.service",
+                  "name": "url"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+              "value": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+              "value": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              }
+            },
+            {
+              "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.account",
+                  "name": "email"
+                }
+              }
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": {
+                "$output": {
+                  "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+                  "name": "id"
+                }
+              }
+            }
+          ],
+          "image": "shop-orders-ship-orders",
+          "language": "go",
+          "name": {
+            "$concat": [
+              "shop-orders-ship-orders-",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          },
+          "retries": 1,
+          "timeoutSeconds": 300
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.service",
+          "shop-db.database.shop-db",
+          "shop-db.instance",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+              "name": "id"
+            }
+          },
+          "role": "secret.accessor"
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.sql.shop-db",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "id"
+            }
+          },
+          "role": "sql.client"
+        },
+        "dependsOn": [
+          "shop-db.instance",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-ship-orders->shop-db"
+        ]
       }
     ]
   },
@@ -770,7 +1102,10 @@
         "shop-api.account",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sql.shop-db",
-        "shop-db.database.shop-db"
+        "shop-db.database.shop-db",
+        "shop-orders-ship-orders.account",
+        "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-orders-ship-orders.sql.shop-db"
       ]
     },
     {
@@ -788,17 +1123,20 @@
       ],
       "resources": [
         "Orders.invokes.shop-api",
-        "shop-api.service"
+        "shop-api.service",
+        "shop-orders-ship-orders.invokes.shop-api"
       ]
     },
     {
       "step": "rollout",
       "wave": 2,
       "deployables": [
-        "Orders"
+        "Orders",
+        "shop-orders-ship-orders"
       ],
       "resources": [
-        "Orders.service"
+        "Orders.service",
+        "shop-orders-ship-orders.job"
       ]
     },
     {

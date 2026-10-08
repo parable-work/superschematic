@@ -29,21 +29,23 @@ export interface Targets {
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container, a server's settings its
- * port, and a database takes no settings. A port left out is derived from
- * the stack, the environment and the server.
+ * port, and a database and a job take no settings. A port left out is
+ * derived from the stack, the environment and the server.
  */
 export interface LocalTarget {
   values: { postgresImage?: string; postgresPort?: number };
   server: { port?: number };
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   database: {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  job: {};
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database";
+export type DeployableKind = "server" | "database" | "job";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -110,6 +112,32 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
       ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
       : never);
 
+/**
+ * A job's schedule as an environment changes it (D52): a five-field cron
+ * read in an IANA time zone, and whether it runs. A member of a
+ * parameterized environment runs no schedule unless `enabled` turns it on.
+ */
+export type JobSchedule = {
+  /** Replaces the `@job` schedule: minute, hour, day of the month, month and day of the week. */
+  readonly schedule?: string;
+  /** The IANA time zone the schedule is read in. */
+  readonly timeZone?: string;
+  /** Turns the schedule on or off; off, the job runs only on demand. */
+  readonly enabled?: boolean;
+};
+
+/**
+ * What a job's settings element is: its API's handle in `of` and the job's
+ * class name in `job`, which the handle's jobs type, its schedule, the
+ * target's job settings, and an env of the API's config, over what the
+ * API's server is given.
+ */
+type JobElementOf<T, Of> =
+  Of extends ServiceHandle<"API", infer C, infer J>
+    ? { readonly of: Of; readonly job: J; readonly platform?: string; readonly env?: EnvOf<C> } & JobSchedule &
+        SettingsOf<T, "job">
+    : never;
+
 /** Every key of W, or of any member when W is a union. */
 type KeysOf<W> = W extends unknown ? keyof W : never;
 
@@ -120,13 +148,19 @@ type Exact<W, E> = W & { readonly [K in Exclude<keyof E, KeysOf<W>>]: never };
 type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<unknown>;
 
 /**
- * One settings element checked: its `of` picks the settings type, its env
- * is the config's fields, and a key neither takes is refused. An element
- * that names a platform, which may be another target's, takes any settings
- * key; the loader checks it against that platform.
+ * One settings element checked: its `of` picks the settings type, and a
+ * `job` beside an API's handle makes it the element of that job; its env is
+ * the config's fields, and a key neither takes is refused. An element that
+ * names a platform, which may be another target's, takes any settings key;
+ * the loader checks it against that platform.
  */
 export type SettingsElement<T, E> = E extends { readonly of: infer Of }
-  ? Exact<ElementOf<E extends { readonly platform: string } ? undefined : T, Of>, E> &
+  ? Exact<
+      E extends { readonly job: unknown }
+        ? JobElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+        : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+      E
+    > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
   : { readonly of: ServiceHandle<"API" | "DB"> | DeployableClass };
 

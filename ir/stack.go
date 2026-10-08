@@ -12,8 +12,9 @@ import "sort"
 // its class's TypeDef (StackDecl, ServerDecl, DatabaseDecl and
 // EnvironmentDecl), and StackOf assembles a schema's declarations into its
 // Stack. A service handle is a ServiceRef, a declared deployable's class is
-// its name, and the keys of one `settings` element other than `of`,
-// `platform` and `env` are the platform settings.
+// its name, and the keys of one `settings` element other than `of`, `job`,
+// `platform`, `env`, `schedule`, `timeZone` and `enabled` are the platform
+// settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -27,16 +28,29 @@ const (
 	// to each served API's database and the address of each service it
 	// calls.
 	DeployableServer DeployableKind = "server"
+
+	// DeployableJob runs one `@job` of an API schema to completion, on a
+	// schedule or on demand. Its needs are its API's: the connection to
+	// the API's database and the address of each service the API calls
+	// (D52).
+	DeployableJob DeployableKind = "job"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob
+}
+
+// HasImage reports whether a deployable of kind k runs code the stack's
+// build writes an entrypoint for, and so has an image a deploy builds,
+// pins and records: a server or a job (D52).
+func (k DeployableKind) HasImage() bool {
+	return k == DeployableServer || k == DeployableJob
 }
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -45,10 +59,11 @@ type EdgeKind string
 
 const (
 	// EdgeSQL runs from a server to the database that hosts a served API's
-	// database schema.
+	// database schema, and from a job to its API's.
 	EdgeSQL EdgeKind = "sql"
 
-	// EdgeHTTP runs from a server to the server that serves an API it calls.
+	// EdgeHTTP runs from a server to the server that serves an API it
+	// calls, and from a job to the server of each API its API calls.
 	EdgeHTTP EdgeKind = "http"
 )
 
@@ -63,18 +78,26 @@ func (k EdgeKind) Valid() bool {
 
 // DeployableRef names a deployable: by a service handle, which means the
 // deployable that hosts or serves that service, or by the name of a
-// declared deployable's class. Exactly one is set.
+// declared deployable's class. Exactly one is set. With Job beside an API
+// service's handle, it names that job of the API (D52).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
 
 	// Deployable is the name of a declared deployable.
 	Deployable string `json:"deployable,omitempty" yaml:"deployable,omitempty"`
+
+	// Job names a job of the API service Service names: the name of its
+	// `@job` class (`{of: ShopOrders, job: "ExpireCarts"}`).
+	Job string `json:"job,omitempty" yaml:"job,omitempty"`
 }
 
 // String renders the reference the way resolution errors quote it.
 func (r DeployableRef) String() string {
 	if r.Service != nil {
+		if r.Job != "" {
+			return r.Service.Name + " job " + r.Job
+		}
 		return r.Service.Name
 	}
 	return r.Deployable
@@ -192,7 +215,21 @@ type DeployableSettings struct {
 	Values map[string]any `json:"values,omitempty" yaml:"values,omitempty"`
 
 	// Env binds fields of a server's `@envVars` type, keyed by field name.
+	// A job's fields are its API's: it takes the env its API's server is
+	// given, with its own over that.
 	Env map[string]EnvValue `json:"env,omitempty" yaml:"env,omitempty"`
+
+	// Schedule replaces a job's schedule, a five-field cron, and TimeZone
+	// the IANA time zone it is read in. Only an element whose `of` names a
+	// job sets them (D52).
+	Schedule string `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	TimeZone string `json:"timeZone,omitempty" yaml:"timeZone,omitempty"`
+
+	// Enabled turns a job's schedule on or off. Unset, a schedule runs,
+	// except in a parameterized environment, whose members run none unless
+	// their settings turn it on. A job whose schedule is off runs only on
+	// demand.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // EnvValue is the value an environment gives one config field: a literal,

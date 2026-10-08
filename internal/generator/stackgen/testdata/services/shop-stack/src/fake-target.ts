@@ -8,6 +8,7 @@ declare module "@superschematic/stack" {
       values: { project: string; projectNumber?: string; region: string; production?: boolean };
       server: { minInstances?: number; public?: boolean };
       database: { tier?: "small" | "large"; highAvailability?: boolean };
+      job: { cpu?: string };
     };
   }
 }
