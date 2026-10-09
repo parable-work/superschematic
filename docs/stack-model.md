@@ -1187,14 +1187,14 @@ change reads as a diff.
 ## 7. The gcp target
 
 `extensions/gcp` builds this section: the target, its Cloud Run, Cloud
-Run job and Cloud SQL platforms, their connectors, the Cloud DNS
-platform, the policy rules, the pinned provider schemas (section 6.4), at
-pulumi-gcp 9.37.1, bootstrap with the target's Secret Manager store and
-state bucket (section 7.3), image builds on Cloud Build, the migration
-job (section 8.4, D46), and a job's run on demand (section 8.7, D52). Its
-golden environments resolve the acme-shop stack of section 4.1,
-shop-orders' job included, in a staging, a production and a parameterized
-preview environment.
+Run job, Cloud Run worker pool (D53) and Cloud SQL platforms, their
+connectors, the Cloud DNS platform, the policy rules, the pinned provider
+schemas (section 6.4), at pulumi-gcp 9.37.1, bootstrap with the target's
+Secret Manager store and state bucket (section 7.3), image builds on
+Cloud Build, the migration job (section 8.4, D46), and a job's run on
+demand (section 8.7, D52). Its golden environments resolve the acme-shop
+stack of section 4.1, shop-orders' job and worker included, in a staging,
+a production and a parameterized preview environment.
 
 ### 7.1 What the engineer enters
 
@@ -1223,13 +1223,14 @@ Bootstrap reads the GitHub repository from the git remote.
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or the job's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service or the job mounts |
+| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
-| calling server or job | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
+| calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
-| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's or job's account, and an environment variable that references its latest version |
-| image | a server's or a job's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
+| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's, job's or worker's account, and an environment variable that references its latest version |
+| image | a server's, a job's or a worker's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
@@ -1367,15 +1368,17 @@ in its database; the migration job grants them (section 8.4, D46).
 
 The target sets defaults that `settings` can override:
 
-- one service account per server and per job;
+- one service account per server, per job and per worker;
 - deletion protection on production databases (`deletionProtection`);
 - a zonal instance unless `highAvailability` is set, on the
   `db-custom-1-3840` tier of the Enterprise edition (`tier`), running
   Postgres 16, the version CI tests against (`version`), with backups on
   and point-in-time recovery in production;
 - one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
-  `minInstances`, `maxInstances`, `concurrency`), and one CPU and 512 MiB
-  per job's task (`cpu`, `memory`);
+  `minInstances`, `maxInstances`, `concurrency`), one CPU and 512 MiB
+  per job's task (`cpu`, `memory`), and one CPU and 512 MiB per instance
+  of a worker's pool (`cpu`, `memory`), whose instances and concurrency
+  are the core's settings (section 8.8);
 - a server's CPU allocated only while an instance handles a request
   (`cpuAlwaysAllocated`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
@@ -1390,7 +1393,8 @@ sets `cpuIdle` unless the server's settings set `cpuAlwaysAllocated:
 true`, for a server that works between requests, in goroutines of its own
 or on the warm instances `minInstances` keeps. Cloud Run takes a `cpu`
 below 1 only with `cpuIdle`. A job's task always has its CPU (D30,
-amended).
+amended), and so does a worker pool's instance, which claims between
+messages, so a worker's `cpu` is one or more (D53).
 
 ### 7.6 Policy rules
 
@@ -2230,10 +2234,20 @@ export abstract class FulfilOrders {}
 - **Local.** `stack dev` runs each worker as a process with no port,
   ready once it starts, its output prefixed with its name. Its exit stops
   the environment, as a server's does (section 8.3).
-- **gcp.** A worker is a Cloud Run worker pool
-  (`gcp:cloudrunv2/workerPool:WorkerPool`), which has no port and no URL,
-  with as many instances as its settings say. Not built yet: the gcp
-  target places no worker.
+- **gcp.** A worker is a Cloud Run worker pool (`gcp.cloudrunworker`,
+  `gcp:cloudrunv2/workerPool:WorkerPool`, GA in the pinned pulumi-gcp
+  9.37.1), which has no port, no URL and no IAM of its own (section 7.2).
+  It scales manually to the worker's instances, and to zero when the
+  environment turns the worker off, which keeps the pool and its pinned
+  image. Its account connects as a server's does, and the migration job
+  grants its IAM database user read and write privileges, since the
+  deploy's migration plan lists every deployable with a sql edge to the
+  DB service. A grace of ten seconds or more is refused, since Cloud Run
+  kills an instance ten seconds after SIGTERM. A worker pool's CPU is
+  always allocated, so `cpu` takes one or more. Bootstrap needs no new API
+  or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
+  `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
+  reads them.
 
 Not built:
 
@@ -3407,9 +3421,10 @@ model, or retired, when it lands.
    - jobs and scheduled jobs, on the local target and on gcp as Cloud
      Run jobs with Cloud Scheduler (section 8.7, D52);
    - queues in a DB service's database, and Go workers that handle them,
-     on the local target (section 8.8, D53).
+     on the local target and on gcp as Cloud Run worker pools (section
+     8.8, D53).
    
-   Not yet: workers on gcp, buckets, static sites and a second target.
+   Not yet: buckets, static sites and a second target.
 
 ## 15. Open questions
 

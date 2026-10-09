@@ -1,6 +1,7 @@
 // Package gcp is the gcp target of the stack model (docs/stack-model.md,
 // section 7): Cloud Run servers, Cloud Run jobs and their Cloud Scheduler
-// schedules, Cloud SQL Postgres databases, Secret Manager secrets, a global
+// schedules, Cloud Run worker pools, Cloud SQL Postgres databases, Secret
+// Manager secrets, a global
 // external Application Load Balancer for exposed servers, and Cloud DNS for
 // their records. It registers through the
 // public registry package alone, as any extension does (D10), in a Go
@@ -33,10 +34,12 @@ const (
 
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
+	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
 	// CloudSQL runs Postgres databases on Cloud SQL instances.
-	CloudRun    = "gcp.cloudrun"
-	CloudRunJob = "gcp.cloudrunjob"
-	CloudSQL    = "gcp.cloudsql"
+	CloudRun       = "gcp.cloudrun"
+	CloudRunJob    = "gcp.cloudrunjob"
+	CloudRunWorker = "gcp.cloudrunworker"
+	CloudSQL       = "gcp.cloudsql"
 
 	// CloudDNS writes an environment's records into a Cloud DNS managed
 	// zone. It is the target's default DNS platform.
@@ -51,6 +54,12 @@ const (
 	// edges are its API's, as the server's connectors do (D52).
 	JobSQLConnector  = "gcp.cloudrunjob-cloudsql"
 	JobHTTPConnector = "gcp.cloudrunjob-cloudrun"
+
+	// WorkerSQLConnector and WorkerHTTPConnector connect a Cloud Run
+	// worker pool, whose edges are its API's, as the server's connectors
+	// do (D53).
+	WorkerSQLConnector  = "gcp.cloudrunworker-cloudsql"
+	WorkerHTTPConnector = "gcp.cloudrunworker-cloudrun"
 
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
@@ -128,6 +137,16 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      CloudRunWorker,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageGo},
+			Settings:  json.RawMessage(cloudRunWorkerSettings),
+			NameOf:    serviceName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerWorker,
+		},
+		{
 			Name:      CloudSQL,
 			Extension: Name,
 			Kind:      ir.DeployableDatabase,
@@ -147,6 +166,8 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunJob, To: CloudRun, Connect: connectHTTP},
+		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunWorker, To: CloudSQL, Connect: connectSQL},
+		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunWorker, To: CloudRun, Connect: connectHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -168,6 +189,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   CloudRun,
 			ir.DeployableDatabase: CloudSQL,
 			ir.DeployableJob:      CloudRunJob,
+			ir.DeployableWorker:   CloudRunWorker,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,

@@ -11,6 +11,7 @@ const (
 	TypeServiceIAMMember    = "gcp:cloudrunv2/serviceIamMember:ServiceIamMember"
 	TypeJob                 = "gcp:cloudrunv2/job:Job"
 	TypeJobIAMMember        = "gcp:cloudrunv2/jobIamMember:JobIamMember"
+	TypeWorkerPool          = "gcp:cloudrunv2/workerPool:WorkerPool"
 	TypeSchedulerJob        = "gcp:cloudscheduler/job:Job"
 	TypeSecret              = "gcp:secretmanager/secret:Secret"
 	TypeSecretIAMMember     = "gcp:secretmanager/secretIamMember:SecretIamMember"
@@ -83,6 +84,21 @@ const cloudRunJobSettings = `{
   "type": "object",
   "properties": {
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+  },
+  "additionalProperties": false
+}`
+
+// cloudRunWorkerSettings is the schema of a worker's settings on a Cloud
+// Run worker pool (D53): the resources of each instance's container. A
+// worker pool's CPU is always allocated, which Cloud Run gives as one CPU
+// or more, so a fraction of one is refused here rather than by the deploy.
+// How many instances run, and how many messages each handles, are the
+// core's settings (ir.ResolvedWorker).
+const cloudRunWorkerSettings = `{
+  "type": "object",
+  "properties": {
+    "cpu": {"type": "string", "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|[1-9][0-9]{3,}m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
   "additionalProperties": false

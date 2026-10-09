@@ -24,6 +24,7 @@
     "gcp:cloudrunv2/jobIamMember:JobIamMember",
     "gcp:cloudrunv2/service:Service",
     "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+    "gcp:cloudrunv2/workerPool:WorkerPool",
     "gcp:cloudscheduler/job:Job",
     "gcp:compute/backendService:BackendService",
     "gcp:compute/globalAddress:GlobalAddress",

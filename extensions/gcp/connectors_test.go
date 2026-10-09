@@ -62,7 +62,7 @@ func wantJSON(t *testing.T, what string, got any, want string) {
 // the Cloud SQL connection it derives, which the server's service carries
 // as variables and mounts as its Cloud SQL connection.
 func TestSQLConnectorGrants(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), acmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
 	edge := "sql:shop-api->shop-db"
 	if got, want := strings.Join(ownedBy(env, edge), ", "), "shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, shop-api.database-user.shop-db"; got != want {
 		t.Errorf("%s produces %s, want %s", edge, got, want)
@@ -111,7 +111,7 @@ func TestSQLConnectorGrants(t *testing.T) {
 // TestSQLConnectorUnderParameter checks that a preview member's database
 // user is its own account's, on the instance it inherits.
 func TestSQLConnectorUnderParameter(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), acmeShop(), "Preview")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Preview")
 	user := node(t, env, "shop-api.database-user.shop-db")
 	if user.Inherited {
 		t.Error("the preview's database user is inherited; each member creates its own")
@@ -126,7 +126,7 @@ func TestSQLConnectorUnderParameter(t *testing.T) {
 // to lower: Cloud SQL has no connector for Rust, and the password form is
 // not built.
 func TestSQLConnectorRefusesRust(t *testing.T) {
-	services := acmeShop()
+	services := stacktest.AcmeShop()
 	for i := range services {
 		if services[i].Name == "shop-api" {
 			services[i].Language = registry.APILanguageRust
@@ -147,7 +147,7 @@ func TestSQLConnectorRefusesRust(t *testing.T) {
 // Service-Authorization alone, since the callee's invoker check is off,
 // and the caller's traffic leaves through the environment's VPC.
 func TestHTTPConnectorGrants(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), acmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
 	edge := "http:Orders->shop-api"
 	if got := strings.Join(ownedBy(env, edge), ", "); got != "Orders.run-invoker.shop-api" {
 		t.Errorf("%s produces %s, want Orders.run-invoker.shop-api", edge, got)
@@ -172,8 +172,8 @@ func TestHTTPConnectorGrants(t *testing.T) {
 	if _, ok := node(t, env, "shop-api.service").Properties["template"].(map[string]any)["vpcAccess"]; ok {
 		t.Error("shop-api calls no other server, yet has VPC egress")
 	}
-	if got := strings.Join(node(t, env, "network.nat").Owners, ", "); got != "Orders, shop-orders-ship-orders" {
-		t.Errorf("the network's owners are %s, want the one calling server, Orders, and shop-orders' job, which calls what its API calls", got)
+	if got := strings.Join(node(t, env, "network.nat").Owners, ", "); got != "Orders, shop-orders-fulfil-orders, shop-orders-ship-orders" {
+		t.Errorf("the network's owners are %s, want the one calling server, Orders, and shop-orders' job and worker, which call what their API calls", got)
 	}
 }
 
@@ -181,26 +181,28 @@ func TestHTTPConnectorGrants(t *testing.T) {
 // gives a callee with a service clause: SHOP_API_CALLERS holds Google's
 // issuer and keys, shop-api's custom audience, which Orders's token is
 // for, and Orders's service account by the email claim, as the deployable
-// Orders that serves shop-orders; and shop-orders' job by its own
-// account's email, as the deployable shop-orders-ship-orders, which
-// serves shop-orders too (D52). On the server, the field is one variable
-// per member, the lists of objects counted and indexed.
+// Orders that serves shop-orders; and shop-orders' job and worker each by
+// its own account's email, as the deployables shop-orders-ship-orders
+// (D52) and shop-orders-fulfil-orders (D53), which serve shop-orders too.
+// On the server, the field is one variable per member, the lists of
+// objects counted and indexed.
 func TestHTTPConnectorGivesTheCalleeItsCaller(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.WithoutWorkers(stacktest.RequireServiceShop()), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.RequireServiceShop(), "Staging")
 	callers := binding(t, env, "shop-api", "SHOP_API_CALLERS")
 	if callers.Source != ir.BindingDerived || callers.CallersOf != "shop-api" ||
-		strings.Join(callers.Edges, ",") != "http:Orders->shop-api,http:shop-orders-ship-orders->shop-api" {
-		t.Errorf("SHOP_API_CALLERS = %+v, want the derived callers of shop-api from Orders's edge and the job's", callers)
+		strings.Join(callers.Edges, ",") != "http:Orders->shop-api,http:shop-orders-fulfil-orders->shop-api,http:shop-orders-ship-orders->shop-api" {
+		t.Errorf("SHOP_API_CALLERS = %+v, want the derived callers of shop-api from Orders's edge, the worker's and the job's", callers)
 	}
 	wantJSON(t, "SHOP_API_CALLERS", callers.Value,
 		`{"issuers":[{"algorithms":["RS256"],"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","callers":[`+
 			`{"deployable":"Orders","serves":["shop-orders"],"subject":"orders@acme-staging.iam.gserviceaccount.com"},`+
+			`{"deployable":"shop-orders-fulfil-orders","serves":["shop-orders"],"subject":"shop-orders-fulfil-orders@acme-staging.iam.gserviceaccount.com"},`+
 			`{"deployable":"shop-orders-ship-orders","serves":["shop-orders"],"subject":"shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com"}],`+
 			`"issuer":"https://accounts.google.com","issuerAliases":["accounts.google.com"],"jwksUrl":"https://www.googleapis.com/oauth2/v3/certs","subjectClaim":"email"}]}`)
 	if err := ir.CheckServiceAuth(callers.Value); err != nil {
 		t.Error(err)
 	}
-	for _, caller := range []string{"Orders", "shop-orders-ship-orders"} {
+	for _, caller := range []string{"Orders", "shop-orders-fulfil-orders", "shop-orders-ship-orders"} {
 		token := binding(t, env, caller, "SHOP_API_SERVICE").Value.(map[string]any)["credential"].(map[string]any)["audience"]
 		if token != callers.Value.(map[string]any)["issuers"].([]any)[0].(map[string]any)["audience"] {
 			t.Errorf("%s's token is for %v, which shop-api does not accept", caller, token)
@@ -220,13 +222,16 @@ func TestHTTPConnectorGivesTheCalleeItsCaller(t *testing.T) {
 		"SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS":           "RS256",
 		"SHOP_API_CALLERS_ISSUERS_0_JWKS_URL":             "https://www.googleapis.com/oauth2/v3/certs",
 		"SHOP_API_CALLERS_ISSUERS_0_SUBJECT_CLAIM":        "email",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "2",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "3",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT":    "orders@acme-staging.iam.gserviceaccount.com",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES":     "shop-orders",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT":    "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT":    "shop-orders-fulfil-orders@acme-staging.iam.gserviceaccount.com",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SERVES":     "shop-orders",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE": "shop-orders-ship-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE": "shop-orders-fulfil-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_SUBJECT":    "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_SERVES":     "shop-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_DEPLOYABLE": "shop-orders-ship-orders",
 	} {
 		if got := vars[name]; got != want {
 			t.Errorf("shop-api's service sets %s to %v, want %v", name, got, want)
@@ -252,7 +257,7 @@ func internalShop() *ir.Stack {
 // on, and the token also travels in X-Serverless-Authorization, which the
 // check reads, so the end user's Authorization reaches the application.
 func TestHTTPConnectorInternalCallee(t *testing.T) {
-	env := resolve(t, assemble(t), internalShop(), acmeShop(), "Staging")
+	env := resolve(t, assemble(t), internalShop(), stacktest.AcmeShop(), "Staging")
 	wantJSON(t, "derived endpoint", binding(t, env, "Orders", "SHOP_API_SERVICE").Value,
 		`{"credential":{"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","headers":["Service-Authorization","X-Serverless-Authorization"],"source":"google-id-token"},"url":{"$output":{"resource":"shop-api.service","name":"uri"}}}`)
 	callee := node(t, env, "shop-api.service").Properties
@@ -277,7 +282,7 @@ func TestExposedWithoutDomain(t *testing.T) {
 	for _, env := range s.Environments {
 		env.Domain, env.DNS = "", nil
 	}
-	env := resolve(t, assemble(t), s, acmeShop(), "Staging")
+	env := resolve(t, assemble(t), s, stacktest.AcmeShop(), "Staging")
 	callee := node(t, env, "shop-api.service").Properties
 	if callee["ingress"] != "INGRESS_TRAFFIC_ALL" || callee["invokerIamDisabled"] != true {
 		t.Errorf("shop-api takes %v with invokerIamDisabled %v, want all traffic with the check off", callee["ingress"], callee["invokerIamDisabled"])
@@ -308,13 +313,13 @@ func TestHTTPConnectorSelfCall(t *testing.T) {
 			}
 		}
 	}
-	env := resolve(t, assemble(t), s, acmeShop(), "Staging")
+	env := resolve(t, assemble(t), s, stacktest.AcmeShop(), "Staging")
 	wantJSON(t, "self endpoint", binding(t, env, "Backend", "SHOP_API_SERVICE").Value, `{"url":"http://127.0.0.1:8080"}`)
 	if ids := ownedBy(env, "http:Backend->shop-api"); len(ids) > 0 {
 		t.Errorf("the self edge produces %v", ids)
 	}
-	if got := strings.Join(node(t, env, "network").Owners, ", "); got != "shop-orders-ship-orders" {
-		t.Errorf("the network's owners are %s, want the job alone: a server that calls only itself has no VPC", got)
+	if got := strings.Join(node(t, env, "network").Owners, ", "); got != "shop-orders-fulfil-orders, shop-orders-ship-orders" {
+		t.Errorf("the network's owners are %s, want the job and the worker alone: a server that calls only itself has no VPC", got)
 	}
 	wantJSON(t, "the job's endpoint", binding(t, env, "shop-orders-ship-orders", "SHOP_API_SERVICE").Value,
 		`{"credential":{"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/backend","headers":["Service-Authorization","X-Serverless-Authorization"],"source":"google-id-token"},"url":{"$output":{"resource":"Backend.service","name":"uri"}}}`)
@@ -335,7 +340,7 @@ func TestAccountIDLength(t *testing.T) {
 			}
 		}
 	}
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: acmeShop(), Environment: "Staging"})
+	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "GCP allows 30") {
 		t.Fatalf("err = %v, want the service account id refused for its length", err)
 	}

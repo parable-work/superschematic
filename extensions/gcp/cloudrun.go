@@ -15,7 +15,8 @@ import (
 // a reference to its Secret Manager secret, a derived field as one
 // variable per member of the value its edge's connector derived.
 // The job platform (cloudrunjob.go) lowers a job the same way, to a Cloud
-// Run job (D52).
+// Run job (D52), and the worker platform (cloudrunworker.go) a worker, to
+// a Cloud Run worker pool (D53).
 
 // The ingress settings a service takes.
 const (
@@ -139,10 +140,11 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
-// workload is what lowerWorkload makes of a server or a job for the Cloud
-// Run resource that runs it: its one container, and the template that
-// holds the container. A service's template is a revision's and a job's a
-// task's, which take the members here under the same names.
+// workload is what lowerWorkload makes of a server, a job or a worker for
+// the Cloud Run resource that runs it: its one container, and the template
+// that holds the container. A service's template is a revision's, a job's
+// a task's and a worker pool's a revision's, which take the members here
+// under the same names.
 type workload struct {
 	// container has the image, the resource limits, the environment and
 	// the Cloud SQL mount; the platform adds what only its resource takes.
@@ -153,8 +155,8 @@ type workload struct {
 	template map[string]any
 }
 
-// lowerWorkload lowers what a server and a job share (sections 7.2 and
-// 8.7, D52):
+// lowerWorkload lowers what a server, a job and a worker share (sections
+// 7.2, 8.7 and 8.8, D52, D53):
 //
 //   - a service account named after the deployable, and the trace agent
 //     role for it, since the entrypoint exports traces to Cloud Trace
@@ -266,10 +268,10 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 }
 
 // callsAnother reports whether a server calls an API another server
-// serves. A call to an API it serves itself stays on loopback. A job
-// serves its API alone and runs apart from every server (D52), so it
-// reaches each API its API calls over the network, the server of its own
-// API's siblings included.
+// serves. A call to an API it serves itself stays on loopback. A job or a
+// worker serves its API alone and runs apart from every server (D52, D53),
+// so it reaches each API its API calls over the network, the server of its
+// own API's siblings included.
 func callsAnother(d ir.ResolvedDeployable) bool {
 	for _, call := range d.Calls {
 		if !slices.ContainsFunc(d.Services, func(s ir.ServiceRef) bool { return s.Name == call.Name }) {

@@ -96,8 +96,9 @@ type AppliedSchema struct {
 	// it and refuses any other plan until it does.
 	Pending *PendingMigration `json:"pending,omitempty"`
 
-	// Servers are the servers and jobs that connected to the DB service when the
-	// migration runner last ran on it, sorted. A runner that owns the
+	// Servers are the servers, jobs and workers (D53) that connected to the
+	// DB service when the migration runner last ran on it, sorted, by
+	// their sql edges. A runner that owns the
 	// database's privileges gave each what it reads and writes (D46), so a
 	// deploy runs the expand phase of a DB service whose connecting
 	// servers changed even when its plan has no expand steps.

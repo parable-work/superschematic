@@ -385,15 +385,16 @@ func newDeployFixture(t *testing.T, withRunner bool) *deployFixture {
 	return f
 }
 
-// shopImages are images of the shop's servers and its job in the
-// repository the Cloud Run platforms write.
+// shopImages are images of the shop's servers, its job and its worker in
+// the repository the Cloud Run platforms write.
 func shopImages(project string, n int) map[string]string {
 	digest := "sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
 	repo := "us-east1-docker.pkg.dev/" + project + "/shop/"
 	return map[string]string{
-		"shop-api":                repo + "shop-api@" + digest,
-		"Orders":                  repo + "orders@" + digest,
-		"shop-orders-ship-orders": repo + "shop-orders-ship-orders@" + digest,
+		"shop-api":                  repo + "shop-api@" + digest,
+		"Orders":                    repo + "orders@" + digest,
+		"shop-orders-ship-orders":   repo + "shop-orders-ship-orders@" + digest,
+		"shop-orders-fulfil-orders": repo + "shop-orders-fulfil-orders@" + digest,
 	}
 }
 
@@ -414,7 +415,7 @@ func shopPlanner(service, dialect string, _ json.RawMessage) (*stack.DatabasePla
 // manifest lands in the state bucket.
 func TestDeployShopOnGCP(t *testing.T) {
 	f := newDeployFixture(t, true)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	ctx := context.Background()
 	// The infrastructure step creates the secret; the fake provisioner
 	// creates nothing, so the test does.
@@ -436,7 +437,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		steps = append(steps, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 45 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
+	want := []string{"render 53 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("ran %q, want %q", steps, want)
 	}
@@ -461,7 +462,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 // TestStores covers the state bucket and Secret Manager names.
 func TestStores(t *testing.T) {
 	f := newDeployFixture(t, false)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Preview")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
 	target, _ := f.reg.Target(gcp.Target)
 	ctx := context.Background()
 	backend, err := target.State.Backend(ctx, env)
@@ -526,7 +527,7 @@ func TestStores(t *testing.T) {
 // same graph and returns the same number.
 func TestBootstrap(t *testing.T) {
 	f := newDeployFixture(t, false)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	target, _ := f.reg.Target(gcp.Target)
 	ctx := context.Background()
 	cred := registry.Credential{Secret: "shop-cloudflare-dns-acme_dev", Env: "CLOUDFLARE_API_TOKEN", Description: "A token"}
@@ -589,7 +590,7 @@ func TestBootstrap(t *testing.T) {
 // what a graph without a repository leaves out.
 func TestBootstrapGraph(t *testing.T) {
 	reg := assemble(t)
-	env := resolve(t, reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
 	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
 	if err != nil {
 		t.Fatal(err)
@@ -646,7 +647,7 @@ func TestBootstrapGraph(t *testing.T) {
 // TestNoDeprecatedProperties walks the environments'.
 func TestBootstrapGraphNoDeprecatedProperties(t *testing.T) {
 	reg := assemble(t)
-	env := resolve(t, reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
 	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
 	if err != nil {
 		t.Fatal(err)

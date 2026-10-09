@@ -1,0 +1,675 @@
+{
+  "token": "gcp:cloudrunv2/workerPool:WorkerPool",
+  "terraform": {
+    "type": "google_cloud_run_v2_worker_pool",
+    "renames": {
+      "binaryAuthorization": "binary_authorization",
+      "binaryAuthorization.breakglassJustification": "breakglass_justification",
+      "binaryAuthorization.useDefault": "use_default",
+      "clientVersion": "client_version",
+      "customAudiences": "custom_audiences",
+      "deletionPolicy": "deletion_policy",
+      "deletionProtection": "deletion_protection",
+      "instanceSplits": "instance_splits",
+      "launchStage": "launch_stage",
+      "scaling.manualInstanceCount": "manual_instance_count",
+      "scaling.maxInstanceCount": "max_instance_count",
+      "scaling.minInstanceCount": "min_instance_count",
+      "scaling.scalingMode": "scaling_mode",
+      "template.clientVersion": "client_version",
+      "template.containers.commands": "command",
+      "template.containers.dependsOns": "depends_on",
+      "template.containers.envs": "env",
+      "template.containers.envs.valueSource": "value_source",
+      "template.containers.envs.valueSource.secretKeyRef": "secret_key_ref",
+      "template.containers.livenessProbe": "liveness_probe",
+      "template.containers.livenessProbe.failureThreshold": "failure_threshold",
+      "template.containers.livenessProbe.httpGet": "http_get",
+      "template.containers.livenessProbe.httpGet.httpHeaders": "http_headers",
+      "template.containers.livenessProbe.initialDelaySeconds": "initial_delay_seconds",
+      "template.containers.livenessProbe.periodSeconds": "period_seconds",
+      "template.containers.livenessProbe.tcpSocket": "tcp_socket",
+      "template.containers.livenessProbe.timeoutSeconds": "timeout_seconds",
+      "template.containers.startupProbe": "startup_probe",
+      "template.containers.startupProbe.failureThreshold": "failure_threshold",
+      "template.containers.startupProbe.httpGet": "http_get",
+      "template.containers.startupProbe.httpGet.httpHeaders": "http_headers",
+      "template.containers.startupProbe.initialDelaySeconds": "initial_delay_seconds",
+      "template.containers.startupProbe.periodSeconds": "period_seconds",
+      "template.containers.startupProbe.tcpSocket": "tcp_socket",
+      "template.containers.startupProbe.timeoutSeconds": "timeout_seconds",
+      "template.containers.volumeMounts": "volume_mounts",
+      "template.containers.volumeMounts.mountPath": "mount_path",
+      "template.containers.volumeMounts.subPath": "sub_path",
+      "template.containers.workingDir": "working_dir",
+      "template.encryptionKey": "encryption_key",
+      "template.encryptionKeyRevocationAction": "encryption_key_revocation_action",
+      "template.encryptionKeyShutdownDuration": "encryption_key_shutdown_duration",
+      "template.gpuZonalRedundancyDisabled": "gpu_zonal_redundancy_disabled",
+      "template.nodeSelector": "node_selector",
+      "template.serviceAccount": "service_account",
+      "template.volumes.cloudSqlInstance": "cloud_sql_instance",
+      "template.volumes.emptyDir": "empty_dir",
+      "template.volumes.emptyDir.sizeLimit": "size_limit",
+      "template.volumes.gcs.mountOptions": "mount_options",
+      "template.volumes.gcs.readOnly": "read_only",
+      "template.volumes.nfs.readOnly": "read_only",
+      "template.volumes.secret.defaultMode": "default_mode",
+      "template.vpcAccess": "vpc_access",
+      "template.vpcAccess.networkInterfaces": "network_interfaces"
+    }
+  },
+  "inputProperties": {
+    "annotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "binaryAuthorization": {
+      "$ref": "#/types/gcp:cloudrunv2/WorkerPoolBinaryAuthorization:WorkerPoolBinaryAuthorization"
+    },
+    "client": {
+      "type": "string"
+    },
+    "clientVersion": {
+      "type": "string"
+    },
+    "customAudiences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "deprecationMessage": "<span pulumi-lang-nodejs=\"`customAudiences`\" pulumi-lang-dotnet=\"`CustomAudiences`\" pulumi-lang-go=\"`customAudiences`\" pulumi-lang-python=\"`custom_audiences`\" pulumi-lang-yaml=\"`customAudiences`\" pulumi-lang-java=\"`customAudiences`\" pulumi-lang-hcl=\"`custom_audiences`\">`customAudiences`</span> is deprecated since it is not applicable to WorkerPool resource and will be removed in a future major release."
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "deletionProtection": {
+      "type": "boolean"
+    },
+    "description": {
+      "type": "string"
+    },
+    "instanceSplits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:cloudrunv2/WorkerPoolInstanceSplit:WorkerPoolInstanceSplit"
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "launchStage": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "scaling": {
+      "$ref": "#/types/gcp:cloudrunv2/WorkerPoolScaling:WorkerPoolScaling"
+    },
+    "template": {
+      "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplate:WorkerPoolTemplate"
+    }
+  },
+  "requiredInputs": [
+    "location",
+    "template"
+  ],
+  "types": {
+    "gcp:cloudrunv2/WorkerPoolBinaryAuthorization:WorkerPoolBinaryAuthorization": {
+      "type": "object",
+      "properties": {
+        "breakglassJustification": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "useDefault": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolInstanceSplit:WorkerPoolInstanceSplit": {
+      "type": "object",
+      "properties": {
+        "percent": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolScaling:WorkerPoolScaling": {
+      "type": "object",
+      "properties": {
+        "manualInstanceCount": {
+          "type": "integer"
+        },
+        "maxInstanceCount": {
+          "type": "integer"
+        },
+        "minInstanceCount": {
+          "type": "integer"
+        },
+        "scalingMode": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplate:WorkerPoolTemplate": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "client": {
+          "type": "string"
+        },
+        "clientVersion": {
+          "type": "string"
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainer:WorkerPoolTemplateContainer"
+          }
+        },
+        "encryptionKey": {
+          "type": "string"
+        },
+        "encryptionKeyRevocationAction": {
+          "type": "string"
+        },
+        "encryptionKeyShutdownDuration": {
+          "type": "string"
+        },
+        "gpuZonalRedundancyDisabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "nodeSelector": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateNodeSelector:WorkerPoolTemplateNodeSelector"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "serviceAccount": {
+          "type": "string"
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolume:WorkerPoolTemplateVolume"
+          }
+        },
+        "vpcAccess": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVpcAccess:WorkerPoolTemplateVpcAccess"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainer:WorkerPoolTemplateContainer": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dependsOns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "envs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerEnv:WorkerPoolTemplateContainerEnv"
+          }
+        },
+        "image": {
+          "type": "string"
+        },
+        "livenessProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbe:WorkerPoolTemplateContainerLivenessProbe"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerResources:WorkerPoolTemplateContainerResources"
+        },
+        "startupProbe": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbe:WorkerPoolTemplateContainerStartupProbe"
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerVolumeMount:WorkerPoolTemplateContainerVolumeMount"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerEnv:WorkerPoolTemplateContainerEnv": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "valueSource": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerEnvValueSource:WorkerPoolTemplateContainerEnvValueSource"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerEnvValueSource:WorkerPoolTemplateContainerEnvValueSource": {
+      "type": "object",
+      "properties": {
+        "secretKeyRef": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerEnvValueSourceSecretKeyRef:WorkerPoolTemplateContainerEnvValueSourceSecretKeyRef"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerEnvValueSourceSecretKeyRef:WorkerPoolTemplateContainerEnvValueSourceSecretKeyRef": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbe:WorkerPoolTemplateContainerLivenessProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeGrpc:WorkerPoolTemplateContainerLivenessProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeHttpGet:WorkerPoolTemplateContainerLivenessProbeHttpGet"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "tcpSocket": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeTcpSocket:WorkerPoolTemplateContainerLivenessProbeTcpSocket"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeGrpc:WorkerPoolTemplateContainerLivenessProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeHttpGet:WorkerPoolTemplateContainerLivenessProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "httpHeaders": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeHttpGetHttpHeaders:WorkerPoolTemplateContainerLivenessProbeHttpGetHttpHeaders"
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeHttpGetHttpHeaders:WorkerPoolTemplateContainerLivenessProbeHttpGetHttpHeaders": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "deprecationMessage": "<span pulumi-lang-nodejs=\"`port`\" pulumi-lang-dotnet=\"`Port`\" pulumi-lang-go=\"`port`\" pulumi-lang-python=\"`port`\" pulumi-lang-yaml=\"`port`\" pulumi-lang-java=\"`port`\" pulumi-lang-hcl=\"`port`\">`port`</span> field is deprecated and will be removed in a future major release. It was never supported by the API."
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerLivenessProbeTcpSocket:WorkerPoolTemplateContainerLivenessProbeTcpSocket": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerResources:WorkerPoolTemplateContainerResources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbe:WorkerPoolTemplateContainerStartupProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "grpc": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeGrpc:WorkerPoolTemplateContainerStartupProbeGrpc"
+        },
+        "httpGet": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeHttpGet:WorkerPoolTemplateContainerStartupProbeHttpGet"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "tcpSocket": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeTcpSocket:WorkerPoolTemplateContainerStartupProbeTcpSocket"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeGrpc:WorkerPoolTemplateContainerStartupProbeGrpc": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeHttpGet:WorkerPoolTemplateContainerStartupProbeHttpGet": {
+      "type": "object",
+      "properties": {
+        "httpHeaders": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeHttpGetHttpHeaders:WorkerPoolTemplateContainerStartupProbeHttpGetHttpHeaders"
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeHttpGetHttpHeaders:WorkerPoolTemplateContainerStartupProbeHttpGetHttpHeaders": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "deprecationMessage": "<span pulumi-lang-nodejs=\"`port`\" pulumi-lang-dotnet=\"`Port`\" pulumi-lang-go=\"`port`\" pulumi-lang-python=\"`port`\" pulumi-lang-yaml=\"`port`\" pulumi-lang-java=\"`port`\" pulumi-lang-hcl=\"`port`\">`port`</span> field is deprecated and will be removed in a future major release. It was never supported by the API."
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerStartupProbeTcpSocket:WorkerPoolTemplateContainerStartupProbeTcpSocket": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateContainerVolumeMount:WorkerPoolTemplateContainerVolumeMount": {
+      "type": "object",
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "subPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mountPath",
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateNodeSelector:WorkerPoolTemplateNodeSelector": {
+      "type": "object",
+      "properties": {
+        "accelerator": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accelerator"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolume:WorkerPoolTemplateVolume": {
+      "type": "object",
+      "properties": {
+        "cloudSqlInstance": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeCloudSqlInstance:WorkerPoolTemplateVolumeCloudSqlInstance"
+        },
+        "emptyDir": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeEmptyDir:WorkerPoolTemplateVolumeEmptyDir"
+        },
+        "gcs": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeGcs:WorkerPoolTemplateVolumeGcs"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nfs": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeNfs:WorkerPoolTemplateVolumeNfs"
+        },
+        "secret": {
+          "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeSecret:WorkerPoolTemplateVolumeSecret"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeCloudSqlInstance:WorkerPoolTemplateVolumeCloudSqlInstance": {
+      "type": "object",
+      "properties": {
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeEmptyDir:WorkerPoolTemplateVolumeEmptyDir": {
+      "type": "object",
+      "properties": {
+        "medium": {
+          "type": "string"
+        },
+        "sizeLimit": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeGcs:WorkerPoolTemplateVolumeGcs": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "mountOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bucket"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeNfs:WorkerPoolTemplateVolumeNfs": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "server"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeSecret:WorkerPoolTemplateVolumeSecret": {
+      "type": "object",
+      "properties": {
+        "defaultMode": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVolumeSecretItem:WorkerPoolTemplateVolumeSecretItem"
+          }
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVolumeSecretItem:WorkerPoolTemplateVolumeSecretItem": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVpcAccess:WorkerPoolTemplateVpcAccess": {
+      "type": "object",
+      "properties": {
+        "connector": {
+          "type": "string"
+        },
+        "egress": {
+          "type": "string"
+        },
+        "networkInterfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:cloudrunv2/WorkerPoolTemplateVpcAccessNetworkInterface:WorkerPoolTemplateVpcAccessNetworkInterface"
+          }
+        }
+      }
+    },
+    "gcp:cloudrunv2/WorkerPoolTemplateVpcAccessNetworkInterface:WorkerPoolTemplateVpcAccessNetworkInterface": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string"
+        },
+        "subnetwork": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

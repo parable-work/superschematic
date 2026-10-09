@@ -108,12 +108,6 @@ func shop() *ir.Stack {
 }
 
 // resolve resolves an environment of s over services.
-// acmeShop is the shop's services as stacktest has them, without
-// shop-orders' worker and shop-db's queue: gcp places no worker yet (D53).
-func acmeShop() []stack.Service {
-	return stacktest.WithoutWorkers(stacktest.AcmeShop())
-}
-
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
 	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: services, Environment: env})
@@ -132,7 +126,7 @@ func TestGolden(t *testing.T) {
 	s := shop()
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, acmeShop(), env.Name)
+			checkGolden(t, reg, s, stacktest.AcmeShop(), env.Name)
 		})
 	}
 }
@@ -151,8 +145,8 @@ func TestServiceAuthGolden(t *testing.T) {
 		services []stack.Service
 		envs     []string
 	}{
-		{"RequireShop", stacktest.WithoutWorkers(stacktest.RequireServiceShop()), []string{"Staging", "Preview"}},
-		{"AllowShop", stacktest.WithoutWorkers(stacktest.AllowServiceShop()), []string{"Staging"}},
+		{"RequireShop", stacktest.RequireServiceShop(), []string{"Staging", "Preview"}},
+		{"AllowShop", stacktest.AllowServiceShop(), []string{"Staging"}},
 	} {
 		s := shop()
 		s.Name = tc.stack
@@ -215,7 +209,7 @@ func checkGolden(t *testing.T, reg *registry.Registry, s *ir.Stack, services []s
 // callers Orders and shop-orders' job, whose schedule comes with it, and
 // the load balancer and records last.
 func TestDeployOrder(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), acmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
 	var order []string
 	for _, step := range env.DeployOrder {
 		s := string(step.Step)
@@ -232,11 +226,14 @@ func TestDeployOrder(t *testing.T) {
 			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
 			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator, " +
+			"shop-orders-fulfil-orders.account, shop-orders-fulfil-orders.cloudsql-client.shop-db, shop-orders-fulfil-orders.cloudsql-login.shop-db, " +
+			"shop-orders-fulfil-orders.database-user.shop-db, shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-fulfil-orders.trace-agent, " +
 			"shop-orders-ship-orders.account, shop-orders-ship-orders.cloudsql-client.shop-db, shop-orders-ship-orders.cloudsql-login.shop-db, " +
 			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.trace-agent)",
 		"migrate expand (shop-db)",
-		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service, shop-orders-ship-orders.run-invoker.shop-api)",
-		"rollout 2 (Orders, shop-orders-ship-orders, Orders.service, shop-orders-ship-orders.job, shop-orders-ship-orders.schedule, shop-orders-ship-orders.schedule-invoker)",
+		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service, shop-orders-fulfil-orders.run-invoker.shop-api, shop-orders-ship-orders.run-invoker.shop-api)",
+		"rollout 2 (Orders, shop-orders-fulfil-orders, shop-orders-ship-orders, Orders.service, shop-orders-fulfil-orders.worker-pool, " +
+			"shop-orders-ship-orders.job, shop-orders-ship-orders.schedule, shop-orders-ship-orders.schedule-invoker)",
 		"migrate contract (shop-db)",
 		"exposure (dns.shop-api.a, dns.shop-api.cname, shop-api.address, shop-api.backend, shop-api.certificate, shop-api.certificate-map, " +
 			"shop-api.certificate-map-entry, shop-api.dns-authorization, shop-api.endpoint-group, shop-api.forwarding-rule, shop-api.https-proxy, shop-api.url-map)",
@@ -252,7 +249,7 @@ func TestDeployOrder(t *testing.T) {
 // secret and the network from Staging, which no step of its deploy
 // applies.
 func TestPreviewInherits(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), acmeShop(), "Preview")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Preview")
 	var inherited []string
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -295,7 +292,7 @@ func TestServiceCPU(t *testing.T) {
 		always = `{"limits":{"cpu":"1","memory":"512Mi"}}`
 	)
 
-	env := resolve(t, reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
 	wantJSON(t, "shop-api's resources", service(env, "shop-api"), idle)
 	wantJSON(t, "Orders' resources", service(env, "Orders"), idle)
 	task := node(t, env, stacktest.ShipOrdersJob+".job").Properties["template"].(map[string]any)["template"].(map[string]any)
@@ -307,7 +304,7 @@ func TestServiceCPU(t *testing.T) {
 		staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 			Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": keep},
 		})
-		env := resolve(t, reg, s, acmeShop(), "Staging")
+		env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
 		want := idle
 		if keep {
 			want = always
@@ -321,7 +318,7 @@ func TestServiceCPU(t *testing.T) {
 	staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 		Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": "yes"},
 	})
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: acmeShop(), Environment: "Staging"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "cpuAlwaysAllocated") {
 		t.Errorf("cpuAlwaysAllocated \"yes\": err = %v, want a refusal naming cpuAlwaysAllocated", err)
 	}
@@ -334,13 +331,13 @@ func TestProjectNumber(t *testing.T) {
 	reg := assemble(t)
 	s := shop()
 	s.Environments[0].Values["projectNumber"] = "123456789012"
-	if got := resolve(t, reg, s, acmeShop(), "Preview").Values["projectNumber"]; got != "123456789012" {
+	if got := resolve(t, reg, s, stacktest.AcmeShop(), "Preview").Values["projectNumber"]; got != "123456789012" {
 		t.Errorf("Preview's projectNumber = %v, want Staging's", got)
 	}
 	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
 		s := shop()
 		s.Environments[0].Values["projectNumber"] = bad
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: acmeShop(), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
 			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
 		}

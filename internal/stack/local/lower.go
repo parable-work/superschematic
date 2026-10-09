@@ -59,9 +59,8 @@ const (
 	ReadinessStarted = "started"
 
 	// WorkerConcurrencyVariable is the environment variable a worker reads
-	// its concurrency from, which the local platform sets
-	// (runtime/http/go/worker.ConcurrencyVariable).
-	WorkerConcurrencyVariable = "WORKER_CONCURRENCY"
+	// its concurrency from, which the local platform sets.
+	WorkerConcurrencyVariable = ir.WorkerConcurrencyVariable
 
 	// ServerModuleDir is the directory, under the output root, of each
 	// server's entrypoint module: `server/<stack>/<server>`.

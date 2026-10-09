@@ -24,7 +24,7 @@ schema's instances into claimable work, are another thing.
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, the `worker` deployable, its entrypoint and image | a TypeScript or Rust worker |
-| `stack dev`'s worker processes | workers on gcp |
+| `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
 
 D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
@@ -182,3 +182,21 @@ which the platform sets.
 The claims run on Postgres, the Go ORM's dialect, so an environment that
 places the queue's database on a platform of another dialect does not
 resolve.
+
+## On gcp
+
+The gcp target runs a worker as a Cloud Run worker pool,
+`gcp.cloudrunworker`, named after the worker as its service account is:
+no port, no URL and nothing that calls it, scaled by hand to the worker's
+`instances`, with `WORKER_CONCURRENCY` set to its concurrency. Its config,
+secrets, Cloud SQL volume and egress are a server's of its API, and its
+account gets the queue's database as a server's does: the Cloud SQL roles,
+an IAM database user, and read and write privileges the migration job
+grants. A worker the environment turns off keeps its pool at zero
+instances. Cloud Run stops an instance ten seconds after SIGTERM, so a
+worker whose `grace` is ten seconds or more does not resolve on gcp. A
+worker pool takes `cpu` and `memory`, one CPU and `512Mi` unless set:
+
+```ts
+settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }],
+```
