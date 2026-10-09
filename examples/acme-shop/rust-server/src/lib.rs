@@ -1,7 +1,9 @@
 //! shop-orders' implementations over the generated Rust server, keeping
 //! orders and reviews in memory and the shop's users in SQLite: the server
 //! in src/main.rs serves them over HTTP, and the Topcoat app in ../topcoat
-//! calls them from its pages.
+//! calls them from its pages. With the `sqlite` feature,
+//! `sqlite::SqliteShop` keeps the orders and reviews in a SQLite file of
+//! shop-db's tables instead, the users' file (`users_at`).
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -19,6 +21,9 @@ use acme_shop_orders_api::{
 use async_trait::async_trait;
 use superschematic_http_runtime::{ApiError, RequestContext};
 
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
 /// shop-db's identity tables in SQLite (identity.sql): its User and Role
 /// tables and the session, credential and role grant tables the build adds.
 pub const IDENTITY_TABLES: &str = include_str!("../identity.sql");
@@ -29,6 +34,18 @@ pub const IDENTITY_TABLES: &str = include_str!("../identity.sql");
 /// carries, as shop-api's login started it, and the roles of its user.
 pub fn users(path: &str, config: &str) -> Result<Arc<Service>, Box<dyn Error>> {
     users_over(rusqlite::Connection::open(path)?, config)
+}
+
+/// The shop's users in the SQLite database `url` names, read as
+/// `sqlite::SqliteShop::open` reads it: the file the shop keeps its orders
+/// and reviews in, whose shop-db tables hold `IDENTITY_TABLES` too, so a
+/// user the identity service adds is one a review's author or an order's
+/// customer can be.
+#[cfg(feature = "sqlite")]
+pub fn users_at(url: &str, config: &str) -> Result<Arc<Service>, Box<dyn Error>> {
+    let path = sqlite::database_path(url).map_err(|scheme| format!("a {scheme} URL, not a SQLite one"))?;
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    users_over(rusqlite::Connection::open_with_flags(path, flags)?, config)
 }
 
 /// The shop's users in a SQLite database in memory, its tables created and
@@ -102,9 +119,13 @@ impl Shop {
 }
 
 /// The implementations the generated router and the Topcoat app run: the
-/// shop for both namespaces, and the identity runtime's authenticator over
-/// `users`, whose caller is the user a request's session signs in.
-pub fn implementations(shop: Arc<Shop>, users: Arc<Service>) -> Implementations {
+/// shop for both namespaces, in memory or in SQLite, and the identity
+/// runtime's authenticator over `users`, whose caller is the user a
+/// request's session signs in.
+pub fn implementations<S: OrderImplementation + ProductReviewsImplementation>(
+    shop: Arc<S>,
+    users: Arc<Service>,
+) -> Implementations {
     Implementations {
         order: shop.clone(),
         product_reviews: shop,

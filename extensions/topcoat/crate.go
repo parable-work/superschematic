@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/template"
 
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 )
 
@@ -37,13 +38,17 @@ type crate struct {
 	// page's caller from the session the JSON API signed in, and forwards
 	// the API crate's store features.
 	Identity bool
-	// Operations are the mounted operations, each an in-process call;
-	// Guards every operation, manual ones included.
+	// Operations are the operations with an in-process call; Guards every
+	// operation, those without one included.
 	Operations []operation
 	Guards     []operation
 	Records    []record
 	Forms      []form
 	Procedures []procedure
+	// Views are each record's display components, and EnumLabels the
+	// label functions of the enums they show.
+	Views      []view
+	EnumLabels []enumLabel
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -62,10 +67,16 @@ type operation struct {
 	Output       string
 	RequiresAuth bool
 	Permissions  []string
-	Manual       bool
-	// Identity marks one of the user model's operations, which the identity
-	// runtime serves (D50): it has a guard and no in-process call.
-	Identity bool
+	// ServiceOnly marks an operation whose route admits only a service
+	// caller (@requireService). Its in-process call admits the end user
+	// alone, and its doc says so (D37, amended).
+	ServiceOnly bool
+	// NoCall is why the operation has no in-process call, and so no
+	// procedure; NoProcedure why one with a call has no procedure. Each is
+	// a reason (noCall, noProcedure), empty when the operation has the
+	// item.
+	NoCall      string
+	NoProcedure string
 }
 
 func operationOf(e registry.RustEndpoint) operation {
@@ -82,13 +93,61 @@ func operationOf(e registry.RustEndpoint) operation {
 		Output:       e.OutputRustType,
 		RequiresAuth: e.RequiresAuth,
 		Permissions:  e.RequiredPerms,
-		Manual:       e.Manual,
-		Identity:     e.IdentityOperation != "",
+		ServiceOnly:  requiresService(e),
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
 	}
 	return op
+}
+
+// declared is an operation of the API crate with its declaration in the
+// schema.
+type declared struct {
+	endpoint registry.RustEndpoint
+	op       *ir.FieldDef
+}
+
+// noCall is why an operation has no in-process call, or empty when it has
+// one: a clause the guard's doc and the build log complete ("It has no
+// in-process call: <reason>."). Without the call it has no procedure
+// either. A call would skip what the operation's route does before its
+// handler, or what the service mounts in its place. op is the operation's
+// declaration, nil for a manual one.
+func noCall(e registry.RustEndpoint, op *ir.FieldDef) string {
+	signed := e.WebhookProvider != ""
+	switch {
+	case e.Manual:
+		return "the service mounts it (@manualRouteRegistration)"
+	case e.IdentityOperation != "":
+		return "the identity runtime serves it, as one of the user model's operations (D50)"
+	case op.Webhook && signed:
+		return "a third party calls it (@webhook), and its route checks the third party's signature first (@hmacVerified)"
+	case op.Webhook:
+		return "a third party calls it (@webhook)"
+	case signed:
+		return "its route checks a provider's signature first (@hmacVerified)"
+	}
+	return ""
+}
+
+// noProcedure is why an operation with an in-process call has no
+// procedure, or empty when it has one: a clause the call's doc and the
+// build log complete ("It has no procedure: <reason>."). A procedure is a
+// route browser code calls, so it exists only where a browser's request
+// meets the operation's route's rules.
+func noProcedure(e registry.RustEndpoint) string {
+	if requiresService(e) {
+		return "a browser holds no service credential (@requireService)"
+	}
+	return ""
+}
+
+// requiresService reports whether the operation's route admits only a
+// service caller: its effective clause is @requireService. An
+// @allowService route also admits an end user, as a procedure does.
+func requiresService(e registry.RustEndpoint) bool {
+	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersRequire
 }
 
 func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*crate, error) {
@@ -110,32 +169,61 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		HasAuth:       api.HasAuth,
 		Identity:      api.Identity != nil,
 	}
-	for _, endpoint := range api.Endpoints {
-		out.Operations = append(out.Operations, operationOf(endpoint))
-	}
-	for _, endpoint := range api.AllEndpoints() {
-		out.Guards = append(out.Guards, operationOf(endpoint))
-	}
 	schemas, err := schemasOf(c)
 	if err != nil {
 		return nil, err
+	}
+	// The operations a page calls in-process, and of those the ones browser
+	// code calls through a procedure.
+	var inProcess, fromBrowser []declared
+	for _, endpoint := range api.AllEndpoints() {
+		// The service's own route reads a manual operation's request, so
+		// its declaration need not name a route this one matches.
+		var op *ir.FieldDef
+		if !endpoint.Manual {
+			if op, err = schemas.operation(endpoint); err != nil {
+				return nil, err
+			}
+		}
+		o := operationOf(endpoint)
+		o.NoCall = noCall(endpoint, op)
+		if o.NoCall == "" && cfg.WritesProcedures() {
+			o.NoProcedure = noProcedure(endpoint)
+		}
+		out.Guards = append(out.Guards, o)
+		if o.NoCall != "" {
+			c.Logf("  - topcoat: no in-process call for %s.%s: %s\n", o.Namespace, o.Name, o.NoCall)
+			continue
+		}
+		out.Operations = append(out.Operations, o)
+		inProcess = append(inProcess, declared{endpoint, op})
+		if o.NoProcedure != "" {
+			c.Logf("  - topcoat: no procedure for %s.%s: %s\n", o.Namespace, o.Name, o.NoProcedure)
+			continue
+		}
+		fromBrowser = append(fromBrowser, declared{endpoint, op})
 	}
 	// A procedure's arguments and result are records, so procedures need
 	// them.
 	if cfg.WritesRecords() {
 		records := newRecordBuilder(schemas)
-		if err := records.addResults(); err != nil {
+		if err := records.addResults(inProcess); err != nil {
 			return nil, fmt.Errorf("topcoat: records of %s: %w", service, err)
 		}
 		if cfg.WritesProcedures() {
-			if out.Procedures, err = proceduresOf(records, api, service); err != nil {
+			if out.Procedures, err = proceduresOf(records, fromBrowser, service); err != nil {
 				return nil, err
 			}
 		}
 		out.Records = records.sorted()
+		if cfg.WritesViews() {
+			if out.Views, out.EnumLabels, err = viewsOf(schemas, out.Records); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if cfg.WritesForms() {
-		if out.Forms, err = formsOf(schemas, api, c.Logf); err != nil {
+		if out.Forms, err = formsOf(schemas, inProcess, c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -180,6 +268,33 @@ func (c *crate) FormsUse(put string) bool {
 	return false
 }
 
+// ControlledProcedures are the procedures whose routes have a traffic
+// control: each gets a ProcedureControls layer on its path.
+func (c *crate) ControlledProcedures() []procedure {
+	var out []procedure
+	for _, p := range c.Procedures {
+		if p.HasControls() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ControlsUse reports whether a procedure's route has the control
+// ("rate_limit", "body_limit" or "timeout"), so procedures.rs declares
+// ProcedureControls' builder method for it.
+func (c *crate) ControlsUse(control string) bool {
+	for _, p := range c.Procedures {
+		switch {
+		case control == "rate_limit" && p.RateLimit > 0,
+			control == "body_limit" && p.BodyLimit > 0,
+			control == "timeout" && p.Timeout > 0:
+			return true
+		}
+	}
+	return false
+}
+
 // write renders the crate into dir.
 func (c *crate) write(dir string) error {
 	files := []struct{ template, path string }{
@@ -199,15 +314,19 @@ func (c *crate) write(dir string) error {
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
+	if len(c.Views) > 0 {
+		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
+	}
 	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
 		"rustString": rustString,
 		"join":       strings.Join,
+		"doc":        doc,
 	}).ParseFS(templates, "templates/*.tmpl")
 	if err != nil {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs", "views.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -250,6 +369,21 @@ func pascalCase(name string) string {
 func firstLine(text string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
 	return strings.TrimSpace(line)
+}
+
+// doc wraps text as Rust doc comment lines of at most 80 columns where its
+// words allow, as the templates wrap their own.
+func doc(text string) string {
+	var lines []string
+	line := "///"
+	for _, word := range strings.Fields(text) {
+		if line != "///" && len(line)+1+len(word) > 80 {
+			lines = append(lines, line)
+			line = "///"
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n")
 }
 
 // rustString renders a Rust string literal.

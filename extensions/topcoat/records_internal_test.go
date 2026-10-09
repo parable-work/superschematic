@@ -4,13 +4,15 @@ import (
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 )
 
 // TestRecordsLeaveOutWhatThePageMustNotHold builds the records of a schema
 // whose authored operation returns a type with a secret field beside the
 // user model's login, whose result carries the session token (D50): the
 // secret field is left out as a @uiHidden one is, and the user model's
-// result gets no record at all, since its operation has no in-process call.
+// result gets no record at all, since its operation has no in-process call
+// (noCall), so newCrate does not hand it to addResults.
 func TestRecordsLeaveOutWhatThePageMustNotHold(t *testing.T) {
 	schema := ir.NewSchema("fixture", ir.SchemaKindAPI)
 	schema.Types["Account"] = &ir.TypeDef{Name: "Account", Fields: []*ir.FieldDef{
@@ -29,8 +31,17 @@ func TestRecordsLeaveOutWhatThePageMustNotHold(t *testing.T) {
 		}},
 	}
 
+	// newCrate hands addResults the operations with an in-process call, and
+	// login, which the identity runtime serves, has none.
+	account, login := schema.OperationSets[0].Operations[0], schema.OperationSets[1].Operations[0]
+	if reason := noCall(registry.RustEndpoint{IdentityOperation: login.IdentityOperation}, login); reason == "" {
+		t.Fatal("login has an in-process call")
+	}
+	if reason := noCall(registry.RustEndpoint{}, account); reason != "" {
+		t.Fatalf("getAccount has no in-process call: %s", reason)
+	}
 	b := newRecordBuilder(schemaSet{schema})
-	if err := b.addResults(); err != nil {
+	if err := b.addResults([]declared{{op: account}}); err != nil {
 		t.Fatal(err)
 	}
 	records := b.sorted()

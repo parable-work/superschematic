@@ -3,19 +3,23 @@
 //! (`acme_shop_orders_topcoat`), by each route's rules: a shopper signs in
 //! with their email and password, writes a review through the form the
 //! extension builds from `WriteReviewInput`, and lists their orders. The
-//! JSON API is mounted at `/api` beside the pages, on the same
-//! implementations, and the shop's users are the core user model's (D50):
-//! one session cookie signs the shopper in on both.
+//! reviews and the orders render through the display components the crate
+//! builds from their types. The JSON API is mounted at `/api` beside the
+//! pages, on the same implementations, which keep the shop in memory or in
+//! a SQLite file of shop-db's tables, and the shop's users are the core
+//! user model's (D50): one session cookie signs the shopper in on both.
 
 use std::sync::Arc;
 
-use acme_shop_orders_server::{Shop, implementations};
+use acme_shop_orders_server::implementations;
 use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
 use acme_shop_orders_topcoat::api::{
-    OrderListOrdersArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
+    OrderImplementation, OrderListOrdersArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
+    ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{FormErrors, WriteReviewInputForm, write_review_input_fields};
-use acme_shop_orders_topcoat::records::ReviewViewRecord;
+use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
+use acme_shop_orders_topcoat::views::{order_view_table, review_view_detail};
 use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations};
 use serde::Deserialize;
 use topcoat::context::{Cx, app_context};
@@ -40,12 +44,14 @@ pub fn product() -> types::IdentityUUID {
 pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 
 /// The app: its pages, and shop-orders' JSON API and in-process operations
-/// over `shop`, whose callers are `users`' users. A page's caller is the
-/// user whose session the request carries, read by the identity runtime as
-/// the JSON API reads it. Topcoat's origin policy runs before that check,
-/// so an origin the identity config trusts must be one the router's
-/// `OriginPolicy` trusts too; this app trusts none.
-pub fn app(shop: Arc<Shop>, users: Arc<Service>) -> Router {
+/// over `shop`, in memory (`acme_shop_orders_server::Shop`) or in SQLite
+/// (`acme_shop_orders_server::sqlite::SqliteShop`), whose callers are
+/// `users`' users. A page's caller is the user whose session the request
+/// carries, read by the identity runtime as the JSON API reads it. Topcoat's
+/// origin policy runs before that check, so an origin the identity config
+/// trusts must be one the router's `OriginPolicy` trusts too; this app
+/// trusts none.
+pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let pages = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
@@ -116,12 +122,13 @@ async fn sign_in_page(#[default] login: String, #[default] refused: Option<Strin
 }
 
 /// One review, as a shard: the browser can render it again from its record.
+/// `review_view_detail` lists its fields, labeled as `ReviewView` declares
+/// them and named by its title.
 #[shard("/shards/review")]
 async fn review_card(review: ReviewViewRecord) -> topcoat::Result<impl View> {
     Ok(view! {
         <article class="review">
-            <h3>(review.title) " (" (review.rating.to_string()) "/5)"</h3>
-            <p>(review.body)</p>
+            review_view_detail(record: review)
         </article>
     })
 }
@@ -183,24 +190,28 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`: a caller without it sees
-/// the route's refusal, with its status.
+/// The shopper's orders, which need `orders.read`, as `order_view_table`
+/// renders them: a column per summary field `OrderView` declares. A caller
+/// without the permission sees the route's refusal, with its status.
 #[page("/orders")]
 async fn show_orders(cx: &Cx) -> topcoat::Result<impl View> {
     let args = OrderListOrdersArgs { statuses: None, limit: None };
-    let (status, lines) = match operations::order_list_orders(cx, args).await {
-        Ok(orders) if orders.is_empty() => (StatusCode::OK, vec!["No orders yet.".to_owned()]),
-        Ok(orders) => (
-            StatusCode::OK,
-            orders.iter().map(|order| format!("{} {}", order.id, order.status.as_str())).collect(),
-        ),
-        Err(err) => (err.status, vec![err.message]),
+    let (status, orders) = match operations::order_list_orders(cx, args).await {
+        Ok(orders) => (StatusCode::OK, Ok(orders.iter().map(OrderViewRecord::from).collect::<Vec<_>>())),
+        Err(err) => (err.status, Err(err.message)),
     };
     Ok(view! {
         (status)
         <h1>"Orders"</h1>
-        for line in lines {
-            <p>(line)</p>
+        match orders {
+            Ok(orders) => {
+                if orders.is_empty() {
+                    <p>"No orders yet."</p>
+                } else {
+                    order_view_table(rows: orders)
+                }
+            },
+            Err(message) => <p>(message)</p>,
         }
     })
 }

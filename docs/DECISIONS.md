@@ -4674,6 +4674,114 @@ script with no lockfile, a current one and a stale one.
 `TestLocalTypeScriptServerRuns` brings a stale lockfile up to date under
 `CI=true`. No generated workflow has run on GitHub Actions.
 
+### D27, amended: SQLite builds a `@searchField` as a VIRTUAL column, without the trigram index
+
+D27 refused `@searchField` on SQLite, so a DB service whose tables any
+shopper searches could not list `sqlite`. The acme shop's `Review` is one,
+and a Topcoat app that keeps the shop in a SQLite file needs `shop-db`
+built for it. A human decided on 2026-10-07 that SQLite builds the column
+and leaves the index out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| SQLite gives a table with search fields the `search_text` column Postgres gives it, with the same expression (`COALESCE(field, '')`, joined by `' '`), each field quoted as SQLite quotes every identifier: a field named as a keyword of SQLite's that Postgres does not reserve, such as `escape` or `exists`, still parses. The model keeps the column, so plans diff it as they diff Postgres's. | Refusing it, as D27 did; leaving the column out on SQLite, so a query written for `search_text` fails there; Postgres's expression as written, quoted by Postgres's reserved words |
+| The column is `VIRTUAL`: SQLite computes it when a row is read. `ADD COLUMN` can add a `VIRTUAL` column and not a `STORED` one, so adding a search field is a statement, not a rebuild; changing the search fields drops the column and adds it again, and dropping it rewrites no rows. A rebuild leaves it out of the copy. | `STORED`, as on Postgres, which costs a rebuild for every change of the search fields and gives a read nothing without an index |
+| No index: SQLite has no trigram operator class, so a search on SQLite reads every row of the table. | An FTS5 table with the `trigram` tokenizer, kept in step by triggers or by the writer: a virtual table the model, the diff and the runner do not know, and triggers, which D27 keeps out of SQLite; left for when a SQLite reader needs search to be fast |
+| In both dialects a generated column is added after the plain columns its phase adds, and dropped before the plain columns its phase drops: its expression may read them, and neither Postgres nor SQLite adds a generated column before a column it reads or drops a column a generated column reads. Ordered by subject alone, a table's first search field added as a new column whose name sorts after `search_text`, or its only one dropped with a name that sorts before, failed on both. | Ordering a generated column after exactly the columns its expression reads, which parses the expression for the order the simpler rule already gives; `DROP COLUMN ... CASCADE` on Postgres, which SQLite has no form of |
+
+Status: built. `internal/sqlmigrate`'s SQLite model keeps `search_text`
+and drops the trigram index, the shop's SQLite plan cases keep their
+search field, and the `@searchField` cases and `rename-search-field`
+plan and converge on SQLite; the SQLite convergence check compares columns
+through `pragma table_xinfo`, so a generated column, and whether it is
+`VIRTUAL`, is compared too. Two plan cases, which failed to apply on both
+dialects before the order above, plan and converge on both:
+`add-search-field-column` gives `Customer` its first search field as a new
+column, `tagline`, and `drop-search-field-column` drops its only one,
+`bio`. `add-keyword-search-fields`, on SQLite, adds search fields named
+`escape` and `exists`, which failed to parse unquoted.
+
+The rule is reversible until the first release.
+
+### D44, amended: a procedure keeps its route's rules, and an operation whose route a browser cannot meet has none
+
+D44's procedures gave every mounted operation a `#[procedure]` that
+`.discover()` registers without the app asking: a second route to the
+operation, which any browser reaches. Its body ran the operation
+in-process (D43), which applies the route's end-user step and argument
+checks and nothing else. A review found three gaps. A `@webhook`
+operation's route runs the provider's signature check (`@hmacVerified`)
+before anything else; its in-process call and its procedure skipped it,
+so anyone could run the handler unsigned. A `@requireService` route
+admits only a service caller (D37), but its procedure admitted an end
+user's session, or anyone when the operation has no user clause. And a
+procedure skipped its route's `@rateLimit`, `@bodyLimit` and `@timeout`,
+so `placeOrder` had an unlimited twin. Fixing them found a fourth: the
+JSON API the crate mounts keyed its rate limits by addresses a request
+through Topcoat does not carry, so every client of a route shared one
+budget.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An operation has an in-process call unless a reason says it has none, and every such case is one reason, a clause the guard's doc gives on a line of its own ("It has no in-process call: …") and the build log repeats. The reasons are `@manualRouteRegistration` (the service mounts it) and `@webhook` or `@hmacVerified` (a third party calls it, and its route checks the signature first). The guard stays. Without a call there is no procedure, the result of such an operation gets no record, and its input no form, since a form submits through the call: forms are built from the operations with a call, as records are. | A flag per case in the templates, as `@manualRouteRegistration` had; checking the signature in-process, where there is no signed request to check; forms over the input of every mounted operation, which gave a webhook's input a form no page could submit through a call |
+| An operation with a call has a procedure unless a second reason says otherwise, which the call's doc and the build log give. The one reason is a `@requireService` route, since a browser holds no service credential. An `@allowService` route admits an end user too, so its procedure stays. The `@requireService` operation's in-process call is unchanged and applies the end-user step alone; its doc and its guard's say so, and whether it should refuse stays open, as D37, amended, left it. | Keeping the procedure and refusing every call to it, a route that can never succeed |
+| A procedure meets its route's traffic controls in the route's order (D35) through `ProcedureControls`, a Topcoat layer on the procedure's path that `<service>(...)` adds: the rate limit, then the body limit, read before the procedure decodes its arguments with Topcoat's own limit raised to it, then the timeout around the decoding and the call. Each refusal is the route's 429 (with `Retry-After`), 413 or 504, answered as the procedure answers one, as a `ProblemRecord`. | Topcoat's `BodyLimit` alone, whose refusal is a bare 413 the browser cannot read; the timeout inside `call_<operation>`, which would leave the decoding outside it and time a page's own call |
+| The procedure's rate limit is a limiter of its own at the route's rate, built with each router as `build_router` builds the route's, and keyed by the client's IP address as Topcoat reads it (`client_ip`: the peer's, or the one a proxy the app trusts names). The JSON API's route keeps its limiter, so a client gets the rate on each, as on two replicas. | Sharing the route's limiter, which `RouteControls` keeps private, at the cost of a change to every Rust server; no limit on the procedure |
+| `<service>(...)` gives each request to the mounted JSON API the same address, as the runtime's `ClientIp`, through `ClientAddress`, a Topcoat layer on `/api` that puts it on the request `TowerRoute` hands the API. A route's rate limit and its procedure's then count the same clients, and the app's trusted proxies apply to both. An address Topcoat does not know is left out, and the runtime's fallback stands. | A tower layer around the API reading Topcoat's `RemoteAddr`, the peer's address, which ignores the app's trusted proxies; a route of the crate's own in place of `TowerRoute` |
+| A control a procedure cannot apply as its route does leaves the procedure out with the reason, rather than being skipped; all three apply today. A page's in-process call applies none of them: the page is a route of the app, under the controls the app gives it. | Applying a route's controls to in-process calls, which would spend an operation's budget on the pages that call it |
+
+Status: built. The extension's YAML fixture `fixture-controls-api` has a
+signed webhook whose input a form would hold, a `@requireService` and an
+`@allowService` operation, and an order whose route has all three
+controls. `TestWhatHasNoProcedure` reads its crate and build log: the
+webhook's input has no form, so the crate has no `forms` module. Its cargo
+test drives a Topcoat app through `Router::handle`: the webhook's and the
+`@requireService` operation's procedure paths are 404, the webhook's JSON
+route still refuses an unsigned request, the `@allowService` procedure is
+registered, and the webhook's guard and the `@requireService` call still
+answer a page. The order's procedure answers its third call in a minute, a
+body past the route's three megabytes, sent or declared, and a call past
+its second as the 429, 413 and 504 `ProblemRecord`s, and reads a body past
+Topcoat's own two. On the order's procedure and on its JSON route alike,
+two client addresses get a budget each: the second is admitted after the
+first is refused 429, and on the route requests without an address share
+the fallback's. acme-shop's `placeOrder` and `cancelOrder` procedures
+carry their routes' controls.
+
+The rule is reversible until the first release.
+
+### D44, amended: a detail and a table component per record, shaped by `@display`
+
+A page that showed a record wrote its markup by hand: acme's reviews shard
+printed a review's title and rating, and its orders page each order's id
+and status. Each restated what the schema already says: a field's label
+(its `@docs` title), an enum's member names, and since D48 a type's
+`@display`, which names its title, its summary fields, its noun and its
+plural. No generator read `@display` (D48).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The crate's `views` module has two Topcoat components per record it writes: `<type>_detail(record)`, a description list with a `<dt>` label and a `<dd>` value per field, and `<type>_table(rows)`, a table with a header row of labels and a row per record. The records are those the amendment above leaves: what a page's in-process call returns, the types it nests, and the types a remaining procedure names, so a webhook's result has no components and a procedure's argument record has both. `outputs.topcoat.views` turns them off. They render records, so `records: false` leaves them out too, and `[extension.topcoat]` turns them on with every other default. | A trait every record implements that lists its fields at run time, which loses each field's kind; components for result types only, where a procedure's input records are records too; a page per operation, which would take routing from the app |
+| A field is labeled as a form labels it, by one helper: its `@docs` title, else its name in words. An enum's value shows its member's name in words, in a `<data>` element whose `value` is the serialized value, from `<enum>_label`, which a value the enum does not declare passes through. | The serialized value as its own label; a second label rule for display |
+| A value renders by its field's type: text and numbers as they are; a date, a time or a date-time scalar as `<time datetime>` with the text the API sends; a boolean "Yes" or "No"; a nested record as its detail; a list of records as their table; any other list as `<ul>`; a map as a `<dl>` of its entries; a union or any JSON value as its JSON text in `<pre>`. | Formatting a timestamp on the server, which knows neither the reader's locale nor their time zone; a tree of the JSON value's members |
+| `@display` shapes them: `summaryFields` chooses and orders a table's columns, otherwise every field; `titleField` names a detail (`aria-label`, the `noun` when the title is empty), heads its row (`<th scope="row">`) and is a nested record's cell in a table, which is otherwise its detail; `plural` captions a table. `createLabel`, `states`, `transitions` and a field's `@icon` are not read. | A visible heading for the title, whose level depends on where a page places the detail; the noun as a table's caption |
+| An absent optional value leaves its `<dd>` or `<td>` empty, which a stylesheet can fill with `:empty`. | A placeholder such as "None", which each app would word its own way and a screen reader would read |
+| The markup is semantic HTML with `ss-` classes, `data-type` (the type's name) and `data-field` (the field's JSON key), and no styles. Every value is text that `view!` escapes, in a node or an attribute. A type that nests itself, at any depth, boxes its components' views, as Topcoat requires of a recursive component. | Inline styles or a stylesheet the crate ships; boxing every view |
+
+Status: built. The goldens cover a fifth fixture, the extension's own
+`fixture-views-api`, whose `OrderView` has a field of every kind, a hidden
+one and a `@display`, and whose `Comment` nests itself.
+`TestViewsRenderRecords` renders its detail and table through
+`Router::handle` and checks the HTML: each kind of field, the empty cells
+of absent values, the summary columns under their caption, a `<script>`
+in a value escaped, an undeclared enum value escaped in its attribute, and
+three levels of comments. `TestDisplayShapesTheComponents` and
+`TestViewsOff` check the generated module, and `TestWhatHasNoProcedure`
+that `fixture-controls-api`'s webhook result has no components while its
+`@requireService` result, which a page still calls, has them. acme's
+`ReviewView` and `OrderView` declare a `@display`, its reviews shard
+renders `review_view_detail`, and its orders page `order_view_table`.
+
 The rule is reversible until the first release.
 
 ### D14, amended: Geo.Location is a {lat, lon} object

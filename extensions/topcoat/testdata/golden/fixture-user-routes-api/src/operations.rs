@@ -5,7 +5,12 @@
 //! the router checks them, then the implementation. A refusal is the
 //! `ApiError` the route answers, and `?` carries it into a page's error.
 //! A guard (`can_<operation>`) admits the caller alone, for a page that
-//! shows or hides what the operation does.
+//! shows or hides what the operation does. An operation without a call
+//! still has its guard, whose doc says why.
+//!
+//! A call does not apply the route's traffic controls (@rateLimit,
+//! @bodyLimit, @timeout): the page that makes it is a route of the app,
+//! under the controls the app gives it.
 
 #![allow(unused_imports)]
 
@@ -28,144 +33,144 @@ pub async fn greeting_greet(cx: &Cx) -> Result<types::Greeting, ApiError> {
 
 /// Admits the caller of account.capabilities as its route does: 401 without one, 403
 /// never. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_capabilities(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_CAPABILITIES).await
 }
 
 /// Admits the caller of account.login as its route does: it needs none, so
 /// `Ok(None)`.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_login(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_LOGIN).await
 }
 
 /// Admits the caller of account.logout as its route does: 401 without one, 403
 /// never. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_logout(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_LOGOUT).await
 }
 
 /// Admits the caller of account.me as its route does: 401 without one, 403
 /// never. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_me(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ME).await
 }
 
 /// Admits the caller of account.changePassword as its route does: 401 without one, 403
 /// never. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_change_password(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_CHANGE_PASSWORD).await
 }
 
 /// Admits the caller of account.register as its route does: it needs none, so
 /// `Ok(None)`.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_register(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_REGISTER).await
 }
 
 /// Admits the caller of account-admin.listRoles as its route does: 401 without one, 403
 /// without one of identity.roles.read. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_list_roles(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_LIST_ROLES).await
 }
 
 /// Admits the caller of account-admin.createRole as its route does: 401 without one, 403
 /// without one of identity.roles.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_create_role(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_CREATE_ROLE).await
 }
 
 /// Admits the caller of account-admin.deleteRole as its route does: 401 without one, 403
 /// without one of identity.roles.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_delete_role(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_DELETE_ROLE).await
 }
 
 /// Admits the caller of account-admin.updateRole as its route does: 401 without one, 403
 /// without one of identity.roles.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_update_role(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_UPDATE_ROLE).await
 }
 
 /// Admits the caller of account-admin.listUsers as its route does: 401 without one, 403
 /// without one of identity.users.read. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_list_users(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_LIST_USERS).await
 }
 
 /// Admits the caller of account-admin.createUser as its route does: 401 without one, 403
 /// without one of identity.users.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_create_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_CREATE_USER).await
 }
 
 /// Admits the caller of account-admin.getUser as its route does: 401 without one, 403
 /// without one of identity.users.read. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_get_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_GET_USER).await
 }
 
 /// Admits the caller of account-admin.disableUser as its route does: 401 without one, 403
 /// without one of identity.users.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_disable_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_DISABLE_USER).await
 }
 
 /// Admits the caller of account-admin.enableUser as its route does: 401 without one, 403
 /// without one of identity.users.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_enable_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_ENABLE_USER).await
 }
 
 /// Admits the caller of account-admin.setUserPassword as its route does: 401 without one, 403
 /// without one of identity.users.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_set_user_password(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_SET_USER_PASSWORD).await
 }
 
 /// Admits the caller of account-admin.revokeRole as its route does: 401 without one, 403
 /// without one of identity.roles.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_revoke_role(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_REVOKE_ROLE).await
 }
 
 /// Admits the caller of account-admin.grantRole as its route does: 401 without one, 403
 /// without one of identity.roles.write. The caller, for the implementation.
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
 pub async fn can_account_admin_grant_role(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_GRANT_ROLE).await
 }

@@ -1,6 +1,6 @@
 ---
 title: Pages with Topcoat
-description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms and records built from the schema.
+description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms, records and display components built from the schema.
 sidebar:
   order: 9
 ---
@@ -12,13 +12,14 @@ server-rendered pages. Its pages run in the same process as a service's
 Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
-rules. The crate also has a form per input type and a record per result
-type, and mounts the JSON API beside the pages.
+rules. For the operations a page can call, the crate also has a form per
+input type and a record per result type, with components that render each
+record, and it mounts the JSON API beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
-serves, with the orders and reviews in memory and the shop's users in
-SQLite.
+serves, which keep the shop in memory or in a SQLite file, with the
+shop's users in SQLite.
 
 ## Build the crate
 
@@ -49,21 +50,24 @@ on. A service whose server is in another language skips the crate and
 says why in the build log, so the same config also builds the Go server.
 The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
 
-The crate's forms, records and procedures, below, are on by default. In
-`outputs.topcoat`, `forms: false` leaves out the forms, `procedures: false`
-the procedures, and `records: false` the records and the procedures,
-which carry their arguments and results as records.
+The crate's forms, records, procedures and display components, below,
+are on by default. In `outputs.topcoat`, `forms: false` leaves out the
+forms, `procedures: false` the procedures, `views: false` the display
+components, and `records: false` the records with the procedures and the
+display components, which are built on records.
 
 ## Mount it
 
 `shop_orders` keeps the API's `Implementations` for the in-process calls
-and mounts the JSON API at `/api`. It also takes a `PageAuthenticator`,
-which establishes a page's caller. The shop's users are the core user
-model's, so the crate offers `IdentityPageAuthenticator::of(&implementations)`,
-which reads a page's caller from the session cookie or bearer token as
-the JSON API does. One sign-in serves the pages and the JSON API, and a
-refused cookie is cleared on the page's response. An app whose users are
-its own writes a `PageAuthenticator` instead, over a Topcoat session, say.
+and mounts the JSON API at `/api`, giving its routes the client's address
+as Topcoat reads it, by which their rate limits count clients. It also
+takes a `PageAuthenticator`, which establishes a page's caller. The shop's
+users are the core user model's, so the crate offers
+`IdentityPageAuthenticator::of(&implementations)`, which reads a page's
+caller from the session cookie or bearer token as the JSON API does. One
+sign-in serves the pages and the JSON API, and a refused cookie is cleared
+on the page's response. An app whose users are its own writes a
+`PageAuthenticator` instead, over a Topcoat session, say.
 
 <Snippet file="topcoat/src/lib.rs" symbol={['app', 'SignInForm', 'sign_in']} />
 
@@ -98,13 +102,14 @@ only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 
-An input type gets a form when each of its fields is a string, a number,
-a boolean or an enum, alone, and the service declares it; the build log
-names any other and why. `forms::WriteReviewInputForm` holds the form's
-fields as the browser sends them, each an `Option<String>`, so a refused
-form renders again as it was sent. `parse()` reads them by
-`WriteReviewInput`'s rules, and `FormErrors::from_api` turns the
-operation's refusal into the same field messages:
+An input type gets a form when an operation a page can call takes it,
+each of its fields is a string, a number, a boolean or an enum, alone,
+and the service declares it; the build log names any other and why.
+`forms::WriteReviewInputForm` holds the form's fields as the browser sends
+them, each an `Option<String>`, so a refused form renders again as it was
+sent. `parse()` reads them by `WriteReviewInput`'s rules, and
+`FormErrors::from_api` turns the operation's refusal into the same field
+messages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="post_review" />
 
@@ -115,15 +120,58 @@ form, and `parse()` checks every rule again.
 
 ## Records
 
-`records` mirrors each type an operation returns as a Topcoat record,
-which a page hands the browser, here through a shard:
+`records` mirrors each type a page's call returns, and the types it
+nests, as a Topcoat record, which a page hands the browser, here through a
+shard:
 
 <Snippet file="topcoat/src/lib.rs" symbol="review_card" />
 
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
 enums are strings, a map is its entries, and an `@uiHidden` or secret
-field is left out, since a record reaches the browser. The user model's
-routes have no records, since a page does not call them in-process.
+field is left out, since a record reaches the browser. A webhook's result
+reaches no page, so it has no record ([Procedures](#procedures)), and the
+user model's routes have none, since a page does not call them in-process.
+
+## Display components
+
+`views` renders each record two ways: `<type>_detail(record)` as a
+description list, a label and a value per field, and `<type>_table(rows)`
+as a table with a row per record. The shard above renders a review with
+`review_view_detail`, and the orders page renders the shopper's orders
+with `order_view_table`:
+
+<Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
+
+A field is labeled as its form field is: its `@docs` title, else its name
+in words. A value renders by its type:
+
+- an enum's value is its member's name in words, in a `<data>` element
+  whose `value` is the one the API sends;
+- a date or a time is a `<time>` element;
+- a boolean is "Yes" or "No";
+- a nested record is its own detail, and in a table cell its title when
+  its type declares one;
+- a list of records is their table, any other list a `<ul>`, and a map a
+  `<dl>` of its entries;
+- a union or any JSON value is its JSON text in a `<pre>`;
+- an absent optional value leaves its cell empty.
+
+A type's `@display` ([Display on a type](/superschematic/reference/documentation/#display-on-a-type))
+shapes both components. `summaryFields` chooses and orders a table's
+columns, which are otherwise every field. `titleField` names a detail for
+assistive technology (`aria-label`, the noun when the title is empty) and
+heads each row. `plural` captions a table. `ReviewView` declares all four:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="ReviewView" />
+
+`OrderView`'s summary fields are the orders table's columns: the order's
+id, when it was placed, its status and its total.
+
+The markup is plain HTML and ships no styles. A stylesheet or a test finds
+it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
+`ss-json`), by `data-type`, the type's name, and by `data-field`, each
+field's JSON key. Every value is text, which the view escapes, so a
+review's body never becomes markup.
 
 ## Procedures
 
@@ -136,6 +184,66 @@ browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
 procedure's body as a plain function, for Rust code and tests: Topcoat
 turns the procedure itself into a value Rust cannot call.
 
+A procedure is a second route to its operation, which any browser can
+reach, so an operation gets one only where a browser's request can meet
+its route's rules. A webhook (`@webhook`, `@hmacVerified`) has neither an
+in-process call nor a procedure: a third party calls it, and its route
+checks the signature before anything else. Nor has an operation the
+service mounts itself (`@manualRouteRegistration`). An operation only a
+service may call (`@requireService`) keeps its in-process call but has
+no procedure, since a browser holds no service credential; an
+`@allowService` one keeps both, since its route admits an end user too.
+Each guard's or call's doc says why, and so does the build log. The
+result of an operation without a call reaches no page, so it has no
+record and no display components, and its input has no form.
+
+A procedure keeps its route's traffic controls, in the route's order, and
+refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
+allows a client 60 calls a minute (429 with `Retry-After`), a body of a
+megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
+them on the procedure's path. Its limiter is its own, at the route's
+rate, and counts clients by the IP address Topcoat reads for them; the
+JSON API's route keeps its own, counting by the same address. A page's
+in-process call applies none of them: the page is a route of the app,
+under the controls the app gives it.
+
+## Keep the shop in SQLite
+
+`shop-db` lists `sqlite` beside `postgres`, so its build also writes the
+tables' SQLite DDL, and `migrate plan --dialect sqlite` plans a SQLite
+database ([SQLite](/superschematic/reference/migrations/#sqlite)):
+
+<Snippet file="schemas/services/shop-db/schema.config.ts" from="    // SQLite too" to="dialects" />
+
+The Rust server's `sqlite` feature adds `SqliteShop`, the shop's
+implementations over a file of `shop-db`'s tables, through rusqlite, and
+`users_at`, the identity service over the same file. The app turns it on.
+With `DATABASE_URL` set, the app opens that file, which must hold
+`shop-db`'s tables, its identity tables among them, and its reviews,
+orders, users and sessions outlive the process; without it, the shop and
+its users are in memory. `DATABASE_URL` is a `sqlite:`
+URL, a `file:` URI or a path. A URL of another database, such as a
+Postgres one already in the shell, stops the app with an error that names
+its scheme alone, since the URL may hold a password:
+
+<Snippet file="topcoat/src/main.rs" symbol="main" />
+
+Plan the file from an empty database, apply the plan with the migration
+runner, and start the app on it, from `examples/acme-shop`:
+
+```bash
+superschematic migrate plan schemas/services/shop-db --dialect sqlite --out shop-db.sqlite.plan.json
+superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqlite:shop.db
+cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
+```
+
+The runner records the model it applied, so a later version of `shop-db`
+plans `--from` it ([Adopt a database built from
+create.sql](/superschematic/reference/migrations/#adopt-a-database-built-from-createsql)
+shows the commands). `Review`'s search fields give the SQLite table its
+`search_text` column, `VIRTUAL`, without the trigram index Postgres
+builds.
+
 ## Test the app
 
 `Router::handle` drives the app as a browser would. The acme app's tests
@@ -146,3 +254,10 @@ invalid), post a valid one, and read it back from the page and from the
 JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+Over SQLite, a test builds a file from `sqlite/create.sql`, or copies the
+one `scripts/check.sh` migrates with the runner, signs the shopper in,
+writes a review and places an order, then opens a new app on the same
+file, where the shopper's session still holds:
+
+<Snippet file="topcoat/tests/app.rs" symbol="a_sqlite_shop_outlives_the_app" />

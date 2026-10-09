@@ -5,7 +5,12 @@
 //! the router checks them, then the implementation. A refusal is the
 //! `ApiError` the route answers, and `?` carries it into a page's error.
 //! A guard (`can_<operation>`) admits the caller alone, for a page that
-//! shows or hides what the operation does.
+//! shows or hides what the operation does. An operation without a call
+//! still has its guard, whose doc says why.
+//!
+//! A call does not apply the route's traffic controls (@rateLimit,
+//! @bodyLimit, @timeout): the page that makes it is a route of the app,
+//! under the controls the app gives it.
 
 #![allow(unused_imports)]
 
@@ -17,6 +22,12 @@ use topcoat::context::{Cx, app_context};
 {{- range .Operations }}
 
 /// {{ .Namespace }}.{{ .Name }} (`{{ .Method }} {{ .Path }}`){{ with .Description }}: {{ . }}{{ else }}.{{ end }}
+{{- if .ServiceOnly }}
+{{ doc "Its route admits only a service caller (@requireService). This call applies the end-user step alone, as `OperationInfo::admit` does; whether it should refuse stays open (D37, amended)." }}
+{{- end }}
+{{- with .NoProcedure }}
+{{ doc (printf "It has no procedure: %s." .) }}
+{{- end }}
 pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ . }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
     let caller = can_{{ .SnakeName }}(cx).await?;
 {{- if .ArgsName }}
@@ -34,10 +45,13 @@ pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ 
 
 /// Admits the caller of {{ .Namespace }}.{{ .Name }} as its route does: {{ if .RequiresAuth }}401 without one, 403
 /// {{- if .Permissions }} without one of {{ join .Permissions ", " }}{{ else }} never{{ end }}. The caller, for the implementation.{{ else }}it needs none, so
-/// `Ok(None)`.{{ end }}{{ if .Manual }} The service mounts the operation
-/// (@manualRouteRegistration), so it has no in-process call.{{ end }}{{ if .Identity }}
-/// The identity runtime serves the operation (D50), so it has no
-/// in-process call.{{ end }}
+/// `Ok(None)`.{{ end }}
+{{- if .ServiceOnly }}
+{{ doc "Its route admits only a service caller (@requireService), which a guard does not check (D37, amended)." }}
+{{- end }}
+{{- with .NoCall }}
+{{ doc (printf "It has no in-process call: %s." .) }}
+{{- end }}
 pub async fn can_{{ .SnakeName }}(cx: &Cx) -> Result<Option<Principal>, ApiError> {
 {{- if $.HasAuth }}
     crate::admit(cx, &operations::{{ .ConstName }}).await

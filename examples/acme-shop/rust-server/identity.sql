@@ -1,10 +1,10 @@
 -- shop-db's identity tables in SQLite: the User and Role tables and the
 -- Session, UserCredential and UserRoleGrant tables the build adds beside
--- them (D50). The Rust server and the Topcoat app keep the shop's users in
--- them, and go/clients_test.go signs a shopper in over them. shop-db as a
--- whole has no SQLite form, since its reviews' search fields are
--- Postgres's, so these are the statements the compiler writes for these
--- five tables with outputs.sql.dialects listing sqlite, copied as written.
+-- them (D50). The Rust server and the Topcoat app in memory keep the
+-- shop's users in them, and go/clients_test.go signs a shopper in over
+-- them: the statements shop-db's SQLite DDL (sql/shop-db/sqlite/create.sql)
+-- holds for these five tables, copied as written, so a database of the
+-- users alone needs neither the build nor the rest of shop-db's tables.
 
 CREATE TABLE "role" (
   "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,

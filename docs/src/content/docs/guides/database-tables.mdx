@@ -111,6 +111,9 @@ extension.
 
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE review ADD COLUMN search_text" to="STORED;" />
 
+The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
+SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.

@@ -21,8 +21,7 @@ import (
 // users are the shop's users as the tests serve them: the identity
 // runtime's config, at a low password cost, and a store both APIs' identity
 // services read, as the stack's servers share shop-db. The store is in
-// memory: the tests serve the ORM's no-op database, and shop-db's tables
-// have no SQLite form (its search fields are Postgres's). The runtime's
+// memory, since the tests serve the ORM's no-op database. The runtime's
 // SQLStore runs over Postgres in TestStackDevRunsTheShop, and over SQLite,
 // on shop-db's identity tables alone, in TestEverySDKCallsTheRustServer,
 // whose server is another process.

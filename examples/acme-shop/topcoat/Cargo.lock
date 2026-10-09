@@ -34,6 +34,7 @@ dependencies = [
  "async-trait",
  "axum",
  "rusqlite",
+ "serde_json",
  "superschematic-http-runtime",
  "tokio",
 ]
@@ -46,6 +47,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
+ "tokio",
  "topcoat",
 ]
 
@@ -67,6 +69,7 @@ dependencies = [
  "acme-shop-orders-server",
  "acme-shop-orders-topcoat",
  "http",
+ "rusqlite",
  "serde",
  "tokio",
  "topcoat",
