@@ -295,7 +295,7 @@ func TestServiceCPU(t *testing.T) {
 		always = `{"limits":{"cpu":"1","memory":"512Mi"}}`
 	)
 
-	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, reg, shop(), acmeShop(), "Staging")
 	wantJSON(t, "shop-api's resources", service(env, "shop-api"), idle)
 	wantJSON(t, "Orders' resources", service(env, "Orders"), idle)
 	task := node(t, env, stacktest.ShipOrdersJob+".job").Properties["template"].(map[string]any)["template"].(map[string]any)
@@ -307,7 +307,7 @@ func TestServiceCPU(t *testing.T) {
 		staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 			Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": keep},
 		})
-		env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
+		env := resolve(t, reg, s, acmeShop(), "Staging")
 		want := idle
 		if keep {
 			want = always
@@ -321,7 +321,7 @@ func TestServiceCPU(t *testing.T) {
 	staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 		Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": "yes"},
 	})
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: acmeShop(), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "cpuAlwaysAllocated") {
 		t.Errorf("cpuAlwaysAllocated \"yes\": err = %v, want a refusal naming cpuAlwaysAllocated", err)
 	}
