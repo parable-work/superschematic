@@ -15,5 +15,5 @@
   },
   "comment": "The runtime ships compiled ESM with declarations: Node.js does not strip types from files under node_modules, so a server library that runs there, such as the engine, needs it built. NodeNext holds each relative import to the .js path Node.js resolves.",
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "src/**/*.test.ts"]
+  "exclude": ["node_modules", "src/**/*.test.ts", "src/**/*.testing.ts"]
 }

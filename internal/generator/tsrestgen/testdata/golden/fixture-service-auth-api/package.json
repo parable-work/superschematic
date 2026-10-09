@@ -22,7 +22,8 @@
       "types": "./deps.ts",
       "import": "./deps.ts"
     },
-    "./openapi.json": "./openapi.json"
+    "./openapi.json": "./openapi.json",
+    "./permissions.json": "./permissions.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -335,7 +335,7 @@ func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) 
 	}
 	if class == "" {
 		return "", fmt.Errorf("%s holds a JSON %s but is stored as %s, which no value class reads",
-			ref.Name, jsonNoun(holds), column)
+			ref.Name, jsonNoun(schema, ref.Name, holds), column)
 	}
 	return class + lists, nil
 }
@@ -457,8 +457,15 @@ func isTextType(sqlType string) bool {
 	return strings.HasPrefix(sqlType, "VARCHAR")
 }
 
-// jsonNoun names what jsonOf returned, for an error.
-func jsonNoun(holds string) string {
+// jsonNoun names what jsonOf returned for the named type, for an error: the
+// object or array a JSON-object or array scalar holds (Geo.Location's
+// object), "value" for any other JSON, or the class.
+func jsonNoun(schema *ir.Schema, name, holds string) string {
+	if scalar := schema.Scalars[name]; scalar != nil && holds == ClassJSON {
+		if shape := scalar.StructuredJSONType(); shape != "" {
+			return shape
+		}
+	}
 	switch holds {
 	case ClassJSON:
 		return "value"

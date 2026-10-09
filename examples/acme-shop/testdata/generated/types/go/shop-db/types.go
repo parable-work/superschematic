@@ -394,6 +394,36 @@ func validateContactPhoneNumberValue(value ContactPhoneNumber, required bool) (b
 	return valid, coreErrs
 }
 
+// validateCryptoSHA256Value validates one Crypto.SHA256 value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateCryptoSHA256Value(value CryptoSHA256, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 64 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 64 characters"})
+	}
+	if utf8.RuneCountInString(string(value)) < 64 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 64 characters"})
+	}
+	if matched, err := regexp.MatchString("^[0-9a-f]{64}$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateGenericInt64Value validates one Generic.Int64 value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -2052,29 +2082,28 @@ func ReviewFromYAMLNonStrict(data []byte) (*Review, error) {
 	return decoded, nil
 }
 
-// Session - A signed-in session. The session auth provider looks a bearer token up
-// by its jti.
-type Session struct {
+// Role - A named set of permissions a user is granted: staff hold products, to
+// add products, and shoppers orders, to place them. Users hold roles
+// through the UserRoleGrant table the build adds.
+type Role struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 
 	UpdatedAt *TemporalDateTime `json:"updatedAt,omitempty"`
 
 	Id *IdentityUUID `json:"id,omitempty"`
 
-	Jti IdentityUUID `json:"jti"`
+	Name IdentitySlug `json:"name"`
 
-	User User `json:"user"`
-
-	ExpiresAt TemporalDateTime `json:"expiresAt"`
+	Permissions []string `json:"permissions"`
 }
 
-// MaskSecrets returns a copy of Session with secret fields cleared.
-func (t *Session) MaskSecrets() *Session {
+// MaskSecrets returns a copy of Role with secret fields cleared.
+func (t *Role) MaskSecrets() *Role {
 	if t == nil {
 		return nil
 	}
 
-	masked := &Session{}
+	masked := &Role{}
 
 	masked.CreatedAt = t.CreatedAt
 
@@ -2082,27 +2111,27 @@ func (t *Session) MaskSecrets() *Session {
 
 	masked.Id = t.Id
 
-	masked.Jti = t.Jti
+	masked.Name = t.Name
 
-	maskedValueUser := t.User.MaskSecrets()
-	if maskedValueUser != nil {
-		masked.User = *maskedValueUser
+	if t.Permissions != nil {
+		masked.Permissions = make([]string, len(t.Permissions))
+
+		copy(masked.Permissions, t.Permissions)
+
 	}
-
-	masked.ExpiresAt = t.ExpiresAt
 
 	return masked
 }
 
-// JSONFieldNames are the keys Session's JSON form declares. A generated
+// JSONFieldNames are the keys Role's JSON form declares. A generated
 // route refuses an input body with any other top-level key, as every
 // generated server does.
-func (*Session) JSONFieldNames() []string {
-	return []string{"createdAt", "updatedAt", "id", "jti", "user", "expiresAt"}
+func (*Role) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "name", "permissions"}
 }
 
-// Validate validates all fields in Session
-func (t *Session) Validate() ValidationErrors {
+// Validate validates all fields in Role
+func (t *Role) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
 	// Validate updatedAt (optional)
@@ -2123,10 +2152,281 @@ func (t *Session) Validate() ValidationErrors {
 		}
 	}
 
-	// Validate jti (required)
+	// Validate name (required)
 
-	if valid, fieldErrs := validateIdentityUUIDValue(t.Jti, true); !valid {
-		errors.SetFieldErrors("jti", fieldErrs)
+	if valid, fieldErrs := validateIdentitySlugValue(t.Name, true); !valid {
+		errors.SetFieldErrors("name", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Role to JSON
+func (t *Role) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Role
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfRole are the list fields of Role; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfRole = []jsonListField{
+	{name: "permissions", depth: 1},
+}
+
+// UnmarshalJSON unmarshals Role from JSON with validation
+func (t *Role) UnmarshalJSON(data []byte) error {
+	type Alias Role
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("Role", data, listFieldsOfRole); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Role into a map representation.
+func (t *Role) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Role to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Role to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Role from a map using lenient decoding.
+func (t *Role) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Role from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Role from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Role from a map and rejects unknown fields.
+func (t *Role) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Role from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Role from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Role from JSON and rejects unknown fields.
+func (t *Role) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Role from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Role from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Role from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Role from JSON using lenient decoding.
+func (t *Role) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Role from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Role from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Role from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Role from YAML and rejects unknown fields.
+func (t *Role) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Role from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Role from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Role from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Role from YAML using lenient decoding.
+func (t *Role) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Role from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Role from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Role from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RoleFromMap builds Role from a map using lenient decoding.
+func RoleFromMap(value map[string]any) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RoleFromMapStrict builds Role from a map and rejects unknown fields.
+func RoleFromMapStrict(value map[string]any) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RoleFromJSON builds Role from JSON and rejects unknown fields.
+func RoleFromJSON(data []byte) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RoleFromJSONNonStrict builds Role from JSON using lenient decoding.
+func RoleFromJSONNonStrict(data []byte) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RoleFromYAML builds Role from YAML and rejects unknown fields.
+func RoleFromYAML(data []byte) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RoleFromYAMLNonStrict builds Role from YAML using lenient decoding.
+func RoleFromYAMLNonStrict(data []byte) (*Role, error) {
+	decoded := &Role{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// Session - A signed-in session: the user it signs in, the SHA-256 of its token, and when it ends.
+type Session struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	TokenHash CryptoSHA256 `json:"tokenHash"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	LastSeenAt *TemporalDateTime `json:"lastSeenAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of Session with secret fields cleared.
+func (t *Session) MaskSecrets() *Session {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Session{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	masked.TokenHash = t.TokenHash
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.LastSeenAt = t.LastSeenAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys Session's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Session) JSONFieldNames() []string {
+	return []string{"id", "user", "tokenHash", "createdAt", "expiresAt", "lastSeenAt", "revokedAt"}
+}
+
+// Validate validates all fields in Session
+func (t *Session) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
 	}
 
 	// Validate user (required nested type)
@@ -2135,10 +2435,34 @@ func (t *Session) Validate() ValidationErrors {
 		errors.AddNestedError("user", fieldErrs)
 	}
 
+	// Validate tokenHash (required)
+
+	if valid, fieldErrs := validateCryptoSHA256Value(t.TokenHash, true); !valid {
+		errors.SetFieldErrors("tokenHash", fieldErrs)
+	}
+
 	// Validate expiresAt (required)
 
 	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
 		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate lastSeenAt (optional)
+
+	// Validate optional pointer field
+	if t.LastSeenAt != nil {
+		if valid, fieldErrs := t.LastSeenAt.Validate(); !valid {
+			errors.SetFieldErrors("lastSeenAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
 	}
 
 	return errors
@@ -2932,7 +3256,11 @@ func StockLevelFromYAMLNonStrict(data []byte) (*StockLevel, error) {
 	return decoded, nil
 }
 
-// User - A person who can sign in to the shop.
+// User - A person who can sign in to the shop, with their email and a password.
+// The User trait makes the table the core user model's (D50): the build
+// adds the Session and UserCredential tables beside it, and both APIs sign
+// users in and out with the identity runtime. The trait is imported as
+// UserTrait, since the table is named User too.
 type User struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 
@@ -3197,6 +3525,553 @@ func UserFromYAML(data []byte) (*User, error) {
 // UserFromYAMLNonStrict builds User from YAML using lenient decoding.
 func UserFromYAMLNonStrict(data []byte) (*User, error) {
 	decoded := &User{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredential - A user's password hash, kept apart from the user row.
+type UserCredential struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	PasswordHash string `json:"passwordHash"`
+
+	PasswordChangedAt TemporalDateTime `json:"passwordChangedAt"`
+
+	DisabledAt *TemporalDateTime `json:"disabledAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of UserCredential with secret fields cleared.
+func (t *UserCredential) MaskSecrets() *UserCredential {
+	if t == nil {
+		return nil
+	}
+
+	masked := &UserCredential{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	var zeroPasswordHash string
+	masked.PasswordHash = zeroPasswordHash
+
+	masked.PasswordChangedAt = t.PasswordChangedAt
+
+	masked.DisabledAt = t.DisabledAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys UserCredential's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*UserCredential) JSONFieldNames() []string {
+	return []string{"id", "user", "passwordHash", "passwordChangedAt", "disabledAt"}
+}
+
+// Validate validates all fields in UserCredential
+func (t *UserCredential) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate user (required nested type)
+
+	if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("user", fieldErrs)
+	}
+
+	// Validate passwordChangedAt (required)
+
+	if valid, fieldErrs := t.PasswordChangedAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("passwordChangedAt", fieldErrs)
+	}
+
+	// Validate disabledAt (optional)
+
+	// Validate optional pointer field
+	if t.DisabledAt != nil {
+		if valid, fieldErrs := t.DisabledAt.Validate(); !valid {
+			errors.SetFieldErrors("disabledAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals UserCredential to JSON
+func (t *UserCredential) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias UserCredential
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals UserCredential from JSON with validation
+func (t *UserCredential) UnmarshalJSON(data []byte) error {
+	type Alias UserCredential
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts UserCredential into a map representation.
+func (t *UserCredential) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert UserCredential to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert UserCredential to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes UserCredential from a map using lenient decoding.
+func (t *UserCredential) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode UserCredential from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode UserCredential from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes UserCredential from a map and rejects unknown fields.
+func (t *UserCredential) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserCredential from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode UserCredential from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes UserCredential from JSON and rejects unknown fields.
+func (t *UserCredential) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserCredential from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserCredential from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserCredential from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes UserCredential from JSON using lenient decoding.
+func (t *UserCredential) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserCredential from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserCredential from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserCredential from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes UserCredential from YAML and rejects unknown fields.
+func (t *UserCredential) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserCredential from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserCredential from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserCredential from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes UserCredential from YAML using lenient decoding.
+func (t *UserCredential) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserCredential from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserCredential from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserCredential from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// UserCredentialFromMap builds UserCredential from a map using lenient decoding.
+func UserCredentialFromMap(value map[string]any) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredentialFromMapStrict builds UserCredential from a map and rejects unknown fields.
+func UserCredentialFromMapStrict(value map[string]any) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredentialFromJSON builds UserCredential from JSON and rejects unknown fields.
+func UserCredentialFromJSON(data []byte) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredentialFromJSONNonStrict builds UserCredential from JSON using lenient decoding.
+func UserCredentialFromJSONNonStrict(data []byte) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredentialFromYAML builds UserCredential from YAML and rejects unknown fields.
+func UserCredentialFromYAML(data []byte) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserCredentialFromYAMLNonStrict builds UserCredential from YAML using lenient decoding.
+func UserCredentialFromYAMLNonStrict(data []byte) (*UserCredential, error) {
+	decoded := &UserCredential{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrant - A role a user holds.
+type UserRoleGrant struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	Role Role `json:"role"`
+
+	GrantedAt TemporalDateTime `json:"grantedAt"`
+}
+
+// MaskSecrets returns a copy of UserRoleGrant with secret fields cleared.
+func (t *UserRoleGrant) MaskSecrets() *UserRoleGrant {
+	if t == nil {
+		return nil
+	}
+
+	masked := &UserRoleGrant{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	maskedValueRole := t.Role.MaskSecrets()
+	if maskedValueRole != nil {
+		masked.Role = *maskedValueRole
+	}
+
+	masked.GrantedAt = t.GrantedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys UserRoleGrant's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*UserRoleGrant) JSONFieldNames() []string {
+	return []string{"id", "user", "role", "grantedAt"}
+}
+
+// Validate validates all fields in UserRoleGrant
+func (t *UserRoleGrant) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate user (required nested type)
+
+	if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("user", fieldErrs)
+	}
+
+	// Validate role (required nested type)
+
+	if fieldErrs := t.Role.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("role", fieldErrs)
+	}
+
+	// Validate grantedAt (required)
+
+	if valid, fieldErrs := t.GrantedAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("grantedAt", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals UserRoleGrant to JSON
+func (t *UserRoleGrant) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias UserRoleGrant
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals UserRoleGrant from JSON with validation
+func (t *UserRoleGrant) UnmarshalJSON(data []byte) error {
+	type Alias UserRoleGrant
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts UserRoleGrant into a map representation.
+func (t *UserRoleGrant) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert UserRoleGrant to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert UserRoleGrant to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes UserRoleGrant from a map using lenient decoding.
+func (t *UserRoleGrant) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode UserRoleGrant from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode UserRoleGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes UserRoleGrant from a map and rejects unknown fields.
+func (t *UserRoleGrant) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserRoleGrant from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode UserRoleGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes UserRoleGrant from JSON and rejects unknown fields.
+func (t *UserRoleGrant) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserRoleGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserRoleGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserRoleGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes UserRoleGrant from JSON using lenient decoding.
+func (t *UserRoleGrant) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserRoleGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserRoleGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserRoleGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes UserRoleGrant from YAML and rejects unknown fields.
+func (t *UserRoleGrant) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserRoleGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserRoleGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserRoleGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes UserRoleGrant from YAML using lenient decoding.
+func (t *UserRoleGrant) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserRoleGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserRoleGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserRoleGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// UserRoleGrantFromMap builds UserRoleGrant from a map using lenient decoding.
+func UserRoleGrantFromMap(value map[string]any) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrantFromMapStrict builds UserRoleGrant from a map and rejects unknown fields.
+func UserRoleGrantFromMapStrict(value map[string]any) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrantFromJSON builds UserRoleGrant from JSON and rejects unknown fields.
+func UserRoleGrantFromJSON(data []byte) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrantFromJSONNonStrict builds UserRoleGrant from JSON using lenient decoding.
+func UserRoleGrantFromJSONNonStrict(data []byte) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrantFromYAML builds UserRoleGrant from YAML and rejects unknown fields.
+func UserRoleGrantFromYAML(data []byte) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserRoleGrantFromYAMLNonStrict builds UserRoleGrant from YAML using lenient decoding.
+func UserRoleGrantFromYAMLNonStrict(data []byte) (*UserRoleGrant, error) {
+	decoded := &UserRoleGrant{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

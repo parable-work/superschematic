@@ -44,7 +44,7 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20260928143325-10cf493f485e // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

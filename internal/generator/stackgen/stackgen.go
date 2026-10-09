@@ -166,5 +166,41 @@ func loadService(c registry.GenerateContext, name string) (stack.Service, error)
 			imported[dep] = depSchema
 		}
 	}
-	return Service(schema, outputs, imported)
+	svc, err := Service(schema, outputs, imported)
+	if err != nil {
+		return stack.Service{}, err
+	}
+	if schema.Kind == ir.SchemaKindAPI {
+		if svc.Identity, err = declaresUserModel(c, schema, cfg.Public); err != nil {
+			return stack.Service{}, err
+		}
+	}
+	return svc, nil
+}
+
+// declaresUserModel reports whether the server of the API schema
+// authenticates with the identity runtime (D50): whether the database its
+// Go server's auth reads, its authDb or, for a public API, its one DB-kind
+// dependency, has a User table, as the api generator reads it.
+func declaresUserModel(c registry.GenerateContext, schema *ir.Schema, public bool) (bool, error) {
+	name := schema.AuthDB
+	if name == "" && public {
+		for _, dep := range schema.Dependencies {
+			if dep.Kind != ir.SchemaKindDB {
+				continue
+			}
+			if name != "" {
+				return false, nil
+			}
+			name = dep.Name
+		}
+	}
+	if name == "" {
+		return false, nil
+	}
+	db, err := c.LoadDependency(name)
+	if err != nil {
+		return false, fmt.Errorf("load %s, the auth database of %s: %w", name, schema.Name, err)
+	}
+	return db.UserTable() != nil, nil
 }

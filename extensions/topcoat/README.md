@@ -88,23 +88,57 @@ The acme shop's `examples/acme-shop/topcoat` is a Topcoat app over
 guide walks it. Its `app` mounts the crate:
 
 ```rust
+let implementations = implementations(shop, Arc::clone(&users));
+let pages = IdentityPageAuthenticator::of(&implementations);
 Router::builder()
     .discover()
-    .cookies()
-    .sessions(SessionConfig::default())
-    .app_context(Arc::clone(&sessions))
-    .shop_orders(implementations(shop), SessionCaller(sessions))
+    .app_context(users)
+    .shop_orders(implementations, pages)
     .build()
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
-The authenticator establishes a page's caller, here from the app's
-Topcoat session. The API's own `Authenticator` still decides whether the
-caller's permissions cover an operation's, so pages and the JSON API agree.
+The authenticator establishes a page's caller, here from the session the
+shop's users sign in with ([Users and sessions](#users-and-sessions)); an
+app whose users are its own writes one over a Topcoat session, say. The
+API's own authenticator still decides whether the caller's permissions
+cover an operation's, so pages and the JSON API agree.
 
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
+
+## Users and sessions
+
+When the API's users are the core user model's (D50), its
+`Implementations.authenticator` is the identity runtime's, and the crate
+also offers `IdentityPageAuthenticator`, beside a `PageAuthenticator` of
+the app's own. It reads a page's caller from the session the request
+carries, the session cookie or a bearer token, as the JSON API reads it,
+so a user who signs in through the mounted `/api/auth/login` is signed in
+on every page:
+
+```rust
+let pages = IdentityPageAuthenticator::of(&implementations);
+Router::builder()
+    .discover()
+    .fixture_user_routes_api(implementations, pages)
+    .build()
+```
+
+A cookie on a request other than `GET`, `HEAD` or `OPTIONS` passes the
+identity config's cross-origin check, as on the JSON API, and a refused
+cookie is cleared on the page's response. Topcoat's own origin policy
+runs first, for pages and the mounted API alike, so an origin the identity
+config trusts must also be one the app's `OriginPolicy` trusts. The
+crate's `identity-postgres` and `identity-sqlite` features turn on the API
+crate's.
+
+An API that serves no login route of its own, as `shop-orders`, whose
+users sign in through another API's, signs a user in from a page: the
+page calls the identity service's `login` with a cookie session, after
+`check_cookie_login`, and appends `config().session_cookie(..)` to the
+page's response. The acme shop's `/sign-in` does so.
 
 ## Records
 
@@ -123,10 +157,13 @@ can hold:
 | Optional | `Option` |
 | A union, or any JSON value | its JSON text |
 
-A field marked `@uiHidden` is left out, since everything in a record
-reaches the browser. A field whose name a record reserves (`clone`,
-`then`, ...) gets a trailing underscore. `From<types::X>` builds the
-record from the API's value.
+A field marked `@uiHidden` is left out, and so is a secret one
+(`Secret<T>`), since everything in a record reaches the browser. The user
+model's operations add no records: the identity runtime serves them, and
+they have guards but no in-process call, so login's session token never
+reaches a record. A field whose name a record reserves (`clone`, `then`,
+...) gets a trailing underscore. `From<types::X>` builds the record from
+the API's value.
 
 ## Forms
 

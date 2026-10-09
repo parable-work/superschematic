@@ -123,7 +123,7 @@ func TestTheReleaseLinksTheDigests(t *testing.T) {
 		"-X " + symbol + "=$digests",
 		"for platform in " + strings.Join([]string{"linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"}, " ") + "; do",
 		`tarball="archives/` + ArchiveName("${VERSION}", "${platform}") + `"`,
-		"for bin in superschematic superschematic-migrate superschematic-archives; do",
+		"for bin in superschematic superschematic-identity superschematic-migrate superschematic-archives; do",
 		`scripts/release-archives.sh "$VERSION" "$NAME" dist`,
 	} {
 		if !strings.Contains(workflow, want) {

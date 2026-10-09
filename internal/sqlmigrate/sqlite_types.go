@@ -48,8 +48,8 @@ var sqliteTypes = map[string]string{
 	"BYTEA":               sqliteBlob,
 }
 
-// sqliteNoStorage are the Postgres types SQLite has no storage for: LTREE
-// and the PostGIS types.
+// sqliteNoStorage are the Postgres types SQLite has no storage for: LTREE,
+// POINT and the PostGIS types.
 var sqliteNoStorage = map[string]bool{"LTREE": true, "POINT": true, "GEOGRAPHY": true, "GEOMETRY": true}
 
 // sqliteType is the SQLite type of a column of Postgres type pg. A list is

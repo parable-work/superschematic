@@ -19,6 +19,8 @@ export {
   source,
   timeout,
   uiHidden,
+  userAdministration,
+  userSessions,
   virtual,
   webhook
 } from "./decorators";
@@ -38,7 +40,9 @@ export type {
   RateLimitConfig,
   ServiceCallersConfig,
   ServiceHandleRef,
-  TimeoutConfig
+  TimeoutConfig,
+  UserAdministrationConfig,
+  UserSessionsConfig
 } from "./decorators";
 export { HttpMethod } from "./enums";
 export type { EncryptedField, QueryParam } from "./wrappers";

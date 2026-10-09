@@ -330,6 +330,14 @@ def _validate_scalar_value(
     shape = scalar.structured_json_type()
     if shape and not isinstance(value, str):
         return _validate_structured_json_value(scalar, shape, value, required, registry)
+    if shape and value == "":
+        # An empty string is no JSON text: a missing value, which the scalar
+        # core is not asked about.
+        return (
+            [ValidationError(validator="required", message=f"{scalar.name} is required.")]
+            if required
+            else []
+        )
     if scalar.primitive == "Int":
         return _validate_int_constraints(scalar, value)
     if scalar.primitive == "Float":

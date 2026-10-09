@@ -671,7 +671,10 @@ func executeBuildAllStep(cmd *cobra.Command, task buildAllTask, stage buildplan.
 		OutputRoot:  ctx.outputRoot,
 		SchemasRoot: ctx.schemasRoot,
 		Paths:       ctx.naming.LocalPaths(ctx.repoRoot),
-		LoadOptions: buildAllTaskLoadOptions(ctx),
+		// The load reads an API's authDb from the build's schema cache.
+		LoadOptions: append(buildAllTaskLoadOptions(ctx), loader.WithDependencyLoader(func(name string) (*ir.Schema, error) {
+			return loadBuildAllDependency(name, ctx, prof)
+		})),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loadBuildAllDependency(name, ctx, prof)
 		},

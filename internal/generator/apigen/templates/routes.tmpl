@@ -45,6 +45,12 @@ import (
 {{- if .HasBodyArgs }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/bodyargs"
 {{- end }}
+{{- if .Auth.Identity }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/identity"
+{{- end }}
+{{- if .RoutesNeedScalars }}
+	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
 {{- if .HasServiceCallers }}
@@ -94,7 +100,20 @@ type Config struct {
 	// Optional: defaults to "http://localhost:8080" if empty.
 	OpenAPIBaseURL string
 
-{{- if .IsPublic }}
+{{- if .Auth.Identity }}
+
+	// Identity is the user model's runtime (D50): it authenticates the caller
+	// of every protected route and serves the user model's routes. Build it
+	// with NewIdentity, which gives it this API's route table.
+	Identity *identity.Service
+
+	// AuthMiddleware authenticates the caller of every protected route.
+	// Optional: nil runs Identity.Middleware. A middleware set here replaces
+	// it and authenticates the caller itself, usually by wrapping
+	// Identity.Middleware.
+	AuthMiddleware func(gohttp.Handler) gohttp.Handler
+{{- authSnippet "routesConfigMiddlewares" . }}
+{{- else if .IsPublic }}
 	// AuthMiddleware is the authentication middleware to apply to protected routes.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 {{- authSnippet "routesConfigMiddlewares" . }}
@@ -128,7 +147,17 @@ func (c *Config) Validate() error {
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
 	}
-{{- if .IsPublic }}
+{{- if .Auth.Identity }}
+	if c.Identity == nil {
+		return fmt.Errorf("Config.Identity is required: the user model's runtime authenticates the callers of {{ .SchemaName }}")
+	}
+{{- if .IdentityEndpoints }}
+	if err := checkIdentity(c.Identity); err != nil {
+		return err
+	}
+{{- end }}
+{{- authSnippet "routesConfigValidate" . }}
+{{- else if .IsPublic }}
 	if c.AuthMiddleware == nil {
 		return fmt.Errorf("Config.AuthMiddleware is required")
 	}
@@ -164,7 +193,11 @@ func (c *Config) Validate() error {
 {{- if .IsPublic }}
 //		DB:                          db,
 //		Logger:                      logger,
+{{- if .Auth.Identity }}
+//		Identity:                    identityService,
+{{- else }}
 //		AuthMiddleware:              authMiddleware,
+{{- end }}
 {{- authSnippet "routesConfigExample" . }}
 {{- if .HasServiceCallers }}
 //		ServiceAuthenticator:        serviceAuthenticator,
@@ -174,6 +207,10 @@ func (c *Config) Validate() error {
 {{- end }}
 {{- else }}
 //		Logger: logger,
+{{- if .Auth.Identity }}
+//		Identity: identityService,
+{{- authSnippet "routesConfigExample" . }}
+{{- end }}
 {{- if .HasServiceCallers }}
 //		ServiceAuthenticator: serviceAuthenticator,
 {{- end }}
@@ -199,6 +236,18 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	if openAPIBaseURL == "" {
 		openAPIBaseURL = defaultOpenAPIBaseURL
 	}
+{{- if .Auth.Identity }}
+
+	// The identity runtime authenticates the protected routes' callers
+	// unless the Config replaces its middleware.
+	if cfg.AuthMiddleware == nil {
+		cfg.AuthMiddleware = cfg.Identity.Middleware
+	}
+
+	// The credentialed CORS middleware runs first, so it answers the
+	// preflights of the identity config's trusted origins.
+	r.Use(cfg.Identity.CORS())
+{{- end }}
 
 {{- if .IsPublic }}
 {{- authSnippet "routesSetupPre" . }}
@@ -224,7 +273,7 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 {{- if .HasServiceCallers }}
 		runtimerouting.Register(r, serviceAPIRoutes(cfg))
 {{- end }}
-{{- if .IsPublic }}
+{{- if .AuthWired }}
 		runtimerouting.RegisterGroup(
 			r,
 			protectedAPIRoutes(cfg),
@@ -266,7 +315,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- end }}
 				{{- if not .ServiceCallers }}
 				{{- if .RequiredPerms }}
-				{{- authSnippet "routePermissions" .EndpointInfo }}
+				{{- template "routePermissionCheck" . }}
 				{{- end }}
 				{{- else if eq .ServiceCallers.Mode "require" }}
 				serviceauth.Require({{ range $i, $api := .ServiceCallers.From }}{{ if $i }}, {{ end }}{{ printf "%q" $api }}{{ end }}),
@@ -289,18 +338,34 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 
 {{- /* routeUserStep is the end-user step of a route with a service clause: what the protected group runs (the provider's AuthMiddleware and the snippets after it), when the API has one and the route a user clause, then the permission check. Its data is route $ <endpoint>. */ -}}
 {{- define "routeUserStep" }}
-				{{- if and .Output.IsPublic .RequiresAuth }}
+				{{- if and .Output.AuthWired .RequiresAuth }}
 				cfg.AuthMiddleware,
 				{{- authSnippet "routesProtectedMiddleware" .Output }}
 				{{- end }}
 				{{- if .RequiredPerms }}
+				{{- template "routePermissionCheck" . }}
+				{{- end }}
+{{- end }}
+
+{{- /* routePermissionCheck is a route's permission check: the identity service's for a user model operation (D50), which answers the problems the routes' contract names, and the provider's routePermissions snippet for every other. Its data is route $ <endpoint>. */ -}}
+{{- define "routePermissionCheck" }}
+				{{- if .IdentityOperation }}
+				cfg.Identity.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}{{ printf "%q" $perm }}{{- end }}),
+				{{- else }}
 				{{- authSnippet "routePermissions" .EndpointInfo }}
 				{{- end }}
 {{- end }}
 
+{{- /* routeHandler is a route's handler: the identity runtime's for a user model operation (D50), the handler factory over the implementation for every other. */ -}}
+{{- define "routeHandler" }}
+{{- if .IdentityOperation }}identityHandler(cfg.Identity, {{ printf "%q" .IdentityOperation }})
+{{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
+{{- end }}
+{{- end }}
+
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		{{- range .Endpoints }}
+		{{- range .RoutedEndpoints }}
 		{{- if and (not .ManualRouteRegistration) (not .RequiresAuth) (not .ServiceCallers) }}
 		{{- if .Description }}
 
@@ -311,7 +376,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
+			Handler: {{ template "routeHandler" . }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -321,7 +386,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		{{- range .Endpoints }}
+		{{- range .RoutedEndpoints }}
 		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .ServiceCallers) .IsScopedEndpoint }}
 		{{- if .Description }}
 
@@ -332,12 +397,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
+			Handler: {{ template "routeHandler" . }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
 		{{- end }}
-		{{- range .Endpoints }}
+		{{- range .RoutedEndpoints }}
 		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .ServiceCallers) (not .IsScopedEndpoint) }}
 		{{- if .Description }}
 
@@ -348,7 +413,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
+			Handler: {{ template "routeHandler" . }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -363,7 +428,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // none sits in the protected group.
 func serviceAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		{{- range .Endpoints }}
+		{{- range .RoutedEndpoints }}
 		{{- if and (not .ManualRouteRegistration) .ServiceCallers }}
 		{{- if .Description }}
 
@@ -374,7 +439,7 @@ func serviceAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }}),
+			Handler: {{ template "routeHandler" . }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}

@@ -55,6 +55,11 @@ type walker struct {
 	// belong in Imports.
 	suppressRecording bool
 
+	// identityTables records the class node of each type that takes a user
+	// model trait and stands where one may, for the base-class check once
+	// every file is walked (finishIdentityTraits).
+	identityTables map[string]*astNode
+
 	// environments counts the @environment classes walked so far. The
 	// files are walked in path order and a file's statements in source
 	// order, so the count numbers each class in declaration order
@@ -78,6 +83,8 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 		externals:     make(map[string]bool),
 		externalTypes: make(map[string]*ir.TypeDef),
 		externalEnums: make(map[string]*ir.EnumDef),
+
+		identityTables: make(map[string]*astNode),
 	}
 }
 
@@ -622,8 +629,15 @@ func (w *walker) walkClass(node *astNode) {
 	name := node.Name().Text()
 	decorators := w.decoratorsOf(node)
 
-	if classHasMethods(node) {
+	// A user model route set (D50) is a class with no methods that the
+	// loader fills.
+	routes := identityRoutesDecorator(decorators)
+	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
+			if routes != nil {
+				w.addErr(errorAtNode(routes.node, "@%s is only allowed in an API schema (this service is kind %s)", routes.id.name, w.cfg.Kind))
+				return
+			}
 			w.addErr(errorAtNode(node, "operation sets (classes with methods) are only allowed in API schemas (this service is kind %s)", w.cfg.Kind))
 			return
 		}
@@ -745,6 +759,9 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 		w.applySource(td, src)
 	}
 
+	// After the decorators, which settle the role and @jsonField.
+	w.checkIdentityTraitPlacement(node, td)
+
 	// A @job class declares a job of the API, which @job's Apply recorded
 	// in Schema.Jobs: it is no type (D52).
 	if findDecorator(decorators, "job") != nil {
@@ -777,6 +794,12 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 				}
 				td.Extends = id.name
 			} else {
+				// The user model's traits are core IR, not TraitRefs, and
+				// RawHeritage leaves them out (users.go).
+				if trait, core := w.identityTraitEntry(t); core {
+					w.applyIdentityTrait(td, trait, t)
+					continue
+				}
 				raw.Implements = append(raw.Implements, text)
 				id, typeArgs, ok := w.traitHeritageTarget(t, true)
 				if !ok {
@@ -996,6 +1019,10 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 			if hc.Token == kindExtendsKeyword {
 				id, idOK = w.identityOf(t.AsExpressionWithTypeArguments().Expression)
 			} else {
+				// The user model's traits carry no fields.
+				if _, core := w.identityTraitEntry(t); core {
+					continue
+				}
 				// Implements entries may name the trait through the
 				// Trait<T> heritage carrier; unwrap to the trait class.
 				// Errors were already reported by applyHeritage.
@@ -1283,6 +1310,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	}
 
 	auth := false
+	var bases identityRoutesBases
 	for _, clause := range heritageClauses(node) {
 		hc := clause.AsHeritageClause()
 		for _, t := range hc.Types.Nodes {
@@ -1294,9 +1322,15 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			switch {
 			case id.is("@superschematic/api", "Authenticated"):
 				auth = true
+				bases.authenticated = t
 			case id.is("@superschematic/api", "Encrypted"):
 				set.Encrypted = true
+				bases.encrypted = t
 			default:
+				if trait, core := identityTrait(id); core {
+					w.addErr(errorAtNode(t, "%s: the %s trait is only allowed on a DB table of a DB schema (an operation set is not one)", name, trait))
+					continue
+				}
 				w.addErr(errorAtNode(t, "operation sets may only extend Authenticated or Encrypted from @superschematic/api"))
 			}
 		}
@@ -1304,6 +1338,14 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 
 	for _, d := range decorators {
 		w.addErr(w.applyDecorator(d, registry.TargetOperationSet, registry.Node{Schema: w.schema, OperationSet: set}))
+	}
+
+	if set.IsIdentityRoutes() {
+		w.checkIdentityRoutesClass(node, set, decorators, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
 	}
 
 	for _, m := range node.AsClassDeclaration().Members.Nodes {
