@@ -104,11 +104,23 @@ only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 
+## Forms
+
+The crate's `forms` module has a form for what a page submits to an
+operation, of two kinds that share their controls, their decoding and
+their errors. An **input form** holds an input type's fields, parsed by
+the type's rules. An **argument form** holds an operation's arguments,
+in its path, its query or its body, parsed by the route's own rules
+(`Args::check`), and embeds the input's form when the operation takes
+one. A form holds each field as the browser sends it, so a refused form
+renders again exactly as it was sent.
+
+### An input form
+
 An input type gets a form when an operation a page can call takes it and
 the service declares it; the build log names any other and why.
-`forms::WriteReviewInputForm` holds the form's fields as the browser sends
-them, each an `Option<String>`, so a refused form renders again as it was
-sent. `parse()` reads them by `WriteReviewInput`'s rules, and
+`forms::WriteReviewInputForm` holds `WriteReviewInput`'s fields, each an
+`Option<String>`. `parse()` reads them by the type's rules, and
 `FormErrors::from_api` turns the operation's refusal into the same field
 messages:
 
@@ -159,49 +171,28 @@ if form.apply_action() {
 The buttons skip the browser's checks (`formnovalidate`), so a row can be
 added before the others are valid, and Enter still submits the form.
 
-### Typed controls
+### An argument form
 
-A `Temporal.Date` field is `type="date"` and a `Temporal.Time` field
-`type="time"`. A `Temporal.DateTime` field is `type="datetime-local"`,
-which carries no offset, so the form reads it as UTC and its label says
-so. A `@secret` field is `type="password"` and is never rendered with its
-value, so a refused form asks for it again. A value no control holds, a
-union, any JSON value or a map, is a `<textarea>` of its JSON text.
-
-### Choices the app supplies
-
-An input type does not say which product a `productId` names. The page
-says, with `Choices`, which turns the text or number fields it names into
-a `<select>`: `lines.productId` for every line's product, or
-`lines[0].productId` for one line's.
-
-```rust
-let choices = Choices::new().with("lines.productId", products.iter().map(|p| (p.id.clone(), p.name.clone())));
-view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
-```
-
-## Argument and filter forms
-
-An operation's other arguments, in its path, its query or its body, get a
-form too, in `arg_forms`, named after the operation's `Args` struct:
-`<Namespace><Operation>ArgsForm`. It holds each argument as the browser
-sends it, and a list's every value. `parse()` writes each as the JSON a
-request carries, decodes it into the `Args` struct and checks it with the
-router's own rules (`Args::check`), so a value the JSON API would refuse
-with 400 is that field's error. `submit(cx)` parses the form and makes the
-in-process call, and a refusal of either is the form's `FormErrors`, which
-the page renders the form again with, as it does an input form.
+An operation a form submits gets `<Namespace><Operation>ArgsForm`, named
+after its `Args` struct: a GET operation with a query argument, whose
+form is a filter, and any other operation with an argument beside its
+input. A GET whose path carries its only arguments, `getOrder(id)`, is a
+link and has none. The form holds each argument, a list's every value,
+and `input`, the input's form, when the operation takes one, so one
+`<form>`, one `parse()` and one component cover the arguments and the
+input's fields. `parse()` writes each argument as the JSON a request
+carries, decodes it into the `Args` struct and checks it as the router
+checks a request's, so a value the JSON API would refuse with 400 is that
+argument's error. `submit(cx)` parses the form and makes the in-process
+call, and a refusal of either is the form's `FormErrors`.
 
 `<namespace>_<operation>_args_fields(form, errors)` renders each argument
-with the control an input form gives a field of its type and the
-attributes its rules give it: a `<select>` for an enum, a group of
-checkboxes for a list of an enum, `min` and `max` on a number, `maxlength`
-on a string. An argument is labeled by its name in words, and its
-description, when it has one, is a hint under the label. A path argument
-is a hidden input: `new(id)` builds the form of one resource, such as the
-order a cancel button cancels. When the operation also takes an input, the
-argument form embeds the input's form, so one `<form>`, one `parse()` and
-one component cover both.
+with the control an input field of its type gets: a `<select>` for an
+enum, a group of checkboxes for a list of an enum, an input per value for
+any other list, `min` and `max` on a number, `maxlength` on a string. An
+argument is labeled by its name in words, and its description is a hint
+under the label. A path argument is a hidden input: `new(id)` builds the
+form of one resource, such as the order a cancel button cancels.
 
 A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
 reads it from the query with Topcoat's `Form<T>`, which reads the query on
@@ -210,10 +201,37 @@ A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
 a comma-separated value is split as the router splits it. A blank field is
 absent, and so is an optional flag whose checkbox is not checked.
 
-`FormErrors::from_api` places a refused parameter's error, which the
-router's 400 names in its details, on that argument's control. A message
-no rendered control shows, such as a hidden path argument's, is shown with
+### Typed controls
+
+A `Temporal.Date` field or argument is `type="date"` and a
+`Temporal.Time` one `type="time"`. A `Temporal.DateTime` one is
+`type="datetime-local"`, which carries no offset, so the form reads it as
+UTC and its label says so. A `@secret` field is `type="password"` and is
+never rendered with its value, so a refused form asks for it again. A
+value no control holds, a union, any JSON value or a map, is a
+`<textarea>` of its JSON text.
+
+### Errors
+
+A form's errors are keyed by its controls' names, so each renders at its
+control: `parse`'s, and an operation's refusal through
+`FormErrors::from_api`, which also places a refused parameter's error,
+which the router's 400 names, on that argument's control. A message no
+rendered control shows, such as a hidden path argument's, is shown with
 the form's own messages, named by its field.
+
+### Choices the app supplies
+
+An input type does not say which product a `productId` names. The page
+says, with `Choices`, which either kind of component takes and which
+turns the text or number fields it names into a `<select>`:
+`lines.productId` for every line's product, or `lines[0].productId` for
+one line's.
+
+```rust
+let choices = Choices::new().with("lines.productId", products.iter().map(|p| (p.id.clone(), p.name.clone())));
+view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
+```
 
 ## Records
 

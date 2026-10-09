@@ -5106,7 +5106,7 @@ first things to check.
 
 The rule is reversible until the first release.
 
-### D44, amended: a form for every input type, its controls named by path, a list's rows added and removed without JavaScript
+### D44, amended: a form for every input type and every operation a form submits, its controls named by path
 
 The first forms amendment gave a form only to an input type whose fields
 were each a string, a number, a boolean or an enum, since Topcoat's
@@ -5114,29 +5114,40 @@ were each a string, a number, a boolean or an enum, since Topcoat's
 input got none, with its reason in the build log: acme's
 `PlaceOrderInput`, whose `lines` are a list of one to fifty products with
 their quantities and whose `shippingAddress` is a nested object, got
-"field lines is a list or a map", so a page that places an order would
-write its controls, their names and their errors by hand.
+"field lines is a list or a map". And an operation's arguments beside its
+input, in its path, its query or its body, had no form at all, so a page
+that cancels an order by its id and a reason, or lists orders by a set of
+statuses and a limit, wrote its controls, their rules, their names,
+their parsing and their errors by hand. The router already decodes and
+checks each argument (`ParamSpec`), and `Args::check` runs those rules
+in-process (D43).
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| Every input type an in-process call takes, declared by the service, gets a form. A control is named by its field's path in the input, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, and a list of an enum's members `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
-| Each input's form implements `Deserialize` from the pairs a post carries, which Topcoat's `Form` hands it as `Vec<(String, String)>`, so `Form<PlaceOrderInputForm>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up, and a name no control has, one that is not a path, or one deeper than 32 steps is ignored. `parse()` writes the struct as the input's JSON and runs `parse_<type>` with undeclared keys refused, as before. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize` with renamed fields, which reads no nested name; reading the body in the crate, where Topcoat's `Form` already applies the body limit |
-| `FormErrors` keys each message by its control's name. `parse`'s errors are the validators' paths, flattened (`lines[0].productId`), and `from_api` walks the API's nested `errors` as a procedure's `field_errors` does, so each message renders at its control, and `errors.under(name)` gathers a JSON value's or a group's with the place of each. An error at a place the component renders no control for (an `@uiHidden` field, an undeclared key) renders with the form's own messages, after its name. A value a control cannot hold, a number that is not one, JSON that does not parse, a date-time that does not exist, is refused at the control before the rules run. | Dropping an error no control shows, which would refuse a form with nothing on it |
-| A nested object is a `<fieldset>` with its label as `<legend>`. An optional one is part of the input only when one of its values was sent (a filled control, a checked box, a row): its controls are never `required`, its select has a blank option, and a new form starts it empty, its `@default`s left to the API. A required one is always sent, and its rules refuse what it lacks. | A checkbox that includes the object, one more control to tick; prefilling an optional object's defaults, which would send the object a reader left blank |
-| A list of objects is a fieldset of rows, each a fieldset numbered by the row type's `@display` noun, else the list's label, after a hidden input of the row's name that keeps a row whose controls send nothing. A list of values is a control per row, a checkbox after a hidden input of its name, and a blank row is null, which the rules refuse at the row. A list of an enum's members is a group of checkboxes in the enum's order. A new form starts a list at its `listMin`, or one when the input requires it. | Rows for a list of an enum's members, which would let a reader pick a member twice; dropping a blank row, which would hide a row the reader added |
-| A row is added and removed without JavaScript, by submit buttons named `_action`: `add:lines` after a list's rows, with the row type's `@display` createLabel as its text, until the list holds its `listMax`, and `remove:lines[1]` in each row while it holds more than its `listMin`. They carry `formnovalidate`, so a row can be added before the others are valid, and the component renders a hidden submit button ahead of them, which Enter presses. The form holds the button in `row_action`; `apply_action()` applies it within the bounds, numbering the rows after a removed one again with their values as sent, and is true when a row button submitted the form, in which case the page renders the form again, 200, without calling the operation. | Script that clones a row; a route per action; a row count field, which a reader could set past the bounds |
-| A control is typed by its scalar: `Temporal.Date` is `type="date"` and `Temporal.Time` `type="time"`, whose `HH:MM` the scalar takes. `Temporal.DateTime` is `type="datetime-local"`, which carries no offset, so the form reads it as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in "(UTC)"; a value with an offset, which an app may set, is sent as it is, and a held `Z` value shows without it. A `@secret` field is `type="password"`, never rendered with its value, after a refusal or a row button. A value no control holds, a union, any JSON value, a map, a list of lists, or a type that nests the type holding it, is a `<textarea>` of its JSON text, "(JSON)" in its label. `new()` is a new form, each value's `@default` filled in, and the component's default; `Default` is the empty form. | Text holding the canonical RFC 3339 form, which a reader would type by hand; reading the local time in the server's zone, which is not the reader's; a map as key and value rows, whose errors (`labels.vip`) name a key a row may have changed; refusing the whole input for one such field |
-| The app supplies choices: `Choices` maps a field's path without its rows' indexes (`lines.productId`, every line's) or a control's name (`lines[0].productId`, one line's, which wins) to value and label pairs, and the component renders each text or number control it names as a `<select>`, a blank option first, keeping the value held as an option when no choice is it. The generator infers no picker. | Inferring a table from an id's name or type, which an input type does not declare (`productId` is a plain `Identity.UUID`) |
-| A flat form keeps its public shape: `WriteReviewInputForm`, `Form<WriteReviewInputForm>`, `parse()`, `write_review_input_fields(form, errors)`, `FormErrors::from_api` and `FormErrors::of`, and it renders the same HTML. The component also takes `choices`, and each prop is optional. | |
+| `forms` has two kinds of form, which share their controls, their decoding and their errors. An input form, `<Input>Form`, per input type an in-process call takes and the service declares. An argument form, `<Ns><Op>ArgsForm`, named after its `Args` struct, per operation a form submits: a GET operation with a query argument, whose form is a filter, and any other operation with an argument beside its input. A GET whose path carries its only arguments, `getOrder(id)`, is a link, and an operation whose only argument is its input uses the input's form. An argument form embeds its input's form as `input`, so one `<form>`, one `parse()` and one component cover every argument. `outputs.topcoat.forms` turns both off. | A module per kind, which split one feature and its helpers; a switch of its own for argument forms; an argument form for a GET by id, a form with nothing to fill; an argument form wrapping an input form alone |
+| A control is named by its field's path, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`; an argument by its name, beside its input's fields. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, a list of an enum's members `Vec<String>`; an argument is an `Option<String>`, a list argument's values a `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
+| Every form implements `Deserialize` from the pairs a browser sends, which Topcoat's `Form` hands it as `Vec<(String, String)>` for a post's body or a GET's query, so `Form<T>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs; `from_query(cx)` reads a filter outside an extractor. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up; a name no control has, one that is not a path, or one deeper than 32 steps is ignored. An input field takes the last value sent (a checkbox row sends a hidden input of its name first), and an argument the first, as the router reads a parameter sent twice; a list argument's values are every value sent, a query list's split on commas as the router splits it; a blank value is none. An argument form reads its input's fields from the same tree. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize`, which reads no nested name and refuses a repeated key; re-encoding an argument form's other pairs for the input's form to decode again |
+| An input form's `parse()` writes the struct as the input's JSON and runs `parse_<type>` with undeclared keys refused. An argument form's writes each argument as the JSON a request carries (a blank optional one absent, one with a declared default the default), decodes it into the `Args` struct, parses the input by its form, then runs `Args::check`, which refuses the first argument that breaks a rule; `submit(cx)` parses the form and makes the in-process call. | Restating each `ParamSpec`'s rules in the form, which would drift from the router's; making the router's specs public, a change to every Rust server |
+| `FormErrors` keys each message by its control's name. `parse`'s errors are the validators' paths, flattened (`lines[0].productId`); `from_api` walks the API's nested `errors` as a procedure's `field_errors` does and places a refused parameter's error, which the router's 400 names in `details.parameter`, on that argument's control; `errors.under(name)` gathers a JSON value's or a list's with the place of each. Each form has a `shows` that says which paths its component renders a control for, and a message at any other place (an `@uiHidden` field, a hidden path argument, an undeclared key) renders with the form's own messages, after its name. A value a control cannot hold, a number that is not one, JSON that does not parse, a date-time that does not exist, is refused at the control before the rules run. | Dropping an error no control shows, which would refuse a form with nothing on it; a list of rendered names per component, which a row's names cannot be |
+| A control is typed by its field's or argument's type, by one renderer for both kinds, with the attributes its rules give it (`required`, `min`/`max`, lengths, a pattern a browser reads as the server does): a select for an enum; `Temporal.Date` `type="date"` and `Temporal.Time` `type="time"`; `Temporal.DateTime` `type="datetime-local"`, which carries no offset, so the form reads it as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in "(UTC)", a value with an offset sent as it is and a held `Z` value shown without it; a `@secret` field `type="password"`, never rendered with its value; and a `<textarea>` of JSON text, "(JSON)" in its label, for a value no control holds: a union, any JSON value, a map, a list of lists, an argument's object or list of booleans, or a type that nests the type holding it. A description is a hint under the label (`aria-describedby`); an argument is labeled by its name in words. | Text holding the canonical RFC 3339 form, which a reader would type by hand; reading the local time in the server's zone; a map as key and value rows, whose errors (`labels.vip`) name a key a row may have changed; leaving an operation or an input without a form for one such value |
+| A nested object is a `<fieldset>` with its label as `<legend>`. An optional one is part of the input only when one of its values was sent: its controls are never `required`, its select has a blank option, and a new form starts it empty, its `@default`s left to the API. A list of objects is a fieldset of rows, each numbered by the row type's `@display` noun, else the list's label, after a hidden input of the row's name that keeps a row whose controls send nothing; an input's list of values is a control per row, and a blank row is null, which the rules refuse at the row; a list of an enum's members is a group of checkboxes in the enum's order; an argument's list of values is an input per value sent and a blank one for another. `new()` is a new form, each value's `@default` filled in and each list's first rows, its `listMin` or one when the input requires it, and the component's default; an argument form's `new(<path arguments>)` fills its hidden path inputs, each argument's default and the input's new form. `Default` is the empty form. | A checkbox that includes an optional object, one more control to tick; prefilling an optional object's defaults, which would send the object a reader left blank; rows for a list of an enum's members, which would let a reader pick a member twice |
+| A row is added and removed without JavaScript, by submit buttons named `_action`: `add:lines` after a list's rows, with the row type's `@display` createLabel as its text, until the list holds its `listMax`, and `remove:lines[1]` in each row while it holds more than its `listMin`. They carry `formnovalidate`, so a row can be added before the others are valid, and the component renders a hidden submit button ahead of them, which Enter presses. The form holds the button in `row_action`; `apply_action()`, on the input's form and on an argument form that embeds it, applies it within the bounds, numbering the rows after a removed one again with their values as sent, and is true when a row button submitted the form, in which case the page renders the form again, 200, without calling the operation. | Script that clones a row; a route per action; a row count field, which a reader could set past the bounds |
+| A filter's optional boolean is absent when its checkbox is not checked, so it filters nothing; elsewhere an unchecked box is false, as an input form's is. | Reading every unchecked box as false, which would filter on it |
+| The app supplies choices: `Choices` maps a field's path without its rows' indexes (`lines.productId`, every line's) or a control's name (`lines[0].productId`, one line's, which wins) to value and label pairs, and either kind of component renders each text or number control it names as a `<select>` (`choice_select`, one call per control), a blank option first, keeping the value held as an option when no choice is it. The generator infers no picker. | Inferring a table from an id's name or type, which an input type does not declare (`productId` is a plain `Identity.UUID`); an inline select per control, which doubled the generated view |
+| A flat input form keeps its public shape: `WriteReviewInputForm`, `Form<WriteReviewInputForm>`, `parse()`, `write_review_input_fields(form, errors)`, `FormErrors::from_api` and `FormErrors::of`, and it renders the same HTML. Each component also takes `choices`, and each prop is optional. | |
 
-Status: built. The extension's fixture `fixture-forms-api` gains
-`BookingInput`: a required nested `Guest` with an optional field, an
-optional nested `BillingAddress`, `rooms` of one to three `RoomRequest`s
-(each with an id, a bounded integer and a list of `Amenity` members), a
-list of `Amenity` members, a date, a time, a date-time, a secret, a
-default, any JSON value and a map; `NoteInput`'s `tags` are now rows of
-at most three. The goldens cover it, and fixture-nested-arrays-api's
-`SaveGridInput`, whose lists of lists are JSON text, gains a form.
+Status: built. The goldens cover a sixth fixture, the extension's own
+`fixture-args-api`: a filter of a list of enums, a list of strings, a
+limit, an integer page and a flag in the query; an order fetched by its
+id alone, which has no argument form; a cancel by a path UUID, an enum
+and an optional reason with `maxLength` and a description in the body; a
+review written by a path id and an input; and a tag map, which its form
+holds as JSON text. `fixture-forms-api` gains `BookingInput`: a required
+nested `Guest` with an optional field, an optional nested
+`BillingAddress`, `rooms` of one to three `RoomRequest`s, each with an
+id, a bounded integer and a list of `Amenity` members, a list of
+`Amenity` members, a date, a time, a date-time, a secret, a default, any
+JSON value and a map; `NoteInput`'s `tags` are rows of at most three.
 `TestFormsServeATopcoatApp` drives a Topcoat app through
 `Router::handle`: the booking form renders its controls at their names
 with their attributes; a valid nested post books with the input's JSON,
@@ -5144,52 +5155,23 @@ the date-time in UTC, the blank billing address left out and the default
 filled in; a refused field, nested or in a row, renders 422 at its
 control with the values as sent and the secret blank, as does a value no
 control holds and the operation's refusal of a row's field; row buttons
-add and remove rooms within one and three without calling the operation,
-numbering the rest again; and choices render a select, a row's own
-winning. Its unit tests decode rows by index and read date-times as UTC.
-`TestEveryInputHasAForm`, `TestHowAFormHoldsAField` and
-`TestControlNames` check the generator. acme-shop's `PlaceOrderInput` now
-has `PlaceOrderInputForm`; its app is unchanged.
-
-### D44, amended: an operation's arguments get a form, and a GET's query a filter form
-
-D44's forms covered an operation's input type alone. An operation whose
-arguments are scalars, in its path, its query or its body, had none, so a
-page that cancels an order by its id and a reason, or lists orders by a
-set of statuses and a limit, wrote its fields, their rules and their
-parsing by hand. The router already decodes and checks each argument
-(`ParamSpec`), and `Args::check` runs those rules in-process (D43), but
-only in the API crate: its specs are private to its router.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| An operation with an in-process call and an argument beside its input gets `arg_forms::<Ns><Op>ArgsForm`, named after its `Args` struct. It holds each argument as the browser sends it, an `Option<String>`, and a list's every value, a `Vec<String>`, so a refused form renders again as sent. `outputs.topcoat.forms` turns argument forms off with input forms; `FormErrors` stays in `forms`, which the crate writes when it has either kind. | A switch of their own, `argForms`, where one switch already says whether the crate renders forms; a form only for operations without an input |
-| `parse()` writes each argument as the JSON a request carries, as a procedure's `to_args` does (a number parsed, a checkbox true when sent, a blank field absent, a declared default read when blank), decodes it into the `Args` struct, then runs `Args::check`. A value that does not decode, or that `check` refuses, is that argument's error; `check` stops at the first argument it refuses. `submit(cx)` parses the form and makes the in-process call. | Restating each `ParamSpec`'s rules in the form, which would drift from the router's; making the router's specs public, a change to every Rust server for one extension |
-| The component renders each argument with the control and attributes an input form's field of its type gets (`schemaSet.control`, called, not copied): a select for an enum, number with `min`, `max` and `step`, text with lengths and a pattern a browser reads as the server does, a checkbox for a boolean. A list of an enum is a group of checkboxes; any other list an input per value sent and one more. A label is the argument's name in words, since the IR's arguments have no title, and its description a hint (`aria-describedby`). A path argument is a hidden input a page fills through `new(<path arguments>)`. A map, a list of lists, an object, a list of booleans, a union or any JSON value leaves the operation without a form, with the build log's reason. | A multiple select for a list of an enum, which hides its choices; refusing every list but an enum's |
-| An operation with an input embeds the input's form as `input`: one struct, one `parse()` and one component cover the arguments and the input's fields, posted in one `<form>`. The arguments' keys go to the argument form, the rest to the input form through Topcoat's own `Form<T>`. An operation whose input has no form gets no argument form, nor does one where an argument shares an input field's name. | An argument form beside the input's that the page composes, which needs two extractions of one body that Topcoat does not offer; copying the input's fields into the argument form |
-| A GET operation's form is a filter: `METHOD` is `"get"`, and it deserializes from Topcoat's `Form<T>`, which reads the query on GET, or from `from_query(cx)`. Its `Deserialize` reads the pairs a browser sends: a list's values are repeated keys (`statuses=placed&statuses=shipped`), which a derived `Deserialize` refuses as a duplicate field, a query list's comma-separated values are split as the router splits them, and a single argument takes the first value sent, as the router does. An optional boolean in a filter is absent when its checkbox is not checked; elsewhere an unchecked box is false, as in an input form. | Pairs (`Form<Vec<(String, String)>>`) in each page; serde_urlencoded's struct decoding, which holds no list; a component that renders the `<form>` element and its button, whose words are the app's |
-| `FormErrors::from_api` places a refused parameter's error, which the router's 400 names in `details.parameter`, on that argument's control, as procedures' `ProblemRecord::from` places it at the parameter. A component shows a message no control it renders shows, a hidden path argument's, an input's `@uiHidden` field's, a parameter an input form does not hold, with the form's own, named by its field (`FormErrors::unclaimed`). | The detail alone as the form's message, which an argument form could not place at its control; dropping a field's error the form does not render |
-
-Status: built. The goldens cover a sixth fixture, the extension's own
-`fixture-args-api`: a filter of a list of enums, a list of strings, a
-limit, an integer page and a flag in the query; a cancel by a path UUID,
-an enum and an optional reason with `maxLength` and a description in the
-body; an order fetched by its id alone; a review written by a path id and
-an input; and a tag map, which leaves its operation without a form.
-`TestWhatHasNoArgumentForm` reads its crate and build log, and
-`TestArgumentControls` each control and reason. Its cargo test drives a
-Topcoat app through `Router::handle`: the cancel form renders its id
-hidden, its select required and its reason's `maxlength` and hint; a
-valid post calls the operation with the arguments sent, a blank reason
-absent; an over-long reason re-renders with 422 and the router's message
-at its control, a forged id with the form's message naming it, and the
-operation's refusal as the form's; the GET filter reads repeated statuses,
-a comma-separated tag list, a limit, a page and a flag from the query and
-renders them checked and filled, an unchecked flag and a blank limit
-absent, and a limit out of range or a page that is not a whole number at
-its control; and the review form, its input embedded, parses both, a
-value with `&` and `%` intact, and shows the input's error at its field.
-The other fixtures' crates gain the forms their operations' arguments
-give, and their apps still pass clippy with warnings denied.
+add and remove rooms within one and three without calling the
+operation; and choices render a select, a row's own winning.
+`TestArgumentFormsServeATopcoatApp` does the same for fixture-args-api:
+the cancel form renders its id hidden, its select required and its
+reason's `maxlength` and hint; a valid post calls the operation, a blank
+reason absent; an over-long reason re-renders with 422 and the router's
+message at its control, a forged id with the form's message naming it,
+and the operation's refusal as the form's; the GET filter reads repeated
+statuses, a comma-separated tag list, a limit, a page and a flag from the
+query and renders them checked and filled, an unchecked flag and a blank
+limit absent, and a limit out of range at its control; the review form,
+its input embedded, parses both; the tag map is JSON text, refused at its
+control when it does not parse; and choices make the reason a select.
+`TestEveryInputHasAForm`, `TestWhatHasNoArgumentForm`,
+`TestHowAFormHoldsAField`, `TestArgumentControls` and `TestControlNames`
+check the generator. acme-shop's crate gains `PlaceOrderInputForm` and
+argument forms for `cancelOrder`, `listOrders`, `listReviews` and
+`writeReview`; its app is unchanged, and its tests pass against it.
 
 The rule is reversible until the first release.
