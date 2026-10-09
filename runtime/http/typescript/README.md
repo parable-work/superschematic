@@ -186,6 +186,19 @@ runtime's `identity` package, held to the same parity vectors
   CORS middleware for the trusted origins. Every success is the `{data,
   meta}` envelope; logout, changePassword, setUserPassword and deleteRole
   answer `data: true`.
+- `identityCorsRoutes(app, service)` scopes that CORS to the app's own
+  routes, for an app a server mounts beside others: the routers of the
+  APIs a TypeScript server serves, or a router beside the engine's app.
+  Hono merges the apps' routes, so middleware on a pattern such as
+  `/api/*` would answer every app's requests under it. It returns a
+  function that registers a route (`{ method, path }`, an operation table
+  entry), called before the route's handler is mounted: a trusted origin's
+  request that the route answers gets the CORS headers, and a trusted
+  origin's preflight of its path that asks for a method the app registers
+  there gets 204. Any other preflight passes on, to the app that
+  registers the method or to not found, as the Go server hands each
+  request, a preflight by the method it asks about, to the router of the
+  API that registers it.
 - `identityOperations` holds each operation's rule (public, a caller, or
   an administration permission) and rate limit (login 10, register 5,
   changePassword 10 a minute per client). `identityOperationSpec` writes
@@ -200,7 +213,8 @@ runtime's `identity` package, held to the same parity vectors
 A generated router (`internal/generator/tsrestgen`) of an API whose authDb
 has a `User` table takes `identity` in place of `authenticate` and passes
 its options through `identityRouterOptions`, so every route authenticates
-with the service. It puts `identityCors` in front of its routes and mounts
+with the service. It registers each of its routes with
+`identityCorsRoutes`, so its CORS answers its own routes alone, and mounts
 each operation of the API's route sets with
 `mountManualOperation(router, spec, identityHandler(service, name), ...)`,
 with the rate limit and body limit of the spec and of the router's

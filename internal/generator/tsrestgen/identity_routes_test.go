@@ -151,7 +151,8 @@ func TestGenerateUserRoutes(t *testing.T) {
 	for _, want := range []string{
 		"identityHandler(runtime.identity, 'changePassword')",
 		"const runtime = identityRouterOptions(options);",
-		"router.use('/api/*', identityCors(runtime.identity));",
+		"const cors = identityCorsRoutes(router, runtime.identity);",
+		"for (const spec of Object.values(operationSpecs)) cors(spec);",
 		"options: RouterOptions<E>): Hono<E>",
 		"routes: routesOf(operationSpecs)",
 	} {
@@ -186,7 +187,7 @@ func TestGenerateUserModelWithoutRouteSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"identity: IdentityService;", "identityRouterOptions(options)", "identityCors(runtime.identity)", "verifies the session that login made"} {
+	for _, want := range []string{"identity: IdentityService;", "identityRouterOptions(options)", "identityCorsRoutes(router, runtime.identity)", "verifies the session that login made"} {
 		if !strings.Contains(string(router), want) {
 			t.Errorf("router.ts has no %s", want)
 		}

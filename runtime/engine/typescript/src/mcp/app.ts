@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { Server, ProtocolError, ProtocolErrorCode, createMcpHandler, type CallToolResult, type McpRequestContext, type Tool } from '@modelcontextprotocol/server';
 import { internal, problemBody, HttpProblem, type OperationSpec, type RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, mountManualOperation, notFoundHandler, type RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
-import { identityRouterOptions, type IdentityService } from '@superschematic/http-runtime/identity';
+import { identityCorsRoutes, identityRouterOptions, type IdentityService } from '@superschematic/http-runtime/identity';
 import { Hono } from 'hono';
 
 import type { Principal } from '../access.js';
@@ -54,8 +54,9 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
   instructions?: string;
   /**
    * The identity service (D50), engineIdentity's: it authenticates the
-   * endpoint in place of authenticate, which is refused beside it. The
-   * session routes are engineApp's.
+   * endpoint in place of authenticate, which is refused beside it, and its
+   * credentialed CORS answers the trusted origins on the endpoint alone.
+   * The session routes are engineApp's.
    */
   identity?: IdentityService;
   /**
@@ -95,6 +96,9 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
   const serverInfo = options.serverInfo ?? packageInfo();
   const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError, options.tools));
   const app = new Hono();
+  // The trusted origins' CORS on the endpoint alone, as engineApp's on its
+  // routes, so an app mounted beside it gets none of it.
+  const cors = options.identity ? identityCorsRoutes(app, options.identity) : () => {};
 
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
     const spec: OperationSpec = {
@@ -110,6 +114,7 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
       ...(options.rateLimitPerMinute ? { rateLimitPerMinute: options.rateLimitPerMinute } : {}),
       ...(options.timeoutSeconds ? { timeoutSeconds: options.timeoutSeconds } : {}),
     };
+    cors(spec);
     mountManualOperation(
       app,
       spec,

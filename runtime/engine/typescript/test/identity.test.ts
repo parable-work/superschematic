@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
 
-import { hashPassword, type IdentityService, type SqlIdentityStore } from '@superschematic/http-runtime/identity';
+import { hashPassword, identityCorsRoutes, type IdentityService, type SqlIdentityStore } from '@superschematic/http-runtime/identity';
 import { Hono } from 'hono';
 
 import { permissionPolicy, type AccessPolicy, type Engine, type Principal } from '../dist/index.js';
@@ -227,6 +227,47 @@ for (const driver of drivers) {
       assert.deepEqual([schemas.status, schemas.headers.get('access-control-allow-credentials')], [200, 'true']);
       assert.deepEqual(outcome(await call(served.app, 'POST', '/namespaces/default/schemas', { body: taskDocument, headers: { ...evil, cookie } })), [403, 'cross_origin']);
       assert.equal((await call(served.app, 'POST', '/namespaces/default/schemas', { body: taskDocument, headers: { ...browser, cookie } })).status, 200);
+    });
+
+    test("the engine's CORS answers its own routes alone: an app mounted beside it, before or after, gets none of it", async () => {
+      const served = await serve(driver);
+      // A router of the project's beside the engine, whose own identity
+      // CORS trusts another origin, and a route with no CORS at all.
+      const OTHER = 'https://other.example.com';
+      const project = (): Hono => {
+        const router = new Hono();
+        identityCorsRoutes(router, { config: { trustedOrigins: [OTHER] } })({ method: 'GET', path: '/api/reports' });
+        router.get('/api/reports', (c) => c.json({ reports: [] }));
+        router.get('/api/plain', (c) => c.json({ plain: true }));
+        return router;
+      };
+      const allowed = (reply: Reply) => [reply.status, reply.headers.get('access-control-allow-origin'), reply.headers.get('access-control-allow-credentials')];
+      const preflight = (origin: string, method: string) => ({ origin, 'access-control-request-method': method });
+      for (const order of ['before', 'after']) {
+        const app = new Hono();
+        if (order === 'before') app.route('/', project());
+        app.route('/api', engineApp(served.engine, { identity: served.identity }));
+        app.route('/api', engineMcp(served.engine, { identity: served.identity }));
+        if (order === 'after') app.route('/', project());
+
+        // The project's routes: its own origin, never the engine's.
+        assert.deepEqual(allowed(await call(app, 'GET', '/reports', { headers: { origin: OTHER } })), [200, OTHER, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'GET', '/reports', { headers: { origin: APP_ORIGIN } })), [200, null, null], order);
+        assert.deepEqual(allowed(await call(app, 'GET', '/plain', { headers: { origin: APP_ORIGIN } })), [200, null, null], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/reports', { headers: preflight(OTHER, 'GET') })), [204, OTHER, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/reports', { headers: preflight(APP_ORIGIN, 'GET') })), [404, null, null], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/plain', { headers: preflight(APP_ORIGIN, 'GET') })), [404, null, null], order);
+
+        // The engine's routes, its MCP endpoint and its session routes:
+        // the engine's origin, never the project's.
+        assert.deepEqual(allowed(await call(app, 'GET', '/namespaces/default/schemas', { headers: { origin: APP_ORIGIN } })), [401, APP_ORIGIN, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'GET', '/namespaces/default/schemas', { headers: { origin: OTHER } })), [401, null, null], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/namespaces/default/schemas', { headers: preflight(APP_ORIGIN, 'POST') })), [204, APP_ORIGIN, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/namespaces/default/schemas', { headers: preflight(OTHER, 'POST') })), [404, null, null], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/auth/login', { headers: preflight(APP_ORIGIN, 'POST') })), [204, APP_ORIGIN, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/namespaces/default/mcp', { headers: preflight(APP_ORIGIN, 'POST') })), [204, APP_ORIGIN, 'true'], order);
+        assert.deepEqual(allowed(await call(app, 'OPTIONS', '/namespaces/default/mcp', { headers: preflight(OTHER, 'POST') })), [404, null, null], order);
+      }
     });
 
     test('engineMcp authenticates with the identity service', async () => {

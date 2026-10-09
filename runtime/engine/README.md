@@ -3582,8 +3582,10 @@ app.route('/api', engineMcp(engine, { identity }));
   service reads the header itself through the engine's wrapper. A cookie
   request other than `GET`, `HEAD` and `OPTIONS` from an origin the
   config does not trust is 403 `cross_origin`, and `engineApp` answers
-  the trusted origins' CORS, preflights included, in front of every
-  route.
+  the trusted origins' CORS, preflights included, on each of its routes
+  and on none of another app's (`identityCorsRoutes`), so a router
+  mounted beside it answers its own; `engineMcp` answers it on its
+  endpoint.
 - `engineApp` serves the session routes under `/auth`, through the
   runtime like every route: `POST /auth/login`, `POST /auth/logout`,
   `GET /auth/me`, `GET /auth/capabilities` and `POST /auth/password`,

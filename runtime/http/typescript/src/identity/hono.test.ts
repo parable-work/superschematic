@@ -7,6 +7,7 @@ import {
   hashPassword,
   identityAuthenticator,
   identityCors,
+  identityCorsRoutes,
   identityHandler,
   identityOperationSpec,
   identityOperations,
@@ -668,5 +669,68 @@ describe('identity routes', () => {
     const refused = await fastest({ login: 'nobody', password: 'wrong password' });
     expect(unknown).toBeGreaterThan(wrong / 3);
     expect(refused).toBeGreaterThan(wrong / 3);
+  });
+});
+
+describe('identityCorsRoutes', () => {
+  /*
+  Three apps on one server, as a TypeScript entrypoint mounts the routers
+  of the APIs it serves: a, over the user model, trusts https://a.example;
+  b, over it too, trusts https://b.example and registers POST on a path
+  where a registers GET; c is no API over the user model and has no CORS.
+  */
+  const A = 'https://a.example';
+  const B = 'https://b.example';
+  const ok = (c: { json: (body: unknown) => Response }) => c.json({ ok: true });
+  const app = (trusted: string | undefined, routes: Array<[method: 'GET' | 'POST', path: string]>): Hono => {
+    const router = new Hono();
+    if (trusted !== undefined) {
+      const cors = identityCorsRoutes(router, { config: { trustedOrigins: [trusted] } });
+      for (const [method, path] of routes) cors({ method, path });
+    }
+    for (const [method, path] of routes) router.on(method, path.replace(/\{([^{}]+)\}/gu, ':$1'), ok);
+    return router;
+  };
+  const server = new Hono();
+  server.route('/', app(A, [['GET', '/api/greeting'], ['GET', '/api/users/{id}']]));
+  server.route('/', app(B, [['POST', '/api/greeting'], ['GET', '/api/notes']]));
+  server.route('/', app(undefined, [['GET', '/api/ping']]));
+  const send = (method: string, path: string, origin: string, requested?: string) =>
+    server.request(`http://api.example${path}`, {
+      method,
+      headers: { origin, ...(requested === undefined ? {} : { 'access-control-request-method': requested }) },
+    });
+  const allows = (response: Response) => [response.headers.get('access-control-allow-origin'), response.headers.get('access-control-allow-credentials')];
+
+  test("a request gets the CORS of the app whose route answers it, and no other app's", async () => {
+    expect(allows(await send('GET', '/api/greeting', A))).toEqual([A, 'true']);
+    expect(allows(await send('GET', '/api/users/u1', A))).toEqual([A, 'true']);
+    expect(allows(await send('GET', '/api/greeting', B))).toEqual([null, null]);
+    expect(allows(await send('GET', '/api/notes', A))).toEqual([null, null]);
+    expect(allows(await send('GET', '/api/notes', B))).toEqual([B, 'true']);
+    expect(allows(await send('POST', '/api/greeting', A))).toEqual([null, null]);
+    expect(allows(await send('POST', '/api/greeting', B))).toEqual([B, 'true']);
+    for (const origin of [A, B]) {
+      const ping = await send('GET', '/api/ping', origin);
+      expect(ping.status).toBe(200);
+      expect(allows(ping)).toEqual([null, null]);
+    }
+  });
+
+  test('a preflight goes to the app that registers the method it asks for on the path', async () => {
+    const answered = async (path: string, origin: string, requested: string) => {
+      const response = await send('OPTIONS', path, origin, requested);
+      return [response.status, ...allows(response)];
+    };
+    expect(await answered('/api/greeting', A, 'GET')).toEqual([204, A, 'true']);
+    expect(await answered('/api/users/u1', A, 'GET')).toEqual([204, A, 'true']);
+    expect(await answered('/api/greeting', B, 'POST')).toEqual([204, B, 'true']);
+    // b registers POST on a's path; a trusts A, b does not.
+    expect(await answered('/api/greeting', A, 'POST')).toEqual([404, null, null]);
+    expect(await answered('/api/greeting', B, 'GET')).toEqual([404, null, null]);
+    expect(await answered('/api/notes', A, 'GET')).toEqual([404, null, null]);
+    expect(await answered('/api/notes', B, 'GET')).toEqual([204, B, 'true']);
+    expect(await answered('/api/ping', A, 'GET')).toEqual([404, null, null]);
+    expect(await answered('/api/nowhere', A, 'GET')).toEqual([404, null, null]);
   });
 });

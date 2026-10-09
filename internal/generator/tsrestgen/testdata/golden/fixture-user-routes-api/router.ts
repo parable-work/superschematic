@@ -20,7 +20,7 @@ import {
 } from '@superschematic/http-runtime/hono';
 import {
   IdentityService,
-  identityCors,
+  identityCorsRoutes,
   identityHandler,
   identityRouterOptions,
   routesOf,
@@ -300,14 +300,18 @@ export function identityService(options: Omit<IdentityServiceOptions, 'routes'>)
 
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
- * options.identity authenticates every route, and identityCors answers the trusted origins' CORS in front of them.
+ * options.identity authenticates every route, and identityCorsRoutes answers the trusted origins' CORS on them alone,
+ * so an app that mounts the router beside other routers gives their routes none of it.
  * The user model's operations are mounted with the identity runtime's handlers.
  * Throws without options.identity, or with options.authenticate beside it.
  */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
   const router = new Hono<E>();
-  router.use('/api/*', identityCors(runtime.identity));
+  // The trusted origins' CORS, on this API's routes alone, registered
+  // before each route's handler.
+  const cors = identityCorsRoutes(router, runtime.identity);
+  for (const spec of Object.values(operationSpecs)) cors(spec);
   mountManualOperation(router, operationSpecs.listRoles, identityHandler(runtime.identity, 'listRoles'), runtime, {
     bodyLimitBytes: options.bodyLimits?.listRoles,
     rateLimitPerMinute: options.rateLimits?.listRoles,

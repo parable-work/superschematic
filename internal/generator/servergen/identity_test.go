@@ -47,6 +47,12 @@ const (
 	identityTSStack = "users-ts-stack"
 	identityTSAPI   = "users-ts-api"
 
+	// identityPortalStack's one TypeScript server, identityPortalServer,
+	// serves users-ts-api beside users-ts-notes, a second API over
+	// users-db, and users-ts-ping, an API over no user model.
+	identityPortalStack  = "users-ts-portal"
+	identityPortalServer = "Web"
+
 	// identityDatabaseEnv names the Postgres the entrypoint also serves
 	// on, as the identity runtime's store tests read it.
 	identityDatabaseEnv = "SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL"
@@ -55,8 +61,9 @@ const (
 // identityOrder is the order a build-all builds the identity fixture's Go
 // stack in, and identityTSOrder its TypeScript stack.
 var (
-	identityOrder   = []string{"users-db", "users-api", "users-admin", identityStack}
-	identityTSOrder = []string{"users-db", identityTSAPI, identityTSStack}
+	identityOrder       = []string{"users-db", "users-api", "users-admin", identityStack}
+	identityTSOrder     = []string{"users-db", identityTSAPI, identityTSStack}
+	identityPortalOrder = []string{"users-db", identityTSAPI, "users-ts-notes", "users-ts-ping", identityPortalStack}
 )
 
 // loadIdentityFixture loads the identity fixture with the core registry,
@@ -68,7 +75,9 @@ func loadIdentityFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(identityOrder), identityTSOrder[1:]...) {
+	names := append(slices.Clone(identityOrder), identityTSOrder[1:]...)
+	names = append(names, "users-ts-notes", "users-ts-ping", identityPortalStack)
+	for _, name := range names {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(identityRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -560,6 +569,99 @@ func TestTypeScriptIdentityEntrypointServes(t *testing.T) {
 	online.authorized(t, token, http.MethodPost, "/api/auth/logout", http.StatusOK, `"data":true`)
 	online.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusUnauthorized)
 	online.stop(t)
+}
+
+// TestTypeScriptIdentityCorsStaysWithItsAPI: a TypeScript server that
+// serves several APIs gives each identity API's trusted origins
+// credentialed CORS on that API's routes alone, as the Go server's
+// dispatch does. users-ts-api trusts one origin and users-ts-notes
+// another; users-ts-ping, over no user model, answers neither. A
+// preflight goes to the API that registers the method it asks for on the
+// path: users-ts-notes registers POST where users-ts-api registers GET.
+func TestTypeScriptIdentityCorsStaysWithItsAPI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	paths := testpaths.Local(t)
+	installTypeScriptRuntime(t, bun, paths)
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := loadIdentityFixture(t)
+	f.build(t, repoRoot, paths, identityPortalOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	install := exec.Command(bun, "install")
+	install.Dir = out
+	if output, err := install.CombinedOutput(); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
+	}
+	dir := servergen.ServerDir(out, identityPortalStack, identityPortalServer)
+	tsc := filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc")
+	cmd := exec.Command(tsc, "--noEmit", "-p", "tsconfig.json")
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tsc in %s: %v\n%s", dir, err, output)
+	}
+
+	const a, b = "https://a.example.com", "https://b.example.com"
+	trusting := func(api, origin string) string {
+		return ir.IdentityConfigField(api) + `={"trustedOrigins": ["` + origin + `"], "cookie": {"secure": false}}`
+	}
+	server := bunServer(t, bun, dir,
+		"USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable",
+		trusting(identityTSAPI, a), trusting("users-ts-notes", b))
+	defer server.stop(t)
+	// answer sends method to path from origin, a preflight when requested
+	// names a method, and returns the status and the CORS it got.
+	answer := func(method, path, origin, requested string) string {
+		t.Helper()
+		req, err := http.NewRequest(method, server.base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", origin)
+		if requested != "" {
+			req.Header.Set("Access-Control-Request-Method", requested)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return fmt.Sprintf("%d %s %s", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Origin"), resp.Header.Get("Access-Control-Allow-Credentials"))
+	}
+	for _, c := range []struct{ method, path, origin, requested, want string }{
+		// Each API's routes answer its own trusted origin, before the
+		// identity runtime refuses a request without a session.
+		{"GET", "/api/greeting", a, "", "401 " + a + " true"},
+		{"GET", "/api/notes", b, "", "401 " + b + " true"},
+		{"POST", "/api/greeting", b, "", "401 " + b + " true"},
+		// And no other API's.
+		{"GET", "/api/notes", a, "", "401  "},
+		{"POST", "/api/greeting", a, "", "401  "},
+		{"GET", "/api/greeting", b, "", "401  "},
+		{"GET", "/api/ping", a, "", "501  "},
+		{"GET", "/api/ping", b, "", "501  "},
+		// A preflight is answered by the API that registers the method.
+		{"OPTIONS", "/api/greeting", a, "GET", "204 " + a + " true"},
+		{"OPTIONS", "/api/greeting", b, "POST", "204 " + b + " true"},
+		{"OPTIONS", "/api/notes", b, "GET", "204 " + b + " true"},
+		{"OPTIONS", "/api/auth/login", a, "POST", "204 " + a + " true"},
+		{"OPTIONS", "/api/greeting", a, "POST", "404  "},
+		{"OPTIONS", "/api/greeting", b, "GET", "404  "},
+		{"OPTIONS", "/api/notes", a, "GET", "404  "},
+		{"OPTIONS", "/api/auth/login", b, "POST", "404  "},
+		{"OPTIONS", "/api/ping", a, "GET", "404  "},
+	} {
+		if got := answer(c.method, c.path, c.origin, c.requested); got != c.want {
+			t.Errorf("%s %s from %s (asking for %q) answered %q, want %q", c.method, c.path, c.origin, c.requested, got, c.want)
+		}
+	}
 }
 
 // identitySchemaTS is identitySchema through pg under Bun, from the

@@ -1,0 +1,11 @@
+# A second TypeScript API over users-db's user model, which serves none of
+# its routes: its operations need a caller, whom the identity runtime
+# authenticates, and it registers POST on the path where users-ts-api
+# registers GET.
+name: users-ts-notes
+kind: API
+authDb: users-db
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

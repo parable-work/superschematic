@@ -1,10 +1,10 @@
 import type { Context, Env, Hono, MiddlewareHandler } from 'hono';
 import { envelopeResponse, requestIdOf } from '../envelope.js';
-import { mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
+import { honoPath, mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
 import type { OperationAuth, OperationSpec, RequestContext } from '../operation.js';
 import { HttpProblem, badRequest, internal, problemResponse } from '../problem.js';
 import { identityAuthenticator, identityPrincipalOf } from './authenticator.js';
-import { corsAnswer, requestHost } from './crossorigin.js';
+import { corsAnswer, requestHost, type CorsAnswer } from './crossorigin.js';
 import { bodyRefusal, crossOrigin } from './errors.js';
 import {
   PERMISSION_ROLES_READ,
@@ -41,7 +41,9 @@ generated router; mountIdentityOperations mounts the same routes through
 the router runtime's pipeline, each with the operation table entry
 identityOperationSpec writes from the contract's rules, for a server whose
 router does not generate a table (the engine). identityCors is the
-credentialed CORS middleware for the config's trusted origins.
+credentialed CORS middleware for the config's trusted origins, and
+identityCorsRoutes the same answer scoped to an app's own routes, for an
+app a server mounts beside others.
 */
 
 /**
@@ -456,26 +458,98 @@ export function mountIdentityOperations<E extends Env = Env>(
   return specs;
 }
 
+/** What the CORS helpers read of a service: its config's trusted origins. */
+type TrustedOrigins = IdentityService | { readonly config: { readonly trustedOrigins: readonly string[] } };
+
+/** The 204 that answers a trusted origin's preflight. */
+function preflightResponse(answer: CorsAnswer): Response {
+  const headers = new Headers();
+  for (const [name, value] of answer.headers) headers.append(name, value);
+  return new Response(null, { status: 204, headers });
+}
+
+/** Adds a non-preflight answer's headers to the response the route made. */
+function addCorsHeaders(c: Context, answer: CorsAnswer): void {
+  for (const [name, value] of answer.headers) {
+    if (name === 'vary') c.res.headers.append(name, value);
+    else c.res.headers.set(name, value);
+  }
+}
+
 /**
  * Credentialed CORS for the config's trusted origins, as Hono middleware: a
  * trusted origin's request gets Access-Control-Allow-Origin and
  * Access-Control-Allow-Credentials, its preflight is answered here with
  * 204, and any other request passes through without CORS headers. Every
- * request with an Origin gets Vary: Origin.
+ * request with an Origin gets Vary: Origin. It answers every request it
+ * runs for, so an app mounted beside others on one server takes
+ * identityCorsRoutes instead, which answers for the app's own routes.
  */
-export function identityCors<E extends Env = Env>(service: IdentityService | { readonly config: { readonly trustedOrigins: readonly string[] } }): MiddlewareHandler<E> {
+export function identityCors<E extends Env = Env>(service: TrustedOrigins): MiddlewareHandler<E> {
   const trusted = [...service.config.trustedOrigins];
   return async (c, next) => {
     const answer = corsAnswer(trusted, c.req.method, c.req.raw.headers);
-    if (answer.preflight) {
-      const headers = new Headers();
-      for (const [name, value] of answer.headers) headers.append(name, value);
-      return new Response(null, { status: 204, headers });
-    }
+    if (answer.preflight) return preflightResponse(answer);
     await next();
-    for (const [name, value] of answer.headers) {
-      if (name === 'vary') c.res.headers.append(name, value);
-      else c.res.headers.set(name, value);
+    addCorsHeaders(c, answer);
+  };
+}
+
+/**
+ * A route identityCorsRoutes answers CORS on: an operation's method and its
+ * path in the operation table's form, {name} for a parameter, relative to
+ * where the app is mounted. An OperationSpec is one.
+ */
+export interface CorsRoute {
+  readonly method: string;
+  readonly path: string;
+}
+
+/**
+ * identityCorsRoutes is identityCors scoped to app's own routes (D50). A
+ * server that mounts several apps, the routers of the APIs it serves or an
+ * API's router beside the engine's app, merges their routes into one, so
+ * middleware on a path pattern runs for every app's request under it: a
+ * trusted origin of one would get credentialed CORS on another's routes.
+ * The Go server instead hands each request to the router of the API that
+ * registers its method and path, a preflight by the method it asks about,
+ * and only that router's CORS answers it.
+ *
+ * It returns register, which takes a route of app's own, before the route's
+ * handler is mounted on app. A trusted origin's request that the route
+ * answers gets the CORS headers; a trusted origin's preflight of the
+ * route's path that asks for a method app registers there is answered with
+ * 204. A preflight for a method app does not register there passes on, to
+ * the app that does or to not found, and a request of any other app's route
+ * gets none of app's CORS.
+ */
+export function identityCorsRoutes<E extends Env = Env>(app: Hono<E>, service: TrustedOrigins): (route: CorsRoute) => void {
+  const trusted = [...service.config.trustedOrigins];
+  // The methods app registers on each path, by the path with its
+  // parameters unnamed, as a router matches them whatever their names.
+  const methods = new Map<string, Set<string>>();
+  const answer: MiddlewareHandler<E> = async (c, next) => {
+    const cors = corsAnswer(trusted, c.req.method, c.req.raw.headers);
+    await next();
+    addCorsHeaders(c, cors);
+  };
+  return route => {
+    const path = honoPath(route.path);
+    const key = route.path.replace(/\{[^{}]*\}/gu, '{}');
+    let owned = methods.get(key);
+    if (owned === undefined) {
+      // One preflight handler per path, which reads the methods the app
+      // registers there when a preflight comes.
+      const registered = new Set<string>();
+      methods.set(key, registered);
+      owned = registered;
+      app.on('OPTIONS', path, async (c, next) => {
+        if (!registered.has(c.req.header('access-control-request-method') ?? '')) return next();
+        const cors = corsAnswer(trusted, 'OPTIONS', c.req.raw.headers);
+        return cors.preflight ? preflightResponse(cors) : next();
+      });
     }
+    owned.add(route.method);
+    app.on(route.method, path, answer);
   };
 }

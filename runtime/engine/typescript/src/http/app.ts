@@ -44,11 +44,12 @@ for one (callers.ts, D37).
 
 With `identity`, the HTTP runtime's identity service (identity.ts, D50),
 the service authenticates every route in place of `authenticate`, which is
-refused beside it, its credentialed CORS answers the trusted origins in
-front of every route, and the app serves the user model's session routes
-under /auth: login, logout, me, capabilities and changePassword, register
-when `identityRoutes.register` asks for it, and the administration routes
-under /auth/admin when the store has roles.
+refused beside it, its credentialed CORS answers the trusted origins on
+the app's own routes alone (identityCorsRoutes), so an app the deployment
+mounts beside it gets none of it, and the app serves the user model's
+session routes under /auth: login, logout, me, capabilities and
+changePassword, register when `identityRoutes.register` asks for it, and
+the administration routes under /auth/admin when the store has roles.
 */
 
 import { Hono } from 'hono';
@@ -73,7 +74,14 @@ import {
   type DecodedRequest,
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
-import { identityCors, identityRouterOptions, mountIdentityOperations, type IdentityService } from '@superschematic/http-runtime/identity';
+import {
+  identityCorsRoutes,
+  identityOperationSpec,
+  identityRouterOptions,
+  identityRoutes,
+  mountIdentityOperations,
+  type IdentityService,
+} from '@superschematic/http-runtime/identity';
 
 import type { Engine } from '../engine.js';
 import type { EventKind } from '../events/log.js';
@@ -178,9 +186,9 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     onError: async (error, ctx) => engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined),
   };
   const app = new Hono();
-  if (identity) {
-    app.use('*', identityCors(identity));
-  }
+  // The trusted origins' CORS on the app's own routes, each registered
+  // before its handler, so a router mounted beside the app answers its own.
+  const cors = identity ? identityCorsRoutes(app, identity) : () => {};
 
   const spec = (name: string, method: OperationSpec['method'], path: string, parts: Partial<OperationSpec> = {}): OperationSpec => ({
     name,
@@ -197,8 +205,10 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     ...parts,
   });
   const body = { input: { parse: (value: unknown) => value, required: true } };
-  const route = (operation: OperationSpec, handler: (ctx: RequestContext, request: DecodedRequest) => unknown) =>
+  const route = (operation: OperationSpec, handler: (ctx: RequestContext, request: DecodedRequest) => unknown) => {
+    cors(operation);
     mountOperation(app, operation, async (ctx, request) => handler(ctx, request), runtime);
+  };
 
   // The namespaces themselves, as the policy's manage allows.
   route(spec('listNamespaces', 'GET', NAMESPACES), (ctx) => engine.namespaces.list(principalOf(ctx)));
@@ -393,9 +403,11 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   // The event log: a JSON page, or with Accept: text/event-stream the
   // stream. A manual route, so the handler owns the streaming response;
   // the runtime still applies the rate limit, the timeout and the gate.
+  const readEvents = spec('readEvents', 'GET', EVENTS, { queryParams: EVENT_QUERY, manual: true });
+  cors(readEvents);
   mountManualOperation(
     app,
-    spec('readEvents', 'GET', EVENTS, { queryParams: EVENT_QUERY, manual: true }),
+    readEvents,
     (c, ctx) => {
       const principal = principalOf(ctx);
       const namespace = c.req.param('namespace') as string;
@@ -425,18 +437,15 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
   // with the contract's rate limits on login, register and changePassword.
   if (identity) {
     const administration = options.identityRoutes?.administration ?? identity.store.hasRoles();
-    mountIdentityOperations(
-      app,
-      identity,
-      {
-        sessions: { register: options.identityRoutes?.register === true },
-        ...(administration ? { administration: {} } : {}),
-        namespace: 'engine',
-        rateLimitPerMinute: options.rateLimitPerMinute,
-        timeoutSeconds: options.timeoutSeconds,
-      },
-      runtime
-    );
+    const sets = {
+      sessions: { register: options.identityRoutes?.register === true },
+      ...(administration ? { administration: {} } : {}),
+      namespace: 'engine',
+      rateLimitPerMinute: options.rateLimitPerMinute,
+      timeoutSeconds: options.timeoutSeconds,
+    };
+    for (const entry of identityRoutes(identity, sets)) cors(identityOperationSpec(identity, entry, sets));
+    mountIdentityOperations(app, identity, sets, runtime);
   }
 
   app.notFound(notFoundHandler());

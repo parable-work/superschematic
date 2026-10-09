@@ -33,7 +33,7 @@ import {
 {{- if .Identity }}
 import {
   IdentityService,
-  identityCors,
+  identityCorsRoutes,
 {{- if .Identity.Routes }}
   identityHandler,
 {{- end }}
@@ -163,7 +163,8 @@ export function identityService(options: Omit<IdentityServiceOptions, 'routes'>)
 
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
- * options.identity authenticates every route, and identityCors answers the trusted origins' CORS in front of them.
+ * options.identity authenticates every route, and identityCorsRoutes answers the trusted origins' CORS on them alone,
+ * so an app that mounts the router beside other routers gives their routes none of it.
 {{- if .Identity.Routes }}
  * The user model's operations are mounted with the identity runtime's handlers.
 {{- end }}
@@ -205,7 +206,10 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
   const router = new Hono<E>();
 {{- if .Identity }}
-  router.use('/api/*', identityCors(runtime.identity));
+  // The trusted origins' CORS, on this API's routes alone, registered
+  // before each route's handler.
+  const cors = identityCorsRoutes(router, runtime.identity);
+  for (const spec of Object.values(operationSpecs)) cors(spec);
 {{- end }}
 {{- range .Endpoints }}
 {{- if .IdentityOperation }}

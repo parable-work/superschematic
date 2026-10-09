@@ -22,7 +22,7 @@ users, roles and grants over the tables the core owns.
 - The Hono handlers of every route (identityHandler, identityHandlers,
   identityRoutes, mountIdentityRoutes), their operation table entries for
   a server that generates none (identityOperationSpec,
-  mountIdentityOperations) and identityCors.
+  mountIdentityOperations), identityCors and identityCorsRoutes.
 
 It needs node:crypto's argon2 (Node.js 24.7 or later, or Bun) and
 superscalar. It imports no database driver: pg and the SQLite modules are
@@ -110,6 +110,7 @@ export {
   LOGIN_RATE_LIMIT,
   REGISTER_RATE_LIMIT,
   identityCors,
+  identityCorsRoutes,
   identityHandler,
   identityHandlers,
   identityOperationSpec,
@@ -119,6 +120,7 @@ export {
   mountIdentityRoutes,
 } from './hono.js';
 export type {
+  CorsRoute,
   IdentityHandler,
   IdentityOperation,
   IdentityOperationName,

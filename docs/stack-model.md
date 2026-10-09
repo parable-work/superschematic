@@ -1892,9 +1892,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
     an API with a service clause, then the runtime's `notFoundHandler` and
-    `errorHandler`. The build refuses two served APIs that register one
-    method and path, a manually routed operation included, which a
-    TypeScript router mounts;
+    `errorHandler`. Hono merges the routers' routes, so an identity API's
+    router registers its CORS on each of its own routes: a request gets
+    the CORS of the API that serves it alone, and a preflight that of the
+    API that registers the method it asks for, as Go's dispatch does.
+    The build refuses two served APIs that register one method and path,
+    a manually routed operation included, which a TypeScript router
+    mounts;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, through `Bun.serve`, which it hands Hono as the
