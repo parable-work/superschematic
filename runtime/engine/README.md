@@ -755,9 +755,16 @@ operation asks `write` when its declaration says it writes and `read`
 otherwise, and names itself in `operation`, absent for every other call.
 Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
-no roles; a policy can hold the principal's `permissions` to whatever
-rule the deployment has, through the HTTP runtime's `PermissionMatcher`
-for example. A behavior's own checks, a transition only a reviewer may
+no roles of its own; a policy can hold the principal's `permissions` to
+whatever rule the deployment has, through the HTTP runtime's
+`PermissionMatcher` for example. `permissionPolicy()` is one such rule,
+opt-in: it allows an action to a caller holding `<schema>.<action>`
+(`Task.read`, `Task.write`, `Task.define`, `Task.publish`), by the
+engine's `permissionMatcher`, so a caller holding `Task` may do all four.
+With the core user model ("Users" under "HTTP"), a user's permissions are
+those of their roles. `permissionPolicy({ permissionMatcher })` matches
+with the matcher it is given instead; called from a policy of the
+deployment's own, it matches with that matcher or `hasAnyPermission`. A behavior's own checks, a transition only a reviewer may
 make say, ask the `permissionMatcher` option (a `PermissionMatcher`, the
 HTTP runtime's `hasAnyPermission` by default) through `can()` ("Contexts"
 under "Behaviors"); a deployment passes the matcher it gives the HTTP
@@ -2804,8 +2811,9 @@ serve({ fetch: app.fetch, port: 8080 });
 The options are the HTTP runtime's router options (`authenticate`,
 `authenticateService`, `permissionMatcher`, `onError`, `bodyLimitBytes`,
 `rateLimit`), with `rateLimitPerMinute` and `timeoutSeconds` for every
-route and `stream: { pageSize, heartbeatMs }`. The deployment's `onError`
-sees what the engine does not raise.
+route and `stream: { pageSize, heartbeatMs }`, and `identity` and
+`identityRoutes` for the core user model ("Users"). The deployment's
+`onError` sees what the engine does not raise.
 
 ### Routes
 
@@ -2922,6 +2930,85 @@ policy's to say. The engine wraps the deployment's `Authenticator`:
 A deployment whose callers are all services passes `authenticateService`
 and no `authenticate`. Without `authenticateService` the runtime ignores
 the header, as before.
+
+### Users
+
+When the project's schemas declare the core user model (D50: a `User`
+table in a DB schema), the engine signs its users in with the HTTP
+runtime's identity package. `engineApp` and `engineMcp` take `identity`,
+an `IdentityService`, in place of `authenticate`, and refuse the two
+together. `engineIdentity(engine, options)` builds it: `options` are the
+service's, with the project's store and identity config, and its
+`capabilities` answers for the engine.
+
+```ts
+import { readFileSync } from 'node:fs';
+import { openEngine, permissionPolicy } from '@superschematic/engine';
+import { engineApp, engineIdentity, engineIdentityStore } from '@superschematic/engine/http';
+import { engineMcp } from '@superschematic/engine/mcp';
+import { parseIdentityConfig } from '@superschematic/http-runtime/identity';
+import { identityDescriptor } from '@acme/shop-db-types/identity';
+
+const engine = openEngine({ path: 'shop.db', policy: permissionPolicy() });
+const identity = engineIdentity(engine, {
+  store: engineIdentityStore(engine, identityDescriptor),
+  config: parseIdentityConfig(JSON.parse(readFileSync('identity.json', 'utf8'))),
+});
+app.route('/api', engineApp(engine, { identity, rateLimitPerMinute: 600 }));
+app.route('/api', engineMcp(engine, { identity }));
+```
+
+- The service authenticates every route. A request carries its session
+  as `Authorization: Bearer <token>` or in the session cookie; the
+  principal's subject is the user's id, its permissions those of the
+  user's roles, and its claims the session, login, name, transport and
+  roles. A malformed `Authorization` is 401 `unauthorized`, since the
+  service reads the header itself through the engine's wrapper. A cookie
+  request other than `GET`, `HEAD` and `OPTIONS` from an origin the
+  config does not trust is 403 `cross_origin`, and `engineApp` answers
+  the trusted origins' CORS, preflights included, in front of every
+  route.
+- `engineApp` serves the session routes under `/auth`, through the
+  runtime like every route: `POST /auth/login`, `POST /auth/logout`,
+  `GET /auth/me`, `GET /auth/capabilities` and `POST /auth/password`,
+  with `POST /auth/register` when `identityRoutes.register` is true, and
+  the administration routes under `/auth/admin` when the store has roles
+  (`identityRoutes.administration` turns them on or off). Login and
+  changePassword allow 10 requests a minute per client and register 5;
+  the others take `rateLimitPerMinute`. `engineMcp` serves none of them.
+- `GET /auth/capabilities` answers `{ operations }`: for each schema with
+  a live version that a namespace reaches and the caller may read, the
+  keys `<namespace>/<schema>.read`, `.write`, `.define` and `.publish`,
+  each true when the access policy allows the action, in code-point
+  order. A schema the caller may not read has no key, as the schema list
+  leaves it out. It is the policy's answer: a call it allows may still
+  be refused for another reason, and a behavior operation asks the
+  action its declaration says. `engineCapabilities(engine, principal)`
+  computes it.
+- A behavior's own permission, such as a Workflow transition's, is a
+  role's like any other: `can()` asks the engine's `permissionMatcher`
+  with the user's permissions, which the service reads from the user's
+  roles on each request, so a grant reaches a session already signed in.
+- The runner's principal is not a user and does not change: the
+  deployment names it (`runner.principal`), it holds no session, and the
+  policy answers it as any caller.
+
+The store is the project's. `engineIdentityStore(engine, descriptor)`
+keeps the identity tables in the engine's own SQLite file, beside the
+engine's, whose names all start with `engine_` or `bhv_`, so the two
+never meet; the engine's migrations neither create nor read them. The
+deployment creates them once from the authDb's SQLite DDL, the
+`sqlite/create.sql` the DB build writes when the authDb's
+`outputs.sql.dialects` lists `sqlite`, before the store first reads them
+(`engine.storage.exec(createSql)`, or `superschematic-migrate apply` with
+the authDb's SQLite plan, which keeps its state tables in the same
+file). A store operation runs synchronously on the engine's connection,
+its transaction included, as the engine's own writes do. A separate file
+is `sqliteIdentityStore(nodeSqlite(new DatabaseSync('users.db')),
+identityDescriptor)` (`bunSqlite` on Bun), and the project's Postgres
+database, shared with its APIs, is `postgresIdentityStore(pool,
+identityDescriptor)`; the descriptor is the authDb's, which its
+generated TypeScript types export as `identityDescriptor`.
 
 ### Concurrency
 
@@ -3322,10 +3409,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
 - The route goes through the HTTP runtime like every other: the request
   id, the rate limit, the timeout, the body limit, the service step with
   `authenticateService` and the authentication gate with the deployment's
-  `Authenticator`. Its caller, an end user, a service acting for one or a
-  service standing in for one ("Authentication and access" under
-  "HTTP"), is the principal of every call, so the access policy answers
-  each. An unknown namespace is the HTTP API's 404 problem; a request
+  `Authenticator`, or with `identity` ("Users" under "HTTP"). Its caller,
+  an end user, a service acting for one or a service standing in for one
+  ("Authentication and access" under "HTTP"), is the principal of every
+  call, so the access policy answers each. An unknown namespace is the HTTP API's 404 problem; a request
   without a caller is 401.
 - The protocol is the official TypeScript SDK's
   (`@modelcontextprotocol/server`, pinned): its web-standard handler

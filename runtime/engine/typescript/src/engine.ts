@@ -14,7 +14,7 @@ commit as the principal the deployment names for it.
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 import { SchemaFileLoader } from '@superschematic/schema-runtime';
 
-import { Access, checkPrincipal, type AccessPolicy, type Principal } from './access.js';
+import { Access, boundPolicy, checkPrincipal, type AccessPolicy, type Principal } from './access.js';
 import type { AnyBehaviorImplementation } from './behaviors/behavior.js';
 import { coreBehaviors, searchSchemas, type SchemaSearchHit } from './behaviors/core/index.js';
 import type { Page } from './behaviors/paging.js';
@@ -38,7 +38,9 @@ export interface EngineOptions extends StorageOptions {
   path: string;
   /**
    * Who may read, write, define and publish. There is no default: pass
-   * the deployment's policy, or allowAll for tests and local use.
+   * the deployment's policy, permissionPolicy() to allow an action to a
+   * caller holding `<schema>.<action>`, or allowAll for tests and local
+   * use.
    */
   policy: AccessPolicy;
   /**
@@ -105,6 +107,8 @@ export class Engine {
   readonly runner: Runner;
   /** Reads a value of the value store by its hash, as a caller who may read a schema that references it. */
   readonly values: EngineValues;
+  /** Decides whether a principal holds a permission: a behavior's can(), and permissionPolicy's, ask it. */
+  readonly permissionMatcher: PermissionMatcher;
 
   private constructor(
     storage: Storage,
@@ -115,7 +119,8 @@ export class Engine {
     events: EventLog,
     tools: ToolCatalog,
     runner: Runner,
-    values: EngineValues
+    values: EngineValues,
+    permissionMatcher: PermissionMatcher
   ) {
     this.storage = storage;
     this.namespaces = namespaces;
@@ -126,19 +131,20 @@ export class Engine {
     this.tools = tools;
     this.runner = runner;
     this.values = values;
+    this.permissionMatcher = permissionMatcher;
   }
 
   /** open opens the engine's file, creating it if absent, and applies the engine's migrations. */
   static open(options: EngineOptions): Engine {
-    const access = new Access(options.policy);
-    const namespaces = new Namespaces(options.namespaces);
-    const tools = resolveToolOptions(options.tools);
-    const loader = new SchemaFileLoader({ metaSchema: options.metaSchema });
-    const clock = options.clock ?? Date.now;
     const permissionMatcher = options.permissionMatcher ?? hasAnyPermission;
     if (typeof permissionMatcher !== 'function') {
       throw new TypeError('permissionMatcher is a function (held, required) => boolean');
     }
+    const access = new Access(typeof options.policy === 'function' ? boundPolicy(options.policy, permissionMatcher) : options.policy);
+    const namespaces = new Namespaces(options.namespaces);
+    const tools = resolveToolOptions(options.tools);
+    const loader = new SchemaFileLoader({ metaSchema: options.metaSchema });
+    const clock = options.clock ?? Date.now;
     // Checked before the file opens, so a bad option leaves nothing open.
     const runnerOptions = options.runner;
     Runner.check(runnerOptions);
@@ -169,7 +175,8 @@ export class Engine {
       events,
       new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors, values),
       new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions),
-      values
+      values,
+      permissionMatcher
     );
   }
 

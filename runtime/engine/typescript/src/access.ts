@@ -6,12 +6,15 @@ to create, update or delete an instance, `define` for a draft, `publish`
 for a new version. A behavior operation asks `write` when its declaration
 says it writes and `read` otherwise, and names the operation. The engine
 has no roles and no default policy; `allowAll` is explicit, for tests and
-local use.
+local use, and `permissionPolicy` is opt-in: it allows an action to a
+caller holding `<schema>.<action>`, such as a user whose roles grant it
+(D50).
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
-entry point does not import that package, which brings Hono as a peer
-dependency; only the engine's ./http entry point does (http/app.ts).
+entry point imports only that package's framework-free entry point, for
+the default permission matcher; the engine's ./http entry point imports
+its Hono adapter (http/app.ts).
 
 A call a service makes (D37) carries the calling service in `service`,
 beside the end user it acts for, whose subject and permissions the
@@ -21,6 +24,8 @@ servicePrincipal) and it holds no permissions, since services hold none
 (D37). The policy and the behaviors see the service through the
 principal, and a behavior's can() is false for a service standing in.
 */
+
+import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 
 import { EngineError } from './errors.js';
 
@@ -89,6 +94,47 @@ export type AccessPolicy = (request: AccessRequest) => boolean;
 
 /** allowAll allows everything: for tests and local use. */
 export const allowAll: AccessPolicy = () => true;
+
+// The policies permissionPolicy made without a matcher of their own, which
+// an engine answers with its permissionMatcher (boundPolicy).
+const enginePermissionPolicies = new WeakSet<AccessPolicy>();
+
+/** permissionAllows is permissionPolicy's rule: the principal holds `<schema>.<action>`, by matcher. */
+function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): boolean {
+  return matcher(request.principal.permissions, [`${request.schema}.${request.action}`]);
+}
+
+/**
+ * permissionPolicy is an opt-in policy (D50): it allows an action to a
+ * caller holding `<schema>.<action>` (`Task.read`, `Task.write`,
+ * `Task.define`, `Task.publish`), so a role that grants `Task` grants every
+ * action on Task. A behavior operation asks the action its declaration
+ * says, so `Task.write` allows a transition; the behavior's own permission,
+ * such as a Workflow transition's, is checked besides. It matches with the
+ * engine's permissionMatcher, or with the one it is given. Called by a
+ * policy of the deployment's own rather than by an engine, it matches with
+ * the HTTP runtime's hasAnyPermission, or the matcher it is given.
+ */
+export function permissionPolicy(options: { permissionMatcher?: PermissionMatcher } = {}): AccessPolicy {
+  const matcher = options.permissionMatcher;
+  if (matcher !== undefined && typeof matcher !== 'function') {
+    throw new TypeError('permissionMatcher is a function (held, required) => boolean');
+  }
+  const policy: AccessPolicy = (request) => permissionAllows(request, matcher ?? hasAnyPermission);
+  if (matcher === undefined) {
+    enginePermissionPolicies.add(policy);
+  }
+  return policy;
+}
+
+/**
+ * boundPolicy is the policy an engine asks: a permissionPolicy made
+ * without a matcher matches with the engine's, and any other policy is
+ * itself.
+ */
+export function boundPolicy(policy: AccessPolicy, matcher: PermissionMatcher): AccessPolicy {
+  return enginePermissionPolicies.has(policy) ? (request) => permissionAllows(request, matcher) : policy;
+}
 
 /**
  * checkPrincipal refuses a call without a principal that names its

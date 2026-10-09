@@ -34,6 +34,14 @@ point's.
 With the runtime's `authenticateService`, a calling service is verified
 on every route and reaches the engine beside the end user, or standing in
 for one (callers.ts, D37).
+
+With `identity`, the HTTP runtime's identity service (identity.ts, D50),
+the service authenticates every route in place of `authenticate`, which is
+refused beside it, its credentialed CORS answers the trusted origins in
+front of every route, and the app serves the user model's session routes
+under /auth: login, logout, me, capabilities and changePassword, register
+when `identityRoutes.register` asks for it, and the administration routes
+under /auth/admin when the store has roles.
 */
 
 import { Hono } from 'hono';
@@ -58,6 +66,7 @@ import {
   type DecodedRequest,
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
+import { identityCors, identityRouterOptions, mountIdentityOperations, type IdentityService } from '@superschematic/http-runtime/identity';
 
 import type { Engine } from '../engine.js';
 import type { EventKind } from '../events/log.js';
@@ -79,6 +88,19 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
   timeoutSeconds?: number;
   /** The event stream's page size and heartbeat. */
   stream?: StreamOptions;
+  /**
+   * The identity service (D50), engineIdentity's: it authenticates every
+   * route in place of authenticate, which is refused beside it, and the
+   * app serves the session routes under /auth.
+   */
+  identity?: IdentityService;
+  /**
+   * Which of the user model's routes the app serves beside login, logout,
+   * me, capabilities and changePassword: register (off by default), and
+   * the administration routes under /auth/admin (on when the store has
+   * roles).
+   */
+  identityRoutes?: { register?: boolean; administration?: boolean };
 }
 
 /** The media type of a JSON body. */
@@ -130,14 +152,18 @@ const EVENT_QUERY: readonly ParamSpec[] = [
 export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono {
   const stream = checkStreamOptions(options.stream ?? {});
   const deployed = options.onError;
+  const { identity } = options;
   // One options object for every mount, so the routes share the runtime's
   // default rate-limit store.
   const runtime: RouterRuntimeOptions = {
     ...options,
-    authenticate: callerAuthenticator(options.authenticate),
+    authenticate: callerAuthenticator(identity ? identityRouterOptions(options, 'engineApp').authenticate : options.authenticate),
     onError: async (error, ctx) => engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined),
   };
   const app = new Hono();
+  if (identity) {
+    app.use('*', identityCors(identity));
+  }
 
   const spec = (name: string, method: OperationSpec['method'], path: string, parts: Partial<OperationSpec> = {}): OperationSpec => ({
     name,
@@ -328,6 +354,24 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     },
     runtime
   );
+
+  // The user model's session routes, through the runtime like every route,
+  // with the contract's rate limits on login, register and changePassword.
+  if (identity) {
+    const administration = options.identityRoutes?.administration ?? identity.store.hasRoles();
+    mountIdentityOperations(
+      app,
+      identity,
+      {
+        sessions: { register: options.identityRoutes?.register === true },
+        ...(administration ? { administration: {} } : {}),
+        namespace: 'engine',
+        rateLimitPerMinute: options.rateLimitPerMinute,
+        timeoutSeconds: options.timeoutSeconds,
+      },
+      runtime
+    );
+  }
 
   app.notFound(notFoundHandler());
   app.onError(errorHandler((error) => engineProblem(error)));
