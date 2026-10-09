@@ -268,6 +268,12 @@
           "name": "price",
           "origin": "Product.price",
           "type": "INTEGER"
+        },
+        {
+          "generated": "COALESCE(title, '')",
+          "name": "search_text",
+          "nullable": true,
+          "type": "TEXT"
         }
       ],
       "kind": "entity",

@@ -318,12 +318,12 @@ var planCases = []planCase{
 	{name: "drop-join-table", after: func(s *ir.Schema) { dropField(s, "Order", "labels") }},
 
 	// @searchField.
-	{name: "add-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Customer", "name").SearchField = true }},
-	{name: "change-search-fields", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) {
+	{name: "add-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Customer", "name").SearchField = true }},
+	{name: "change-search-fields", after: func(s *ir.Schema) {
 		addField(s, "Product", &ir.FieldDef{Name: "blurb", TypeRef: stringRef, SearchField: true})
 	}},
-	{name: "drop-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }},
-	{name: "retype-search-field", noSQLite: "sqlite does not support @searchField", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").TypeRef = stringRef }},
+	{name: "drop-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }},
+	{name: "retype-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").TypeRef = stringRef }},
 
 	// @versioned and @optimistic.
 	{name: "versioned-on", noSQLite: "sqlite does not support @versioned", after: func(s *ir.Schema) { versioned(s, "Order", nil) }},

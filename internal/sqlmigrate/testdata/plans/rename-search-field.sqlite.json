@@ -1,0 +1,43 @@
+{
+  "dialect": "sqlite",
+  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
+  "hash": "dfb4a87decf1d7b549d91e96f7e5fca2d88003993f86a37e27e5fbd45cc67b95",
+  "renames": [
+    "product.title=product.heading"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/product/column/heading",
+          "reason": "product.title is renamed to product.heading (Product.heading): servers built from the previous version still use the old name.",
+          "subject": "table/product/column/heading"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" RENAME COLUMN \"title\" TO \"heading\""
+      ],
+      "subject": "table/product/column/heading",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "regenerateColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" DROP COLUMN \"search_text\"",
+        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(heading, '')) VIRTUAL"
+      ],
+      "subject": "table/product/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "50a54f73357ea51adabf2198629e35acaaad82285f9684ab16382860f65da6a2",
+  "toModel": null,
+  "version": 1
+}

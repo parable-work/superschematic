@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "135be55940c4e1bf6a99503f94ce0d864c84e004f409cef5b3c9feb4ae2a7298",
+  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
+  "hash": "d9facd328ec2091abd4332193adf189649d76b9a0b117c1566ad2d9918a1322c",
   "service": "shop-db",
   "steps": [
     {
@@ -54,7 +54,7 @@
       "transactional": true
     }
   ],
-  "to": "f47401539fea791de16119b0859ce6562e53742379afa694a4a6825beab1c0f1",
+  "to": "f0002855dcad5ae04f1511641b94db24c5e016c252205e2d3c72da48a3c13e77",
   "toModel": null,
   "version": 1
 }

@@ -397,6 +397,12 @@ constraint (`customer_email_key`), so adding or dropping one is a
 statement of its own, not a rebuild. SQLite names neither a primary key
 nor a foreign key, so renaming one is no step. SQLite keeps no comments.
 
+A `@searchField` gives its table the `search_text` column Postgres has,
+with the same expression, as a `VIRTUAL` generated column: SQLite
+computes it when a row is read and stores nothing. It has no index, since
+SQLite has no trigram operator class, so a search on SQLite reads every
+row of the table.
+
 ### Steps
 
 Every SQLite step runs in a transaction, which the runner opens with
@@ -407,8 +413,9 @@ its `ALTER TABLE` can:
 | Change | Step |
 | --- | --- |
 | a table or a column renamed | `ALTER TABLE ... RENAME TO`, `RENAME COLUMN` |
-| a column added | `ADD COLUMN`, unless the column is `NOT NULL` without a constant default, has a default that is not a constant (the UUID and time defaults above), or has a foreign key and is `NOT NULL` or has a default |
-| a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
+| a column added | `ADD COLUMN`, unless the column is `NOT NULL` without a constant default, has a default that is not a constant (the UUID and time defaults above), or has a foreign key and is `NOT NULL` or has a default. `search_text` is `VIRTUAL`, which `ADD COLUMN` adds |
+| a column dropped | `DROP COLUMN` (`blocking`: SQLite rewrites the table; `search_text` has no values to rewrite). Its indexes are dropped before it, and a foreign key over it makes its table's rebuild drop it instead |
+| the search fields changed | `search_text` dropped and added again with its new expression, in one step |
 | an index or a unique field added or dropped | `CREATE INDEX`, `CREATE UNIQUE INDEX`, `DROP INDEX`; building an index on a table the previous version has is `blocking` |
 | an index or a unique field renamed | the index dropped and built again under its new name (`blocking`): SQLite cannot rename an index |
 | a table dropped | `DROP TABLE`, after every table that references it. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops. That step, and one that drops a table that references itself, starts with `PRAGMA defer_foreign_keys = ON` |
@@ -426,7 +433,8 @@ references it, directly or through another table, in one step:
    other new tables;
 3. copy the rows, referenced tables first, mapping each column to its
    name after the renames, filling the columns a table gains from their
-   defaults, casting a column whose type changes, and converting each
+   defaults, leaving `search_text` to SQLite, which computes it, casting
+   a column whose type changes, and converting each
    element of a list whose element changes ([A list's
    element](#a-lists-element));
 4. drop the old tables, referencing tables first;
@@ -526,7 +534,6 @@ the feature and the dialect:
 
 - `@versioned` and `@optimistic`, whose triggers SQLite's adapter does not
   read yet;
-- `@searchField`, a stored generated column with a trigram index;
 - projections;
 - `GIN` and `GIST` indexes: an `@index` over a list, a JSON or an `LTREE`
   column;
@@ -548,6 +555,8 @@ the feature and the dialect:
   text as JSON where wrapping it in a JSON string would keep another
   value, and Postgres converts no list to or from anything else. Change
   the column by hand and adopt the new model.
+- A `@searchField`'s trigram index: `search_text` is there, with no
+  index over it.
 - A list's element type is kept only as far as JSON tells types apart:
   `UUID[]`, `TEXT[]` and `DATE[]` are arrays of strings, and
   `SMALLINT[]` and `BIGINT[]` arrays of numbers, so a change between
@@ -725,7 +734,7 @@ adopt.
 - A custom cast, a backfill or a column split is written by hand, ordered
   around the plan or applied and then adopted.
 - A change the plan cannot express fails the plan and names it.
-- SQLite refuses `@versioned`, `@optimistic`, `@searchField`, projections,
+- SQLite refuses `@versioned`, `@optimistic`, projections,
   `GIN` and `GIST` indexes, and `LTREE` and the PostGIS types
   ([Refusals](#refusals)).
 - A SQLite rebuild copies every table that references the rebuilt one,

@@ -1,8 +1,8 @@
 {
   "dialect": "sqlite",
-  "expanded": "b629c0031126e2a6fbb71e31c50aff3661d39b61b81a8d2e8f54cf64fa591606",
-  "from": "70a84da9fa317641bee19121252de0ceb49115b491816fa7b7cb4d191f3934b1",
-  "hash": "947738180363b5783f99c5bd41f08dda62818fbadbaa121f92f06a0db5ed36fa",
+  "expanded": "bbbc8e2b635c5a651db04d7f2f39ad545f0e625448b357094d20c4052cc0cd37",
+  "from": "6354722518fdd4c26ecb7461ec848278205c7c1540cd5e38bb5a90cb4b9b2a5a",
+  "hash": "807c5277b00385d7cf750901c85bbccad5a0806e1144a68ed3a0f8d520b512e0",
   "service": "shop-db",
   "steps": [
     {
@@ -37,7 +37,7 @@
       "phase": "expand",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"items\" TEXT,\n  \"price\" INTEGER,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"items\" TEXT,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(title, '')) VIRTUAL,\n  \"price\" INTEGER,\n  PRIMARY KEY (\"id\")\n)",
         "INSERT INTO \"_new_product\" (\"id\", \"title\", \"items\", \"price\")\nSELECT \"id\", \"title\", CASE WHEN \"product\".\"items\" IS NOT NULL THEN (SELECT json_group_array(CAST(\"_element\".\"value\" AS INTEGER) ORDER BY \"_element\".\"key\") FROM json_each(\"product\".\"items\") AS \"_element\") END, \"price\"\nFROM \"product\"",
         "DROP TABLE \"product\"",
         "ALTER TABLE \"_new_product\" RENAME TO \"product\""
@@ -70,7 +70,7 @@
       "transactional": true
     }
   ],
-  "to": "cfdd845208a312c1d17408c09ee8faeb3ba34b3da9f264e56c0ddd7a10c82892",
+  "to": "5f7c4531f4f9b863b965b57b22ae7d4bb6e9788d52d6802e887f797676b5dad6",
   "toModel": null,
   "version": 1
 }

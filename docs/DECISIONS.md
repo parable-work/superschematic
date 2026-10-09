@@ -3919,3 +3919,26 @@ operation refuses it though section 9.3's check counts it, which section
 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
+
+### D27, amended: SQLite builds a `@searchField` as a VIRTUAL column, without the trigram index
+
+D27 refused `@searchField` on SQLite, so a DB service whose tables any
+shopper searches could not list `sqlite`. The acme shop's `Review` is one,
+and a Topcoat app that keeps the shop in a SQLite file needs `shop-db`
+built for it. A human decided on 2026-10-07 that SQLite builds the column
+and leaves the index out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| SQLite gives a table with search fields the `search_text` column Postgres gives it, with the same expression (`COALESCE(field, '')`, joined by `' '`), which SQLite runs as written. The model keeps the column, so plans diff it as they diff Postgres's. | Refusing it, as D27 did; leaving the column out on SQLite, so a query written for `search_text` fails there |
+| The column is `VIRTUAL`: SQLite computes it when a row is read. `ADD COLUMN` can add a `VIRTUAL` column and not a `STORED` one, so adding a search field is a statement, not a rebuild; changing the search fields drops the column and adds it again, and dropping it rewrites no rows. A rebuild leaves it out of the copy. | `STORED`, as on Postgres, which costs a rebuild for every change of the search fields and gives a read nothing without an index |
+| No index: SQLite has no trigram operator class, so a search on SQLite reads every row of the table. | An FTS5 table with the `trigram` tokenizer, kept in step by triggers or by the writer: a virtual table the model, the diff and the runner do not know, and triggers, which D27 keeps out of SQLite; left for when a SQLite reader needs search to be fast |
+
+Status: built. `internal/sqlmigrate`'s SQLite model keeps `search_text`
+and drops the trigram index, the shop's SQLite plan cases keep their
+search field, and the four `@searchField` cases and `rename-search-field`
+plan and converge on SQLite; the SQLite convergence check compares columns
+through `pragma table_xinfo`, so a generated column, and whether it is
+`VIRTUAL`, is compared too.
+
+The rule is reversible until the first release.

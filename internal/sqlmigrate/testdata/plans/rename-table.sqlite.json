@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "c7547b3443185696de9b7af3df0a244575c3b12efb1d23acd201ac41dcd14686",
+  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
+  "hash": "8f3b27ac9f7cd28ff37cc88511a36638a09721dfbc8240b32211414e3ca3edc5",
   "renames": [
     "label=tag"
   ],
@@ -81,7 +81,7 @@
       "transactional": true
     }
   ],
-  "to": "21e5db4707e8ca380d85641e78c9b8d7968289c7ca05bd21f70574ef95a65421",
+  "to": "6ce1a5b5fe83c201d906d5c996dc4e4915cd087807cdf4bd277802abe41c558f",
   "toModel": null,
   "version": 1
 }

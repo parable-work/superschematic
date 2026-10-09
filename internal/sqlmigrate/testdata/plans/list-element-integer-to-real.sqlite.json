@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "27a3c567d57b12fd36580f260cee69bd1399ec45532eed397e01a5808b13c8fd",
-  "hash": "7ca54473556211703590734d2b218fdcc17fb65d09c9c8aa7d3d49f433ac169e",
+  "from": "2e148db30997ccdd228b358df8bb87060292bbddd360bfda553bb275b571f191",
+  "hash": "153f7e83e022c6062f4838573035dc723c8f6cea3de2fa3e8d23a2feedaab998",
   "service": "shop-db",
   "steps": [
     {
@@ -36,7 +36,7 @@
       "phase": "expand",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(title, '')) VIRTUAL,\n  PRIMARY KEY (\"id\")\n)",
         "INSERT INTO \"_new_product\" (\"id\", \"title\", \"price\", \"items\")\nSELECT \"id\", \"title\", \"price\", CASE WHEN \"product\".\"items\" IS NOT NULL THEN (SELECT json_group_array(CAST(\"_element\".\"value\" AS REAL) ORDER BY \"_element\".\"key\") FROM json_each(\"product\".\"items\") AS \"_element\") END\nFROM \"product\"",
         "DROP TABLE \"product\"",
         "ALTER TABLE \"_new_product\" RENAME TO \"product\""
@@ -45,7 +45,7 @@
       "transactional": true
     }
   ],
-  "to": "21d5144a1b6d01c49d950176463fea751a022cf3fbcce85d97be00f5fcfc2441",
+  "to": "6209125c3aee2686df18371fd301e9dddc4712b01107dfc01cc0d2ecc0f4df03",
   "toModel": null,
   "version": 1
 }

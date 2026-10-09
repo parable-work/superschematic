@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
+  "hash": "4fe225385cbe74a3a77fc5106a31a3b367d14f854feec63452b8fd16155ffdfd",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"name\", '')) VIRTUAL"
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "63109dd60c7112014ed21bb7a8d8b81a8044bf54cf51021bd0e2fde03ae5f7ba",
+  "toModel": null,
+  "version": 1
+}

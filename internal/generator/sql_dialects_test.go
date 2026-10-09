@@ -74,6 +74,40 @@ func TestRunWritesSQLiteDDL(t *testing.T) {
 	}
 }
 
+// TestRunWritesSQLiteSearchText: a @searchField builds for SQLite as its
+// search_text column, VIRTUAL, with the expression Postgres's has and no
+// trigram index, which SQLite has no operator class for (D27, amended).
+func TestRunWritesSQLiteSearchText(t *testing.T) {
+	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-list-defaults-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasting := schema.Types["Tasting"]
+	tasting.Fields = append(tasting.Fields, &ir.FieldDef{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, SearchField: true})
+	root := t.TempDir()
+	if _, err := Run(schema, withDialects(cfg, "postgres", "sqlite"), Options{OutputRoot: root, Naming: naming.Default()}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(parts ...string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(append([]string{SQLDir(root, cfg.Name)}, parts...)...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if postgres := read("create.sql"); !strings.Contains(postgres, "gin_trgm_ops") {
+		t.Errorf("create.sql has no trigram index:\n%s", postgres)
+	}
+	sqlite := read(SQLiteSubdir, "create.sql")
+	if want := `"search_text" TEXT GENERATED ALWAYS AS (COALESCE(note, '')) VIRTUAL`; !strings.Contains(sqlite, want) {
+		t.Errorf("sqlite/create.sql does not contain %s:\n%s", want, sqlite)
+	}
+	if strings.Contains(sqlite, "search_trgm") {
+		t.Errorf("sqlite/create.sql has the trigram index:\n%s", sqlite)
+	}
+}
+
 // TestOutputsSQLDialects: outputs.sql's JSON Schema takes a list of
 // dialects, and the core registry refuses one without postgres, with an
 // unknown dialect or with a dialect twice, saying why.
@@ -132,9 +166,6 @@ func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 	}{
 		{"@versioned", "", func(s *ir.Schema) { tasting(s).Versioned = true }, "Tasting is @versioned"},
 		{"@optimistic", "", func(s *ir.Schema) { tasting(s).Optimistic = true }, "Tasting is @optimistic"},
-		{"@searchField", "", func(s *ir.Schema) {
-			tasting(s).Fields = append(tasting(s).Fields, &ir.FieldDef{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, SearchField: true})
-		}, "Tasting.note is a @searchField"},
 		{"projection", "fixture-projection", nil, "is a projection (app.preferences)"},
 		{"GIN index", "", func(s *ir.Schema) {
 			tasting(s).Indexes = []ir.IndexDef{{Keys: []string{"retastedAt"}}}
