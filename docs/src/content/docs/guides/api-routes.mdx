@@ -145,6 +145,12 @@ table's field of the same name. A field with no column behind it is
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderLineView', 'OrderView']} />
 
+`@display` says how a UI shows an order: what to call one and several, and
+the fields a list of orders shows
+([Display on a type](/superschematic/reference/documentation/#display-on-a-type)).
+The Topcoat app's table of orders reads it
+([Display components](/superschematic/guides/topcoat/#display-components)).
+
 <Snippet file="go/shop-orders/orders.go" symbol="orderView" />
 
 ## Errors

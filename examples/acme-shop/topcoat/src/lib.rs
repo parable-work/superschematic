@@ -2,9 +2,11 @@
 //! operations in-process through the crate the Topcoat extension writes
 //! (`acme_shop_orders_topcoat`), by each route's rules: a shopper signs in
 //! with a Topcoat session, writes a review through the form the extension
-//! builds from `WriteReviewInput`, and lists their orders. The JSON API is
-//! mounted at `/api` beside the pages, on the same implementations, which
-//! keep the shop in memory or in a SQLite file of shop-db's tables.
+//! builds from `WriteReviewInput`, and lists their orders. The reviews and
+//! the orders render through the display components the crate builds from
+//! their types. The JSON API is mounted at `/api` beside the pages, on the
+//! same implementations, which keep the shop in memory or in a SQLite file
+//! of shop-db's tables.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,7 +18,8 @@ use acme_shop_orders_topcoat::api::{
     ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{FormErrors, WriteReviewInputForm, write_review_input_fields};
-use acme_shop_orders_topcoat::records::ReviewViewRecord;
+use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
+use acme_shop_orders_topcoat::views::{order_view_table, review_view_detail};
 use acme_shop_orders_topcoat::{PageAuthenticator, RouterBuilderShopOrdersExt, operations};
 use async_trait::async_trait;
 use topcoat::context::{Cx, app_context};
@@ -87,12 +90,13 @@ async fn sign_in(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 /// One review, as a shard: the browser can render it again from its record.
+/// `review_view_detail` lists its fields, labeled as `ReviewView` declares
+/// them and named by its title.
 #[shard("/shards/review")]
 async fn review_card(review: ReviewViewRecord) -> topcoat::Result<impl View> {
     Ok(view! {
         <article class="review">
-            <h3>(review.title) " (" (review.rating.to_string()) "/5)"</h3>
-            <p>(review.body)</p>
+            review_view_detail(record: review)
         </article>
     })
 }
@@ -154,24 +158,28 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`: a caller without it sees
-/// the route's refusal, with its status.
+/// The shopper's orders, which need `orders.read`, as `order_view_table`
+/// renders them: a column per summary field `OrderView` declares. A caller
+/// without the permission sees the route's refusal, with its status.
 #[page("/orders")]
 async fn show_orders(cx: &Cx) -> topcoat::Result<impl View> {
     let args = OrderListOrdersArgs { statuses: None, limit: None };
-    let (status, lines) = match operations::order_list_orders(cx, args).await {
-        Ok(orders) if orders.is_empty() => (StatusCode::OK, vec!["No orders yet.".to_owned()]),
-        Ok(orders) => (
-            StatusCode::OK,
-            orders.iter().map(|order| format!("{} {}", order.id, order.status.as_str())).collect(),
-        ),
-        Err(err) => (err.status, vec![err.message]),
+    let (status, orders) = match operations::order_list_orders(cx, args).await {
+        Ok(orders) => (StatusCode::OK, Ok(orders.iter().map(OrderViewRecord::from).collect::<Vec<_>>())),
+        Err(err) => (err.status, Err(err.message)),
     };
     Ok(view! {
         (status)
         <h1>"Orders"</h1>
-        for line in lines {
-            <p>(line)</p>
+        match orders {
+            Ok(orders) => {
+                if orders.is_empty() {
+                    <p>"No orders yet."</p>
+                } else {
+                    order_view_table(rows: orders)
+                }
+            },
+            Err(message) => <p>(message)</p>,
         }
     })
 }

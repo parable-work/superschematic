@@ -4696,3 +4696,35 @@ through `pragma table_xinfo`, so a generated column, and whether it is
 `VIRTUAL`, is compared too.
 
 The rule is reversible until the first release.
+
+### D44, amended: a detail and a table component per record, shaped by `@display`
+
+A page that showed a record wrote its markup by hand: acme's reviews shard
+printed a review's title and rating, and its orders page each order's id
+and status. Each restated what the schema already says: a field's label
+(its `@docs` title), an enum's member names, and since D48 a type's
+`@display`, which names its title, its summary fields, its noun and its
+plural. No generator read `@display` (D48).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The crate's `views` module has two Topcoat components per record it writes: `<type>_detail(record)`, a description list with a `<dt>` label and a `<dd>` value per field, and `<type>_table(rows)`, a table with a header row of labels and a row per record. `outputs.topcoat.views` turns them off. They render records, so `records: false` leaves them out too, and `[extension.topcoat]` turns them on with every other default. | A trait every record implements that lists its fields at run time, which loses each field's kind; components for result types only, where a procedure's input records are records too; a page per operation, which would take routing from the app |
+| A field is labeled as a form labels it, by one helper: its `@docs` title, else its name in words. An enum's value shows its member's name in words, in a `<data>` element whose `value` is the serialized value, from `<enum>_label`, which a value the enum does not declare passes through. | The serialized value as its own label; a second label rule for display |
+| A value renders by its field's type: text and numbers as they are; a date, a time or a date-time scalar as `<time datetime>` with the text the API sends; a boolean "Yes" or "No"; a nested record as its detail; a list of records as their table; any other list as `<ul>`; a map as a `<dl>` of its entries; a union or any JSON value as its JSON text in `<pre>`. | Formatting a timestamp on the server, which knows neither the reader's locale nor their time zone; a tree of the JSON value's members |
+| `@display` shapes them: `summaryFields` chooses and orders a table's columns, otherwise every field; `titleField` names a detail (`aria-label`, the `noun` when the title is empty), heads its row (`<th scope="row">`) and is a nested record's cell in a table, which is otherwise its detail; `plural` captions a table. `createLabel`, `states`, `transitions` and a field's `@icon` are not read. | A visible heading for the title, whose level depends on where a page places the detail; the noun as a table's caption |
+| An absent optional value leaves its `<dd>` or `<td>` empty, which a stylesheet can fill with `:empty`. | A placeholder such as "None", which each app would word its own way and a screen reader would read |
+| The markup is semantic HTML with `ss-` classes, `data-type` (the type's name) and `data-field` (the field's JSON key), and no styles. Every value is text that `view!` escapes, in a node or an attribute. A type that nests itself, at any depth, boxes its components' views, as Topcoat requires of a recursive component. | Inline styles or a stylesheet the crate ships; boxing every view |
+
+Status: built. The goldens cover a fourth fixture, the extension's own
+`fixture-views-api`, whose `OrderView` has a field of every kind, a hidden
+one and a `@display`, and whose `Comment` nests itself.
+`TestViewsRenderRecords` renders its detail and table through
+`Router::handle` and checks the HTML: each kind of field, the empty cells
+of absent values, the summary columns under their caption, a `<script>`
+in a value escaped, an undeclared enum value escaped in its attribute, and
+three levels of comments. `TestDisplayShapesTheComponents` and
+`TestViewsOff` check the generated module. acme's `ReviewView` and
+`OrderView` declare a `@display`, its reviews shard renders
+`review_view_detail`, and its orders page `order_view_table`.
+
+The rule is reversible until the first release.

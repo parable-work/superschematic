@@ -1,6 +1,6 @@
 ---
 title: Pages with Topcoat
-description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms and records built from the schema.
+description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms, records and display components built from the schema.
 sidebar:
   order: 9
 ---
@@ -12,8 +12,9 @@ server-rendered pages. Its pages run in the same process as a service's
 Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
-rules. The crate also has a form per input type and a record per result
-type, and mounts the JSON API beside the pages.
+rules. The crate also has a form per input type, a record per result
+type and components that render each record, and mounts the JSON API
+beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
@@ -48,10 +49,11 @@ on. A service whose server is in another language skips the crate and
 says why in the build log, so the same config also builds the Go server.
 The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
 
-The crate's forms, records and procedures, below, are on by default. In
-`outputs.topcoat`, `forms: false` leaves out the forms, `procedures: false`
-the procedures, and `records: false` the records and the procedures,
-which carry their arguments and results as records.
+The crate's forms, records, procedures and display components, below,
+are on by default. In `outputs.topcoat`, `forms: false` leaves out the
+forms, `procedures: false` the procedures, `views: false` the display
+components, and `records: false` the records with the procedures and the
+display components, which are built on records.
 
 ## Mount it
 
@@ -108,6 +110,47 @@ which a page hands the browser, here through a shard:
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
 enums are strings, a map is its entries, and an `@uiHidden` field is left
 out, since a record reaches the browser.
+
+## Display components
+
+`views` renders each record two ways: `<type>_detail(record)` as a
+description list, a label and a value per field, and `<type>_table(rows)`
+as a table with a row per record. The shard above renders a review with
+`review_view_detail`, and the orders page renders the shopper's orders
+with `order_view_table`:
+
+<Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
+
+A field is labeled as its form field is: its `@docs` title, else its name
+in words. A value renders by its type:
+
+- an enum's value is its member's name in words, in a `<data>` element
+  whose `value` is the one the API sends;
+- a date or a time is a `<time>` element;
+- a boolean is "Yes" or "No";
+- a nested record is its own detail, and in a table cell its title when
+  its type declares one;
+- a list of records is their table, any other list a `<ul>`, and a map a
+  `<dl>` of its entries;
+- a union or any JSON value is its JSON text in a `<pre>`;
+- an absent optional value leaves its cell empty.
+
+A type's `@display` ([Display on a type](/superschematic/reference/documentation/#display-on-a-type))
+shapes both components. `summaryFields` chooses and orders a table's
+columns, which are otherwise every field. `titleField` names a detail for
+assistive technology (`aria-label`, the noun when the title is empty) and
+heads each row. `plural` captions a table. `ReviewView` declares all four:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="ReviewView" />
+
+`OrderView`'s summary fields are the orders table's columns: the order's
+id, when it was placed, its status and its total.
+
+The markup is plain HTML and ships no styles. A stylesheet or a test finds
+it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
+`ss-json`), by `data-type`, the type's name, and by `data-field`, each
+field's JSON key. Every value is text, which the view escapes, so a
+review's body never becomes markup.
 
 ## Procedures
 

@@ -128,7 +128,8 @@ async fn a_review_needs_a_signed_in_shopper_and_its_rules() {
     let written = send(&router, "POST", "/reviews", Some(&cookie), Some("rating=5&title=Great&body=Works")).await;
     assert_eq!((written.status, written.location.as_deref()), (StatusCode::SEE_OTHER, Some("/reviews")));
     let page = send(&router, "GET", "/reviews", Some(&cookie), None).await;
-    assert!(page.body.contains("Great (5/5)"), "{}", page.body);
+    assert!(page.body.contains(r#"<div class="ss-detail" data-type="ReviewView" role="group" aria-label="Great">"#), "{}", page.body);
+    assert!(page.body.contains(r#"<div data-field="rating"><dt>Rating</dt><dd>5</dd></div>"#), "{}", page.body);
 
     // The same review through the JSON API the app mounts.
     let api = send(&router, "GET", &format!("/api/products/{PRODUCT}/reviews"), None, None).await;
@@ -173,11 +174,12 @@ async fn a_sqlite_shop_outlives_the_app() {
     // so the shopper signs in again.
     let router = sqlite_shop(&path);
     let page = send(&router, "GET", "/reviews", None, None).await;
-    assert!(page.body.contains("Sturdy (4/5)"), "{}", page.body);
+    assert!(page.body.contains(r#"<div data-field="title"><dt>Title</dt><dd>Sturdy</dd></div>"#), "{}", page.body);
     let cookie = send(&router, "POST", "/sign-in", None, None).await.cookie.expect("the session cookie");
     let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert_eq!(orders.status, StatusCode::OK);
-    assert!(orders.body.contains(" placed</p>"), "{}", orders.body);
+    assert!(orders.body.contains(r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption>"#), "{}", orders.body);
+    assert!(orders.body.contains(r#"<td data-field="status"><data value="placed">Placed</data></td><td data-field="totalCents">3998</td>"#), "{}", orders.body);
 
     // review's search_text, the VIRTUAL column shop-db's @searchField gives
     // it on SQLite, joins its title and body.
