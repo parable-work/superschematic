@@ -4703,3 +4703,81 @@ it has run against Google Cloud, where the next plan of a deployed
 environment updates each service.
 
 The rule is reversible until the first release.
+
+## D56. Business records get deadlines, state rules, numbers and sign-offs, and a link may hold many targets
+
+The behaviors D16 ships came from claimable work: leases, queues,
+budgets, retries. A store, a salon, a help desk or an invoice needs
+other things of the instances it keeps: a deadline that moves an item
+on when nobody does, fields a state requires or freezes, a number a
+person reads out, and a sign-off by more than one person. This entry
+adds four core behaviors to `@superschematic/engine`, `Timers`,
+`StateRules`, `Numbering` and `Approvals`, and amends three, `Workflow`,
+`Reactions` and `Links`, for what they need. Holds, stock, calendars and
+payments come later and build on it.
+
+Three rules hold throughout. A duration or a time is an integer of
+milliseconds, as every config before has it (`ttlMs`, `sweepMs`):
+`Temporal.Duration` is written `1h30m`, and the engine has no parser for
+it. A change a read shows goes through an operation with its event; a
+sweep invokes an operation and writes nothing a read shows itself (D16).
+An operation name is flat across behaviors, a route, an MCP tool and the
+policy's `operation`, so each new one says what it acts on
+(`fireTimer`, `signOff`).
+
+### Workflow's `enteredAt`, the `volatile` flag and Reactions' `changes`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Workflow` gains the field `enteredAt`, when the status last changed, in epoch milliseconds: its create and each `transition` set it beside `status`. An instance that predates it has none until its next transition, since a behavior's migration and `afterConfigChange` reach only its own storage. | A reader that falls back to the instance's `createdAt`, one query more on every read, and wrong for an instance that moved before; an event read back from the log, which retention prunes |
+| A declaration's field may say `"volatile": true`: it can move without an event of its own instance, computed at read from other instances, the clock or the config. `Rollups.values`, `Dependencies.blocked`, `Lease.active`, `Links.targets` (whose `latest` and `stale` read the target) and `Budget.meters` (a daily meter starts again at read) are. The describe document carries the flag. | Marking nothing, under which a rule on a field can wait forever for an event that never records it; a flag per member of a field, for one field so far |
+| `ConfigTarget` gains `behaviorFields`, each behavior on the type with its declared fields and whether each is volatile. `behaviors` stays the list of names `parseConfig`s already read. | Turning `behaviors` into records, which breaks every `parseConfig` that calls `includes` on it, an extension's among them |
+| `Reactions` takes `{ when: { changes: { field, to?, from? } } }`. `field` is an own field (no dot) or a behavior's by qualified name, a member path after it allowed (`Timers.deadlines.sla.fired`), the behavior found by the longest of the type's behavior names that prefixes it. It fires on a create, an update or an operation event of its schema that moves the value: to `to` when given, from `from` when given; a create moves a field from absent; a delete fires nothing. An unknown field, a volatile one and `Workflow.enteredAt`, which every move of the status moves, are refused at define. | A signal each behavior declares and Reactions subscribes to, a second vocabulary beside the fields every reader already has; triggers per behavior added to Reactions one by one, as `enters` was |
+| A rule reads the move from the event: an operation's patch and an update's `behaviors` part are diffs, so a field the patch leaves out has not moved. It folds the instance before the event only for `from`, an object value, or an own field of an update, whose `data` is the caller's patch rather than a diff, once per event. A value the event keeps in the value store is compared once loaded. As with `enters`, the rule acts only while the field still holds `to`. A `changes` on `Workflow.status` joins the cycle check `enters` has. | Folding the instance for every rule on every event, which grows with each instance's history; comparing a value-store ref with a value |
+
+### Many-valued links
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A link may say `many: true` with a `max` from 1 to 100: it holds a list of targets, a ticket's reviewers or a stylist's services. `required` then means at least one. `targets.<name>` is a list for it, in the order the targets were linked, and the object it was for every other link. | A separate behavior for lists of links, which repeats pins, references and `listLinked`; no bound, under which every write reads every target twice for its event |
+| `link` adds a target to a many-valued link, or pins again one it holds, and `unlink({ name, id })` removes one; past `max` is `too_many`, a target it does not hold `not_linked`, the last of a required link `required_link`, a target given twice at create or by `link` refused before it is stored. Its create parameter is a list. A deleted target leaves the lists that hold it, and the delete is refused only when it would empty a required one. | `addLink` and `removeLink` beside `link`, two operations more on every type with Links, for what `link` and `unlink` already name |
+| The table is rebuilt once, keyed by the target as well as the name, its rows and their order kept. While a schema has instances, a link's `many` does not change and its `max` does not fall. | A second table for many-valued links, two layouts for one behavior |
+| What reads one target refuses a many-valued link, at define and again at run time, since another schema's Links config changes after: Reactions' `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`, Blueprint's `parentLink`, `from.link` and `copyLinks`, Budget's `scope`, Queue's `excludeStale` and Numbering's `scope`. `listLinked`, Rollups, Reactions' `revised` and Lease's `directOn` work over a list, `directOn` keyed by the target too. | Reading the first target, which picks one by an order nobody chose |
+
+### Timers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Timers` keeps named deadlines: `{ deadlines: { <name>: { start, afterMs?, then?, until? } }, sweepMs? }`. A deadline starts at the create (`{ create: true }`), each time the status enters a state (`{ enters }`), or at an own `date-time` field (`{ field }`), `afterMs` after it, before it with a negative `afterMs` for a field alone. When it comes due it fires; `then: { transition, from? }` moves the status, from the `enters` state alone unless `from` says otherwise, so an item resolved in time is never moved; `until` (`{ leaves }` or `{ enters }`) cancels it. | ISO 8601 or Go durations, a parser in the engine for one config; a cron expression, which is a recurrence, a behavior of its own; `from` any state by default, under which a deadline moves an item already resolved |
+| A deadline arms when the fact it starts from changes, the `enteredAt` or the field's value, which `afterChange` reads from the instance as it is, never from which operation ran: a Lease expiry and a Reactions move change the status too. A later write that leaves the fact alone keeps a snooze or a reset, and a status that left and came back within one call is caught by its `enteredAt`. A field cleared cancels its deadline, and one moved arms it again. | Computing every deadline again at every write, which undoes a snooze; reading `change.operation === 'transition'`, which misses every other way the status moves |
+| `Timers.deadlines` gives each armed deadline's `dueAt`, `fired`, `firedAt` and the `outcome` of its move. Nothing in it follows the clock, so it is not volatile, and a rule hears `Timers.deadlines.<name>.fired` turn true; a reader works out what is overdue from `dueAt`. | An `overdue` member, which moves with the clock and no event |
+| The runner's `fire` schedule pages through due deadlines per namespace and schema, in order of due time and keyset by deadline, at most 1000 a run, and invokes `fireTimer` on each. `fireTimer` fires one deadline that is due and has not fired, and changes nothing otherwise, so the sweep and a caller cannot fire one twice. It marks the deadline fired whatever its move meets, a veto or a missing permission, and records which in `outcome`, so one stuck instance never holds the sweep back. `resetTimer` and `snoozeTimer({ deadline, dueAt })` need the config's `permission`. | A permission only the runner holds, which no context can tell; a veto of a fire that is not due, which races the sweep; retrying a move a guard refused, which fires the same deadline forever |
+| A new version may change any deadline. A changed `afterMs` moves due times from each deadline's start, which its row keeps; a removed deadline's rows go; a new `field` deadline arms every instance at publish, and a new `create` or `enters` one at each instance's next write. On a type with `Lease`, `"Timers.fireTimer"` belongs in its `exempt`, or the holder's lease refuses it. | Arming `enters` deadlines at publish, which needs Workflow's columns no other behavior reads in bulk |
+
+### StateRules
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `StateRules` says, per state of the type's `Workflow`, the own fields an instance must hold to enter it (`required`) and the ones that cannot change while it is in it (`frozen`, a list or `"all"`). A field is held when it is neither absent nor null. `permission` lets a caller change a frozen field. | Rules in `Workflow`'s own config, which every type that only moves a status would carry; conditions in an expression language, which this entry does not add |
+| A transition into a state missing a required field is vetoed (`missing_fields`), and a create into an initial state that requires one is refused as an invalid instance. An update, or an operation's `update()`, that changes a frozen field or clears a required one while the instance is in the state is vetoed (`frozen_fields`, `required_fields`), a behavior's write included: a frozen result stays as it is. | Checking the state in `validate`, which sees the fields and not the status |
+| Any change of the rules is allowed: an instance that predates a requirement keeps working until it would lose a field the rule requires or enter the state. Flagged: Revisions' `propose` checks a patch without guards, so a proposal that changes a frozen field is refused at `approve`. | Refusing a stricter rule while the schema has instances, which keeps a business from ever tightening its own process |
+
+### Numbering
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Numbering` gives each instance a number a person reads, from `format`, a template of `{seq}` or `{seq:N}` (zero-padded) exactly once and `{yyyy}` or `{yy}`: `INV-{yyyy}-{seq:4}` is `INV-2026-0042`. The count runs per namespace and schema, per target of a required single-valued link with `scope: { link }`, and starts again each UTC year with `reset: "yearly"`, which needs the year in the format, so a label is unique within its scope. | Any string template, under which two scopes print the same label; the year at the time of numbering, which puts a backfilled instance in the wrong year |
+| The number is set in the create's transaction, from its own table of counts, so a refused create takes none and leaves no gap; a delete leaves one. `Numbering.seq` and `Numbering.label` are filters, so `where: { "Numbering.label": "INV-2026-0042" }` finds the instance, and nothing changes a number once set. | An own field the behavior writes, which a create's event would not carry; a lookup operation beside the list's filter |
+| An instance made before the schema composed Numbering has no number until `assignNumber()`, which numbers it with an event and changes nothing on one numbered already; a deployment backfills in creation order. While the schema has instances, the format, the scope and the reset stay, and Numbering stays: added again, it would start counting again. | Numbering every instance at publish, with no event for any of them |
+
+### Approvals
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Approvals` gates states of the type's `Workflow` on sign-offs: `{ gates: { <state>: { count, permission, from?, excludeCreator? } }, resetOnChange? }`. A transition into a gated state, from a state its `from` allows, waits for `count` distinct principals holding `permission` to sign off (`approvals_missing`). The creator cannot sign unless `excludeCreator` is false. | `Revisions`' review, one permission and one approval per proposed patch, which approves a change rather than a move; counting any principal, which lets one approver sign twice under two names only the policy knows apart |
+| `signOff({ state, note? })`, `withdrawSignOff({ state })` and the read-only `listSignOffs`, named apart from `Revisions`' `approve` and `reject`. `Approvals.gates` lists each gate's current sign-offs, by subject; the count a gate needs stays in the config, since a publish that changes it writes no event. | `approve` and `reject`, which a type composing `Revisions` already has |
+| A change of the own fields, an update or an operation's `update()`, consumes the sign-offs of every gate unless `resetOnChange` is false, so what was signed is what moves. Entering a gated state consumes its sign-offs too: a return to it signs again. Both read the instance as it is, whichever operation ran. Consumed sign-offs stay in the behavior's table for `listSignOffs`. On a type with `Lease`, `signOff` and `withdrawSignOff` belong in its `exempt`. | Sign-offs that outlive a change of what was signed; resetting only on a transition, which a Timers or a Lease move would skip |
+
+Status: designed; nothing of it is built. Each piece that lands updates
+this paragraph. The names and rules are reversible until the first
+release.
