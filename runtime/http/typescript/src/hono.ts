@@ -528,8 +528,12 @@ async function runRoute<E extends Env>(
     );
   }
   if (!spec.auth.public && spec.auth.required) {
-    const bearer = bearerMiddleware(contextOf);
-    middleware.push(async (current, next) => (standsIn ? next() : bearer(current, next)));
+    // An authenticator that reads Authorization itself gets the header as
+    // the client sent it.
+    if (!options.authenticate?.readsAuthorization) {
+      const bearer = bearerMiddleware(contextOf);
+      middleware.push(async (current, next) => (standsIn ? next() : bearer(current, next)));
+    }
     middleware.push(
       refusing(async ctx => {
         if (!standsIn) await establishCaller(ctx, options);
