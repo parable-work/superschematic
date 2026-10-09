@@ -32,6 +32,11 @@ type crate struct {
 	// HasAuth reports whether an operation needs a caller: the app then
 	// hands the setup a PageAuthenticator.
 	HasAuth bool
+	// Identity reports that the API authenticates with the identity runtime
+	// (D50): the crate then offers IdentityPageAuthenticator, which reads a
+	// page's caller from the session the JSON API signed in, and forwards
+	// the API crate's store features.
+	Identity bool
 	// Operations are the mounted operations, each an in-process call;
 	// Guards every operation, manual ones included.
 	Operations []operation
@@ -58,6 +63,9 @@ type operation struct {
 	RequiresAuth bool
 	Permissions  []string
 	Manual       bool
+	// Identity marks one of the user model's operations, which the identity
+	// runtime serves (D50): it has a guard and no in-process call.
+	Identity bool
 }
 
 func operationOf(e registry.RustEndpoint) operation {
@@ -75,6 +83,7 @@ func operationOf(e registry.RustEndpoint) operation {
 		RequiresAuth: e.RequiresAuth,
 		Permissions:  e.RequiredPerms,
 		Manual:       e.Manual,
+		Identity:     e.IdentityOperation != "",
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
@@ -99,6 +108,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		ExtTrait:      "RouterBuilder" + pascal + "Ext",
 		SetupMethod:   registry.RustIdentifier(service, "service"),
 		HasAuth:       api.HasAuth,
+		Identity:      api.Identity != nil,
 	}
 	for _, endpoint := range api.Endpoints {
 		out.Operations = append(out.Operations, operationOf(endpoint))
@@ -144,6 +154,17 @@ func schemasOf(c registry.GenerateContext) (schemaSet, error) {
 		schemas = append(schemas, schema)
 	}
 	return schemas, nil
+}
+
+// ProceduresTakeArgs reports whether a procedure takes arguments, so
+// procedures.rs declares the decode its records' to_args call.
+func (c *crate) ProceduresTakeArgs() bool {
+	for _, p := range c.Procedures {
+		if p.ArgsRecord != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // FormsUse reports whether a form writes a field with the helper put, so

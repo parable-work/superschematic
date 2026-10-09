@@ -67,6 +67,14 @@ cover an operation's. A page and the JSON API therefore admit the same
 callers. The app names the crate, so the linker keeps it and `.discover()`
 finds its procedures.
 
+When the API's users are the core user model's (`@userSessions`), the
+crate also offers `IdentityPageAuthenticator::of(&implementations)`. It
+reads a page's caller from the session cookie or bearer token as the JSON
+API does, so a user who signs in at `/api/auth/login` is signed in on
+every page, and a refused cookie is cleared on the page's response.
+Topcoat's origin policy runs before both, so an origin the identity
+config trusts must be one the app's `OriginPolicy` trusts too.
+
 ## Call an operation from a page
 
 `operations::<namespace>_<operation>(cx, args)` runs an operation as its
