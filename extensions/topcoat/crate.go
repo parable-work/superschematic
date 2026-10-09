@@ -44,7 +44,10 @@ type crate struct {
 	Guards     []operation
 	Records    []record
 	Forms      []form
-	Procedures []procedure
+	// FormStructs are the structs of the forms' input types and of the
+	// object types they nest.
+	FormStructs []*formStruct
+	Procedures  []procedure
 	// Views are each record's display components, and EnumLabels the
 	// label functions of the enums they show.
 	Views      []view
@@ -223,7 +226,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		}
 	}
 	if cfg.WritesForms() {
-		if out.Forms, err = formsOf(schemas, inProcess, c.Logf); err != nil {
+		if out.Forms, out.FormStructs, err = formsOf(schemas, inProcess, c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -255,17 +258,59 @@ func (c *crate) ProceduresTakeArgs() bool {
 	return false
 }
 
-// FormsUse reports whether a form writes a field with the helper put, so
-// forms.rs declares it.
-func (c *crate) FormsUse(put string) bool {
-	for _, f := range c.Forms {
-		for _, field := range f.Fields {
-			if field.Put == put {
+// FormsUse reports whether a form uses item, so forms.rs declares the
+// helpers it needs: a kind of field ("value", "object", "objectRows",
+// "valueRows", "group"), a reader ("text", "integer", "number",
+// "boolean", "date_time", "json_text"), or "read", "list", "rows",
+// "noRows", "choosable", and what a rendered field needs ("checked",
+// "localDateTime", "showsAll", "showsRow", "showsRows").
+func (c *crate) FormsUse(item string) bool {
+	if item == "choosable" {
+		for _, f := range c.Forms {
+			if f.Choosable {
+				return true
+			}
+		}
+		return false
+	}
+	for _, st := range c.FormStructs {
+		if item == "rows" && st.Rows {
+			return true
+		}
+		for _, f := range st.Fields {
+			if formUses(st, f, item) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// formUses reports whether f, a field of st, uses item (FormsUse).
+func formUses(st *formStruct, f *formField, item string) bool {
+	shown := st.Shown && !f.Hidden
+	reads := f.Kind == kindValue || f.Kind == kindValueRows
+	switch item {
+	case kindValue, kindObject, kindObjectRows, kindValueRows, kindGroup:
+		return f.Kind == item
+	case "read":
+		return reads
+	case "list":
+		return f.Kind == kindObjectRows || f.Kind == kindValueRows || f.Kind == kindGroup
+	case "noRows":
+		return f.Kind == kindValueRows || f.Kind == kindObjectRows && !f.Child.Rows
+	case "checked":
+		return shown && f.Kind == kindGroup
+	case "localDateTime":
+		return shown && reads && f.Control == "datetime-local"
+	case "showsAll":
+		return shown && (f.Kind == kindGroup || f.Kind == kindValue && f.Control == "textarea")
+	case "showsRow":
+		return shown && f.Kind == kindValueRows
+	case "showsRows":
+		return shown && f.Kind == kindObjectRows
+	}
+	return reads && f.Read == item
 }
 
 // ControlledProcedures are the procedures whose routes have a traffic
@@ -318,9 +363,10 @@ func (c *crate) write(dir string) error {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
 	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
-		"rustString": rustString,
-		"join":       strings.Join,
-		"doc":        doc,
+		"rustString":   rustString,
+		"escapeBraces": escapeBraces,
+		"join":         strings.Join,
+		"doc":          doc,
 	}).ParseFS(templates, "templates/*.tmpl")
 	if err != nil {
 		return err

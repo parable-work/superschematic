@@ -21,8 +21,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
   nests, as a Topcoat record a page can hand the browser.
-- reads and renders a form per input type an operation a page calls takes
-  whose fields a form holds, by the input type's rules ([Forms](#forms)).
+- reads and renders a form per input type an operation a page calls takes,
+  nested objects and lists included, by the input type's rules
+  ([Forms](#forms)).
 - lets browser code call each operation through a Topcoat procedure, its
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
@@ -181,27 +182,61 @@ the API's value.
 
 ## Forms
 
-The input type of an operation with an in-process call whose fields a
-form holds (a string, a number, a boolean or an enum, each alone, declared
-by the service itself) gets a form in `forms`:
+The input type of an operation with an in-process call, declared by the
+service itself, gets a form in `forms`:
 
-- **`<Input>Form`** holds each field as the browser sends it
-  (`Option<String>`), so it deserializes from Topcoat's `Form<T>`, and a
-  refused form renders again exactly as it was sent.
-- **`parse()`** reads the fields as the input type's JSON and parses it with
-  the generated `parse_<type>` and its rules ([D14](../../docs/DECISIONS.md)),
-  undeclared keys refused. A checkbox is true when sent. Each field's
-  errors come back as `FormErrors`. `FormErrors::from_api` reads an
-  operation's refusal the same way, so a form shows both.
-- **`<input>_fields(form, errors)`** is a component that renders each field
-  with its label, its value as sent, and its errors:
-  - each field's input type: email, url, tel, number (`step="1"` for an
-    integer) or checkbox, from the field's type; `<select>` for an enum;
+- **`<Input>Form`** holds each field as the browser sends it, so a
+  refused form renders again exactly as it was sent: a value as
+  `Option<String>`, a nested object as its type's own `<Type>Form`, a list
+  of objects as a `Vec` of them, a list of values as `Vec<Option<String>>`
+  and a list of an enum's members as `Vec<String>`.
+  `<Input>Form::new()` is a new form: each field's `@default`, a required
+  nested object's new form, and each list's first rows (its `listMin`, or
+  one when the input requires the list). `Default` is the empty form.
+- **Decoding**: Topcoat's `Form<<Input>Form>` decodes a post, as does
+  `<Input>Form::from_pairs(pairs)`. A control is named by its field's path
+  in the input: `email`, `shippingAddress.city`, `lines[0].productId`,
+  `tags[0]`. A list's rows are read in the order of their indexes, so a
+  gap or a removed row closes up. A name no control has is ignored.
+- **`parse()`** writes the fields as the input type's JSON and parses it
+  with the generated `parse_<type>` and its rules
+  ([D14](../../docs/DECISIONS.md)), undeclared keys refused. A checkbox is
+  true when sent, a blank control is no value, and a blank row of a list
+  of values is null, which the rules refuse at the row. A value a control
+  cannot hold (`seats=many`, JSON that does not parse, a date that does
+  not exist) is refused at the control before the rules run.
+- **`FormErrors`** holds each control's messages by its name. `parse`'s
+  errors, and an operation's refusal through `FormErrors::from_api`, are
+  read by path, nested objects' included (`lines[0].productId`), so each
+  message renders at its control. `errors.of(name)` is a control's
+  messages and `errors.under(name)` a JSON value's or a group's with the
+  place of each.
+- **`<input>_fields(form, errors, choices)`** is a component that renders
+  each field with its label, its value as sent, and its errors, every prop
+  optional (`form` defaults to `new()`):
+  - a value's control: email, url, tel, number (`step="1"` for an
+    integer) or checkbox from the field's type; `<select>` for an enum;
+    `type="date"` for `Temporal.Date`, `type="time"` for `Temporal.Time`;
+    `type="datetime-local"` for `Temporal.DateTime`, whose label ends in
+    "(UTC)", since the control carries no offset and the form reads it
+    as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`);
+    `type="password"` for a `@secret` field, never rendered with its
+    value; and a `<textarea>` of JSON text, "(JSON)" in its label, for a
+    value no control holds: a union, any JSON value, a map, a list of
+    lists, or a type that nests the type holding it;
   - the attributes its rules give it: `required`, `min`/`max`,
     `minlength`/`maxlength`, and `pattern`. A pattern is written only when
     a browser reads it as the server does: no group syntax, and nothing
     the HTML `v` flag refuses. It is never written on an email or URL
-    input, which checks its own syntax.
+    input, which checks its own syntax;
+  - a nested object as a `<fieldset class="ss-object">` with its label as
+    `<legend>`. An optional one is sent only when one of its fields is,
+    so none of its controls is `required`, and it starts empty;
+  - a list of objects as a `<fieldset class="ss-list">` of rows, each a
+    `<fieldset class="ss-row">` numbered by the row type's `@display` noun
+    (else the list's label), and a list of values as a control per row;
+  - a list of an enum's members as a `<fieldset class="ss-choices">` of
+    checkboxes, one per member.
 
   A browser checks those attributes before sending, and `parse` checks
   every rule again.
@@ -223,12 +258,62 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 }
 ```
 
-An input type with a list, a map, an object, a union or any JSON value
-gets no form, and the build log says why. A form submits through the
-operation's in-process call, so the input of an operation without one, a
-webhook's or one the service mounts itself, gets none either
-([what has no procedure](#what-has-no-procedure)). `forms: false` in
-`outputs.topcoat` leaves out the module.
+### Rows without JavaScript
+
+A form whose input holds a list as rows has submit buttons named
+`_action`: `add:lines` after a list's rows, unless it holds its
+`listMax`, and `remove:lines[1]` in each row, unless the list holds no
+more than its `listMin`. They carry `formnovalidate`, so a row can be
+added before the others are valid, and the component renders a hidden
+submit button ahead of them, which Enter presses. The form holds the
+button pressed in `row_action`. `apply_action()` applies it, numbering
+the rows after a removed one again with their values as sent, and is
+true when a row button submitted the form: the page renders the form
+again, 200, without calling the operation.
+
+```rust
+#[page(POST "/book")]
+async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    let (status, errors) = if form.apply_action() {
+        (StatusCode::OK, FormErrors::default())
+    } else {
+        match form.parse() {
+            Ok(input) => match operations::booking_book(cx, BookingBookArgs { input }).await {
+                Ok(_) => return Err(see_other("/booked").into()),
+                Err(err) => (StatusCode::UNPROCESSABLE_ENTITY, FormErrors::from_api(&err)),
+            },
+            Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, errors),
+        }
+    };
+    Ok(view! {
+        (status)
+        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+    })
+}
+```
+
+### Choices the app supplies
+
+An input type does not say which values an id may take: a line's
+`productId` is a UUID, not a product. The page says, with `Choices`: a
+text or number field it names renders as a `<select>` of the options,
+after a blank one, and the value held stays an option when no choice is
+it. A field is named by its path without the rows' indexes, for every
+row, or by its control's name, for one row, which wins:
+
+```rust
+let choices = Choices::new()
+    .with("rooms.roomId", rooms.iter().map(|room| (room.id.clone(), room.name.clone())))
+    .with("rooms[1].roomId", [(attic_id, "Attic")]);
+view! { booking_input_fields(form: form, choices: choices) }
+```
+
+An input type a dependency declares gets no form, and the build log says
+why. A form submits through the operation's in-process call, so the
+input of an operation without one, a webhook's or one the service mounts
+itself, gets none either ([what has no procedure](#what-has-no-procedure)).
+`forms: false` in `outputs.topcoat` leaves out the module.
 
 ## Procedures
 

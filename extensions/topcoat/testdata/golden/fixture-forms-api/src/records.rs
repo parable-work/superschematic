@@ -64,6 +64,206 @@ impl From<types::AccountView> for AccountViewRecord {
     }
 }
 
+/// The record of `types::BillingAddress`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BillingAddressRecord {
+    pub line1: String,
+    pub city: String,
+    pub postcode: Option<String>,
+}
+
+impl BillingAddressRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            line1: wire::string(&json["line1"]),
+            city: wire::string(&json["city"]),
+            postcode: wire::optional(&json["postcode"], wire::string),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("line1".to_owned(), wire::put_string(&self.line1));
+        json.insert("city".to_owned(), wire::put_string(&self.city));
+        if let Some(value) = &self.postcode {
+            json.insert("postcode".to_owned(), wire::put_string(value));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::BillingAddress> for BillingAddressRecord {
+    fn from(value: &types::BillingAddress) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::BillingAddress> for BillingAddressRecord {
+    fn from(value: types::BillingAddress) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::BookingInput`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookingInputRecord {
+    pub guest: GuestRecord,
+    pub billing: Option<BillingAddressRecord>,
+    pub rooms: Vec<RoomRequestRecord>,
+    pub amenities: Option<Vec<String>>,
+    pub arrival: String,
+    pub check_in: Option<String>,
+    pub hold_until: Option<String>,
+    pub currency: Option<String>,
+    pub preferences: Option<String>,
+    pub labels: Option<Vec<(String, String)>>,
+}
+
+impl BookingInputRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            guest: GuestRecord::from_wire(&json["guest"]),
+            billing: wire::optional(&json["billing"], BillingAddressRecord::from_wire),
+            rooms: wire::list(&json["rooms"], RoomRequestRecord::from_wire),
+            amenities: wire::optional(&json["amenities"], |v| wire::list(v, wire::string)),
+            arrival: wire::string(&json["arrival"]),
+            check_in: wire::optional(&json["checkIn"], wire::string),
+            hold_until: wire::optional(&json["holdUntil"], wire::string),
+            currency: wire::optional(&json["currency"], wire::string),
+            preferences: wire::optional(&json["preferences"], wire::json_text),
+            labels: wire::optional(&json["labels"], |v| wire::entries(v, wire::string)),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("guest".to_owned(), GuestRecord::to_wire(&self.guest));
+        if let Some(value) = &self.billing {
+            json.insert("billing".to_owned(), BillingAddressRecord::to_wire(value));
+        }
+        json.insert("rooms".to_owned(), wire::put_list(&self.rooms, RoomRequestRecord::to_wire));
+        if let Some(value) = &self.amenities {
+            json.insert("amenities".to_owned(), wire::put_list(value, wire::put_string));
+        }
+        json.insert("arrival".to_owned(), wire::put_string(&self.arrival));
+        if let Some(value) = &self.check_in {
+            json.insert("checkIn".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.hold_until {
+            json.insert("holdUntil".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.currency {
+            json.insert("currency".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.preferences {
+            json.insert("preferences".to_owned(), wire::put_json_text(value));
+        }
+        if let Some(value) = &self.labels {
+            json.insert("labels".to_owned(), wire::put_entries(value, wire::put_string));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::BookingInput> for BookingInputRecord {
+    fn from(value: &types::BookingInput) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::BookingInput> for BookingInputRecord {
+    fn from(value: types::BookingInput) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::BookingView`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookingViewRecord {
+    pub id: String,
+    pub rooms: f64,
+}
+
+impl BookingViewRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            rooms: wire::number(&json["rooms"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        json.insert("rooms".to_owned(), wire::put_number(&self.rooms));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::BookingView> for BookingViewRecord {
+    fn from(value: &types::BookingView) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::BookingView> for BookingViewRecord {
+    fn from(value: types::BookingView) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::Guest`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuestRecord {
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+}
+
+impl GuestRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            name: wire::string(&json["name"]),
+            email: wire::string(&json["email"]),
+            phone: wire::optional(&json["phone"], wire::string),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("name".to_owned(), wire::put_string(&self.name));
+        json.insert("email".to_owned(), wire::put_string(&self.email));
+        if let Some(value) = &self.phone {
+            json.insert("phone".to_owned(), wire::put_string(value));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Guest> for GuestRecord {
+    fn from(value: &types::Guest) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Guest> for GuestRecord {
+    fn from(value: types::Guest) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::NoteInput`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +300,49 @@ impl From<&types::NoteInput> for NoteInputRecord {
 
 impl From<types::NoteInput> for NoteInputRecord {
     fn from(value: types::NoteInput) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::RoomRequest`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoomRequestRecord {
+    pub room_id: String,
+    pub adults: i64,
+    pub extras: Option<Vec<String>>,
+}
+
+impl RoomRequestRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            room_id: wire::string(&json["roomId"]),
+            adults: wire::integer(&json["adults"]),
+            extras: wire::optional(&json["extras"], |v| wire::list(v, wire::string)),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("roomId".to_owned(), wire::put_string(&self.room_id));
+        json.insert("adults".to_owned(), wire::put_integer(&self.adults));
+        if let Some(value) = &self.extras {
+            json.insert("extras".to_owned(), wire::put_list(value, wire::put_string));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::RoomRequest> for RoomRequestRecord {
+    fn from(value: &types::RoomRequest) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::RoomRequest> for RoomRequestRecord {
+    fn from(value: types::RoomRequest) -> Self {
         Self::from(&value)
     }
 }

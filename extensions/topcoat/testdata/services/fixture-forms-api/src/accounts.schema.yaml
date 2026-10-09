@@ -1,6 +1,10 @@
 # Accounts, signed up through a form: the input's fields are an email, a
 # URL, strings with rules, an enum, an integer and a number scalar, and a
-# boolean. A note's input holds a list, which a form does not.
+# boolean. A note's input holds a list of strings, a row each. A booking's
+# input holds a field of every other kind a form renders: a nested object
+# with an optional field, an optional nested object, a list of objects with
+# bounds, a list of enums, a date, a time, a date-time, a secret, a default,
+# any JSON value and a map.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -16,6 +20,18 @@ scalars:
   Ordering.Rank:
     name: Ordering.Rank
     languagePrimitive: number
+  Temporal.Date:
+    name: Temporal.Date
+    languagePrimitive: string
+  Temporal.Time:
+    name: Temporal.Time
+    languagePrimitive: string
+  Temporal.DateTime:
+    name: Temporal.DateTime
+    languagePrimitive: string
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
 enums:
   # What an account pays for.
   Plan:
@@ -25,6 +41,16 @@ enums:
         serializedAs: free
       - name: Pro
         serializedAs: pro
+  # What a stay includes.
+  Amenity:
+    name: Amenity
+    values:
+      - name: Wifi
+        serializedAs: wifi
+      - name: Breakfast
+        serializedAs: breakfast
+      - name: LateCheckout
+        serializedAs: late_checkout
 types:
   SignupInput:
     name: SignupInput
@@ -65,6 +91,98 @@ types:
         required: true
       - name: tags
         typeRef: { name: string, isArray: true }
+        validateListMax: 3
+  Guest:
+    name: Guest
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 2
+      - name: email
+        typeRef: { name: Contact.Email }
+        required: true
+      - name: phone
+        typeRef: { name: string }
+  BillingAddress:
+    name: BillingAddress
+    role: APIInput
+    fields:
+      - name: line1
+        title: Address line 1
+        typeRef: { name: string }
+        required: true
+      - name: city
+        typeRef: { name: string }
+        required: true
+      - name: postcode
+        typeRef: { name: string }
+  RoomRequest:
+    name: RoomRequest
+    role: APIInput
+    display:
+      noun: Room
+      createLabel: Add a room
+    fields:
+      - name: roomId
+        title: Room
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: adults
+        typeRef: { name: Ordering.Rank }
+        required: true
+        validateMin: 1
+        validateMax: 4
+      - name: extras
+        typeRef: { name: Amenity, isArray: true }
+  BookingInput:
+    name: BookingInput
+    role: APIInput
+    fields:
+      - name: guest
+        typeRef: { name: Guest }
+        required: true
+      - name: billing
+        title: Billing address
+        typeRef: { name: BillingAddress }
+      - name: rooms
+        typeRef: { name: RoomRequest, isArray: true }
+        required: true
+        validateListMin: 1
+        validateListMax: 3
+      - name: amenities
+        typeRef: { name: Amenity, isArray: true }
+      - name: arrival
+        typeRef: { name: Temporal.Date }
+        required: true
+      - name: checkIn
+        title: Check-in time
+        typeRef: { name: Temporal.Time }
+      - name: holdUntil
+        typeRef: { name: Temporal.DateTime }
+      - name: doorCode
+        typeRef: { name: string }
+        secret: true
+        validateMinLength: 4
+      - name: currency
+        typeRef: { name: string }
+        default: GBP
+        validatePattern: "^[A-Z]{3}$"
+      - name: preferences
+        typeRef: { name: Generic.JSON }
+      - name: labels
+        typeRef: { name: string, isMap: true }
+  BookingView:
+    name: BookingView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: rooms
+        typeRef: { name: number }
+        required: true
   AccountView:
     name: AccountView
     role: APIView
@@ -111,4 +229,16 @@ operationSets:
             required: true
           - name: input
             typeRef: { name: NoteInput }
+            required: true
+  - name: BookingMutations
+    operations:
+      # Book a stay.
+      - name: book
+        typeRef: { name: BookingView }
+        required: true
+        httpMethod: POST
+        restPath: bookings
+        arguments:
+          - name: input
+            typeRef: { name: BookingInput }
             required: true

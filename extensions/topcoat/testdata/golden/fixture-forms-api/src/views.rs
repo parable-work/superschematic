@@ -17,8 +17,19 @@
 //! The markup has `ss-` classes and `data-field` attributes, the field's
 //! JSON key, for a stylesheet or a test, and no style of its own.
 
-use crate::records::{AccountViewRecord, NoteInputRecord, SignupInputRecord};
+use crate::records::{AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
 use topcoat::view::{View, component, view};
+
+/// Labels a value of `Amenity`: its member's name in words. A value the
+/// enum does not declare is its own label.
+pub fn amenity_label(value: &str) -> &str {
+    match value {
+        "wifi" => "Wifi",
+        "breakfast" => "Breakfast",
+        "late_checkout" => "Late checkout",
+        other => other,
+    }
+}
 
 /// Labels a value of `Plan`: its member's name in words. A value the
 /// enum does not declare is its own label.
@@ -96,6 +107,324 @@ pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result
     })
 }
 
+/// `BillingAddressRecord` as a description list: each field's label and value.
+#[component]
+pub async fn billing_address_detail(record: BillingAddressRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BillingAddress" role="group">
+            <dl>
+                <div data-field="line1">
+                    <dt>"Address line 1"</dt>
+                    <dd>(record.line1)</dd>
+                </div>
+                <div data-field="city">
+                    <dt>"City"</dt>
+                    <dd>(record.city)</dd>
+                </div>
+                <div data-field="postcode">
+                    <dt>"Postcode"</dt>
+                    <dd>(record.postcode)</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BillingAddressRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn billing_address_table(rows: Vec<BillingAddressRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BillingAddress">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="line1">"Address line 1"</th>
+                    <th scope="col" data-field="city">"City"</th>
+                    <th scope="col" data-field="postcode">"Postcode"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="line1">(row.line1)</td>
+                        <td data-field="city">(row.city)</td>
+                        <td data-field="postcode">(row.postcode)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `BookingInputRecord` as a description list: each field's label and value.
+#[component]
+pub async fn booking_input_detail(record: BookingInputRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BookingInput" role="group">
+            <dl>
+                <div data-field="guest">
+                    <dt>"Guest"</dt>
+                    <dd>guest_detail(record: record.guest)</dd>
+                </div>
+                <div data-field="billing">
+                    <dt>"Billing address"</dt>
+                    <dd>
+                        match record.billing {
+                            Some(value) => billing_address_detail(record: value),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="rooms">
+                    <dt>"Rooms"</dt>
+                    <dd>room_request_table(rows: record.rooms)</dd>
+                </div>
+                <div data-field="amenities">
+                    <dt>"Amenities"</dt>
+                    <dd>
+                        match record.amenities {
+                            Some(value) => {
+                                <ul class="ss-list">
+                                    for item in value {
+                                        <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                    }
+                                </ul>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="arrival">
+                    <dt>"Arrival"</dt>
+                    <dd><time datetime=(&record.arrival)>(&record.arrival)</time></dd>
+                </div>
+                <div data-field="checkIn">
+                    <dt>"Check-in time"</dt>
+                    <dd>
+                        match record.check_in {
+                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="holdUntil">
+                    <dt>"Hold until"</dt>
+                    <dd>
+                        match record.hold_until {
+                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="currency">
+                    <dt>"Currency"</dt>
+                    <dd>(record.currency)</dd>
+                </div>
+                <div data-field="preferences">
+                    <dt>"Preferences"</dt>
+                    <dd>
+                        match record.preferences {
+                            Some(value) => <pre class="ss-json">(value)</pre>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="labels">
+                    <dt>"Labels"</dt>
+                    <dd>
+                        match record.labels {
+                            Some(value) => {
+                                <dl class="ss-map">
+                                    for (key, entry) in value {
+                                        <div>
+                                            <dt>(key)</dt>
+                                            <dd>(entry)</dd>
+                                        </div>
+                                    }
+                                </dl>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BookingInputRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn booking_input_table(rows: Vec<BookingInputRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BookingInput">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="guest">"Guest"</th>
+                    <th scope="col" data-field="billing">"Billing address"</th>
+                    <th scope="col" data-field="rooms">"Rooms"</th>
+                    <th scope="col" data-field="amenities">"Amenities"</th>
+                    <th scope="col" data-field="arrival">"Arrival"</th>
+                    <th scope="col" data-field="checkIn">"Check-in time"</th>
+                    <th scope="col" data-field="holdUntil">"Hold until"</th>
+                    <th scope="col" data-field="currency">"Currency"</th>
+                    <th scope="col" data-field="preferences">"Preferences"</th>
+                    <th scope="col" data-field="labels">"Labels"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="guest">guest_detail(record: row.guest)</td>
+                        <td data-field="billing">
+                            match row.billing {
+                                Some(value) => billing_address_detail(record: value),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="rooms">room_request_table(rows: row.rooms)</td>
+                        <td data-field="amenities">
+                            match row.amenities {
+                                Some(value) => {
+                                    <ul class="ss-list">
+                                        for item in value {
+                                            <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                        }
+                                    </ul>
+                                },
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="arrival"><time datetime=(&row.arrival)>(&row.arrival)</time></td>
+                        <td data-field="checkIn">
+                            match row.check_in {
+                                Some(value) => <time datetime=(&value)>(&value)</time>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="holdUntil">
+                            match row.hold_until {
+                                Some(value) => <time datetime=(&value)>(&value)</time>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="currency">(row.currency)</td>
+                        <td data-field="preferences">
+                            match row.preferences {
+                                Some(value) => <pre class="ss-json">(value)</pre>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="labels">
+                            match row.labels {
+                                Some(value) => {
+                                    <dl class="ss-map">
+                                        for (key, entry) in value {
+                                            <div>
+                                                <dt>(key)</dt>
+                                                <dd>(entry)</dd>
+                                            </div>
+                                        }
+                                    </dl>
+                                },
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `BookingViewRecord` as a description list: each field's label and value.
+#[component]
+pub async fn booking_view_detail(record: BookingViewRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BookingView" role="group">
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(record.id)</dd>
+                </div>
+                <div data-field="rooms">
+                    <dt>"Rooms"</dt>
+                    <dd>(record.rooms)</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BookingViewRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn booking_view_table(rows: Vec<BookingViewRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BookingView">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="rooms">"Rooms"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="id">(row.id)</td>
+                        <td data-field="rooms">(row.rooms)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `GuestRecord` as a description list: each field's label and value.
+#[component]
+pub async fn guest_detail(record: GuestRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="Guest" role="group">
+            <dl>
+                <div data-field="name">
+                    <dt>"Name"</dt>
+                    <dd>(record.name)</dd>
+                </div>
+                <div data-field="email">
+                    <dt>"Email"</dt>
+                    <dd>(record.email)</dd>
+                </div>
+                <div data-field="phone">
+                    <dt>"Phone"</dt>
+                    <dd>(record.phone)</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `GuestRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn guest_table(rows: Vec<GuestRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Guest">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="name">"Name"</th>
+                    <th scope="col" data-field="email">"Email"</th>
+                    <th scope="col" data-field="phone">"Phone"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="name">(row.name)</td>
+                        <td data-field="email">(row.email)</td>
+                        <td data-field="phone">(row.phone)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
 /// `NoteInputRecord` as a description list: each field's label and value.
 #[component]
 pub async fn note_input_detail(record: NoteInputRecord) -> topcoat::Result<impl View> {
@@ -147,6 +476,76 @@ pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<imp
                                     <ul class="ss-list">
                                         for item in value {
                                             <li>(item)</li>
+                                        }
+                                    </ul>
+                                },
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `RoomRequestRecord` as a description list: each field's label and value.
+#[component]
+pub async fn room_request_detail(record: RoomRequestRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="RoomRequest" role="group" aria-label="Room">
+            <dl>
+                <div data-field="roomId">
+                    <dt>"Room"</dt>
+                    <dd>(record.room_id)</dd>
+                </div>
+                <div data-field="adults">
+                    <dt>"Adults"</dt>
+                    <dd>(record.adults)</dd>
+                </div>
+                <div data-field="extras">
+                    <dt>"Extras"</dt>
+                    <dd>
+                        match record.extras {
+                            Some(value) => {
+                                <ul class="ss-list">
+                                    for item in value {
+                                        <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                    }
+                                </ul>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `RoomRequestRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn room_request_table(rows: Vec<RoomRequestRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="RoomRequest">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="roomId">"Room"</th>
+                    <th scope="col" data-field="adults">"Adults"</th>
+                    <th scope="col" data-field="extras">"Extras"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="roomId">(row.room_id)</td>
+                        <td data-field="adults">(row.adults)</td>
+                        <td data-field="extras">
+                            match row.extras {
+                                Some(value) => {
+                                    <ul class="ss-list">
+                                        for item in value {
+                                            <li><data value=(&item)>(amenity_label(&item))</data></li>
                                         }
                                     </ul>
                                 },

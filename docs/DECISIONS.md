@@ -5105,3 +5105,50 @@ Google Cloud, where the anchor and the rewrite of the root path are the
 first things to check.
 
 The rule is reversible until the first release.
+
+### D44, amended: a form for every input type, its controls named by path, a list's rows added and removed without JavaScript
+
+The first forms amendment gave a form only to an input type whose fields
+were each a string, a number, a boolean or an enum, since Topcoat's
+`Form<T>` decodes flat names and not `lines[0].quantity`. Every other
+input got none, with its reason in the build log: acme's
+`PlaceOrderInput`, whose `lines` are a list of one to fifty products with
+their quantities and whose `shippingAddress` is a nested object, got
+"field lines is a list or a map", so a page that places an order would
+write its controls, their names and their errors by hand.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every input type an in-process call takes, declared by the service, gets a form. A control is named by its field's path in the input, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, and a list of an enum's members `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
+| Each input's form implements `Deserialize` from the pairs a post carries, which Topcoat's `Form` hands it as `Vec<(String, String)>`, so `Form<PlaceOrderInputForm>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up, and a name no control has, one that is not a path, or one deeper than 32 steps is ignored. `parse()` writes the struct as the input's JSON and runs `parse_<type>` with undeclared keys refused, as before. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize` with renamed fields, which reads no nested name; reading the body in the crate, where Topcoat's `Form` already applies the body limit |
+| `FormErrors` keys each message by its control's name. `parse`'s errors are the validators' paths, flattened (`lines[0].productId`), and `from_api` walks the API's nested `errors` as a procedure's `field_errors` does, so each message renders at its control, and `errors.under(name)` gathers a JSON value's or a group's with the place of each. An error at a place the component renders no control for (an `@uiHidden` field, an undeclared key) renders with the form's own messages, after its name. A value a control cannot hold, a number that is not one, JSON that does not parse, a date-time that does not exist, is refused at the control before the rules run. | Dropping an error no control shows, which would refuse a form with nothing on it |
+| A nested object is a `<fieldset>` with its label as `<legend>`. An optional one is part of the input only when one of its values was sent (a filled control, a checked box, a row): its controls are never `required`, its select has a blank option, and a new form starts it empty, its `@default`s left to the API. A required one is always sent, and its rules refuse what it lacks. | A checkbox that includes the object, one more control to tick; prefilling an optional object's defaults, which would send the object a reader left blank |
+| A list of objects is a fieldset of rows, each a fieldset numbered by the row type's `@display` noun, else the list's label, after a hidden input of the row's name that keeps a row whose controls send nothing. A list of values is a control per row, a checkbox after a hidden input of its name, and a blank row is null, which the rules refuse at the row. A list of an enum's members is a group of checkboxes in the enum's order. A new form starts a list at its `listMin`, or one when the input requires it. | Rows for a list of an enum's members, which would let a reader pick a member twice; dropping a blank row, which would hide a row the reader added |
+| A row is added and removed without JavaScript, by submit buttons named `_action`: `add:lines` after a list's rows, with the row type's `@display` createLabel as its text, until the list holds its `listMax`, and `remove:lines[1]` in each row while it holds more than its `listMin`. They carry `formnovalidate`, so a row can be added before the others are valid, and the component renders a hidden submit button ahead of them, which Enter presses. The form holds the button in `row_action`; `apply_action()` applies it within the bounds, numbering the rows after a removed one again with their values as sent, and is true when a row button submitted the form, in which case the page renders the form again, 200, without calling the operation. | Script that clones a row; a route per action; a row count field, which a reader could set past the bounds |
+| A control is typed by its scalar: `Temporal.Date` is `type="date"` and `Temporal.Time` `type="time"`, whose `HH:MM` the scalar takes. `Temporal.DateTime` is `type="datetime-local"`, which carries no offset, so the form reads it as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in "(UTC)"; a value with an offset, which an app may set, is sent as it is, and a held `Z` value shows without it. A `@secret` field is `type="password"`, never rendered with its value, after a refusal or a row button. A value no control holds, a union, any JSON value, a map, a list of lists, or a type that nests the type holding it, is a `<textarea>` of its JSON text, "(JSON)" in its label. `new()` is a new form, each value's `@default` filled in, and the component's default; `Default` is the empty form. | Text holding the canonical RFC 3339 form, which a reader would type by hand; reading the local time in the server's zone, which is not the reader's; a map as key and value rows, whose errors (`labels.vip`) name a key a row may have changed; refusing the whole input for one such field |
+| The app supplies choices: `Choices` maps a field's path without its rows' indexes (`lines.productId`, every line's) or a control's name (`lines[0].productId`, one line's, which wins) to value and label pairs, and the component renders each text or number control it names as a `<select>`, a blank option first, keeping the value held as an option when no choice is it. The generator infers no picker. | Inferring a table from an id's name or type, which an input type does not declare (`productId` is a plain `Identity.UUID`) |
+| A flat form keeps its public shape: `WriteReviewInputForm`, `Form<WriteReviewInputForm>`, `parse()`, `write_review_input_fields(form, errors)`, `FormErrors::from_api` and `FormErrors::of`, and it renders the same HTML. The component also takes `choices`, and each prop is optional. | |
+
+Status: built. The extension's fixture `fixture-forms-api` gains
+`BookingInput`: a required nested `Guest` with an optional field, an
+optional nested `BillingAddress`, `rooms` of one to three `RoomRequest`s
+(each with an id, a bounded integer and a list of `Amenity` members), a
+list of `Amenity` members, a date, a time, a date-time, a secret, a
+default, any JSON value and a map; `NoteInput`'s `tags` are now rows of
+at most three. The goldens cover it, and fixture-nested-arrays-api's
+`SaveGridInput`, whose lists of lists are JSON text, gains a form.
+`TestFormsServeATopcoatApp` drives a Topcoat app through
+`Router::handle`: the booking form renders its controls at their names
+with their attributes; a valid nested post books with the input's JSON,
+the date-time in UTC, the blank billing address left out and the default
+filled in; a refused field, nested or in a row, renders 422 at its
+control with the values as sent and the secret blank, as does a value no
+control holds and the operation's refusal of a row's field; row buttons
+add and remove rooms within one and three without calling the operation,
+numbering the rest again; and choices render a select, a row's own
+winning. Its unit tests decode rows by index and read date-times as UTC.
+`TestEveryInputHasAForm`, `TestHowAFormHoldsAField` and
+`TestControlNames` check the generator. acme-shop's `PlaceOrderInput` now
+has `PlaceOrderInputForm`; its app is unchanged.
+
+The rule is reversible until the first release.
