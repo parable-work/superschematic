@@ -318,22 +318,27 @@ TypeScript router does, and refuses a key an input type does not declare.
 The [Rust page](/superschematic/install/rust/#serve-a-generated-api)
 lists what it refuses.
 
-The example serves shop-orders on it too, keeping its orders in memory,
-and runs all four SDKs' clients against it as against the Go server. It
-builds the service with its API in Rust, into an output root of its own:
+The example serves shop-orders on it too, keeping its orders in memory and
+its users in SQLite, and runs all four SDKs' clients against it as against
+the Go server. It builds the service with its API in Rust, into an output
+root of its own:
 
 ```bash
 superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
 ```
 
 The router takes one `Implementations` value: an implementation of each
-namespace's trait, and the `Authenticator` that says who the caller is
+namespace's trait, and the authenticator that says who the caller is.
+`shop-orders`' users are the core user model's, so that is the identity
+runtime's `IdentityAuthenticator`, over the API's identity service
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-rust)).
-One shop serves both namespaces here:
+One shop serves both namespaces here, and the users are in a SQLite
+database of `shop-db`'s identity tables:
 
-<Snippet file="rust-server/src/lib.rs" symbol={['Tokens', 'implementations']} />
+<Snippet file="rust-server/src/lib.rs" symbol={['users', 'implementations']} />
 
-`main` serves the router on a local port:
+`main` serves the router on a local port, over the database the test
+signed the shopper in on:
 
 <Snippet file="rust-server/src/main.rs" symbol="main" />
 

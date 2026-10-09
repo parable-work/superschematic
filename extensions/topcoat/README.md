@@ -88,20 +88,22 @@ The acme shop's `examples/acme-shop/topcoat` is a Topcoat app over
 guide walks it. Its `app` mounts the crate:
 
 ```rust
+let implementations = implementations(shop, Arc::clone(&users));
+let pages = IdentityPageAuthenticator::of(&implementations);
 Router::builder()
     .discover()
-    .cookies()
-    .sessions(SessionConfig::default())
-    .app_context(Arc::clone(&sessions))
-    .shop_orders(implementations(shop), SessionCaller(sessions))
+    .app_context(users)
+    .shop_orders(implementations, pages)
     .build()
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
-The authenticator establishes a page's caller, here from the app's
-Topcoat session. The API's own `Authenticator` still decides whether the
-caller's permissions cover an operation's, so pages and the JSON API agree.
+The authenticator establishes a page's caller, here from the session the
+shop's users sign in with ([Users and sessions](#users-and-sessions)); an
+app whose users are its own writes one over a Topcoat session, say. The
+API's own authenticator still decides whether the caller's permissions
+cover an operation's, so pages and the JSON API agree.
 
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
@@ -131,6 +133,12 @@ runs first, for pages and the mounted API alike, so an origin the identity
 config trusts must also be one the app's `OriginPolicy` trusts. The
 crate's `identity-postgres` and `identity-sqlite` features turn on the API
 crate's.
+
+An API that serves no login route of its own, as `shop-orders`, whose
+users sign in through another API's, signs a user in from a page: the
+page calls the identity service's `login` with a cookie session, after
+`check_cookie_login`, and appends `config().session_cookie(..)` to the
+page's response. The acme shop's `/sign-in` does so.
 
 ## Records
 
