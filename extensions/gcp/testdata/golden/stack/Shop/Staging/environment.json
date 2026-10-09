@@ -133,6 +133,12 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-api",
@@ -172,6 +178,19 @@
           "edge": "sql:shop-api->shop-db"
         },
         {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "shop-media.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
           "field": "STRIPE_KEY",
           "source": "secret",
           "secret": "PaymentsSecrets.STRIPE_KEY"
@@ -194,6 +213,27 @@
         "$output": {
           "resource": "shop-db.instance",
           "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "gcp.storage",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "settings": {
+        "deleteAfterDays": 30
+      },
+      "resourceName": "acme-staging-shop-shop-media",
+      "address": {
+        "$output": {
+          "resource": "shop-media.bucket",
+          "name": "name"
         }
       }
     },
@@ -283,6 +323,18 @@
     }
   ],
   "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrun-storage",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
     {
       "id": "http:Orders->shop-api",
       "kind": "http",
@@ -1223,6 +1275,15 @@
                     "value": "shop-api@acme-staging.iam"
                   },
                   {
+                    "name": "SHOP_MEDIA_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-media.bucket",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
                     "name": "STRIPE_KEY",
                     "valueSource": {
                       "secretKeyRef": {
@@ -1301,11 +1362,65 @@
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.account",
           "shop-db.database.shop-db",
-          "shop-db.instance"
+          "shop-db.instance",
+          "shop-media.bucket"
         ],
         "phase": "rollout",
         "owners": [
           "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
+        "id": "shop-api.storage.shop-media",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-media.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
         ]
       },
       {
@@ -1430,6 +1545,35 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": false,
+          "lifecycleRules": [
+            {
+              "action": {
+                "type": "Delete"
+              },
+              "condition": {
+                "age": 30
+              }
+            }
+          ],
+          "location": "US-EAST1",
+          "name": "acme-staging-shop-shop-media",
+          "project": "acme-staging",
+          "publicAccessPrevention": "enforced",
+          "uniformBucketLevelAccess": true,
+          "versioning": {
+            "enabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
         ]
       },
       {
@@ -1842,10 +1986,13 @@
         "shop-api.cloudsql-login.shop-db",
         "shop-api.database-user.shop-db",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-api.sign-as-self",
+        "shop-api.storage.shop-media",
         "shop-api.trace-agent",
         "shop-db.database.shop-db",
         "shop-db.instance",
         "shop-db.migrator",
+        "shop-media.bucket",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.cloudsql-client.shop-db",
         "shop-orders-ship-orders.cloudsql-login.shop-db",

@@ -32,8 +32,10 @@ const (
 	TypeCertificateMap      = "gcp:certificatemanager/certificateMap:CertificateMap"
 	TypeCertificateMapEntry = "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry"
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
+	TypeBucket              = "gcp:storage/bucket:Bucket"
 
-	// The types of the bootstrap graph (BootstrapEnvironment).
+	// The types of the bootstrap graph (BootstrapEnvironment). A bucket
+	// edge's grants (connectBucket) are of the last two too (D54).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
 	TypeRepositoryIAMMember      = "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember"
 	TypeServiceAccountIAMMember  = "gcp:serviceaccount/iAMMember:IAMMember"
@@ -97,6 +99,18 @@ const cloudSQLSettings = `{
     "version": {"enum": ["POSTGRES_15", "POSTGRES_16", "POSTGRES_17"]},
     "deletionProtection": {"type": "boolean"},
     "diskSize": {"type": "integer", "minimum": 10}
+  },
+  "additionalProperties": false
+}`
+
+// storageSettings is the schema of a bucket's settings on Cloud Storage
+// (D54): object versioning, off unless set, and the age in days at which
+// a lifecycle rule deletes an object.
+const storageSettings = `{
+  "type": "object",
+  "properties": {
+    "versioning": {"type": "boolean"},
+    "deleteAfterDays": {"type": "integer", "minimum": 1}
   },
   "additionalProperties": false
 }`

@@ -22,7 +22,7 @@ and D54 in `docs/DECISIONS.md` records the decision.
 | `Deps` gains a bucket per listed bucket, in Go and TypeScript, implemented over GCS | a bucket on another provider |
 | signed URLs to upload or download an object directly | |
 | `stack dev` runs fake-gcs-server with a bucket per Bucket service | |
-| | the gcp target's bucket: until it lands, a stack with a bucket does not resolve on gcp |
+| on gcp, a private Cloud Storage bucket per Bucket service, with its grants | a bucket for a Rust server or job |
 
 ## Declare a bucket
 
@@ -123,6 +123,39 @@ from the bucket.
 A server or job whose APIs list a bucket links GCS's Go client, or depends
 on its Node client, and no other does. On Cloud Run it reaches the bucket
 as its own service account, and signs a URL as that account through IAM's
-`signBlob`. The gcp target's bucket, a private Cloud Storage bucket per
-Bucket service with its grants, is the next step; until it lands, a stack
-with a bucket resolves only on the `local` target.
+`signBlob`.
+
+The gcp target places each Bucket service on the `gcp.storage` platform:
+a Cloud Storage bucket in the environment's region, named
+`<project>-<stack>-<bucket>` since bucket names are global, with uniform
+bucket-level access and public access prevention enforced. Each server or
+job whose APIs list it gets:
+
+- `roles/storage.objectUser` on that bucket alone, to read, write, list
+  and delete its objects;
+- `roles/iam.serviceAccountTokenCreator` on its own service account,
+  which signing a URL through `signBlob` needs.
+
+The derived field holds the bucket's name alone. A member of a
+parameterized environment gets a bucket of its own, which its destroy
+empties; any other bucket keeps its objects, and a destroy of a bucket
+that holds some fails.
+
+| Setting | Default |
+| --- | --- |
+| `versioning` | false: an object's earlier versions are not kept |
+| `deleteAfterDays` | none: an object stays until it is deleted |
+
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-prod", region: "us-east1", production: true },
+  settings: [{ of: ShopMedia, versioning: true }]
+})
+export abstract class Production {}
+```
+
+The `buckets-never-public` policy rule refuses a bucket that is not
+private, and any grant of one to `allUsers` or `allAuthenticatedUsers`,
+an exposed server's included. `stack bootstrap` gives the `deployer`
+account Storage Admin, to create the buckets and set their grants.

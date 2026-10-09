@@ -1188,14 +1188,14 @@ change reads as a diff.
 ## 7. The gcp target
 
 `extensions/gcp` builds this section: the target, its Cloud Run, Cloud
-Run job and Cloud SQL platforms, their connectors, the Cloud DNS
+Run job, Cloud SQL and Cloud Storage platforms, their connectors, the Cloud DNS
 platform, the policy rules, the pinned provider schemas (section 6.4), at
 pulumi-gcp 9.37.1, bootstrap with the target's Secret Manager store and
 state bucket (section 7.3), image builds on Cloud Build, the migration
 job (section 8.4, D46), and a job's run on demand (section 8.7, D52). Its
 golden environments resolve the acme-shop stack of section 4.1,
-shop-orders' job included, in a staging, a production and a parameterized
-preview environment.
+shop-orders' job and shop-api's bucket included, in a staging, a
+production and a parameterized preview environment.
 
 ### 7.1 What the engineer enters
 
@@ -1224,14 +1224,16 @@ Bootstrap reads the GitHub repository from the git remote.
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
+| bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or the job's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service or the job mounts |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
+| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's or the job's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's or job's bucket edge is refused: its runtime has no `Bucket` |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server or job | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
 | secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's or job's account, and an environment variable that references its latest version |
 | image | a server's or a job's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
-| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits; a bucket per value, which the member's destroy empties |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
 inside the VPC. Cloud Run counts a request from a VPC as internal, which
@@ -1302,7 +1304,11 @@ again: each step creates what is missing and leaves the rest.
      applies a job's schedule with Cloud Scheduler's admin role, the role
      that creates, updates and deletes scheduler jobs, and runs a job's
      executions for `stack run` with the Cloud Run admin role it applies
-     the job with (D52);
+     the job with (D52). It holds Storage Admin to create a Bucket
+     service's buckets, set their IAM and empty a parameterized member's
+     on its destroy (D54): no narrower predefined role creates a bucket
+     and sets its policy, and IAM checks a bucket's create on the project,
+     where a condition on the bucket's name cannot narrow it;
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1379,6 +1385,9 @@ The target sets defaults that `settings` can override:
   per job's task (`cpu`, `memory`);
 - a server's CPU allocated only while an instance handles a request
   (`cpuAlwaysAllocated`);
+- a bucket with object versioning off (`versioning`) and no lifecycle
+  rule, unless `deleteAfterDays` deletes each object that many days after
+  it was written (D54);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
 
@@ -1403,6 +1412,12 @@ amended).
   balancer's address or forwarding rule, a grant to `allUsers` or
   `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`. A
   job is never exposed, so a grant that lets anyone run it is refused too.
+- `buckets-never-public`: a Bucket service's bucket is private (D54). It
+  refuses one without uniform bucket-level access or with public access
+  prevention not enforced, and a grant on one to `allUsers` or
+  `allAuthenticatedUsers` on behalf of any deployable, an exposed server
+  included, which `nothing-public-unless-exposed` admits. A browser
+  reaches a bucket's objects through signed URLs.
 
 ## 8. Generated build and runtime
 
@@ -2233,13 +2248,21 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   Postgres, one per environment, with a bucket per Bucket service
   (section 8.3). The container keeps its objects between runs, and
   `--remove-data` removes them with it.
-- **gcp.** A bucket is a `gcp:storage/bucket:Bucket` with uniform access
-  and public access prevention. Its name starts with the project, since
-  bucket names are global. The connector grants the workload's account
-  `roles/storage.objectUser` on it, and the right to sign as itself. A
-  member of a parameterized environment gets a bucket of its own, which
-  its destroy empties. Not built yet: until it is, a stack with a bucket
-  does not resolve on gcp.
+- **gcp.** A bucket is a `gcp:storage/bucket:Bucket`, pinned at
+  pulumi-gcp 9.37.1, on the `gcp.storage` platform, with uniform
+  bucket-level access and public access prevention enforced. Its name is
+  `<project>-<stack>-<bucket>` (`acme-staging-shop-shop-media`), since
+  bucket names are global, at most 63 characters, and holds no `google`,
+  which Cloud Storage refuses. Its settings are `versioning`, off unless
+  set, and `deleteAfterDays`, a lifecycle rule's age. The connectors from
+  a Cloud Run service and a Cloud Run job grant the workload's account
+  `roles/storage.objectUser` on the bucket and
+  `roles/iam.serviceAccountTokenCreator` on itself, the right to sign as
+  itself, one node however many buckets it reaches. A member of a
+  parameterized environment gets a bucket of its own, with
+  `forceDestroy`, which its destroy empties. `buckets-never-public`
+  refuses a bucket that is not private (section 7.6), and bootstrap gives
+  `deployer` Storage Admin (section 7.3).
 
 ### 8.10 Static sites
 

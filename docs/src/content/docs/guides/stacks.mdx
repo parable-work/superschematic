@@ -36,7 +36,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, and fake-gcs-server under `stack dev` | the gcp target's bucket |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server or job; a bucket on another provider |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
 
 The design is
@@ -326,6 +326,10 @@ declare module "@superschematic/stack" {
       job: {
         cpu?: string;
         memory?: string;
+      };
+      bucket: {
+        versioning?: boolean;
+        deleteAfterDays?: number;
       };
     };
   }
@@ -831,14 +835,16 @@ and the [generated CI](#generated-ci) signs in with.
 | job | a Cloud Run job with its own service account, named after the job (`shop-orders-ship-orders`), with its API's config, secrets and connections; one task, with the job's timeout for each try and its retries, at most 10 |
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
+| bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password. A Rust server's sql edge is refused |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
+| bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's or job's account, so it signs URLs as itself. The derived value is the bucket's name. A Rust server's bucket edge is refused |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
 | secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server and job, and an environment variable that reads its latest version |
 | image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
-| parameter | names suffixed with the parameter and its value (`shop-api-pr123`), and a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`), a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits, and a bucket per value, which the member's destroy empties |
 
 Settings and their defaults:
 
@@ -853,6 +859,8 @@ Settings and their defaults:
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
 | `gcp.cloudsql` | `deletionProtection` | on in production |
 | `gcp.cloudsql` | `diskSize` | Cloud SQL's |
+| `gcp.storage` | `versioning` | false |
+| `gcp.storage` | `deleteAfterDays` | none: objects stay until deleted |
 
 A server's CPU is allocated only while an instance handles a request, so
 Cloud Run bills its instances for the requests they handle. A server that
@@ -867,7 +875,9 @@ refuses a zonal instance when `production` is set, and
 outside traffic or turns its invoker check off, a load balancer for
 anything but an exposed server, a grant to `allUsers` or
 `allAuthenticatedUsers`, a job's included, and an instance open to
-`0.0.0.0/0`. Every
+`0.0.0.0/0`; `buckets-never-public` refuses a Bucket service's bucket
+without uniform bucket-level access or public access prevention, and a
+grant of one to the public on behalf of any deployable. Every
 resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
 and resolution checks each node's properties against it.
 
@@ -895,7 +905,8 @@ superschematic stack run Staging shop-orders-ship-orders
   migration job runs as, and Workload Identity Federation for the GitHub
   repository of the git remote. It enables Cloud Scheduler when the
   environment runs a job's schedule, and gives `deployer` Cloud
-  Scheduler's admin role to apply it. `--repository owner/name` names another
+  Scheduler's admin role to apply it, and Storage Admin to create the
+  buckets and set their grants. `--repository owner/name` names another
   repository, and `--repository ""` leaves the federation out, for a
   project no CI deploys to. Last, it records the project's number,
   which the generated CI's Workload Identity Federation needs, as

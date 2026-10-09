@@ -47,6 +47,7 @@
     "gcp:sql/database:Database",
     "gcp:sql/databaseInstance:DatabaseInstance",
     "gcp:sql/user:User",
+    "gcp:storage/bucket:Bucket",
     "gcp:storage/bucketIAMMember:BucketIAMMember"
   ]
 }

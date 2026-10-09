@@ -137,6 +137,12 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "settings": {
@@ -183,6 +189,19 @@
           "edge": "sql:shop-api->shop-db"
         },
         {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "shop-media.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
           "field": "STRIPE_KEY",
           "source": "secret",
           "secret": "PaymentsSecrets.STRIPE_KEY"
@@ -209,6 +228,27 @@
         "$output": {
           "resource": "shop-db.instance",
           "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "fake.storage",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "settings": {
+        "versioning": true
+      },
+      "resourceName": "acme-prod-shop-stack-shop-media",
+      "address": {
+        "$output": {
+          "resource": "shop-media.bucket",
+          "name": "name"
         }
       }
     },
@@ -306,6 +346,18 @@
     }
   ],
   "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "fake.run-storage",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
     {
       "id": "http:Orders->shop-api",
       "kind": "http",
@@ -701,6 +753,15 @@
               }
             },
             {
+              "name": "SHOP_MEDIA_BUCKET_NAME",
+              "value": {
+                "$output": {
+                  "resource": "shop-media.bucket",
+                  "name": "name"
+                }
+              }
+            },
+            {
               "name": "STRIPE_KEY",
               "secret": {
                 "$output": {
@@ -720,7 +781,8 @@
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.account",
           "shop-db.database.shop-db",
-          "shop-db.instance"
+          "shop-db.instance",
+          "shop-media.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -755,6 +817,33 @@
         ]
       },
       {
+        "id": "shop-api.storage.shop-media",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "id"
+            }
+          },
+          "role": "storage.objectUser"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-media.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
         "id": "shop-db.database.shop-db",
         "type": "fake:sql/database:Database",
         "properties": {
@@ -786,6 +875,20 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "fake:storage/bucket:Bucket",
+        "properties": {
+          "location": "us-east1",
+          "name": "acme-prod-shop-stack-shop-media",
+          "public": false,
+          "versioning": true
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
         ]
       },
       {
@@ -1014,8 +1117,10 @@
         "shop-api.account",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sql.shop-db",
+        "shop-api.storage.shop-media",
         "shop-db.database.shop-db",
         "shop-db.instance",
+        "shop-media.bucket",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-orders-ship-orders.sql.shop-db"
