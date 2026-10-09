@@ -46,3 +46,44 @@ Signatures are checked with `ring`. The optional `http-client` feature adds
 `HttpFetcher` (reqwest, native-tls), the default JWKS fetcher of
 `JwtServiceAuthenticator` and HTTP client of `GoogleIdTokenSource`. Without
 it, a service passes its own `KeyFetcher` or `HttpGetter`.
+
+## Identity (D50)
+
+The optional `identity` feature adds the `identity` module, the Rust runtime
+of the core user model. It does what the Go runtime's
+`runtime/http/go/identity` does, held to the shared vectors
+(`runtime/http/testdata/identity_parity.json`, whose harness
+`runtime/http/testdata/README.md` states):
+
+- `identity::Config`: the identity config's JSON, read strictly, with its
+  defaults and rules
+- argon2id passwords as PHC strings (`hash_password`, `verify_password` and
+  its rehash decision, `check_password` for `Auth.Password`), session tokens
+  (`new_token`, `hash_token`), the credential on a request
+  (`extract_credential`), the session cookie (`Config::session_cookie`,
+  `Config::clear_cookie`), the cross-origin check (`check_cross_origin`,
+  Go's `net/http.CrossOriginProtection`) and the credentialed `CorsLayer`
+- permission names, a principal's permissions, the grant rule and
+  capabilities over the router's operation table (`Route::of` an
+  `OperationInfo`)
+- `Store` and `SqlStore`, built from the schema's identity descriptor (the
+  generated types' `IDENTITY_DESCRIPTOR`), which runs its SQL through a
+  `Client`: `TokioPostgres` with `identity-postgres`, `Rusqlite` with
+  `identity-sqlite`, or a binding of the service's own (a pool, another
+  driver). The store parses logins, display names and keys with the scalar
+  catalog the service passes as `Scalars`, superscalar's registry in a
+  generated crate, since this crate does not link the scalar crate
+- `Service`, every session and administration operation with the Go
+  runtime's statuses and problem codes; `Service::handler` and
+  `Service::routes`, the axum handlers of `ir/identity_routes.go`; and
+  `IdentityAuthenticator`, the router's `Authenticator`, so `admit`,
+  `RouteControls` and `OperationInfo::admit` work unchanged
+
+A password hash runs on tokio's blocking pool, so the service needs a tokio
+runtime. The store and route tests run on SQLite, and on Postgres too with
+`identity-postgres` and the database `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL`
+names:
+
+```
+cargo test --features identity-postgres,identity-sqlite
+```
