@@ -39,6 +39,10 @@ type crate struct {
 	Records    []record
 	Forms      []form
 	Procedures []procedure
+	// Views are each record's display components, and EnumLabels the
+	// label functions of the enums they show.
+	Views      []view
+	EnumLabels []enumLabel
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -123,6 +127,11 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			}
 		}
 		out.Records = records.sorted()
+		if cfg.WritesViews() {
+			if out.Views, out.EnumLabels, err = viewsOf(schemas, out.Records); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if cfg.WritesForms() {
 		if out.Forms, err = formsOf(schemas, api, c.Logf); err != nil {
@@ -178,6 +187,9 @@ func (c *crate) write(dir string) error {
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
+	if len(c.Views) > 0 {
+		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
+	}
 	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
 		"rustString": rustString,
 		"join":       strings.Join,
@@ -186,7 +198,7 @@ func (c *crate) write(dir string) error {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs", "views.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

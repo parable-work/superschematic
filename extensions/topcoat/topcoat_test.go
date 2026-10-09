@@ -27,10 +27,14 @@ const fixtures = "../../internal/loader/tsreader/testdata/services"
 // every kind a form field takes, and one a form cannot hold.
 const formsService = "fixture-forms-api"
 
+// viewsService is the extension's own fixture whose result type has a
+// field of every kind a display component renders, and a @display.
+const viewsService = "fixture-views-api"
+
 // serviceDir is a fixture's directory: the extension's own, or the
 // loader's.
 func serviceDir(name string) string {
-	if name == formsService {
+	if name == formsService || name == viewsService {
 		return filepath.Join("testdata", "services", name)
 	}
 	return filepath.Join(fixtures, name)
@@ -187,11 +191,12 @@ func skipped(result *registry.Result, reason string) bool {
 
 // TestGolden compares the crates written for fixture-api, whose
 // operations need a caller, fixture-nested-arrays-api, whose operations
-// need none and whose result nests records in lists of lists, and
-// fixture-forms-api, whose input types make forms, with
-// testdata/golden/<service>; -update rewrites them.
+// need none and whose result nests records in lists of lists,
+// fixture-forms-api, whose input types make forms, and fixture-views-api,
+// whose result's fields are of every kind a display component renders,
+// with testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, viewsService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -321,6 +326,92 @@ func TestAnInputAFormCannotHoldHasNoForm(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs")); !os.IsNotExist(err) {
 		t.Errorf("forms.rs written with forms false: %v", err)
+	}
+}
+
+// TestViewsRenderRecords does the same for fixture-views-api with
+// viewsAppTest: pages render an order's detail and a table of orders, each
+// kind of field as its rules say, values escaped, the type's @display
+// naming the detail, captioning the table and choosing its columns, and a
+// comment thread that nests itself.
+func TestViewsRenderRecords(t *testing.T) {
+	cargoTestCrate(t, viewsService, viewsAppTest)
+}
+
+// TestDisplayShapesTheComponents builds fixture-views-api: OrderView's
+// @display gives its table the caption Orders and its summary fields as
+// columns, in order, its title field heading each row and naming the
+// detail with the noun as fallback; a nested Address shows its title in a
+// cell, and Money, which declares no title, its detail; Comment, which
+// nests itself, boxes its views.
+func TestDisplayShapesTheComponents(t *testing.T) {
+	root := testpaths.TempDir(t)
+	if _, err := buildService(t, viewsService, root, rustOutputs()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, viewsService), "src", "views.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := string(data)
+	_, table, ok := strings.Cut(views, "pub async fn order_view_table(")
+	if !ok {
+		t.Fatal("views.rs has no order_view_table")
+	}
+	var columns []string
+	for _, line := range strings.Split(table, "\n") {
+		if _, rest, ok := strings.Cut(line, `<th scope="col" data-field="`); ok {
+			column, _, _ := strings.Cut(rest, `"`)
+			columns = append(columns, column)
+		}
+	}
+	if got, want := strings.Join(columns, ","), "reference,status,placedAt,shipTo"; got != want {
+		t.Errorf("order_view_table's columns are %s, want the summary fields %s", got, want)
+	}
+	for _, want := range []string{
+		`<caption>"Orders"</caption>`,
+		`<th scope="row" data-field="reference">(row.reference)</th>`,
+		`let label = label_of(Some(record.reference.as_str()), Some("Order"));`,
+		`<td data-field="shipTo">(row.ship_to.recipient)</td>`,
+		`<td data-field="price">money_detail(record: row.price)</td>`,
+		`<dt>"Ship to"</dt>`,
+		`"on_hold" => "On hold",`,
+	} {
+		if !strings.Contains(views, want) {
+			t.Errorf("views.rs lacks %s", want)
+		}
+	}
+	if strings.Contains(views, "internalNote") {
+		t.Error("views.rs renders the @uiHidden field internalNote")
+	}
+	_, comment, _ := strings.Cut(views, "pub async fn comment_detail(")
+	comment, _, _ = strings.Cut(comment, "#[component]")
+	if !strings.Contains(comment, ".boxed()") {
+		t.Error("comment_detail, whose record nests itself, does not box its view")
+	}
+}
+
+// TestViewsOff builds fixture-views-api with outputs.topcoat.views false,
+// then records false: neither crate has the views module.
+func TestViewsOff(t *testing.T) {
+	for _, off := range []string{"views", "records"} {
+		root := testpaths.TempDir(t)
+		outputs := rustOutputs()
+		outputs["topcoat"] = map[string]any{"enabled": true, off: false}
+		if _, err := buildService(t, viewsService, root, outputs); err != nil {
+			t.Fatalf("build with %s false: %v", off, err)
+		}
+		dir := topcoat.Dir(root, viewsService)
+		lib, err := os.ReadFile(filepath.Join(dir, "src", "lib.rs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(lib), "mod views") {
+			t.Errorf("lib.rs declares views with %s false", off)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "src", "views.rs")); !os.IsNotExist(err) {
+			t.Errorf("views.rs written with %s false: %v", off, err)
+		}
 	}
 }
 
@@ -847,5 +938,143 @@ fn a_form_parses_into_its_input() {
     let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
     assert!(!errors.of("handle").is_empty(), "{errors:?}");
     assert!(errors.of("email").is_empty(), "{errors:?}");
+}
+`
+
+// viewsAppTest is tests/app.rs of fixture-views-api's Topcoat crate.
+const viewsAppTest = `use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
+use schemas_fixture_views_api_topcoat::views::{comment_detail, order_status_label, order_view_detail, order_view_table};
+use serde_json::json;
+use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
+use topcoat::view::{view, View};
+
+// An order as the API sends it, its hidden field included.
+fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
+    let bill_to = bill_to.then(|| json!({"recipient": "Accounts", "city": "Leeds"}));
+    OrderViewRecord::from_wire(&json!({
+        "id": "8d1f6c9e-0000-4000-8000-000000000001",
+        "reference": reference,
+        "status": status,
+        "placedAt": "2026-10-09T08:30:00Z",
+        "deliverBy": "2026-10-12",
+        "note": "<script>alert(1)</script>",
+        "gift": false,
+        "shipTo": {"recipient": "Ada Lovelace", "city": "London & Co"},
+        "billTo": bill_to,
+        "lines": [{"sku": "anvil", "quantity": 2, "price": {"cents": 1999, "currency": "GBP"}}],
+        "tags": ["fragile", "heavy"],
+        "attributes": {"gate": "B"},
+        "metadata": {"source": "<b>web</b>"},
+        "internalNote": "do not show"
+    }))
+}
+
+// An order whose optional fields are absent.
+fn bare_order() -> OrderViewRecord {
+    OrderViewRecord { deliver_by: None, note: None, metadata: None, ..order("A-1003", "pending", false) }
+}
+
+fn thread() -> CommentRecord {
+    let reply = |text: &str, replies| CommentRecord { text: text.to_string(), replies };
+    reply("First", vec![reply("Second", vec![reply("Third", vec![])])])
+}
+
+#[page("/order")]
+async fn show_order() -> topcoat::Result<impl View> {
+    Ok(view! { order_view_detail(record: order("A-1001", "on_hold", true)) })
+}
+
+#[page("/bare-order")]
+async fn show_bare_order() -> topcoat::Result<impl View> {
+    Ok(view! { order_view_detail(record: bare_order()) })
+}
+
+#[page("/orders")]
+async fn show_orders() -> topcoat::Result<impl View> {
+    let mut forged = order("A-1002", "shipped", false);
+    forged.status = "x\" onclick=\"steal()".to_string();
+    Ok(view! { order_view_table(rows: vec![order("A-1001", "on_hold", true), forged]) })
+}
+
+#[page("/thread")]
+async fn show_thread() -> topcoat::Result<impl View> {
+    Ok(view! { comment_detail(record: thread()) })
+}
+
+async fn render(uri: &str) -> String {
+    let router = Router::builder().page(show_order).page(show_bare_order).page(show_orders).page(show_thread).build();
+    let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
+
+fn assert_has(html: &str, wants: &[&str]) {
+    for want in wants {
+        assert!(html.contains(want), "missing {want} in {html}");
+    }
+}
+
+#[tokio::test]
+async fn a_detail_renders_each_kind_of_field() {
+    let html = render("/order").await;
+    assert_has(&html, &[
+        r#"<div class="ss-detail" data-type="OrderView" role="group" aria-label="A-1001"><dl>"#,
+        r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
+        r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">On hold</data></dd></div>"#,
+        r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></dd></div>"#,
+        r#"<dd><time datetime="2026-10-12">2026-10-12</time></dd>"#,
+        r#"<div data-field="gift"><dt>Gift</dt><dd>No</dd></div>"#,
+        r#"<div data-field="shipTo"><dt>Ship to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Ada Lovelace"><dl><div data-field="recipient"><dt>Recipient</dt><dd>Ada Lovelace</dd></div><div data-field="city"><dt>City</dt><dd>London &amp; Co</dd></div></dl></div></dd></div>"#,
+        r#"<div data-field="billTo"><dt>Bill to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Accounts">"#,
+        r#"<div data-field="lines"><dt>Lines</dt><dd><table class="ss-table" data-type="OrderLine"><thead><tr><th scope="col" data-field="sku">Sku</th><th scope="col" data-field="quantity">Quantity</th><th scope="col" data-field="price">Price</th></tr></thead><tbody><tr><td data-field="sku">anvil</td><td data-field="quantity">2</td><td data-field="price"><div class="ss-detail" data-type="Money" role="group"><dl><div data-field="cents"><dt>Cents</dt><dd>1999</dd></div><div data-field="currency"><dt>Currency</dt><dd>GBP</dd></div></dl></div></td></tr></tbody></table></dd></div>"#,
+        r#"<div data-field="tags"><dt>Tags</dt><dd><ul class="ss-list"><li>fragile</li><li>heavy</li></ul></dd></div>"#,
+        r#"<div data-field="attributes"><dt>Attributes</dt><dd><dl class="ss-map"><div><dt>gate</dt><dd>B</dd></div></dl></dd></div>"#,
+        r#"<div data-field="metadata"><dt>Metadata</dt><dd><pre class="ss-json">{"source":"&lt;b&gt;web&lt;/b&gt;"}</pre></dd></div>"#,
+        // A value is text: the note's script is escaped.
+        r#"<div data-field="note"><dt>Note</dt><dd>&lt;script&gt;alert(1)&lt;/script&gt;</dd></div>"#,
+    ]);
+    assert!(!html.contains("<script>") && !html.contains("<b>"), "unescaped markup in {html}");
+    assert!(!html.contains("internalNote") && !html.contains("do not show"), "the hidden field is shown: {html}");
+}
+
+#[tokio::test]
+async fn an_absent_value_leaves_its_entry_empty() {
+    let html = render("/bare-order").await;
+    assert_has(&html, &[
+        r#"<div data-field="deliverBy"><dt>Deliver by</dt><dd></dd></div>"#,
+        r#"<div data-field="note"><dt>Note</dt><dd></dd></div>"#,
+        r#"<div data-field="billTo"><dt>Bill to</dt><dd></dd></div>"#,
+        r#"<div data-field="metadata"><dt>Metadata</dt><dd></dd></div>"#,
+    ]);
+}
+
+#[tokio::test]
+async fn a_table_shows_the_summary_fields_under_its_caption() {
+    let html = render("/orders").await;
+    assert_has(&html, &[
+        r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption><thead><tr><th scope="col" data-field="reference">Reference</th><th scope="col" data-field="status">Status</th><th scope="col" data-field="placedAt">Placed at</th><th scope="col" data-field="shipTo">Ship to</th></tr></thead><tbody>"#,
+        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
+        // A value the enum does not declare is its own label, escaped in
+        // the attribute and the text.
+        r#"<td data-field="status"><data value="x&quot; onclick=&quot;steal()">x" onclick="steal()</data></td>"#,
+    ]);
+    assert!(!html.contains(r#"data-field="note""#), "a column the summary fields leave out: {html}");
+}
+
+#[tokio::test]
+async fn a_record_that_nests_itself_renders_each_level() {
+    let html = render("/thread").await;
+    assert_has(&html, &[
+        r#"<div data-field="text"><dt>Text</dt><dd>First</dd></div><div data-field="replies"><dt>Replies</dt><dd><table class="ss-table" data-type="Comment">"#,
+        r#"<tr><td data-field="text">Second</td><td data-field="replies"><table class="ss-table" data-type="Comment">"#,
+        r#"<tr><td data-field="text">Third</td><td data-field="replies"><table class="ss-table" data-type="Comment"><thead>"#,
+    ]);
+}
+
+#[test]
+fn an_enum_value_is_labeled_by_its_member() {
+    assert_eq!(order_status_label("on_hold"), "On hold");
+    assert_eq!(order_status_label("lost"), "lost");
 }
 `

@@ -20,6 +20,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 - lets browser code call each operation through a Topcoat procedure, its
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
+- renders each record as a description list and as a table, labeled by
+  the schema's titles and its types' `@display`
+  ([Display components](#display-components)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -61,6 +64,11 @@ outputs: {
   topcoat: { enabled: true },   // records: false leaves the records out
 }
 ```
+
+Records, forms, procedures and views are on by default. `forms: false`,
+`procedures: false` and `views: false` each leave out their module;
+`records: false` leaves out the records, and with them the procedures and
+the views, which are built on records.
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -201,3 +209,53 @@ inside an event handler; see Topcoat's procedures.
 
 Records are the arguments' and results' carriers, so `records: false`
 leaves out the procedures too; `procedures: false` leaves out only them.
+
+## Display components
+
+`views` has two components per record, which a page renders as it
+renders any component:
+
+- **`<type>_detail(record: <Type>Record)`** renders a record as a
+  description list: a `<dt>` label and a `<dd>` value per field, each in a
+  `<div data-field="<json key>">`, inside
+  `<div class="ss-detail" data-type="<Type>" role="group">`.
+- **`<type>_table(rows: Vec<<Type>Record>)`** renders records as a
+  `<table class="ss-table">`: a header row of labels, then a row per
+  record, each cell `data-field="<json key>"`.
+
+```rust
+#[page("/orders")]
+async fn orders(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = OrderListOrdersArgs { statuses: None, limit: None };
+    let orders = operations::order_list_orders(cx, args).await?;
+    let rows: Vec<OrderViewRecord> = orders.iter().map(OrderViewRecord::from).collect();
+    Ok(view! { order_view_table(rows: rows) })
+}
+```
+
+A field is labeled as a form labels it: its `@docs` title, else its name
+in words. A value renders by its field's type:
+
+| The type's field | Renders as |
+| --- | --- |
+| A string, a UUID, a number | its text |
+| An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
+| `Temporal.DateTime`, `Temporal.Date`, `Temporal.Time` | `<time datetime="...">` with the text the API sends |
+| A boolean | "Yes" or "No" |
+| An object type | its detail; in a table, its title when its type declares one |
+| A list of objects | its type's table |
+| Any other list | `<ul class="ss-list">` |
+| A map | `<dl class="ss-map">` of its entries |
+| A union, or any JSON value | its JSON text in `<pre class="ss-json">` |
+| Optional, absent | nothing: an empty `<dd>` or `<td>` |
+
+The type's `@display` ([D48](../../docs/DECISIONS.md)) shapes both:
+`summaryFields` chooses and orders a table's columns (else every field),
+`titleField` names a detail (`aria-label`, falling back to `noun`) and
+heads each row (`<th scope="row">`), and `plural` captions a table.
+
+Every value is text the view escapes, never markup. The components ship
+no CSS and no inline styles: a stylesheet styles them by their `ss-`
+classes and `data-field` attributes, and fills an empty value with
+`:empty`. A type that nests itself boxes its components' views, as
+Topcoat requires of a recursive component.

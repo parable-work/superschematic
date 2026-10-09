@@ -11,7 +11,9 @@
 // holds parses what the browser sends by the input type's rules (D14) and
 // renders its fields with the attributes those rules give them. A
 // procedure per operation lets browser code call it, its arguments and its
-// result records, its refusal a record the browser reads.
+// result records, its refusal a record the browser reads. A detail and a
+// table component per record render it as HTML, labeled by the schema's
+// titles and its types' @display.
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.
@@ -104,18 +106,20 @@ var OutputSchema = json.RawMessage(`{
     "enabled": {"type": "boolean"},
     "records": {"type": "boolean", "description": "Mirror each type an operation returns as a Topcoat record (default true)."},
     "forms": {"type": "boolean", "description": "A form per input type whose fields a form holds (default true)."},
-    "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."}
+    "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."},
+    "views": {"type": "boolean", "description": "Components that render each record as a description list and a table (default true; needs records)."}
   }
 }`)
 
 // Config is the decoded outputs.topcoat.
 type Config struct {
 	Enabled bool `json:"enabled"`
-	// Records and Forms are nil when the section leaves them out, which is
-	// on.
+	// Records, Forms, Procedures and Views are nil when the section leaves
+	// them out, which is on.
 	Records    *bool `json:"records,omitempty"`
 	Forms      *bool `json:"forms,omitempty"`
 	Procedures *bool `json:"procedures,omitempty"`
+	Views      *bool `json:"views,omitempty"`
 }
 
 // WritesRecords reports whether the crate mirrors the operations' result
@@ -131,6 +135,12 @@ func (c Config) WritesForms() bool { return c.Forms == nil || *c.Forms }
 // them.
 func (c Config) WritesProcedures() bool {
 	return c.WritesRecords() && (c.Procedures == nil || *c.Procedures)
+}
+
+// WritesViews reports whether the crate has the display components of
+// each record. They render records, so they need them.
+func (c Config) WritesViews() bool {
+	return c.WritesRecords() && (c.Views == nil || *c.Views)
 }
 
 // Dir is where the crate is written for a service.

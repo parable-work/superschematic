@@ -1,0 +1,149 @@
+# Orders, shown by the display components: an order's fields are an enum,
+# a date-time, a date, optional values, a boolean, nested records, a list
+# of records, a list of strings, a map, any JSON value and a hidden field.
+# Its @display names its title, its summary fields, its noun and plural; an
+# address's names its title, and a line's price has none. A comment's
+# replies are comments.
+name: fixture-views-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Temporal.DateTime:
+    name: Temporal.DateTime
+    languagePrimitive: string
+  Temporal.Date:
+    name: Temporal.Date
+    languagePrimitive: string
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
+enums:
+  # Where an order is.
+  OrderStatus:
+    name: OrderStatus
+    values:
+      - name: Pending
+        serializedAs: pending
+      - name: OnHold
+        serializedAs: on_hold
+      - name: Shipped
+        serializedAs: shipped
+types:
+  Address:
+    name: Address
+    role: APIView
+    display:
+      titleField: recipient
+    fields:
+      - name: recipient
+        typeRef: { name: string }
+        required: true
+      - name: city
+        typeRef: { name: string }
+        required: true
+  Money:
+    name: Money
+    role: APIView
+    fields:
+      - name: cents
+        typeRef: { name: number }
+        required: true
+      - name: currency
+        typeRef: { name: string }
+        required: true
+  OrderLine:
+    name: OrderLine
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+      - name: price
+        typeRef: { name: Money }
+        required: true
+  OrderView:
+    name: OrderView
+    role: APIView
+    display:
+      noun: Order
+      plural: Orders
+      titleField: reference
+      summaryFields: [reference, status, placedAt, shipTo]
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: reference
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: OrderStatus }
+        required: true
+      - name: placedAt
+        typeRef: { name: Temporal.DateTime }
+        required: true
+      - name: deliverBy
+        typeRef: { name: Temporal.Date }
+      - name: note
+        typeRef: { name: string }
+      - name: gift
+        typeRef: { name: boolean }
+        required: true
+      - name: shipTo
+        title: Ship to
+        typeRef: { name: Address }
+        required: true
+      - name: billTo
+        typeRef: { name: Address }
+      - name: lines
+        typeRef: { name: OrderLine, isArray: true }
+        required: true
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        required: true
+      - name: attributes
+        typeRef: { name: string, isMap: true }
+        required: true
+      - name: metadata
+        typeRef: { name: Generic.JSON }
+      - name: internalNote
+        typeRef: { name: string }
+        uiHidden: true
+  Comment:
+    name: Comment
+    role: APIView
+    fields:
+      - name: text
+        typeRef: { name: string }
+        required: true
+      - name: replies
+        typeRef: { name: Comment, isArray: true }
+        required: true
+operationSets:
+  - name: OrderQueries
+    operations:
+      # One order.
+      - name: getOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: "orders/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+      # An order's comments.
+      - name: orderComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "orders/{id}/comments"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true

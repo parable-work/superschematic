@@ -10,6 +10,7 @@
 //! holds.
 //! `procedures` lets browser code call each operation, its arguments and
 //! result records; the app's `.discover()` registers them.
+//! `views` renders each record as a description list and as a table.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
@@ -19,6 +20,7 @@ pub mod operations;
 pub mod procedures;
 pub mod records;
 mod wire;
+pub mod views;
 
 /// The service's API crate: its `Implementations`, `Args` structs and
 /// `types`.

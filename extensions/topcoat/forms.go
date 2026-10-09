@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -46,7 +45,8 @@ type formField struct {
 	Required bool
 }
 
-// formOption is one value of an enum's select.
+// formOption is one member of an enum: an option of a form's select, and
+// the label a display component shows for its value.
 type formOption struct {
 	Value string
 	Label string
@@ -139,13 +139,7 @@ func (s schemaSet) control(ff *formField, field *ir.FieldDef) bool {
 	}
 	if enum := s.enum(ref.Name); enum != nil {
 		ff.Control, ff.Put = "select", "put_string"
-		for _, value := range enum.Values {
-			serialized := value.SerializedAs
-			if serialized == "" {
-				serialized = value.Name
-			}
-			ff.Options = append(ff.Options, formOption{Value: serialized, Label: humanize(value.Name)})
-		}
+		ff.Options = enumOptions(enum)
 		ff.Attrs = joinAttrs(attrs)
 		return true
 	}
@@ -292,54 +286,6 @@ func htmlPattern(pattern string) (string, bool) {
 		return "", false
 	}
 	return pattern, true
-}
-
-// labelOf is a field's label: its @docs title, or its name in words.
-func labelOf(field *ir.FieldDef) string {
-	if field.Title != "" {
-		return field.Title
-	}
-	return humanize(field.Name)
-}
-
-// humanize is a camelCase or PascalCase name in words, the first
-// capitalized: displayName is "Display name".
-func humanize(name string) string {
-	var words []string
-	var word []rune
-	runes := []rune(name)
-	for i, r := range runes {
-		boundary := unicode.IsUpper(r) && i > 0 && (unicode.IsLower(runes[i-1]) || i+1 < len(runes) && unicode.IsLower(runes[i+1]))
-		if r == '_' || r == '-' || r == ' ' || boundary {
-			if len(word) > 0 {
-				words = append(words, string(word))
-			}
-			word = nil
-			if r == '_' || r == '-' || r == ' ' {
-				continue
-			}
-		}
-		word = append(word, r)
-	}
-	if len(word) > 0 {
-		words = append(words, string(word))
-	}
-	for i, w := range words {
-		if i > 0 && !isAcronym(w) {
-			words[i] = strings.ToLower(w)
-		}
-	}
-	text := strings.Join(words, " ")
-	if text == "" {
-		return name
-	}
-	first := []rune(text)
-	first[0] = unicode.ToUpper(first[0])
-	return string(first)
-}
-
-func isAcronym(word string) bool {
-	return len(word) > 1 && strings.ToUpper(word) == word
 }
 
 // kebabCase is a name in lower-case words joined by hyphens, for an id.
