@@ -179,6 +179,9 @@ func derivedNoun(field DerivedField) string {
 	if field.Kind == ir.EdgeSQL {
 		return "database connection"
 	}
+	if field.Kind == ir.EdgeBucket {
+		return "bucket connection"
+	}
 	return "service endpoint"
 }
 

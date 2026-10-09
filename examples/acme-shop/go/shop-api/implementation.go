@@ -13,10 +13,11 @@ import (
 )
 
 // New builds the implementation of shop-api from its dependencies. Its
-// signature is the generated one, api.Constructor.
+// signature is the generated one, api.Constructor. Products keep their
+// images in shop-media, the bucket shop-api lists (D54).
 func New(deps api.Deps) (api.Implementations, error) {
 	return api.Implementations{
-		Product: &Products{DB: deps.DB},
+		Product: &Products{DB: deps.DB, Media: deps.ShopMedia},
 	}, nil
 }
 

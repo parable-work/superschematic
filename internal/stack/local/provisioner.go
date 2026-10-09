@@ -42,9 +42,10 @@ var inheritedVariables = []string{
 // It applies a local environment's graph to the machine, a step of the
 // deploy order at a time:
 //
-//   - infrastructure: it starts the Postgres container, creating it when
-//     it is missing and keeping its data when it is stopped, waits until
-//     Postgres answers, and creates each database that is missing;
+//   - infrastructure: it starts the Postgres container and the storage
+//     emulator's, creating each when it is missing and keeping its data
+//     when it is stopped, waits until each is ready, and creates each
+//     database and each bucket that is missing (D54);
 //   - migrate expand: it plans each hosted DB schema's migration from the
 //     model its database recorded to the model the deploy wrote into
 //     ModelsDir, and applies it with the migration runner, expand and
@@ -59,8 +60,8 @@ var inheritedVariables = []string{
 //
 // Each process's output reaches Out a line at a time, prefixed with its
 // name. The processes run until Destroy, which stops them and the
-// container, keeping the container's data; Purge removes the container and
-// its data too.
+// containers, keeping the containers' data; Purge removes the containers
+// and their data too: the databases and the buckets' objects.
 //
 // The zero value runs commands with os/exec and writes to os.Stdout. A
 // Provisioner keeps the processes it started in memory, so the one that
@@ -78,7 +79,7 @@ type Provisioner struct {
 	// value, or MigrateBinary on PATH.
 	Migrate string
 
-	// ReadyTimeout bounds the wait for Postgres and for each server's
+	// ReadyTimeout bounds the wait for each container and each server's
 	// readiness; zero is a minute.
 	ReadyTimeout time.Duration
 
@@ -191,9 +192,9 @@ func (p *Provisioner) Render(env *ir.ResolvedEnvironment, dir string) error {
 }
 
 // Plan returns what applying the environment would start or change: a
-// container to create, start or replace, a database to create, a
-// migration to apply, and each server to start, or to restart when this
-// provisioner runs it already.
+// container to create, start or replace, a database or a bucket to
+// create, a migration to apply, and each server to start, or to restart
+// when this provisioner runs it already.
 func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) ([]registry.PlannedChange, error) {
 	prog, err := p.program(req)
 	if err != nil {
@@ -219,7 +220,7 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 			case !state.running:
 				changes = append(changes, registry.PlannedChange{Resource: c.ID, Action: "start"})
 			default:
-				running[c.ID] = p.postgresReady(ctx, docker, c)
+				running[c.ID] = p.containerReady(ctx, docker, c) == nil
 			}
 		}
 		exists := map[string]bool{}
@@ -243,6 +244,17 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 			}
 			if pending {
 				changes = append(changes, registry.PlannedChange{Resource: m.Resource, Action: "migrate"})
+			}
+		}
+		for _, b := range prog.Buckets {
+			exists := false
+			if running[b.Container] {
+				if exists, err = p.bucketExists(ctx, b); err != nil {
+					return nil, err
+				}
+			}
+			if !exists {
+				changes = append(changes, registry.PlannedChange{Resource: b.ID, Action: "create"})
 			}
 		}
 	}
@@ -300,6 +312,7 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	}
 	var containers []*Container
 	var databases []*Database
+	var buckets []*Bucket
 	var keyPairs []*KeyPair
 	var servers []*Server
 	var jobs []*Job
@@ -308,6 +321,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			containers = append(containers, c)
 		} else if db := prog.database(id); db != nil {
 			databases = append(databases, db)
+		} else if b := prog.bucket(id); b != nil {
+			buckets = append(buckets, b)
 		} else if k := prog.keyPair(id); k != nil {
 			keyPairs = append(keyPairs, k)
 		} else if s := prog.server(id); s != nil {
@@ -333,26 +348,43 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			}
 		}
 	}
-	if len(containers) > 0 || len(databases) > 0 {
+	if len(containers) > 0 || len(databases) > 0 || len(buckets) > 0 {
 		docker, err := p.lookPath("docker")
 		if err != nil {
 			return err
 		}
 		ready := map[string]bool{}
+		waitReady := func(c *Container) error {
+			if ready[c.ID] {
+				return nil
+			}
+			ready[c.ID] = true
+			return p.waitContainer(ctx, docker, c)
+		}
 		for _, c := range containers {
 			if err := p.ensureContainer(ctx, docker, c); err != nil {
 				return err
 			}
 		}
+		for _, c := range containers {
+			if err := waitReady(c); err != nil {
+				return err
+			}
+		}
 		for _, db := range databases {
 			c := prog.container(db.Container)
-			if !ready[c.ID] {
-				if err := p.waitPostgres(ctx, docker, c); err != nil {
-					return err
-				}
-				ready[c.ID] = true
+			if err := waitReady(c); err != nil {
+				return err
 			}
 			if err := p.ensureDatabase(ctx, docker, c, db); err != nil {
+				return err
+			}
+		}
+		for _, b := range buckets {
+			if err := waitReady(prog.container(b.Container)); err != nil {
+				return err
+			}
+			if err := p.ensureBucket(ctx, b); err != nil {
 				return err
 			}
 		}
@@ -369,13 +401,13 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 }
 
 // Destroy stops the environment's servers, callers first, then its
-// container, which keeps its data for the next run.
+// containers, which keep their data for the next run.
 func (p *Provisioner) Destroy(ctx context.Context, req registry.ProvisionRequest) error {
 	return p.destroy(ctx, req, false)
 }
 
-// Purge stops the environment's servers, and removes its container with
-// its data.
+// Purge stops the environment's servers, and removes its containers with
+// their data: the databases, and the buckets and their objects.
 func (p *Provisioner) Purge(ctx context.Context, req registry.ProvisionRequest) error {
 	return p.destroy(ctx, req, true)
 }
@@ -419,7 +451,8 @@ func (p *Provisioner) destroy(ctx context.Context, req registry.ProvisionRequest
 }
 
 // Outputs returns each node's outputs: a container's name, host and port,
-// a database's name and URL, and a server's URL and port.
+// a database's name and URL, a bucket's name and endpoint, and a server's
+// URL and port.
 func (p *Provisioner) Outputs(_ context.Context, req registry.ProvisionRequest) (map[string]map[string]any, error) {
 	if req.Environment == nil {
 		return nil, errors.New("local: no environment")
@@ -450,6 +483,9 @@ func (prog *Program) outputs() map[string]map[string]any {
 	}
 	for _, db := range prog.Databases {
 		out[db.ID] = map[string]any{"name": db.Name, "url": db.URL}
+	}
+	for _, b := range prog.Buckets {
+		out[b.ID] = map[string]any{"name": b.Name, "endpoint": b.Endpoint}
 	}
 	for _, s := range prog.Servers {
 		out[s.ID] = map[string]any{"url": s.URL, "port": s.Port}
@@ -522,7 +558,7 @@ func (p *Provisioner) lookPath(name string) (string, error) {
 	if err != nil {
 		switch name {
 		case "docker":
-			return "", fmt.Errorf("local: docker is not on PATH; the local target runs Postgres in a Docker container: %w", err)
+			return "", fmt.Errorf("local: docker is not on PATH; the local target runs Postgres and the storage emulator in Docker containers: %w", err)
 		case "go":
 			return "", fmt.Errorf("local: go is not on PATH; the local target builds each Go server with go build: %w", err)
 		case "bun":
@@ -568,10 +604,33 @@ func (s containerState) mismatch(c *Container) string {
 	return strings.Join(diffs, ", and ")
 }
 
-// postgresReady reports whether Postgres in a running container answers.
-func (p *Provisioner) postgresReady(ctx context.Context, docker string, c *Container) bool {
-	_, err := p.runner().Run(ctx, pgIsReady(docker, c))
-	return err == nil
+// containerReady checks once whether a running container is ready: its
+// readiness command succeeds inside it, or it answers its readiness path,
+// and the port it publishes takes connections, which Docker's port proxy
+// may do a moment after the container's own process listens. A container
+// that names no readiness is ready once its port takes connections.
+func (p *Provisioner) containerReady(ctx context.Context, docker string, c *Container) error {
+	if r := c.Readiness; r != nil {
+		switch {
+		case len(r.Exec) > 0:
+			if _, err := p.runner().Run(ctx, Command{Path: docker, Args: append([]string{"exec", c.Name}, r.Exec...)}); err != nil {
+				return err
+			}
+		case r.HTTP != "":
+			url := fmt.Sprintf("http://%s:%d%s", c.Host, c.HostPort, r.HTTP)
+			code, err := p.runner().Get(ctx, url)
+			if err != nil {
+				return err
+			}
+			if code != 200 {
+				return fmt.Errorf("%s answers %d", url, code)
+			}
+		}
+	}
+	if !p.runner().PortInUse(c.HostPort) {
+		return fmt.Errorf("nothing takes connections on %s:%d", c.Host, c.HostPort)
+	}
+	return nil
 }
 
 const inspectFormat = `{{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}}`
@@ -618,7 +677,14 @@ func (p *Provisioner) ensureContainer(ctx context.Context, docker string, c *Con
 		for _, v := range c.Env {
 			args = append(args, "--env", v.Name+"="+v.Value.(string))
 		}
+		if len(c.Command) > 0 {
+			args = append(args, "--entrypoint", c.Command[0])
+		}
 		args = append(args, "--publish", fmt.Sprintf("%s:%d:%d", c.Host, c.HostPort, c.ContainerPort), c.Image)
+		if len(c.Command) > 1 {
+			args = append(args, c.Command[1:]...)
+		}
+		args = append(args, c.Args...)
 		p.printf("create container %s from %s on %s:%d", c.Name, c.Image, c.Host, c.HostPort)
 		if _, err := p.runner().Run(ctx, Command{Path: docker, Args: args}); err != nil {
 			return fmt.Errorf("local: create container %s: %w", c.Name, err)
@@ -639,33 +705,66 @@ func (p *Provisioner) ensureContainer(ctx context.Context, docker string, c *Con
 	return nil
 }
 
-func pgIsReady(docker string, c *Container) Command {
-	return Command{Path: docker, Args: []string{
-		"exec", c.Name, "pg_isready", "--host", Loopback, "--port", strconv.Itoa(c.ContainerPort), "--username", PostgresUser, "--quiet",
-	}}
-}
-
-// waitPostgres waits until Postgres in the container answers on TCP,
-// which it does only once the image's first-run initialization is done,
-// and until the port the container publishes takes connections, which
-// Docker's port proxy may do a moment later.
-func (p *Provisioner) waitPostgres(ctx context.Context, docker string, c *Container) error {
+// waitContainer waits until a container is ready (containerReady): the
+// Postgres container once Postgres answers on TCP, which it does only once
+// the image's first-run initialization is done, and the storage emulator's
+// once it answers its list of buckets.
+func (p *Provisioner) waitContainer(ctx context.Context, docker string, c *Container) error {
 	deadline := time.Now().Add(p.readyTimeout())
 	for {
-		_, err := p.runner().Run(ctx, pgIsReady(docker, c))
+		err := p.containerReady(ctx, docker, c)
 		if err == nil {
-			if p.runner().PortInUse(c.HostPort) {
-				return nil
-			}
-			err = fmt.Errorf("nothing takes connections on %s:%d", c.Host, c.HostPort)
+			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("local: Postgres in container %s is not ready after %s: %w", c.Name, p.readyTimeout(), err)
+			return fmt.Errorf("local: container %s is not ready after %s: %w", c.Name, p.readyTimeout(), err)
 		}
 		if err := sleep(ctx, p.pollInterval()); err != nil {
 			return err
 		}
 	}
+}
+
+// bucketExists asks the storage emulator whether the bucket exists.
+func (p *Provisioner) bucketExists(ctx context.Context, b *Bucket) (bool, error) {
+	code, err := p.runner().Get(ctx, b.Endpoint+StorageReadinessPath+"/"+b.Name)
+	switch {
+	case err != nil:
+		return false, fmt.Errorf("local: look for bucket %s: %w", b.Name, err)
+	case code == 200:
+		return true, nil
+	case code == 404:
+		return false, nil
+	}
+	return false, fmt.Errorf("local: look for bucket %s: the storage emulator answers %d", b.Name, code)
+}
+
+// ensureBucket creates the bucket on the storage emulator when it is
+// missing, through the emulator's JSON API.
+func (p *Provisioner) ensureBucket(ctx context.Context, b *Bucket) error {
+	exists, err := p.bucketExists(ctx, b)
+	if err != nil {
+		return err
+	}
+	if exists {
+		p.printf("bucket %s exists", b.Name)
+		return nil
+	}
+	body, err := json.Marshal(map[string]string{"name": b.Name})
+	if err != nil {
+		return err
+	}
+	p.printf("create bucket %s for %s", b.Name, b.Service)
+	code, err := p.runner().Post(ctx, b.Endpoint+StorageReadinessPath+"?project="+StorageProject, body)
+	switch {
+	case err != nil:
+		return fmt.Errorf("local: create bucket %s: %w", b.Name, err)
+	case code == 409:
+		return nil
+	case code < 200 || code > 299:
+		return fmt.Errorf("local: create bucket %s: the storage emulator answers %d", b.Name, code)
+	}
+	return nil
 }
 
 // databaseNamePattern is the shape of a database's name, checked again

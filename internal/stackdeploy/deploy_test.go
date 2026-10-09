@@ -14,13 +14,14 @@ import (
 )
 
 // staging is Staging's deploy order on the fake target, as the call log
-// records it: infrastructure, the expand phase, the servers and shop-orders'
-// job callee first, the contract phase, exposure.
+// records it: infrastructure, shop-api's bucket in it (D54), the expand
+// phase, the servers and shop-orders' job callee first, the contract phase,
+// exposure.
 var staging = []string{
-	"render 20 nodes",
+	"render 22 nodes",
 	"apply infrastructure: Orders.account, Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.sql.shop-db, secret.PaymentsSecrets.STRIPE_KEY, " +
-		"shop-api.account, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sql.shop-db, shop-db.database.shop-db, shop-db.instance, " +
-		"shop-orders-ship-orders.account, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.sql.shop-db",
+		"shop-api.account, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sql.shop-db, shop-api.storage.shop-media, shop-db.database.shop-db, shop-db.instance, " +
+		"shop-media.bucket, shop-orders-ship-orders.account, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.sql.shop-db",
 	"migrate expand shop-db: shop-db",
 	"apply rollout 1: Orders.invokes.shop-api, shop-api.service, shop-orders-ship-orders.invokes.shop-api",
 	"apply rollout 2: Orders.service, shop-orders-ship-orders.job, shop-orders-ship-orders.schedule",
@@ -340,7 +341,7 @@ func TestPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Changes) != 20 || len(out.Databases) != 1 || out.Databases[0].ExpandSteps == 0 {
+	if len(out.Changes) != 22 || len(out.Databases) != 1 || out.Databases[0].ExpandSteps == 0 {
 		t.Errorf("plan: %d changes, databases %+v", len(out.Changes), out.Databases)
 	}
 	if !slices.Equal(out.Unpinned, []string{"Orders", "shop-api", "shop-orders-ship-orders"}) || !slices.Equal(out.MissingSecrets, []string{"PaymentsSecrets.STRIPE_KEY"}) {

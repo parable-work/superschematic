@@ -129,8 +129,8 @@ func TestAcceptance(t *testing.T) {
 
 // TestAcceptanceWiring reads the resolved Staging environment for the
 // facts section 3 derives: the defaults, the declared server, shop-orders'
-// job with its API's edges (D52), the edges with their connectors, the
-// shared secret and the callee-first order.
+// job with its API's edges (D52), shop-api's bucket (D54), the edges with
+// their connectors, the shared secret and the callee-first order.
 func TestAcceptanceWiring(t *testing.T) {
 	reg, _ := assemble(t)
 	env, err := stack.Resolve(reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: "Staging"})
@@ -141,14 +141,15 @@ func TestAcceptanceWiring(t *testing.T) {
 	for _, d := range env.Deployables {
 		names = append(names, string(d.Kind)+" "+d.Name+" on "+d.Platform)
 	}
-	if got, want := strings.Join(names, "; "), "server Orders on fake.run; server shop-api on fake.run; database shop-db on fake.sql; job shop-orders-ship-orders on fake.job"; got != want {
+	if got, want := strings.Join(names, "; "), "server Orders on fake.run; server shop-api on fake.run; database shop-db on fake.sql; bucket shop-media on fake.storage; job shop-orders-ship-orders on fake.job"; got != want {
 		t.Errorf("deployables = %s, want %s", got, want)
 	}
 	var edges []string
 	for _, e := range env.Edges {
 		edges = append(edges, e.ID+" by "+e.Connector+" into "+e.Field)
 	}
-	if got, want := strings.Join(edges, "; "), "http:Orders->shop-api by fake.run-run into SHOP_API_SERVICE; "+
+	if got, want := strings.Join(edges, "; "), "bucket:shop-api->shop-media by fake.run-storage into SHOP_MEDIA_BUCKET; "+
+		"http:Orders->shop-api by fake.run-run into SHOP_API_SERVICE; "+
 		"http:shop-orders-ship-orders->shop-api by fake.job-run into SHOP_API_SERVICE; "+
 		"sql:Orders->shop-db by fake.run-sql into SHOP_DB_DATABASE; sql:shop-api->shop-db by fake.run-sql into SHOP_DB_DATABASE; "+
 		"sql:shop-orders-ship-orders->shop-db by fake.job-sql into SHOP_DB_DATABASE"; got != want {

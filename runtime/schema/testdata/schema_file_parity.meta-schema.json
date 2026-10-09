@@ -1992,6 +1992,7 @@
           "default": "",
           "enum": [
             "API",
+            "Bucket",
             "Catalog",
             "DB",
             "General",
@@ -3535,6 +3536,7 @@
         "kind": {
           "enum": [
             "API",
+            "Bucket",
             "Catalog",
             "DB",
             "General",

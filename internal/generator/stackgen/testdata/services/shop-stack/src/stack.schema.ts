@@ -1,5 +1,6 @@
 import { ShopApi } from "@schemas/shop-api";
 import { ShopDb } from "@schemas/shop-db";
+import { ShopMedia } from "@schemas/shop-media";
 import { ShopOrders } from "@schemas/shop-orders";
 import { environment, server, stack } from "@superschematic/stack";
 
@@ -34,7 +35,8 @@ export abstract class Staging {}
     { of: ShopDb, tier: "large", highAvailability: true },
     { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
     { of: ShopOrders, env: { FULFILLMENT_REGION: "us" } },
-    { of: ShopOrders, job: "ShipOrders", cpu: "2" }
+    { of: ShopOrders, job: "ShipOrders", cpu: "2" },
+    { of: ShopMedia, versioning: true }
   ]
 })
 export abstract class Production {}

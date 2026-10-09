@@ -1,14 +1,17 @@
-# A TypeScript API with a database, a callee and a service clause (D51):
-# it takes its database from its one DB-kind dependency, calls
-# deps-ts-pricing, holds one setting in its @envVars type, checks the end
-# user on one operation and admits a calling service on another. The
-# TypeScript Deps tests in internal/generator build it.
+# A TypeScript API with a database, a callee, a bucket and a service clause
+# (D51, D54): it takes its database from its one DB-kind dependency, calls
+# deps-ts-pricing, lists the bucket deps-media, holds one setting in its
+# @envVars type, checks the end user on one operation and admits a calling
+# service on another. The TypeScript Deps tests in internal/generator build
+# it.
 name: deps-ts-shop
 kind: API
 dependencies:
   - { name: deps-db, kind: DB }
 calls:
   - { name: deps-ts-pricing, kind: API }
+buckets:
+  - { name: deps-media, kind: Bucket }
 outputs:
   types:
     typescript: { enabled: true }

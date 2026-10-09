@@ -84,9 +84,10 @@ func buildDeps(t *testing.T, outputRoot, implementationRoot string, paths naming
 }
 
 // TestDerivedFieldsAndDepsGolden: each API's config holds a database
-// field and a service field per call beside its settings, values-schema.json
-// marks them derived with their variables, Deps holds the config, the ORM
-// and a client per call, and the scaffold implements every method with a
+// field, a service field per call and a bucket field per bucket (D54)
+// beside its settings, values-schema.json marks them derived with their
+// variables, Deps holds the config, the ORM, a client per call and a
+// bucket per bucket, and the scaffold implements every method with a
 // not-implemented error. Regenerate with:
 //
 //	go test ./internal/generator -run TestDerivedFieldsAndDepsGolden -update
@@ -203,6 +204,7 @@ func TestDepsAndScaffoldCompile(t *testing.T) {
 			Source: ir.CredentialGoogleIDToken, Audience: "https://deps-catalog.run.app",
 			Headers: []string{ir.ServiceAuthorizationHeader, "X-Serverless-Authorization"},
 		}},
+		"DEPS_MEDIA_BUCKET": ir.BucketConnection{Name: "acme-shop-deps-media"},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {
@@ -238,6 +240,9 @@ func TestTheImplementationBuildsFromDeps(t *testing.T) {
 	}
 	if svc := cfg.DepsCatalogService; svc.URL != "https://deps-catalog.run.app" || svc.Credential == nil || len(svc.Credential.Headers) != 2 {
 		t.Errorf("DepsCatalogService = %+v", svc)
+	}
+	if b := cfg.DepsMediaBucket; b.Name != "acme-shop-deps-media" || b.Endpoint != "" {
+		t.Errorf("DepsMediaBucket = %+v", b)
 	}
 	impls, err := impl.New(api.Deps{Config: *cfg})
 	if err != nil {

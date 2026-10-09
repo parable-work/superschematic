@@ -34,6 +34,10 @@ type Runner interface {
 	// Get requests url and returns the response's status code.
 	Get(ctx context.Context, url string) (int, error)
 
+	// Post sends body to url as JSON and returns the response's status
+	// code: how the provisioner creates a bucket on the storage emulator.
+	Post(ctx context.Context, url string, body []byte) (int, error)
+
 	// PortInUse reports whether something listens on port on loopback.
 	PortInUse(port int) bool
 }
@@ -170,6 +174,23 @@ func (execRunner) Get(ctx context.Context, url string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func (execRunner) Post(ctx context.Context, url string, body []byte) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err

@@ -1,0 +1,128 @@
+---
+title: Buckets
+description: Keep files in a private bucket a Bucket service declares. List it in an API's config, use it from Deps in Go or TypeScript, hand a browser a signed URL to upload or download an object, and run it locally on fake-gcs-server.
+sidebar:
+  order: 5.6
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A bucket is private object storage: product images, exports, uploads. It
+is a service of the core kind `Bucket`, and an API that keeps objects in
+it lists it in its config, as it lists the APIs it `calls`. A stack that
+deploys the API deploys the bucket too, and the API's implementation gets
+it in `Deps`, behind an interface that names no provider. The design is
+section 8.9 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
+and D54 in `docs/DECISIONS.md` records the decision.
+
+| Built | Not built yet |
+| --- | --- |
+| the `Bucket` kind, `buckets` in an API's config, and the `bucket` deployable and edge | |
+| `Deps` gains a bucket per listed bucket, in Go and TypeScript, implemented over GCS | a bucket on another provider |
+| signed URLs to upload or download an object directly | |
+| `stack dev` runs fake-gcs-server with a bucket per Bucket service | |
+| | the gcp target's bucket: until it lands, a stack with a bucket does not resolve on gcp |
+
+## Declare a bucket
+
+A Bucket service's config is all it has: a name, the kind and an empty
+`outputs`. It has no schema files and generates nothing, but its build
+writes a handle, `src/service.generated.ts`, which the APIs that use it
+import:
+
+<Snippet file="schemas/services/shop-media/schema.config.ts" />
+
+An API lists the buckets it uses in `buckets`, beside `authDb` and
+`calls`. Several APIs may list one bucket:
+
+<Snippet file="schemas/services/shop-api/schema.config.ts" />
+
+`buckets` takes only Bucket handles, so tsc refuses another kind's there,
+and discovery refuses one in any form. In a data form the list is
+`{ name, kind }` pairs, `buckets: [{ name: shop-media, kind: Bucket }]`.
+A bucket is private: its config takes no `public`, no `authDb`, no
+`dependencies` and no outputs.
+
+## What an API gets
+
+The API's config gains a field per bucket, which the stack derives:
+the bucket's name, and locally the emulator's endpoint. It holds no
+credential, since the workload's own identity reaches the bucket.
+
+| Field | Variables |
+| --- | --- |
+| `SHOP_MEDIA_BUCKET` | `SHOP_MEDIA_BUCKET_NAME`, and `SHOP_MEDIA_BUCKET_ENDPOINT` when an emulator serves the bucket |
+
+The name comes from the naming file's
+[`[derived_fields] bucket`](/superschematic/reference/naming/#derived_fieldsbucket)
+template, `{SERVICE}_BUCKET` by default. `Deps` gains the bucket itself,
+named after the service: `ShopMedia bucket.Bucket` in Go, from
+`runtime/http/go/bucket`, and `shopMedia: Bucket` in TypeScript, from
+`@superschematic/http-runtime`. Both have the same methods:
+
+| Go | TypeScript | Does |
+| --- | --- | --- |
+| `Put(ctx, name, body, opts)` | `put(name, body, options)` | writes the object from a stream, replacing any, with an optional content type |
+| `Get(ctx, name)` | `get(name)` | opens the object as a stream, with its size, content type and time; the caller closes it |
+| `Delete(ctx, name)` | `delete(name)` | removes the object |
+| `List(ctx, opts)` | `list(options)` | a page of the objects whose names begin with a prefix, in name order, and the token of the next page |
+| `SignedURL(ctx, name, opts)` | `signedUrl(name, options)` | a URL that lets its holder `GET` the object or `PUT` it, with no other credential, until it expires |
+
+A missing object is `bucket.ErrNotFound` in Go and an
+`ObjectNotFoundError` in TypeScript. Object names are slash-separated
+paths such as `products/7b0e/image.png`; a bucket has no directories.
+
+## Hand a browser a signed URL
+
+A browser uploads or downloads an object straight to or from the bucket,
+through a URL the API signs, so the file's bytes never pass through the
+server, and a large one is not held to Cloud Run's 32 MiB request limit.
+A signed URL lives at most seven days, and one for a `PUT` names the
+content type the upload must send. The acme shop's `shop-api` hands out
+the upload of a product's image and records the object's name on the
+product:
+
+<Snippet file="go/shop-api/products.go" symbol="Products.CreateProductImageUpload" />
+
+The browser then sends the file with the content type it asked for:
+
+```sh
+curl -X PUT -H 'Content-Type: image/png' --data-binary @tea.png "$UPLOAD_URL"
+```
+
+## Run it locally
+
+`superschematic stack dev` runs
+[fake-gcs-server](https://github.com/fsouza/fake-gcs-server), which speaks
+GCS's API, in a container beside Postgres, one per environment, and
+creates a bucket per Bucket service, named after it. The bucket field's
+endpoint points at it, so the same GCS implementation reaches it, with no
+credential. It signs URLs too: against an emulator, a V4 URL for the
+emulator's host signed with a key the process makes, which the emulator
+takes and does not check. A process with `STORAGE_EMULATOR_HOST` set
+reaches that emulator the same way.
+
+The container keeps its objects between runs; `stack dev --remove-data`
+removes them with the containers. The environment's `storageImage` and
+`storagePort` values change its image, `fsouza/fake-gcs-server:1.56.1`,
+and its host port, which is otherwise a hash of the stack and the
+environment:
+
+```ts
+@environment({ target: "local", local: { storagePort: 54443 } })
+export abstract class Dev {}
+```
+
+The acme shop's `go/stack_dev_test.go` runs it: it asks `shop-api` for an
+upload URL, `PUT`s an image through it to the emulator, and reads it back
+from the bucket.
+
+## On Google Cloud
+
+A server or job whose APIs list a bucket links GCS's Go client, or depends
+on its Node client, and no other does. On Cloud Run it reaches the bucket
+as its own service account, and signs a URL as that account through IAM's
+`signBlob`. The gcp target's bucket, a private Cloud Storage bucket per
+Bucket service with its grants, is the next step; until it lands, a stack
+with a bucket resolves only on the `local` target.

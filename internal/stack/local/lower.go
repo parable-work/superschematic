@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -57,15 +58,41 @@ const (
 	// ServerModuleDir is the directory, under the output root, of each
 	// server's entrypoint module: `server/<stack>/<server>`.
 	ServerModuleDir = "server"
+
+	// DefaultStorageImage is the image the storage emulator's container
+	// runs when the environment's values name none: fake-gcs-server, which
+	// serves GCS's JSON API, and the object paths a signed URL names, on
+	// plain HTTP (D54).
+	DefaultStorageImage = "fsouza/fake-gcs-server:1.56.1"
+
+	// storagePort is the port the storage emulator listens on inside its
+	// container.
+	storagePort = 4443
+
+	// StorageContainer is the ID of the environment's storage emulator's
+	// container node, which every bucket deployable's lowering returns, so
+	// they share it.
+	StorageContainer = "storage.container"
+
+	// StorageReadinessPath is the emulator's path the provisioner probes
+	// until it answers 200: its list of buckets, under which it creates
+	// each bucket.
+	StorageReadinessPath = "/storage/v1/b"
+
+	// StorageProject is the project the provisioner creates each bucket
+	// in on the emulator, which keeps one.
+	StorageProject = "local"
 )
 
 // A port the environment does not set falls in a range by a hash of the
 // stack, the environment and, for a server, the deployable, so it stays
-// the same from run to run and differs between environments. A server's
-// range and the container's do not overlap, and both sit below the
-// ephemeral ranges of Linux (32768 and up) and macOS (49152 and up).
+// the same from run to run and differs between environments. The servers'
+// range, the Postgres container's and the storage emulator's do not
+// overlap, and all sit below the ephemeral ranges of Linux (32768 and up)
+// and macOS (49152 and up).
 const (
 	serverPortBase   = 20000
+	storagePortBase  = 23000
 	postgresPortBase = 30000
 	portSpan         = 2768
 )
@@ -115,6 +142,49 @@ func PostgresImage(env registry.StackEnvironment) string {
 func ContainerName(stack, environment string) string {
 	return strings.ToLower("superschematic-" + stack + "-" + environment + "-postgres")
 }
+
+// StoragePort returns the host port the environment's storage emulator
+// publishes: the `storagePort` value, or one derived from the stack and the
+// environment (D54).
+func StoragePort(env registry.StackEnvironment) int {
+	if port, ok := intValue(env.Values["storagePort"]); ok {
+		return port
+	}
+	return hashPort(storagePortBase, env.Stack, env.Name)
+}
+
+// StorageImage returns the image the environment's storage emulator runs:
+// the `storageImage` value, or DefaultStorageImage.
+func StorageImage(env registry.StackEnvironment) string {
+	if image, ok := env.Values["storageImage"].(string); ok && image != "" {
+		return image
+	}
+	return DefaultStorageImage
+}
+
+// StorageContainerName returns the name of the environment's storage
+// emulator's container: `superschematic-<stack>-<environment>-storage`,
+// lower case.
+func StorageContainerName(stack, environment string) string {
+	return strings.ToLower("superschematic-" + stack + "-" + environment + "-storage")
+}
+
+// StorageURL returns the base URL of a storage emulator published on port:
+// what a bucket edge derives as its endpoint.
+func StorageURL(port int) string {
+	return fmt.Sprintf("http://%s:%d", Loopback, port)
+}
+
+// bucketNamePattern is the shape of a bucket's name on GCS and its
+// emulator: 3 to 63 lower-case letters, digits, hyphens and underscores,
+// starting and ending with a letter or a digit.
+var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,61}[a-z0-9]$`)
+
+// BucketName returns the name of a Bucket service's bucket on the
+// environment's emulator: the service's name in lower case. Each
+// environment runs an emulator of its own, so no other stack's bucket
+// takes the name.
+func BucketName(service string) string { return strings.ToLower(service) }
 
 // DatabaseName returns the name of a hosted DB schema's database: the
 // service's name in lower snake case (`shop-db` is `shop_db`).
@@ -206,7 +276,8 @@ func databaseAddress(ctx registry.PlatformContext) any {
 }
 
 // postgresContainer is the environment's Postgres container node. Every
-// database deployable returns the same node, so they share it.
+// database deployable returns the same node, so they share it. It is ready
+// once pg_isready answers inside it.
 func postgresContainer(env registry.StackEnvironment) *ir.Resource {
 	return &ir.Resource{
 		ID:   PostgresContainer,
@@ -224,9 +295,100 @@ func postgresContainer(env registry.StackEnvironment) *ir.Resource {
 				"superschematic.stack":       env.Stack,
 				"superschematic.environment": env.Name,
 			},
+			"readiness": map[string]any{"exec": []any{
+				"pg_isready", "--host", Loopback, "--port", strconv.Itoa(postgresPort), "--username", PostgresUser, "--quiet",
+			}},
 		},
 		Phase: ir.PhaseInfrastructure,
 	}
+}
+
+// storageContainer is the environment's storage emulator's container node
+// (D54): fake-gcs-server on plain HTTP, keeping its objects in the
+// container's filesystem, so a stopped container keeps them for the next
+// run. The emulator writes the URLs it hands out with the host's view of
+// its address. Every bucket deployable returns the same node, so they
+// share it. It is ready once it answers its list of buckets.
+func storageContainer(env registry.StackEnvironment) *ir.Resource {
+	port := StoragePort(env)
+	host := Loopback + ":" + strconv.Itoa(port)
+	return &ir.Resource{
+		ID:   StorageContainer,
+		Type: TypeContainer,
+		Properties: map[string]any{
+			"name":  StorageContainerName(env.Stack, env.Name),
+			"image": StorageImage(env),
+			"ports": []any{map[string]any{
+				"host":          Loopback,
+				"hostPort":      port,
+				"containerPort": storagePort,
+			}},
+			"args": []any{
+				"-scheme", "http", "-host", "0.0.0.0", "-port", strconv.Itoa(storagePort),
+				"-backend", "filesystem", "-filesystem-root", "/storage",
+				"-public-host", host, "-external-url", StorageURL(port),
+			},
+			"labels": map[string]any{
+				"superschematic.stack":       env.Stack,
+				"superschematic.environment": env.Name,
+			},
+			"readiness": map[string]any{"http": StorageReadinessPath},
+		},
+		Phase: ir.PhaseInfrastructure,
+	}
+}
+
+// bucketDeployableName names a bucket deployable after its bucket on the
+// emulator (BucketName).
+func bucketDeployableName(ctx registry.PlatformContext) any {
+	if len(ctx.Deployable.Services) == 1 {
+		return BucketName(ctx.Deployable.Services[0].Name)
+	}
+	return BucketName(ctx.Deployable.Name)
+}
+
+// bucketAddress is the storage emulator's base URL.
+func bucketAddress(ctx registry.PlatformContext) any {
+	return StorageURL(StoragePort(ctx.Environment))
+}
+
+// bucketID is the ID of a bucket deployable's bucket node.
+func bucketID(deployable string) string { return deployable + ".bucket" }
+
+// lowerBucket lowers a bucket deployable to the environment's storage
+// emulator and a bucket on it, which the provisioner creates through the
+// emulator's JSON API (D54).
+func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	name, _ := d.ResourceName.(string)
+	if !bucketNamePattern.MatchString(name) {
+		return registry.Lowered{}, fmt.Errorf("the bucket of %s would be named %q; a bucket's name is 3 to 63 lower-case letters, digits, hyphens and underscores, starting and ending with a letter or a digit", d.Name, name)
+	}
+	service := d.Name
+	if len(d.Services) == 1 {
+		service = d.Services[0].Name
+	}
+	return registry.Lowered{Resources: []*ir.Resource{
+		storageContainer(ctx.Environment),
+		{
+			ID:   bucketID(d.Name),
+			Type: TypeBucket,
+			Properties: map[string]any{
+				"name":      name,
+				"service":   service,
+				"container": ir.Output{Resource: StorageContainer, Name: "name"},
+				"endpoint":  StorageURL(StoragePort(ctx.Environment)),
+			},
+		},
+	}}, nil
+}
+
+// connectBucket derives the bucket's name on the environment's storage
+// emulator and the emulator's endpoint, which the runtimes' GCS
+// implementation reaches with no credential (D54). The edge needs no
+// resource: the emulator checks no caller.
+func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.BucketConnection{Name: ctx.To.ResourceName, Endpoint: ctx.To.Address}}, nil
 }
 
 // lowerDatabase lowers a database deployable to the environment's Postgres
@@ -466,8 +628,10 @@ func checkNoParameters(env *ir.ResolvedEnvironment) []string {
 	return []string{fmt.Sprintf("environment %s takes parameters %s, but the local target runs one copy of each environment; give a parameterized environment a cloud target", env.Environment, strings.Join(env.Parameters, ", "))}
 }
 
-// checkDistinctPorts refuses two listeners on one port: two processes, or
-// a process and the Postgres container.
+// checkDistinctPorts refuses two listeners on one port: two processes, a
+// process and a container, or two containers, such as the Postgres
+// container and the storage emulator's (D54). Each container is named by
+// its name.
 func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	owners := map[int][]string{}
 	for _, res := range env.Resources.Resources {
@@ -477,11 +641,15 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 				owners[port] = append(owners[port], "server "+strings.Join(res.Owners, ", "))
 			}
 		case TypeContainer:
+			name, _ := res.Properties["name"].(string)
+			if name == "" {
+				name = res.ID
+			}
 			ports, _ := res.Properties["ports"].([]any)
 			for _, p := range ports {
 				m, _ := p.(map[string]any)
 				if port, ok := intValue(m["hostPort"]); ok {
-					owners[port] = append(owners[port], "the Postgres container")
+					owners[port] = append(owners[port], "container "+name)
 				}
 			}
 		}
@@ -494,7 +662,7 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	var out []string
 	for _, port := range ports {
 		if names := slices.Compact(owners[port]); len(names) > 1 {
-			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's port setting or the environment's postgresPort value", strings.Join(names, " and "), port))
+			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's port setting or the environment's postgresPort or storagePort value", strings.Join(names, " and "), port))
 		}
 	}
 	return out

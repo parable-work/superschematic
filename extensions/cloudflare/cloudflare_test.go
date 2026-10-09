@@ -47,7 +47,7 @@ func assemble(t *testing.T) *registry.Registry {
 // name references the parameter. shop-orders' job, which is never
 // exposed, writes no record.
 func shop() *ir.Stack {
-	s := stacktest.Shop()
+	s := stacktest.WithoutBucketSettings(stacktest.Shop())
 	for _, env := range s.Environments {
 		switch env.Name {
 		case "Staging":
@@ -61,7 +61,7 @@ func shop() *ir.Stack {
 
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, env string) *ir.ResolvedEnvironment {
 	t.Helper()
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: env})
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestRefusedValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := shop()
 			s.Environments[0].DNS.Values = tc.values
-			_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+			_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Staging"})
 			var errs *stack.Errors
 			if !errors.As(err, &errs) {
 				t.Fatalf("Resolve = %v, want a resolution failure", err)
@@ -222,7 +222,7 @@ func TestRefusedValues(t *testing.T) {
 func TestDomainOutsideTheZone(t *testing.T) {
 	s := shop()
 	s.Environments[0].DNS.Values["zone"] = "acme.com"
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "DNS platform cloudflare: environment Staging has domain staging.acme.dev, which is not in zone acme.com") {
 		t.Errorf("Resolve = %v, want the domain refused", err)
 	}

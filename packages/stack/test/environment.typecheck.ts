@@ -13,6 +13,7 @@ declare module "../src/index" {
       server: { minInstances?: number };
       database: { tier?: string; highAvailability?: boolean };
       job: { cpu?: string };
+      bucket: { versioning?: boolean };
     };
   }
 }
@@ -39,6 +40,8 @@ const ShopApi = service<"API", ShopApiConfig>({ name: "shop-api", kind: SchemaKi
 const ShopOrders = service({ name: "shop-orders", kind: SchemaKind.API });
 const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
+// A Bucket service's handle (D54).
+const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
 // An API with @job classes, whose names the sentinel writes as the third
 // type argument.
 const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
@@ -66,6 +69,8 @@ export abstract class Data {}
     // A declared deployable's class takes either kind's settings.
     { of: Backend, minInstances: 2, env: { ANY_FIELD: "x" } },
     { of: Data, tier: "small" },
+    // A bucket takes the target's bucket settings.
+    { of: ShopMedia, versioning: true },
     // A platform outside the target takes its own settings, which the
     // loader checks.
     { of: ShopDb, platform: "other.sql", storageGb: 10 },
@@ -148,6 +153,20 @@ export abstract class EnvOnDatabase {}
 
 @environment({
   target: "fake",
+  // @ts-expect-error a server's settings on a bucket
+  settings: [{ of: ShopMedia, minInstances: 1 }],
+})
+export abstract class ServerSettingOnBucket {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket has no env
+  settings: [{ of: ShopMedia, env: { LOG_LEVEL: "warn" } }],
+})
+export abstract class EnvOnBucket {}
+
+@environment({
+  target: "fake",
   // @ts-expect-error a General service is no deployable
   settings: [{ of: ShopCommon }],
 })
@@ -172,7 +191,7 @@ export abstract class Dev {}
 
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432 },
+  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443 },
   settings: [{ of: ShopApi, port: 8080, env: { LOG_LEVEL: "debug" } }, { of: Backend, port: 8081 }],
 })
 export abstract class PinnedDev {}
@@ -190,6 +209,13 @@ export abstract class LocalProject {}
   settings: [{ of: ShopDb, tier: "large" }],
 })
 export abstract class LocalDatabaseSetting {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local bucket takes no settings
+  settings: [{ of: ShopMedia, versioning: true }],
+})
+export abstract class LocalBucketSetting {}
 
 @environment({
   target: "local",

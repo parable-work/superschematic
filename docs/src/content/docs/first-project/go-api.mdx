@@ -180,8 +180,9 @@ bindings are the configuration it is started with:
 
 <Snippet file="testdata/generated/stack/shop-stack/Dev/environment.json" from={'"name": "shop-api",'} to={'"edge": "sql:shop-api->shop-db"'} />
 
-Ctrl-C stops the servers and the container, which keeps its data for the
-next run; `--remove-database` removes it too. The routes answer a caller
+Ctrl-C stops the servers and the containers, Postgres's and the storage
+emulator's that holds `shop-media`, which keep their data for the next
+run; `--remove-data` removes them too. The routes answer a caller
 with a session in `shop-db`. `TestStackDevRunsTheShop`, in
 `examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, signs a user in
 through the ORM, calls both APIs through their SDKs, and sees the job ship

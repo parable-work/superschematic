@@ -48,6 +48,9 @@ func TestDerivedValuesMeetTheirContract(t *testing.T) {
 				Key:      Output{Resource: "shop-orders.key.shop-api", Name: "privateJwk"},
 			},
 		}},
+		{"a bucket on its provider", EdgeBucket, BucketConnection{Name: Output{Resource: "shop-media.bucket", Name: "name"}}},
+		{"a bucket on an emulator", EdgeBucket, BucketConnection{Name: "shop-media", Endpoint: "http://127.0.0.1:24443"}},
+		{"a bucket as json", EdgeBucket, map[string]any{"name": Concat{"acme-shop-media-", Parameter("pr")}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +86,9 @@ func TestDerivedValuesThatBreakTheContract(t *testing.T) {
 		{"headers without the service header", EdgeHTTP, ServiceEndpoint{URL: "http://x", Credential: &ServiceCredential{Source: CredentialTokenFile, TokenFile: "/t", Headers: []string{"Authorization"}}}, "lacks Service-Authorization"},
 		{"a header that is not a name", EdgeHTTP, ServiceEndpoint{URL: "http://x", Credential: &ServiceCredential{Source: CredentialTokenFile, TokenFile: "/t", Headers: []string{"Service-Authorization", "A, B"}}}, "headers[1]"},
 		{"a header twice", EdgeHTTP, ServiceEndpoint{URL: "http://x", Credential: &ServiceCredential{Source: CredentialTokenFile, TokenFile: "/t", Headers: []string{"Service-Authorization", "service-authorization"}}}, "twice"},
+		{"a bucket without a name", EdgeBucket, BucketConnection{Endpoint: "http://127.0.0.1:24443"}, "name is null"},
+		{"a bucket with a credential", EdgeBucket, map[string]any{"name": "shop-media", "key": "secret"}, "a bucket connection has no member key"},
+		{"an empty endpoint", EdgeBucket, map[string]any{"name": "shop-media", "endpoint": ""}, `endpoint is ""`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,6 +143,18 @@ func TestDerivedVariables(t *testing.T) {
 		t.Errorf("service variables:\n got %#v\nwant %#v", got, want)
 	}
 
+	got, err = DerivedVariables("SHOP_MEDIA_BUCKET", BucketConnection{Name: "shop-media", Endpoint: "http://127.0.0.1:24443"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []DerivedVariable{
+		{Name: "SHOP_MEDIA_BUCKET_ENDPOINT", Value: "http://127.0.0.1:24443"},
+		{Name: "SHOP_MEDIA_BUCKET_NAME", Value: "shop-media"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bucket variables:\n got %#v\nwant %#v", got, want)
+	}
+
 	got, err = DerivedVariables("X", map[string]any{"port": 5432})
 	if want := []DerivedVariable{{Name: "X_PORT", Value: "5432"}}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("a whole number: got %#v, %v; want its decimal", got, err)
@@ -166,7 +184,10 @@ func TestDerivedFieldNames(t *testing.T) {
 	if got := core.Field(EdgeHTTP, "shop.api"); got != "SHOP_API_SERVICE" {
 		t.Errorf("core http field = %s", got)
 	}
-	named := DerivedFieldNames{Database: "DB_{SERVICE}", Service: "{SERVICE}_API"}
+	if got := core.Field(EdgeBucket, "shop-media"); got != "SHOP_MEDIA_BUCKET" {
+		t.Errorf("core bucket field = %s", got)
+	}
+	named := DerivedFieldNames{Database: "DB_{SERVICE}", Service: "{SERVICE}_API", Bucket: "STORE_{SERVICE}"}
 	if err := named.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -176,11 +197,15 @@ func TestDerivedFieldNames(t *testing.T) {
 	if got := named.Field(EdgeHTTP, "shop-api"); got != "SHOP_API_API" {
 		t.Errorf("named http field = %s", got)
 	}
+	if got := named.Field(EdgeBucket, "shop-media"); got != "STORE_SHOP_MEDIA" {
+		t.Errorf("named bucket field = %s", got)
+	}
 	for _, bad := range []DerivedFieldNames{
 		{Database: "DATABASE"},
 		{Service: "{SERVICE}_{SERVICE}"},
 		{Service: "{SERVICE}-url"},
 		{Database: "9{SERVICE}"},
+		{Bucket: "BUCKET"},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("Validate(%+v) passed", bad)
@@ -203,14 +228,17 @@ func TestDerivedFieldClaims(t *testing.T) {
 }
 
 // TestDerivedConfigFields: an API's database comes from its authDb, or its
-// one DB-kind dependency, and each calls entry adds a service field.
+// one DB-kind dependency, each calls entry adds a service field, and each
+// buckets entry a bucket field (D54).
 func TestDerivedConfigFields(t *testing.T) {
 	api := &Schema{Name: "shop-orders", Kind: SchemaKindAPI, AuthDB: "shop-db",
-		Calls: []ServiceRef{{Name: "shop-api", Kind: SchemaKindAPI}, {Name: "payments", Kind: SchemaKindAPI}}}
+		Calls:   []ServiceRef{{Name: "shop-api", Kind: SchemaKindAPI}, {Name: "payments", Kind: SchemaKindAPI}},
+		Buckets: []ServiceRef{{Name: "shop-media", Kind: SchemaKindBucket}}}
 	want := []DerivedConfigField{
 		{Name: "SHOP_DB_DATABASE", Kind: EdgeSQL, Service: "shop-db", From: "authDb"},
 		{Name: "SHOP_API_SERVICE", Kind: EdgeHTTP, Service: "shop-api", From: "calls"},
 		{Name: "PAYMENTS_SERVICE", Kind: EdgeHTTP, Service: "payments", From: "calls"},
+		{Name: "SHOP_MEDIA_BUCKET", Kind: EdgeBucket, Service: "shop-media", From: "buckets"},
 	}
 	if got := api.DerivedConfigFields(DerivedFieldNames{}); !reflect.DeepEqual(got, want) {
 		t.Errorf("fields:\n got %+v\nwant %+v", got, want)
@@ -238,6 +266,7 @@ func TestDerivedMembersNameTheVariables(t *testing.T) {
 		EdgeHTTP: ServiceEndpoint{URL: "u", Credential: &ServiceCredential{
 			Source: CredentialSignedToken, Audience: "a", Issuer: "i", Key: "k", Headers: []string{ServiceAuthorizationHeader},
 		}},
+		EdgeBucket: BucketConnection{Name: "n", Endpoint: "e"},
 	}
 	for kind, value := range values {
 		names := map[string]bool{}

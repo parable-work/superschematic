@@ -96,23 +96,28 @@ are the union of its APIs' edges, so grouping APIs never restates one.
 
 ### 3.3 Edges
 
-An edge is a need met by something that provides it. v1 has two kinds:
+An edge is a need met by something that provides it. There are three
+kinds:
 
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
 | sql | server or job | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
 | http | server or job | server | `calls` in the config of each API the calling server serves |
+| bucket | server or job | bucket | `buckets` in the config of each API the server serves (D54, section 8.9) |
 
 A job takes its API's edges, from itself (D52): the sql edge to the API's
-database and an http edge to the server of each API its API calls. A job
+database, an http edge to the server of each API its API calls, and a
+bucket edge to each bucket its API lists. A job
 of an API that a declared server serves with the API it calls still
 calls over HTTP, with a credential, since it runs in a process of its
 own.
 
-`calls` is the one wiring fact a person writes, because no schema says that
-one API's implementation calls another API. It sits in the API service's
-config next to `authDb`, because both describe what the implementation
-needs, and the implementation belongs to the API (section 8.5):
+`calls` is the one wiring fact between APIs a person writes, because no
+schema says that one API's implementation calls another API. It sits in
+the API service's config next to `authDb`, because both describe what the
+implementation needs, and the implementation belongs to the API (section
+8.5). `buckets` sits beside it, for the same reason: the Bucket services
+the implementation keeps objects in (section 8.9):
 
 ```ts
 // schemas/services/shop-orders/schema.config.ts
@@ -154,6 +159,12 @@ need nothing of the callee.
 - A cycle of `dependencies` and `authDb` still cannot build, and its error
   names each edge (`a depends on b, b authenticates against a`).
 
+`buckets` is no build-order edge. A Bucket service builds nothing, so the
+build plan checks each handle's kind, and `build --with-deps` builds the
+bucket with its API, but no step waits for it. A server that serves two
+APIs listing one bucket has one bucket edge to it, as it has one http edge
+to an API both call.
+
 Building is not deploying: two servers that call each other still have no
 callee-first rollout (section 5.3), and resolution refuses them
 (`call-cycle`, section 6.10) unless one server serves both APIs.
@@ -176,6 +187,9 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a service field per http edge. It holds the callee's base URL, the
   source of the service credential and the headers that carry it (section
   9.2);
+- a bucket field per bucket edge. It holds the bucket's name and, for a
+  bucket an emulator serves, the emulator's endpoint, with no credential
+  (D54, section 8.9);
 - a callers field per served API with a service clause, `<API>_CALLERS`
   (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
   name. It holds what the server's `ServiceAuthenticator` checks: the
@@ -186,17 +200,17 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
 
-The Go loader has the first two. The API package's `EnvConfig` embeds the
-`@envVars` type and adds a field per edge, a `stackconfig.Database` or a
-`stackconfig.Service` from the Go HTTP runtime, which `LoadEnvConfig`
-reads. `values-schema.json` lists each derived field in
+The Go loader has the first three. The API package's `EnvConfig` embeds
+the `@envVars` type and adds a field per edge, a `stackconfig.Database`, a
+`stackconfig.Service` or a `stackconfig.Bucket` from the Go HTTP runtime,
+which `LoadEnvConfig` reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
 that the platform sets, not a deployment's values. The callers field is
 in neither Go's `EnvConfig` nor `values-schema.json`, since its variables
 follow the environment's edges: the generated entrypoint reads it with
 `stackconfig.LoadCallers` (section 8.1). The TypeScript API package's
-`EnvConfig` holds all three, read through the TypeScript HTTP runtime's
+`EnvConfig` holds all four, read through the TypeScript HTTP runtime's
 readers (section 8.6). The Rust loader reads no derived field yet (section
 12).
 
@@ -209,6 +223,7 @@ connector's value against it and refuses one that breaks it with a
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
 | http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; and an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place. It holds no credential: on gcp the workload's own account reaches the bucket (D54) |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 
 A member holds a string or a reference to an output or a parameter. A
@@ -221,7 +236,7 @@ In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
 with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of objects, or an empty
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`, `SHOP_MEDIA_BUCKET_NAME`). A list of objects, or an empty
 list, is a variable that holds the list's length, and each object's
 members follow the list's name and the object's index
 (`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`). A
@@ -236,11 +251,12 @@ member of it could come from a secret store.
 
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). The
-`[derived_fields]` table holds a template per edge kind, `database` and
-`service`, in which `{SERVICE}` is the DB or called API service's name in
-upper snake case. They default to `{SERVICE}_DATABASE` and
-`{SERVICE}_SERVICE`. envgen and the resolver (`stack.Input.FieldNames`)
-name the fields by the same templates.
+`[derived_fields]` table holds a template per edge kind, `database`,
+`service` and `bucket`, in which `{SERVICE}` is the DB, called API or
+Bucket service's name in upper snake case. They default to
+`{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and `{SERVICE}_BUCKET`. envgen
+and the resolver (`stack.Input.FieldNames`) name the fields by the same
+templates.
 
 A server's own `@envVars` type holds only the application's settings. The
 loader refuses an `@envVars` field whose name collides with a derived one:
@@ -501,7 +517,9 @@ line that holds it.
   an API without a TypeScript `@envVars` class, and `service()` infers the
   kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
-  so tsc refuses a DB handle there. A third parameter, `J`, names an API's
+  so tsc refuses a DB handle there, and `buckets` takes
+  `ServiceHandle<"Bucket">`, which a Bucket service's sentinel gives
+  (D54). A third parameter, `J`, names an API's
   jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
   "ShipOrders">`, with `unknown` for the config type of an API without
   one. It defaults to `string`, any job, and the sweep keeps it as it
@@ -531,6 +549,8 @@ line that holds it.
     takes the target's `job` settings, a `schedule`, a `timeZone` and
     `enabled`, and an `env` typed from the handle's config type (D52);
   - a DB handle takes the target's `database` settings and no `env`;
+  - a Bucket handle takes the target's `bucket` settings and no `env`
+    (D54);
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
     serves;
@@ -1538,20 +1558,24 @@ runs an environment on the `local` target (`internal/stack/local`):
    then stays in the foreground until Ctrl-C or until a server exits,
    running each job on its schedule meanwhile (section 8.7). The summary it
    prints names each server's URL and when each job runs.
-4. It stops the servers, callers first, then the container, which keeps
-   its data for the next run. `--remove-database` removes the container
-   and its data instead.
+4. It stops the servers, callers first, then the containers, which keep
+   their data for the next run: the databases, and the buckets' objects.
+   `--remove-data` removes the containers and their data instead;
+   `--remove-database`, its name before the storage emulator joined
+   Postgres, does the same.
 
 | Stack concept | local |
 | --- | --- |
 | database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
+| bucket | one fake-gcs-server container per environment beside Postgres's, `superschematic-<stack>-<environment>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
+| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
-| port | a server's `port` setting and the `postgresPort` value, else a hash of the stack, the environment and the server: 20000 to 22767 for a server and 30000 to 32767 for Postgres, the same from run to run |
+| port | a server's `port` setting and the `postgresPort` and `storagePort` values, else a hash of the stack, the environment and the server: 20000 to 22767 for a server, 23000 to 25767 for the storage emulator and 30000 to 32767 for Postgres, the same from run to run |
 
 `<schemas-root>/.superschematic` holds what belongs to one machine: each
 local environment's secrets file and the key pairs of its edges. It
@@ -1562,7 +1586,11 @@ which the provisioner reads when it starts the caller.
 
 The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
-migrations, servers and jobs it runs. Beside it are the models `stack
+buckets, migrations, servers and jobs it runs. A container may give its
+image a command and arguments, and says how the provisioner knows it is
+ready beside its published port taking connections: a command `docker
+exec` runs inside it (Postgres's `pg_isready`), or a path it answers 200
+on (the emulator's list of buckets). Beside it are the models `stack
 dev` writes for it (`models/<service>.json`), the plans it applies
 (`migrations/<service>.plan.json`) and the Go servers' and jobs' binaries
 it builds (`bin/`). A TypeScript server has no binary: the provisioner
@@ -1580,7 +1608,8 @@ callers first, and SIGKILL ten seconds later.
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
-on one port (`local-distinct-ports`). The platform runs Go and TypeScript
+on one port (`local-distinct-ports`), which names each container by its
+name. The platform runs Go and TypeScript
 servers; a Rust server, which has no entrypoint yet, does not resolve
 (`unrealizable`).
 
@@ -2120,38 +2149,84 @@ its `calls`:
 
 ```ts
 // schemas/services/shop-media/schema.config.ts
-export default defineConfig({ name: "shop-media", kind: SchemaKind.Bucket });
+export default defineConfig({ name: "shop-media", kind: SchemaKind.Bucket, outputs: {} });
 
 // schemas/services/shop-api/schema.config.ts
-export default defineConfig({ name: "shop-api", kind: SchemaKind.API, buckets: [ShopMedia], ... });
+export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: ShopDb, buckets: [ShopMedia], ... });
 ```
 
-- **Deployable.** Each Bucket service in the stack is a deployable of
-  kind `bucket`. An API's server, jobs and workers each get a `bucket`
-  edge to every bucket the API lists.
-- **Derived value.** A bucket edge derives a field holding the bucket's
-  name and how to reach it. On gcp that is the bucket alone, since the
-  workload's account reaches it. Locally it adds the emulator's endpoint.
-  The runtimes read it as they read a database's.
-- **Code.** `Deps` gains a `Bucket` per bucket the API lists: a
-  provider-neutral interface in the Go and TypeScript runtimes to put,
-  get, delete and list objects, and to sign a URL for one. The GCS
-  implementation reads `STORAGE_EMULATOR_HOST`, so it reaches the local
-  emulator too. Only a server, job or worker some environment places on a
-  provider links that provider's client, as Cloud SQL's connector is
-  linked (D30, amended).
+- **Kind.** A Bucket service's config is all it has: its name, its kind
+  and an empty `outputs`. It declares nothing in schema files, which the
+  kind refuses, and generates nothing, but it has a sentinel, which the
+  configs that list it import. A Bucket config that sets `public`,
+  `authDb`, `dependencies` or an output is refused: a bucket is private,
+  names no service, and takes what differs per environment as its
+  platform's settings. `buckets` is valid on an API's config only, each
+  entry a Bucket service's handle named once, and the IR records it as
+  `Schema.Buckets`. The build plan checks each handle's kind, and `build
+  --with-deps` builds the bucket with its API, but no build step waits on
+  it.
+- **Deployable.** Each Bucket service the stack reaches through an API's
+  `buckets` is a deployable of kind `bucket`, named after its service,
+  which a settings element names by its handle (`{ of: ShopMedia,
+  versioning: true }`). It takes no `env`, is never exposed, and its
+  resources land in the infrastructure step. An API's server and jobs
+  each get a `bucket` edge to every bucket the API lists, and so will its
+  workers (D53). A server's buckets are the union of its APIs'
+  (`ResolvedDeployable.Buckets`), so a server that serves two APIs
+  listing one bucket has one edge to it and one field.
+- **Derived value.** A bucket edge derives an `ir.BucketConnection`:
+  `name`, the bucket's name with its provider, and `endpoint`, the base
+  URL of an emulator that serves the provider's API in its place, set
+  locally and nowhere else. It holds no credential. The field is
+  `{SERVICE}_BUCKET` (`[derived_fields] bucket`), its variables
+  `SHOP_MEDIA_BUCKET_NAME` and `SHOP_MEDIA_BUCKET_ENDPOINT`, which Go's
+  `stackconfig.LoadBucket` and TypeScript's `loadBucket` read, held to one
+  encoding by the shared vectors (D51).
+- **Code.** `Deps` gains a field per bucket the API lists, of the HTTP
+  runtime's provider-neutral type: Go's `bucket.Bucket`
+  (`runtime/http/go/bucket`), TypeScript's `Bucket`. It puts an object
+  from a stream, gets one as a stream with its metadata, deletes one,
+  lists a page of the objects under a prefix with a token for the next,
+  and signs a URL that lets its holder GET or PUT one object, with no
+  other credential, for up to seven days, a PUT with the content type the
+  signature names. A missing object is `bucket.ErrNotFound`, or
+  `ObjectNotFoundError`.
+- **GCS.** The implementation is GCS's, which reaches the local emulator
+  too. The entrypoint of a Go server or job whose APIs list a bucket gets
+  `buckets.go`, written beside `main.go` as `cloudsql.go` is, and its
+  `go.mod` requires `cloud.google.com/go/storage`; one whose APIs list no
+  bucket links nothing of Google's. Every bucket connection is GCS's
+  today, gcp's and the local emulator's, so the build decides by the
+  bucket alone, where Cloud SQL's connector is decided per environment.
+  A TypeScript server opens each bucket with `openBucket` from the HTTP
+  runtime's `./gcs` entry, whose `@google-cloud/storage` is an optional
+  peer, and its `package.json` depends on it only with a bucket. A
+  process opens each bucket once, for every API that lists it, and one
+  client per endpoint. A connection with an endpoint, or a process with
+  `STORAGE_EMULATOR_HOST` set, reaches an emulator with no credential; on
+  GCS the client takes the application default credentials, on Cloud Run
+  the workload's own account.
 - **Private.** Buckets are private. A browser uploads or downloads an
   object directly through a signed URL, which also avoids Cloud Run's
-  32 MiB request limit. On gcp, signing goes through IAM's `signBlob` as
-  the workload's own account.
+  32 MiB request limit. A signed URL is a V4 one. On gcp, the client signs
+  it as the workload's own account through IAM's `signBlob`, which needs
+  the account to hold `roles/iam.serviceAccountTokenCreator` on itself.
+  Against an emulator, the runtime signs a V4 URL for the emulator's host
+  with an RSA key the process generates once, which nothing checks:
+  fake-gcs-server takes a PUT at an object's path only when it carries a
+  V4 signature's parameters, and checks no signature.
 - **Local.** `stack dev` runs fake-gcs-server in a container beside
-  Postgres, one per environment, with a bucket per Bucket service.
+  Postgres, one per environment, with a bucket per Bucket service
+  (section 8.3). The container keeps its objects between runs, and
+  `--remove-data` removes them with it.
 - **gcp.** A bucket is a `gcp:storage/bucket:Bucket` with uniform access
   and public access prevention. Its name starts with the project, since
   bucket names are global. The connector grants the workload's account
   `roles/storage.objectUser` on it, and the right to sign as itself. A
   member of a parameterized environment gets a bucket of its own, which
-  its destroy empties.
+  its destroy empties. Not built yet: until it is, a stack with a bucket
+  does not resolve on gcp.
 
 ### 8.10 Static sites
 

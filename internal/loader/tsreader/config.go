@@ -284,6 +284,9 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 	if cfg.Calls, err = handleList(obj, "calls", at); err != nil {
 		return nil, err
 	}
+	if cfg.Buckets, err = handleList(obj, "buckets", at); err != nil {
+		return nil, err
+	}
 	if outputs, ok := obj["outputs"].(map[string]any); ok {
 		cfg.Outputs = outputs
 	}

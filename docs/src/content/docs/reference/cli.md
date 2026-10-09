@@ -535,9 +535,9 @@ design is section 8.3 of
    prints with its name in front. A job's run never stops the environment.
 
 Dev stays in the foreground until Ctrl-C or until a server exits, then
-stops the servers, callers first, and the container, which keeps its data
-for the next run. `--remove-database` removes the container and its data
-instead.
+stops the servers, callers first, and the containers, which keep their
+data for the next run: the databases, and the buckets' objects.
+`--remove-data` removes the containers and their data instead.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -553,25 +553,25 @@ Docker and Go.
 
 ```
 superschematic stack dev ./schemas/services/shop-stack
-superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-database
+superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-data
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-database` | false | on exit, remove the Postgres container and its data instead of stopping it |
+| `--remove-data` | false | on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
-A local environment sets the container's image and host port with its
-values, and a server's port with its settings; a port it leaves out comes
-from a hash of the stack, the environment and the server, so it stays the
-same from run to run:
+A local environment sets each container's image and host port with its
+values, Postgres's and the storage emulator's, and a server's port with
+its settings; a port it leaves out comes from a hash of the stack, the
+environment and the server, so it stays the same from run to run:
 
 ```ts
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432 },
+  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432, storagePort: 54443 },
   settings: [{ of: ShopApi, port: 8080 }],
 })
 export abstract class Dev {}

@@ -7,19 +7,23 @@
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
 // Ed25519 key (D37), and gives the callee the edge's public key for its
-// callers field.
+// callers field. Every bucket deployable shares one storage emulator,
+// fake-gcs-server, in a container of its own, with a bucket per Bucket
+// service, and a bucket edge derives the bucket's name and the emulator's
+// endpoint (D54).
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
-// vocabulary is the core's own, the `local` provider's four types
-// (TypeContainer, TypeDatabase, TypeKeyPair, TypeProcess), not a Pulumi
+// vocabulary is the core's own, the `local` provider's types
+// (TypeContainer, TypeDatabase, TypeKeyPair, TypeProcess, TypeJob,
+// TypeBucket), not a Pulumi
 // package's: no published provider schema describes a local process, and
 // nothing but the local provisioner applies them (D30, amended: the local
 // target).
 //
 // The platforms and connectors are pure. Provisioner applies their graph:
 // it runs Docker, the migration runner, `go build`, `bun install` and the
-// servers.
+// servers, and creates each bucket through the emulator's API.
 package local
 
 import (
@@ -42,6 +46,10 @@ const (
 	DatabasePlatform = "local.postgres"
 	JobPlatform      = "local.job"
 
+	// BucketPlatform keeps a bucket on the environment's storage emulator,
+	// fake-gcs-server, which speaks GCS's API (D54).
+	BucketPlatform = "local.gcs"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -50,6 +58,11 @@ const (
 	HTTPConnector    = "local.process-process"
 	JobSQLConnector  = "local.job-postgres"
 	JobHTTPConnector = "local.job-process"
+
+	// BucketConnector and JobBucketConnector connect a process and a job
+	// to a bucket on the storage emulator (D54).
+	BucketConnector    = "local.process-gcs"
+	JobBucketConnector = "local.job-gcs"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -63,14 +76,17 @@ const (
 	// target runs one copy of each environment.
 	PolicyNoParameters = "local-no-parameters"
 
-	// PolicyDistinctPorts refuses two processes, or a process and the
-	// Postgres container, that listen on one port.
+	// PolicyDistinctPorts refuses two processes, a process and a
+	// container, or two containers, that listen on one port.
 	PolicyDistinctPorts = "local-distinct-ports"
 )
 
 // The resource types the target's platforms emit: the `local` provider's.
 const (
-	// TypeContainer is a Docker container: the environment's Postgres.
+	// TypeContainer is a Docker container: the environment's Postgres, and
+	// its storage emulator (D54). It may give the image a command and its
+	// arguments, and says how the provisioner knows it is ready: a command
+	// run inside it, or a path it answers over HTTP.
 	TypeContainer = "local:docker/container:Container"
 
 	// TypeDatabase is a database on a Postgres container.
@@ -90,6 +106,10 @@ const (
 	// TypeJob is a job built from its entrypoint module, which the
 	// provisioner runs on its schedule while the environment runs (D52).
 	TypeJob = "local:process/job:Job"
+
+	// TypeBucket is a bucket on the environment's storage emulator, which
+	// the provisioner creates through the emulator's JSON API (D54).
+	TypeBucket = "local:storage/bucket:Bucket"
 )
 
 // The languages of a process, as its node's language property names them:
@@ -104,7 +124,7 @@ const (
 	LanguageTypeScript = "typescript"
 )
 
-// Register adds the local target, its three platforms and four connectors,
+// Register adds the local target, its four platforms and six connectors,
 // the schema of each resource type they emit, and its provisioner. The
 // provisioner is a new Provisioner with its defaults.
 func Register(r *registry.Registry) error {
@@ -134,6 +154,13 @@ func Register(r *registry.Registry) error {
 			AddressOf: databaseAddress,
 			Lower:     lowerDatabase,
 		},
+		{
+			Name:      BucketPlatform,
+			Kind:      ir.DeployableBucket,
+			NameOf:    bucketDeployableName,
+			AddressOf: bucketAddress,
+			Lower:     lowerBucket,
+		},
 	} {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
@@ -144,6 +171,8 @@ func Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: BucketConnector, Edge: ir.EdgeBucket, From: ServerPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: JobBucketConnector, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -162,6 +191,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableServer:   ServerPlatform,
 			ir.DeployableDatabase: DatabasePlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableBucket:   BucketPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -175,12 +205,15 @@ func Register(r *registry.Registry) error {
 }
 
 // targetValues is the schema of a local environment's values: the
-// Postgres image and the host port its container publishes.
+// Postgres image and the host port its container publishes, and the
+// storage emulator's (D54).
 const targetValues = `{
   "type": "object",
   "properties": {
     "postgresImage": {"type": "string", "minLength": 1},
-    "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "storageImage": {"type": "string", "minLength": 1},
+    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`
@@ -220,7 +253,13 @@ var resourceTypes = map[string]string{
 	      "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
 	      "additionalProperties": false
 	    }},
-	    "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+	    "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+	    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+	    "args": {"type": "array", "items": {"type": "string"}},
+	    "readiness": {"oneOf": [
+	      {"type": "object", "required": ["exec"], "properties": {"exec": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}, "additionalProperties": false},
+	      {"type": "object", "required": ["http"], "properties": {"http": {"type": "string", "pattern": "^/"}}, "additionalProperties": false}
+	    ]}
 	  },
 	  "additionalProperties": false
 	}`,
@@ -260,6 +299,17 @@ var resourceTypes = map[string]string{
 	      "properties": {"name": {"type": "string", "minLength": 1}, "value": {}, "secret": {"type": "string", "minLength": 1}},
 	      "additionalProperties": false
 	    }}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeBucket: `{
+	  "type": "object",
+	  "required": ["name", "service", "container", "endpoint"],
+	  "properties": {
+	    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,61}[a-z0-9]$"},
+	    "service": {"type": "string", "minLength": 1},
+	    "container": {"type": "string", "minLength": 1},
+	    "endpoint": {"type": "string", "pattern": "^https?://"}
 	  },
 	  "additionalProperties": false
 	}`,

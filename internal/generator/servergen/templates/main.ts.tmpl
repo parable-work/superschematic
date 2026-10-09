@@ -26,6 +26,9 @@ import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage 
 import { connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
 {{- end }}
+{{- if .Buckets }}
+import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
+{{- end }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
@@ -104,6 +107,14 @@ async function main(): Promise<void> {
   const {{ .Var }} = {{ .Constructor }}({{ .From }});
 {{- end }}
 {{- end }}
+{{- if .Buckets }}
+
+  // One handle per bucket, shared by every API that lists it, on GCS or on
+  // the emulator its connection names (D54).
+{{- range .Buckets }}
+  const {{ .Var }} = openBucket({{ .From }});
+{{- end }}
+{{- end }}
 
   const app = new Hono();
   let draining = false;
@@ -139,6 +150,9 @@ async function main(): Promise<void> {
 {{- end }}
 {{- range .Calls }}
     {{ .Field }}: {{ .Client.Var }},
+{{- end }}
+{{- range .Buckets }}
+    {{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };

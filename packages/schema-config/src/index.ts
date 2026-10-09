@@ -2,13 +2,16 @@
  * The kinds the core compiler registers. Closed: an extension adds a kind by
  * registering it with superschematic, not by extending this enum. A Stack
  * service declares what runs where over the others (`@superschematic/stack`)
- * and is named by none, so it has no sentinel.
+ * and is named by none, so it has no sentinel. A Bucket service is private
+ * object storage that APIs list in their `buckets` (D54): its config is all
+ * it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
  */
 export enum SchemaKind {
   DB = "DB",
   API = "API",
   General = "General",
-  Stack = "Stack"
+  Stack = "Stack",
+  Bucket = "Bucket"
 }
 
 /**
@@ -154,12 +157,16 @@ export type SchemaConfig = {
    * The API services this API's implementation calls. Only an API service sets it, and each entry is an API service's handle. Each callee is built before its caller.
    */
   readonly calls?: readonly ServiceHandle<"API">[];
+  /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry is a Bucket service's handle.
+   */
+  readonly buckets?: readonly ServiceHandle<"Bucket">[];
   readonly outputs: SchemaOutputs;
 };
 
 /**
- * A service reference in the JSON/YAML config forms, in dependencies and
- * calls. The TypeScript form builds ServiceHandle sentinels with the
+ * A service reference in the JSON/YAML config forms, in dependencies,
+ * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -188,6 +195,10 @@ export type SchemaConfigDocument = {
    * The API services this API's implementation calls. Only an API service sets it, and each entry names an API service. Each callee is built before its caller.
    */
   readonly calls?: readonly ServiceDependencyRef[];
+  /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry names a Bucket service.
+   */
+  readonly buckets?: readonly ServiceDependencyRef[];
   readonly outputs: SchemaOutputsDocument;
 };
 

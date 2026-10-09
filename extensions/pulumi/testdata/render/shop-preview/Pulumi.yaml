@@ -148,6 +148,8 @@ resources:
           value: ${parent-stack.outputs["shop-db.instance.connectionName"]}
         - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
           value: ${shop-api-account.email}
+        - name: SHOP_MEDIA_BUCKET_NAME
+          value: ${shop-media-bucket.name}
         - name: STRIPE_KEY
           secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
       image: shop-api
@@ -159,6 +161,7 @@ resources:
         - ${parent-stack}
         - ${shop-api-account}
         - ${shop-db-database-shop-db}
+        - ${shop-media-bucket}
   # phase infrastructure; owners sql:shop-api->shop-db
   shop-api-sql-shop-db:
     name: shop-api.sql.shop-db
@@ -171,6 +174,18 @@ resources:
       dependsOn:
         - ${shop-api-account}
         - ${parent-stack}
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-storage-shop-media:
+    name: shop-api.storage.shop-media
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${shop-api-account.email}
+      resource: ${shop-media-bucket.id}
+      role: storage.objectUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-media-bucket}
   # phase infrastructure; owners shop-db
   shop-db-database-shop-db:
     name: shop-db.database.shop-db
@@ -181,6 +196,15 @@ resources:
     options:
       dependsOn:
         - ${parent-stack}
+  # phase infrastructure; owners shop-media
+  shop-media-bucket:
+    name: shop-media.bucket
+    type: fake:storage/bucket:Bucket
+    properties:
+      forceDestroy: true
+      location: us-east1
+      name: acme-staging-shop-stack-shop-media-${pr}
+      public: false
   # phase infrastructure; owners shop-orders-ship-orders
   shop-orders-ship-orders-account:
     name: shop-orders-ship-orders.account
@@ -277,11 +301,14 @@ outputs:
   shop-api.service.id: ${shop-api-service.id}
   shop-api.service.url: ${shop-api-service.url}
   shop-api.sql.shop-db.id: ${shop-api-sql-shop-db.id}
+  shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
   shop-db.instance.connectionName: ${parent-stack.outputs["shop-db.instance.connectionName"]}
   shop-db.instance.id: ${parent-stack.outputs["shop-db.instance.id"]}
   shop-db.instance.name: ${parent-stack.outputs["shop-db.instance.name"]}
+  shop-media.bucket.id: ${shop-media-bucket.id}
+  shop-media.bucket.name: ${shop-media-bucket.name}
   shop-orders-ship-orders.account.email: ${shop-orders-ship-orders-account.email}
   shop-orders-ship-orders.account.id: ${shop-orders-ship-orders-account.id}
   shop-orders-ship-orders.invokes.shop-api.id: ${shop-orders-ship-orders-invokes-shop-api.id}

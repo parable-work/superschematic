@@ -43,7 +43,7 @@ func jobSettings(s *ir.Stack, env string) *ir.DeployableSettings {
 // job's account, which may run that job alone; and the connectors from
 // the job platform, which name the job's account.
 func TestJobPlatform(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
 	d := env.Deployable(shipOrders)
 	if d.Platform != gcp.CloudRunJob || d.Job.Schedule != "0 * * * *" || d.Job.TimeZone != "America/New_York" {
 		t.Fatalf("the job is %s on %s, run %+v", d.Name, d.Platform, d.Job)
@@ -112,7 +112,7 @@ func TestJobSchedule(t *testing.T) {
 	s := shop()
 	off := false
 	jobSettings(s, "Production").Enabled = &off
-	env := resolve(t, reg, s, stacktest.AcmeShop(), "Production")
+	env := resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Production")
 	if d := env.Deployable(shipOrders); d.Job.Schedule != "" {
 		t.Errorf("Production runs %q", d.Job.Schedule)
 	}
@@ -121,13 +121,13 @@ func TestJobSchedule(t *testing.T) {
 		t.Errorf("a job with its schedule off lowers to %v", ownedBy(env, shipOrders))
 	}
 
-	if env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Preview"); env.Resources.Resource(shipOrders+".schedule") != nil {
+	if env := resolve(t, reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview"); env.Resources.Resource(shipOrders+".schedule") != nil {
 		t.Error("a preview member runs a schedule it did not turn on")
 	}
 	s = shop()
 	on := true
 	jobSettings(s, "Preview").Enabled = &on
-	env = resolve(t, reg, s, stacktest.AcmeShop(), "Preview")
+	env = resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
 	schedule := node(t, env, shipOrders+".schedule").Properties
 	wantJSON(t, "the member's schedule", map[string]any{"name": schedule["name"], "schedule": schedule["schedule"], "timeZone": schedule["timeZone"]},
 		`{"name":{"$concat":["shop-orders-ship-orders-pr",{"$parameter":"pr"}]},"schedule":"0 * * * *","timeZone":"America/New_York"}`)
@@ -135,7 +135,7 @@ func TestJobSchedule(t *testing.T) {
 		t.Error("the member's grant is inherited from Staging")
 	}
 
-	prod := resolve(t, reg, shop(), stacktest.AcmeShop(), "Production")
+	prod := resolve(t, reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Production")
 	if p := node(t, prod, shipOrders+".schedule").Properties; p["schedule"] != "*/15 * * * *" || p["timeZone"] != "UTC" {
 		t.Errorf("Production runs %v in %v, want the decorator's schedule in UTC", p["schedule"], p["timeZone"])
 	}
@@ -154,7 +154,7 @@ func TestJobRefusals(t *testing.T) {
 		}
 	}
 	withJob := func(job ir.Job) []stack.Service {
-		services := stacktest.AcmeShop()
+		services := stacktest.WithoutBuckets(stacktest.AcmeShop())
 		for i := range services {
 			if services[i].Name == "shop-orders" {
 				services[i].Jobs = append(services[i].Jobs, job)
@@ -186,7 +186,7 @@ func newJobRunFixture(t *testing.T) (*deployFixture, stack.RunJobOptions) {
 	f := newDeployFixture(t, true)
 	f.cloud.log = f.prov
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
 	o := stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()}
 	if _, err := stack.Deploy(context.Background(), stack.DeployOptions{Options: o, Images: shopImages("acme-staging", 1), Planner: shopPlanner}); err != nil {
 		t.Fatal(err)
@@ -295,7 +295,7 @@ func TestRunJobOfAMember(t *testing.T) {
 	f := newDeployFixture(t, true)
 	f.cloud.log = f.prov
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
+	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
 	run := registry.Run{Environment: env, Parameters: map[string]string{"pr": "7"}}
 	image := shopImages("acme-staging", 1)[shipOrders]
 	f.cloud.graphJobs["acme-staging/us-east1/shop-orders-ship-orders-pr7"] = image
@@ -312,7 +312,7 @@ func TestRunJobOfAMember(t *testing.T) {
 // runs no schedule needs no Cloud Scheduler.
 func TestBootstrapEnablesSchedulerForASchedule(t *testing.T) {
 	f := newDeployFixture(t, false)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
+	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
 	target, _ := f.reg.Target(gcp.Target)
 	req := registry.BootstrapRequest{Environment: env, Provisioner: f.prov, Dir: t.TempDir()}
 	if _, err := target.Bootstrap.Bootstrap(context.Background(), req); err != nil {

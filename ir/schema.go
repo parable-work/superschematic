@@ -24,6 +24,14 @@ const (
 	// it references (docs/stack-model.md, section 4.1). Its schema declares
 	// a [Stack]; it generates each environment's environment.json.
 	SchemaKindStack SchemaKind = "Stack"
+
+	// SchemaKindBucket represents a bucket: private object storage that the
+	// APIs listing it in their config's buckets reach through a
+	// provider-neutral interface (docs/stack-model.md, section 8.9, D54).
+	// Its config is all it has: it declares nothing in schema files and
+	// generates nothing, and each Bucket service a stack reaches is a
+	// deployable of kind bucket.
+	SchemaKindBucket SchemaKind = "Bucket"
 )
 
 // String returns the string representation of a SchemaKind.
@@ -70,6 +78,11 @@ type Schema struct {
 	// Calls lists the API services an API's implementation calls: the
 	// config's calls (docs/stack-model.md, section 3.3).
 	Calls []ServiceRef `json:"calls,omitempty" yaml:"calls,omitempty"`
+
+	// Buckets lists the Bucket services an API's implementation uses: the
+	// config's buckets (D54). Each gives the API's server and jobs a bucket
+	// edge, and its Deps a Bucket.
+	Buckets []ServiceRef `json:"buckets,omitempty" yaml:"buckets,omitempty"`
 
 	// References lists the services the schema's decorator arguments name
 	// by a service handle, other than as identities: a stack's `deploy`,

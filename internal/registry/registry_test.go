@@ -24,7 +24,7 @@ func (e fakeExtension) Register(r *Registry) error { return e.register(r) }
 func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 	reg := New(naming.Naming{})
 
-	wantKinds := []string{"API", "DB", "General", "Stack"}
+	wantKinds := []string{"API", "Bucket", "DB", "General", "Stack"}
 	if got := reg.Kinds(); !reflect.DeepEqual(got, wantKinds) {
 		t.Fatalf("Kinds() = %v, want %v", got, wantKinds)
 	}
@@ -34,6 +34,7 @@ func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 		"API":     {"types", "api", "sdks"},
 		"General": {"types", "envConfig"},
 		"Stack":   {"stack"},
+		"Bucket":  nil,
 	}
 	for kind, want := range wantPipelines {
 		spec, ok := reg.Kind(kind)

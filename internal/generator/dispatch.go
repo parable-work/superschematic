@@ -632,8 +632,8 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its
 // config and logger (D51): a pg Pool for the API's database, its authDb or
-// its one DB-kind dependency, and a client of each calls entry's
-// TypeScript SDK. A callee whose config the build has must generate that
+// its one DB-kind dependency, a client of each calls entry's TypeScript
+// SDK, and the HTTP runtime's Bucket per buckets entry (D54). A callee whose config the build has must generate that
 // SDK; the database needs nothing generated, since the pool is pg's.
 func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
@@ -658,6 +658,9 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 			Package: r.Options.Naming.NpmSDKPackage(call.Name),
 			Client:  sdkgen.ClassName(call.Name),
 		})
+	}
+	for _, b := range r.Schema.Buckets {
+		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
 	}
 	return deps, nil
 }
@@ -899,8 +902,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 
 // goDeps returns what the Go server's Deps holds beside its config and
 // logger (docs/stack-model.md, section 8.5): the ORM of the API's database,
-// its authDb or its one DB-kind dependency, and a Go SDK client per calls
-// entry. It also returns their schemas, whose Go types modules the server
+// its authDb or its one DB-kind dependency, a Go SDK client per calls
+// entry, and a bucket per buckets entry, which needs nothing generated
+// (D54). It also returns their schemas, whose Go types modules the server
 // reaches through the ORM and the SDKs. A dependency whose config the
 // build has must generate what Deps imports: the database its Go types,
 // and so its ORM, and each callee its Go SDK.
@@ -955,6 +959,9 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 			Alias:   toGoPackageName(call.Name) + "sdk",
 			Client:  gosdkgen.ClientTypeName(call.Name),
 		})
+	}
+	for _, b := range r.Schema.Buckets {
+		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
 	}
 	return deps, roots, nil
 }

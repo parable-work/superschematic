@@ -50,6 +50,10 @@ type Service struct {
 	// server's code calls.
 	Calls []ir.ServiceRef
 
+	// Buckets are the handles in an API service's `buckets`: the Bucket
+	// services its server's and jobs' code use (D54).
+	Buckets []ir.ServiceRef
+
 	// Language is an API service's `outputs.api.language`
 	// (registry.APILanguageGo, ...). Empty means Go.
 	Language string

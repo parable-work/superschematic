@@ -1914,6 +1914,7 @@
           "default": "",
           "enum": [
             "API",
+            "Bucket",
             "DB",
             "General",
             "Stack"
@@ -3383,6 +3384,7 @@
         "kind": {
           "enum": [
             "API",
+            "Bucket",
             "DB",
             "General",
             "Stack"

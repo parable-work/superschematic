@@ -1,5 +1,5 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
-import { Default, Nullable } from "@superschematic/schema";
+import { Default, Nullable, Validate } from "@superschematic/schema";
 import { AutoGenerate, Relation, key, unique } from "@superschematic/db";
 
 // Timestamps every table carries.
@@ -46,6 +46,10 @@ export abstract class Product extends Auditable {
   priceCents: Generic.Int64;
 
   inStock: Default<boolean, true>;
+
+  // The name of the product's image in shop-api's bucket, shop-media,
+  // once an upload URL is handed out for it.
+  imageObject: Nullable<Validate<string, { maxLength: 1024 }>>;
 }
 
 // How many units of a product the warehouse holds.

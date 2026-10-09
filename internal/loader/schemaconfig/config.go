@@ -78,6 +78,11 @@ type SchemaConfig struct {
 	// (docs/stack-model.md, section 3.3).
 	Calls []ServiceDependency `json:"calls,omitempty" yaml:"calls,omitempty"`
 
+	// Buckets lists the Bucket services an API's implementation uses
+	// (docs/stack-model.md, section 8.9, D54). It is valid on an API config
+	// only, and each entry names a Bucket service.
+	Buckets []ServiceDependency `json:"buckets,omitempty" yaml:"buckets,omitempty"`
+
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
@@ -196,6 +201,9 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	if err := validateCalls(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateBuckets(cfg); err != nil {
+		return nil, err
+	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
 	}
@@ -225,15 +233,49 @@ func validateCalls(cfg *SchemaConfig) error {
 	return nil
 }
 
+// validateBuckets checks buckets, an API config's list of Bucket services,
+// each named once (D54), and a Bucket service's own config: its name and
+// kind are all it has, since it names no other service and generates
+// nothing.
+func validateBuckets(cfg *SchemaConfig) error {
+	if cfg.Kind == ir.SchemaKindBucket {
+		switch {
+		case cfg.AuthDB != "" || len(cfg.Dependencies) > 0:
+			return fmt.Errorf("schema config for %s sets authDb or dependencies; a %s service names no other service, and the APIs that use it list it in their buckets", cfg.Name, ir.SchemaKindBucket)
+		case cfg.Public:
+			return fmt.Errorf("schema config for %s sets public; a %s service is private, and a browser reaches an object through a signed URL", cfg.Name, ir.SchemaKindBucket)
+		case len(cfg.Outputs) > 0:
+			return fmt.Errorf("schema config for %s sets outputs; a %s service generates nothing, so its outputs are {}", cfg.Name, ir.SchemaKindBucket)
+		}
+	}
+	if len(cfg.Buckets) > 0 && cfg.Kind != ir.SchemaKindAPI {
+		return fmt.Errorf("schema config for %s sets buckets, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	}
+	seen := make(map[string]bool, len(cfg.Buckets))
+	for _, bucket := range cfg.Buckets {
+		switch {
+		case bucket.Name == "":
+			return fmt.Errorf("schema config for %s has a buckets entry with no name", cfg.Name)
+		case bucket.Kind != ir.SchemaKindBucket:
+			return fmt.Errorf("schema config for %s lists %s in buckets, a handle of kind %q; buckets names %s services only", cfg.Name, bucket.Name, bucket.Kind, ir.SchemaKindBucket)
+		case seen[bucket.Name]:
+			return fmt.Errorf("schema config for %s lists bucket %s more than once", cfg.Name, bucket.Name)
+		}
+		seen[bucket.Name] = true
+	}
+	return nil
+}
+
 // NewSchema returns an empty schema for the configured service, holding the
-// references the config makes: its authDb, dependencies and calls. Every
-// frontend starts its schema here, so the IR records them whatever form the
-// config takes.
+// references the config makes: its authDb, dependencies, calls and
+// buckets. Every frontend starts its schema here, so the IR records them
+// whatever form the config takes.
 func (c *SchemaConfig) NewSchema() *ir.Schema {
 	schema := ir.NewSchema(c.Name, c.Kind)
 	schema.AuthDB = c.AuthDB
 	schema.Dependencies = serviceRefs(c.Dependencies)
 	schema.Calls = serviceRefs(c.Calls)
+	schema.Buckets = serviceRefs(c.Buckets)
 	return schema
 }
 

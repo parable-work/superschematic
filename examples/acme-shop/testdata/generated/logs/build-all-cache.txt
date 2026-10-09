@@ -1,4 +1,5 @@
   OK: shop-db (up to date)
+  OK: shop-media (up to date)
   OK: shop-api (up to date)
   OK: shop-common (up to date)
   OK: shop-orders (up to date)

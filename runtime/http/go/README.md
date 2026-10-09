@@ -15,7 +15,8 @@ depends on a generated type.
 | `session` | the core auth provider's runtime: session store, middleware and permission checks |
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `filterparse` | list-endpoint filter expression parsing |
-| `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
+| `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint, a bucket connection and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
+| `bucket` | the provider-neutral `Bucket` a generated `Deps` holds per bucket an API lists (D54): put, get, delete, list and signed URLs. No provider's client: the GCS implementation is generated into the entrypoint of a server whose APIs list a bucket (`buckets.go`) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path; and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 
 The generated API package keeps `Config`, `Implementations`, the route table,

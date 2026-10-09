@@ -125,7 +125,7 @@ func TestGolden(t *testing.T) {
 	s := shop()
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, stacktest.AcmeShop(), env.Name)
+			checkGolden(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), env.Name)
 		})
 	}
 }
@@ -144,8 +144,8 @@ func TestServiceAuthGolden(t *testing.T) {
 		services []stack.Service
 		envs     []string
 	}{
-		{"RequireShop", stacktest.RequireServiceShop(), []string{"Staging", "Preview"}},
-		{"AllowShop", stacktest.AllowServiceShop(), []string{"Staging"}},
+		{"RequireShop", stacktest.WithoutBuckets(stacktest.RequireServiceShop()), []string{"Staging", "Preview"}},
+		{"AllowShop", stacktest.WithoutBuckets(stacktest.AllowServiceShop()), []string{"Staging"}},
 	} {
 		s := shop()
 		s.Name = tc.stack
@@ -208,7 +208,7 @@ func checkGolden(t *testing.T, reg *registry.Registry, s *ir.Stack, services []s
 // callers Orders and shop-orders' job, whose schedule comes with it, and
 // the load balancer and records last.
 func TestDeployOrder(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
 	var order []string
 	for _, step := range env.DeployOrder {
 		s := string(step.Step)
@@ -245,7 +245,7 @@ func TestDeployOrder(t *testing.T) {
 // secret and the network from Staging, which no step of its deploy
 // applies.
 func TestPreviewInherits(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Preview")
+	env := resolve(t, assemble(t), shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
 	var inherited []string
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -279,13 +279,13 @@ func TestProjectNumber(t *testing.T) {
 	reg := assemble(t)
 	s := shop()
 	s.Environments[0].Values["projectNumber"] = "123456789012"
-	if got := resolve(t, reg, s, stacktest.AcmeShop(), "Preview").Values["projectNumber"]; got != "123456789012" {
+	if got := resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview").Values["projectNumber"]; got != "123456789012" {
 		t.Errorf("Preview's projectNumber = %v, want Staging's", got)
 	}
 	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
 		s := shop()
 		s.Environments[0].Values["projectNumber"] = bad
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Staging"})
 		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
 			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
 		}

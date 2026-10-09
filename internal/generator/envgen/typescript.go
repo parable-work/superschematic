@@ -185,6 +185,7 @@ type typeScriptEnvConfig struct {
 	Derived        []typeScriptDerivedField
 	HasDatabase    bool
 	HasService     bool
+	HasBucket      bool
 	Callers        string
 	CallersLiteral string
 }
@@ -225,6 +226,10 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 			derived.Reader, derived.Type = "loadDatabase", "Database"
 			derived.Doc = fmt.Sprintf("The connection to %s, the API's database: %s. It is read from %s_*.", field.Service, from, field.Key)
 			view.HasDatabase = true
+		} else if field.Kind == ir.EdgeBucket {
+			derived.Reader, derived.Type = "loadBucket", "BucketConnection"
+			derived.Doc = fmt.Sprintf("How the server reaches %s, a bucket the API lists. It is read from %s_*.", field.Service, field.Key)
+			view.HasBucket = true
 		} else {
 			derived.Reader, derived.Type = "loadService", "Service"
 			derived.Doc = fmt.Sprintf("The endpoint of %s, which the API calls. It is read from %s_*.", field.Service, field.Key)
