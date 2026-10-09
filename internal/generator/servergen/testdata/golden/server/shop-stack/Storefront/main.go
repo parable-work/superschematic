@@ -34,6 +34,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parable-work/superschematic/runtime/http/go/cors"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
@@ -137,6 +138,10 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of shop-orders: %w", err)
 	}
+	shopOrdersCORS, err := corsPolicy("shop-orders")
+	if err != nil {
+		return fmt.Errorf("CORS of shop-orders: %w", err)
+	}
 
 	// shop-reviews: its implementation, built from its Deps, and its routes.
 	shopReviewsLogger := logger.With(zap.String("api", "shop-reviews"))
@@ -169,6 +174,12 @@ func run(logger *zap.Logger) error {
 	// A client forwards the end user of the request a call is made for,
 	// whose token this keeps on the request's context (section 9.4).
 	handler = serviceauth.CaptureAuthorization(handler)
+	// A site's browser calls an API here from the site's origin: each API a
+	// site calls answers CORS for the origins its CORS field lists, and no
+	// other (section 8.10).
+	handler = cors.Handler(handler, []cors.API{
+		{Policy: shopOrdersCORS, Match: corsRoutes(shopOrdersRouter)},
+	})
 	return serve(ctx, stop, logger, &draining, handler)
 }
 

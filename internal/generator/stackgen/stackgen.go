@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -118,6 +119,11 @@ func Services(c registry.GenerateContext, st *ir.Stack) ([]stack.Service, error)
 			return nil, fmt.Errorf("stack %s: service %s: %w", st.Name, name, err)
 		}
 		services = append(services, svc)
+		if svc.Kind == ir.SchemaKindSite {
+			// A site reaches the APIs it calls (D55).
+			reach(svc.Calls...)
+			continue
+		}
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
 		}
@@ -166,5 +172,35 @@ func loadService(c registry.GenerateContext, name string) (stack.Service, error)
 			imported[dep] = depSchema
 		}
 	}
-	return Service(schema, outputs, imported)
+	svc, err := Service(schema, outputs, imported)
+	if err != nil {
+		return stack.Service{}, err
+	}
+	if schema.Kind == ir.SchemaKindSite {
+		if svc.Site, err = SiteOf(schema, c.Options.Naming); err != nil {
+			return stack.Service{}, err
+		}
+	}
+	return svc, nil
+}
+
+// SiteOf reads what a Site service builds and where its code is (D55): its
+// config with every default filled in, and its package at the naming
+// file's [implementation_paths] site template, relative to the repository
+// root, where the provisioners and the deploy find it.
+func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
+	cfg := ir.SiteConfig{}
+	if schema.Site != nil {
+		cfg = *schema.Site
+	}
+	if err := cfg.Check(); err != nil {
+		return nil, fmt.Errorf("site %s: %w", schema.Name, err)
+	}
+	cfg = cfg.WithDefaults()
+	return &ir.ResolvedSite{
+		Dir:      n.SiteImplementationPath(schema.Name),
+		Build:    cfg.Build,
+		Output:   cfg.Output,
+		Fallback: cfg.Fallback,
+	}, nil
 }

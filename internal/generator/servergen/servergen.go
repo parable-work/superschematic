@@ -121,6 +121,10 @@ type APIInput struct {
 
 	// Implementation is where its implementation lives.
 	Implementation Implementation
+
+	// CORS is true when a site of the stack calls the API: its server then
+	// answers CORS for the origins its CORS field lists (D55).
+	CORS bool
 }
 
 // Input is what a server's entrypoint is planned from.
@@ -292,6 +296,12 @@ type API struct {
 	Public      bool
 	Encrypted   bool
 	ServiceAuth bool
+
+	// CORS is true when a site of the stack calls the API, whose server
+	// then answers CORS for the origins its CORS field lists, with
+	// CORSMethods, the methods of its operations, sorted (D55).
+	CORS        bool
+	CORSMethods []string
 
 	// Database is the ORM Deps.DB holds, nil without one.
 	Database *Database
@@ -496,6 +506,10 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Public = o.IsPublic
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
+			if a.CORS {
+				apis[i].CORS = true
+				apis[i].CORSMethods = endpointMethods(o)
+			}
 		}
 	}
 	databases := map[string]*Database{}
@@ -800,7 +814,10 @@ func Write(s *Server, dir string) error {
 			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 		}
 	}
-	return writeServiceAuth(s, dir)
+	if err := writeServiceAuth(s, dir); err != nil {
+		return err
+	}
+	return writeCORS(s, dir)
 }
 
 // templates is every template of the package parsed into one set, so that
@@ -965,6 +982,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyServiceAuth": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.ServiceAuth })
+		},
+		"anyCORS": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })
 		},
 		"tsQuote": func(s string) string {
 			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"

@@ -118,6 +118,27 @@ func AllowServiceShop() []stack.Service {
 	return services
 }
 
+// SiteShop returns AcmeShop with the site shop-web (D55), a Site service
+// whose code at web/shop-web calls shop-api from the browser, as
+// examples/acme-shop's does, with the single-page fallback. WithSite
+// deploys it in a stack.
+func SiteShop() []stack.Service {
+	return append(AcmeShop(), stack.Service{
+		Name:  "shop-web",
+		Kind:  ir.SchemaKindSite,
+		Calls: []ir.ServiceRef{ShopAPI},
+		Site:  &ir.ResolvedSite{Dir: "web/shop-web", Build: "build", Output: "dist", Fallback: "index.html"},
+	})
+}
+
+// WithSite returns s deploying the site shop-web as well (D55), to resolve
+// over SiteShop's services. A site is always exposed, so s need not name
+// it in expose; shop-api, which it calls, must be exposed, as Shop's is.
+func WithSite(s *ir.Stack) *ir.Stack {
+	s.Deploy = append(s.Deploy, ShopWeb)
+	return s
+}
+
 // WithoutJobs returns services with no jobs: the shop for a target that
 // places no job yet, or a test about the rest of the stack.
 func WithoutJobs(services []stack.Service) []stack.Service {
@@ -149,6 +170,7 @@ var (
 	ShopDB     = ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	ShopAPI    = ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
 	ShopOrders = ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	ShopWeb    = ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}
 )
 
 // ShipOrders is shop-orders' job (D52): the warehouse's pick run, which

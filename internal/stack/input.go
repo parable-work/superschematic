@@ -47,7 +47,8 @@ type Service struct {
 	Dependencies []ir.ServiceRef
 
 	// Calls are the handles in an API service's `calls`: the APIs its
-	// server's code calls.
+	// server's code calls. A Site service's are the APIs its code calls
+	// from the browser (D55).
 	Calls []ir.ServiceRef
 
 	// Language is an API service's `outputs.api.language`
@@ -70,6 +71,11 @@ type Service struct {
 	// Jobs are an API service's jobs, its `@job` classes (D52), as
 	// ir.Schema.Jobs holds them. Each is a deployable of the stack.
 	Jobs []ir.Job
+
+	// Site is a Site service's build and where its code is, with every
+	// default filled in (D55); nil for every other kind. Its Calls are the
+	// APIs its code calls from the browser.
+	Site *ir.ResolvedSite
 }
 
 // Operation is what admits a caller to one operation of an API service.

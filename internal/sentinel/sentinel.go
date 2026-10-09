@@ -149,6 +149,10 @@ func Content(name string, kind ir.SchemaKind, n naming.Naming, configType *Confi
 	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral:
 		imports = "service, SchemaKind"
 		kindExpr = "SchemaKind." + string(kind)
+	case ir.SchemaKindSite:
+		// A site is a core kind with an enum member (D55).
+		imports = "service, SchemaKind"
+		kindExpr = "SchemaKind." + string(kind)
 	}
 	typeImport, typeArgs := "", ""
 	config := "unknown"

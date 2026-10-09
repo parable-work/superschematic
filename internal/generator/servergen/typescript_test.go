@@ -41,6 +41,11 @@ const (
 	// servers, whose Staging environment places ts-db on Cloud SQL.
 	tsCloudStack = "ts-cloud-stack"
 
+	// tsSite is the fixture's site, which ts-stack deploys and which calls
+	// ts-shop: ts-shop's server answers CORS for it (D55). It is loaded,
+	// not built.
+	tsSite = "ts-web"
+
 	// tsGoldenRoot holds the TypeScript entrypoints as the output root
 	// lays them out.
 	tsGoldenRoot = "testdata/golden/typescript"
@@ -63,7 +68,7 @@ func loadTypeScriptFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(tsOrder), tsCloudStack) {
+	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsSite) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsServicesRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -466,7 +471,13 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	edge := variables(t, "TS_PRICING_SERVICE", ir.ServiceEndpoint{URL: pricing.base, Credential: &ir.ServiceCredential{
 		Source: ir.CredentialSignedToken, Audience: "ts-pricing", Issuer: "ts-shop", Key: private,
 	}})
-	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable}, edge...)...)
+	// The site ts-web calls ts-shop from its origin, which ts-shop's CORS
+	// field lists (D55).
+	const siteOrigin = "https://ts-web.acme.dev"
+	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable, "TS_SHOP_CORS_ORIGINS=" + siteOrigin}, edge...)...)
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, shop.base, http.MethodGet, "/api/carts/tea", siteOrigin, "", http.StatusOK, siteOrigin)
 	shop.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	shop.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["ts-db"]`)
 	shop.expect(t, http.MethodGet, "/api/carts/tea", http.StatusOK, `"cents":300`, `"region":"eu"`)

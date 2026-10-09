@@ -79,6 +79,10 @@ type TypeScriptAPIInput struct {
 
 	// Implementation is where its implementation lives.
 	Implementation TypeScriptImplementation
+
+	// CORS is true when a site of the stack calls the API: its server then
+	// answers CORS for the origins its CORS field lists (D55).
+	CORS bool
 }
 
 // TypeScriptInput is what a TypeScript server's entrypoint is planned
@@ -191,6 +195,12 @@ type TypeScriptAPI struct {
 	// an operation has a service clause (D37).
 	Callers string
 
+	// CORS is the variable of the origins its CORS field lists, which
+	// loadCors reads, and CORSField that field, when a site of the stack
+	// calls it (D55); both empty otherwise.
+	CORS      string
+	CORSField string
+
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
 
@@ -272,6 +282,7 @@ var tsReserved = []string{
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
 	"server", "stopping", "shutdown", "port", "process",
+	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -332,6 +343,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		}
 		if o.HasEnvConfig {
 			api.Config = taken.take(stem + "Config")
+		}
+		if a.CORS {
+			api.CORS = taken.take(stem + "Origins")
+			api.CORSField = ir.CORSField(o.SchemaName)
 		}
 		if o.ChecksEndUsers() {
 			api.Authenticate = taken.take(stem + "Authenticate")
@@ -411,6 +426,12 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	return out
 }
 
+// AnyCORS reports whether a site of the stack calls an API the server
+// serves, which then answers CORS (D55).
+func (s *TypeScriptServer) AnyCORS() bool {
+	return slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.CORS != "" })
+}
+
 // RuntimeImports are the names main.ts imports from the HTTP runtime's
 // main entry.
 func (s *TypeScriptServer) RuntimeImports() []string {
@@ -420,6 +441,9 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if len(s.Clients) > 0 {
 		out = append(out, "serviceCredentialFor")
+	}
+	if s.AnyCORS() {
+		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")
 	}
 	if len(s.Databases) > 0 {
 		out = append(out, "type Database")

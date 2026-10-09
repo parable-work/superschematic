@@ -60,7 +60,7 @@ func TestRegisterScalarsRejectsMissingOwnerAndNilCatalog(t *testing.T) {
 
 func TestRegisterScalarsAfterFinalizeIsAnError(t *testing.T) {
 	reg := New(naming.Default())
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

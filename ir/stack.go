@@ -34,11 +34,16 @@ const (
 	// the API's database and the address of each service the API calls
 	// (D52).
 	DeployableJob DeployableKind = "job"
+
+	// DeployableSite serves one Site service's built files over HTTPS,
+	// with a config per environment, and is always exposed. Its needs are
+	// the public address of each API it calls (D55).
+	DeployableSite DeployableKind = "site"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite
 }
 
 // HasImage reports whether a deployable of kind k runs code the stack's
@@ -48,9 +53,16 @@ func (k DeployableKind) HasImage() bool {
 	return k == DeployableServer || k == DeployableJob
 }
 
+// RollsOut reports whether a deployable of kind k rolls out in the deploy
+// order's waves, after the servers it calls: a server, a job, or a site,
+// whose files a deploy publishes once the APIs it calls are up (D55).
+func (k DeployableKind) RollsOut() bool {
+	return k.HasImage() || k == DeployableSite
+}
+
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -65,11 +77,15 @@ const (
 	// EdgeHTTP runs from a server to the server that serves an API it
 	// calls, and from a job to the server of each API its API calls.
 	EdgeHTTP EdgeKind = "http"
+
+	// EdgeSite runs from a site to the server of each API it calls, which
+	// is exposed: the browser reaches the API at its public address (D55).
+	EdgeSite EdgeKind = "site"
 )
 
 // Valid reports whether k is an edge kind v1 knows.
 func (k EdgeKind) Valid() bool {
-	return k == EdgeSQL || k == EdgeHTTP
+	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite
 }
 
 // A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`
@@ -114,7 +130,8 @@ type Stack struct {
 	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
 
 	// Expose names what is reachable from outside the environment. Each
-	// must be a server.
+	// must be a server or a site; a site is exposed whether it is named
+	// here or not (D55).
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
 
 	// Deployables are the declared deployables: those that differ from the

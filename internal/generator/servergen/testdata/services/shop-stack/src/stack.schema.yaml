@@ -1,5 +1,6 @@
 # Two servers: Storefront, declared, serves shop-orders and shop-reviews;
 # shop-api, which Storefront calls, runs on a default server of its own.
+# The site shop-web calls shop-orders, so Storefront answers CORS for it.
 # Its one environment, Local, runs on the local target, whose sql edges
 # derive a connection string, so no entrypoint links the Cloud SQL
 # connector.
@@ -13,6 +14,7 @@ types:
         - { name: shop-api, kind: API }
         - { name: shop-orders, kind: API }
         - { name: shop-reviews, kind: API }
+        - { name: shop-web, kind: Site }
       expose:
         - deployable: Storefront
   Storefront:

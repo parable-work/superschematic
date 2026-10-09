@@ -379,6 +379,60 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}}}, nil
 }
 
+// siteAddress is a site's loopback URL, its origin: on the port its
+// setting names, or one derived as a server's is (D55).
+func siteAddress(ctx registry.PlatformContext) any {
+	return ServerURL(ServerPort(ctx.Environment, ctx.Deployable))
+}
+
+// siteID is the ID of a site's node.
+func siteID(deployable string) string { return deployable + ".site" }
+
+// lowerSite lowers a site to its node (D55): its package, relative to the
+// output root, the script that builds it and the directory the build
+// writes, its single-page fallback, the port its file server listens on,
+// and its config, each API it calls with the loopback URL its site edge
+// derives. The provisioner builds it once and serves it until the
+// environment stops.
+func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Site == nil {
+		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
+	}
+	apis := map[string]any{}
+	for _, b := range d.Bindings {
+		value, _ := b.Value.(map[string]any)
+		url, ok := value["url"].(string)
+		if b.Source != ir.BindingDerived || !ok {
+			return registry.Lowered{}, fmt.Errorf("site %s: binding %s holds no URL of the local target's", d.Name, b.Field)
+		}
+		apis[b.Field] = map[string]any{"url": url}
+	}
+	props := map[string]any{
+		"name":   d.ResourceName,
+		"dir":    d.Site.Dir,
+		"build":  d.Site.Build,
+		"output": d.Site.Output,
+		"port":   ServerPort(ctx.Environment, d),
+		"config": map[string]any{"apis": apis},
+	}
+	if d.Site.Fallback != "" {
+		props["fallback"] = d.Site.Fallback
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{
+		ID:         siteID(d.Name),
+		Type:       TypeSite,
+		Properties: props,
+	}}}, nil
+}
+
+// connectSite derives the public address of the server whose API a site
+// calls: on this machine, its loopback URL (D55). The edge needs no
+// resource: the server answers the site's origin through its CORS field.
+func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
+}
+
 // connectSQL derives the connection string of the edge's database on the
 // environment's Postgres container. The edge needs no resource: the
 // container trusts every connection from loopback.
@@ -476,6 +530,10 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 			if port, ok := intValue(res.Properties["port"]); ok {
 				owners[port] = append(owners[port], "server "+strings.Join(res.Owners, ", "))
 			}
+		case TypeSite:
+			if port, ok := intValue(res.Properties["port"]); ok {
+				owners[port] = append(owners[port], "site "+strings.Join(res.Owners, ", "))
+			}
 		case TypeContainer:
 			ports, _ := res.Properties["ports"].([]any)
 			for _, p := range ports {
@@ -494,7 +552,7 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	var out []string
 	for _, port := range ports {
 		if names := slices.Compact(owners[port]); len(names) > 1 {
-			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's port setting or the environment's postgresPort value", strings.Join(names, " and "), port))
+			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's or a site's port setting or the environment's postgresPort value", strings.Join(names, " and "), port))
 		}
 	}
 	return out
