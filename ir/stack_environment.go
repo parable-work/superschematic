@@ -247,6 +247,11 @@ type Binding struct {
 	// calls the API, and the field's value has no issuers.
 	Edges []string `json:"edges,omitempty"`
 
+	// IdentityOf is the API service an identity config field belongs to
+	// (IdentityConfigField, D50): a literal, the environment's env setting
+	// or else the platform's identity config, or a parameter.
+	IdentityOf string `json:"identityOf,omitempty"`
+
 	// Parameter is a parameter binding's parameter.
 	Parameter string `json:"parameter,omitempty"`
 }

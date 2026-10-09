@@ -7,13 +7,13 @@ publish = false
 # The Topcoat crate the extension writes for shop-orders, under
 # ../schemas/dist-rust, which scripts/check.sh builds with
 # `superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust`
-# (superschematic.toml's [extension.topcoat] lists shop-orders), and the
-# implementations the Rust server serves, in memory, with the SQLite ones
-# its `sqlite` feature adds.
+# (superschematic.toml's [extension.topcoat] lists shop-orders), with the
+# identity store over SQLite, and the implementations the Rust server
+# serves, in memory, with the SQLite ones its `sqlite` feature adds.
 [dependencies]
-acme-shop-orders-topcoat = { path = "../schemas/dist-rust/topcoat/shop-orders" }
+acme-shop-orders-topcoat = { path = "../schemas/dist-rust/topcoat/shop-orders", features = ["identity-sqlite"] }
 acme-shop-orders-server = { path = "../rust-server", features = ["sqlite"] }
-async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 topcoat = "0.10"
 

@@ -37,6 +37,10 @@
     "./versiongraph": {
       "types": "./versiongraph/index.ts",
       "import": "./versiongraph/index.ts"
+    }{{end}}{{if .IdentityDescriptor}},
+    "./identity": {
+      "types": "./identity.ts",
+      "import": "./identity.ts"
     }{{end}}{{if .HasEnvConfig}},
     "./config": {
       "types": "./config.ts",

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -567,6 +569,41 @@ func TestMetadataKeyPrefixDefaultsAndOverrides(t *testing.T) {
 	}
 	if (Naming{}).OrDefault().MetadataKeyPrefix != "superschematic." {
 		t.Error("an empty MetadataKeyPrefix must fill from the defaults")
+	}
+}
+
+// TestIdentityPermissionPrefixDefaultsAndOverrides: the administration
+// routes' permissions take the prefix (D50), "identity" by default; a file
+// may set another of a permission's form, and any other value fails the
+// load.
+func TestIdentityPermissionPrefixDefaultsAndOverrides(t *testing.T) {
+	if got := Default().IdentityPermissionPrefix; got != ir.DefaultIdentityPermissionPrefix {
+		t.Errorf("default IdentityPermissionPrefix = %q", got)
+	}
+	if (Naming{}).OrDefault().IdentityPermissionPrefix != "identity" {
+		t.Error("an empty IdentityPermissionPrefix must fill from the defaults")
+	}
+	for _, value := range []string{"acme", "acme.identity", "acme_iam-2.users"} {
+		got, err := Parse([]byte("identity_permission_prefix = \""+value+"\"\n"), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("identity_permission_prefix = %q: %v", value, err)
+		}
+		if got.IdentityPermissionPrefix != value {
+			t.Errorf("IdentityPermissionPrefix = %q, want the file's %q", got.IdentityPermissionPrefix, value)
+		}
+	}
+	empty, err := Parse([]byte("identity_permission_prefix = \"\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("an empty value keeps the default, got %v", err)
+	}
+	if empty.IdentityPermissionPrefix != "identity" {
+		t.Errorf("empty IdentityPermissionPrefix = %q, want the default", empty.IdentityPermissionPrefix)
+	}
+	for _, value := range []string{"acme.", ".acme", "acme..iam", "acme iam", "acme:iam", "acme/*"} {
+		_, err := Parse([]byte("identity_permission_prefix = \""+value+"\"\n"), "superschematic.toml")
+		if err == nil || !strings.Contains(err.Error(), "identity_permission_prefix") {
+			t.Errorf("identity_permission_prefix = %q: err = %v, want an identity_permission_prefix error", value, err)
+		}
 	}
 }
 

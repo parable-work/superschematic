@@ -211,6 +211,12 @@ type ModuleOutput struct {
 	// directory via SetVersionGraphLibSpec.
 	VersionGraphLibSpec string
 
+	// IdentityDescriptor is the schema's identity descriptor (D50), the
+	// object literal identity.ts exports as identityDescriptor, which
+	// index.ts re-exports and package.json exports as "./identity". Empty
+	// when the schema has no User table.
+	IdentityDescriptor string
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -354,6 +360,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 
 	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
+		return nil, err
+	}
+	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
 		return nil, err
 	}
 

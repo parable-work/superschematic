@@ -1,20 +1,31 @@
 //! Drives the app through `Router::handle`, as a browser would: the
 //! reviews page renders the form from `WriteReviewInput`'s rules; a review
 //! posted signed out, or one that breaks a rule, renders again with 422;
-//! a signed-in shopper's review is listed, and the JSON API at `/api`
-//! serves the same reviews. Over a SQLite file of shop-db's tables, the
-//! reviews and orders outlive the app.
+//! a shopper signs in with their password, their review is listed, and the
+//! JSON API at `/api` serves the same reviews and admits the same session.
+//! Over a SQLite file of shop-db's tables, the reviews, orders and sessions
+//! outlive the app.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use acme_shop_orders_server::Shop;
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_topcoat::{PRODUCT, app, product, shopper};
+use acme_shop_orders_server::{Shop, add_shopper, users_at, users_in_memory};
+use acme_shop_topcoat::{PRODUCT, app, product};
 use topcoat::router::{Body, Router, StatusCode, header, to_bytes};
 
-fn shop() -> Router {
-    app(Arc::new(Shop::with_prices([(product(), 1999)])))
+/// The app's identity config at a low password cost, so a test hashes
+/// fast.
+const CONFIG: &str = r#"{"cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
+
+/// The sign-in form of the shopper `shop` adds, who holds `orders`
+/// through the shopper role.
+const SHOPPER: &str = "login=grace%40example.com&password=grace%27s+password";
+
+async fn shop() -> Router {
+    let users = users_in_memory(CONFIG).unwrap();
+    add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    app(Arc::new(Shop::with_prices([(product(), 1999)])), users)
 }
 
 /// A new SQLite file of shop-db's tables at `name`: a copy of the file
@@ -45,13 +56,18 @@ fn temp_path(name: &str) -> PathBuf {
     path
 }
 
-/// The app over the SQLite shop at `path`, with the demo's shopper and
-/// product, as src/main.rs opens it.
-fn sqlite_shop(path: &Path) -> Router {
-    let shop = SqliteShop::open(&format!("sqlite:{}", path.display())).unwrap();
-    shop.add_user(&shopper(), "shopper@example.com", "Demo Shopper").unwrap();
+/// The app over the SQLite shop at `path`, its users the file's, with the
+/// demo's shopper and product, as src/main.rs opens it: the shopper is
+/// added unless an earlier app over the file added them.
+async fn sqlite_shop(path: &Path) -> Router {
+    let url = format!("sqlite:{}", path.display());
+    let shop = SqliteShop::open(&url).unwrap();
+    let users = users_at(&url, CONFIG).unwrap();
+    if users.store().find_login("grace@example.com").await.is_err() {
+        add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    }
     shop.add_product(&product(), "anvil", "Anvil", 1999).unwrap();
-    app(Arc::new(shop))
+    app(Arc::new(shop), users)
 }
 
 struct Response {
@@ -76,13 +92,13 @@ async fn send(router: &Router, method: &str, uri: &str, cookie: Option<&str>, fo
     respond(router, request.body(body).unwrap()).await
 }
 
-/// Calls the JSON API with a JSON body as token-1, the shopper the Rust
-/// server's authenticator knows.
-async fn call_api(router: &Router, method: &str, uri: &str, json: &str) -> Response {
+/// Calls the JSON API with a JSON body, as the shopper whose session
+/// `cookie` holds.
+async fn call_api(router: &Router, method: &str, uri: &str, cookie: &str, json: &str) -> Response {
     let request = http::Request::builder()
         .method(method)
         .uri(uri)
-        .header(header::AUTHORIZATION, "Bearer token-1")
+        .header(header::COOKIE, cookie)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json.to_owned()))
         .unwrap();
@@ -102,7 +118,7 @@ async fn respond(router: &Router, request: http::Request<Body>) -> Response {
 
 #[tokio::test]
 async fn the_reviews_page_renders_the_form_from_the_input_rules() {
-    let page = send(&shop(), "GET", "/reviews", None, None).await;
+    let page = send(&shop().await, "GET", "/reviews", None, None).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains("No reviews yet."), "{}", page.body);
     assert!(page.body.contains(r#"name="rating" type="number" required="" step="any" min="1" max="5""#), "{}", page.body);
@@ -111,13 +127,13 @@ async fn the_reviews_page_renders_the_form_from_the_input_rules() {
 
 #[tokio::test]
 async fn a_review_needs_a_signed_in_shopper_and_its_rules() {
-    let router = shop();
+    let router = shop().await;
     let signed_out = send(&router, "POST", "/reviews", None, Some("rating=5&title=Great&body=Works")).await;
     assert_eq!(signed_out.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(signed_out.body.contains("Authentication required"), "{}", signed_out.body);
     assert!(signed_out.body.contains(r#"value="Great""#), "{}", signed_out.body);
 
-    let signed_in = send(&router, "POST", "/sign-in", None, None).await;
+    let signed_in = send(&router, "POST", "/sign-in", None, Some(SHOPPER)).await;
     assert_eq!((signed_in.status, signed_in.location.as_deref()), (StatusCode::SEE_OTHER, Some("/reviews")));
     let cookie = signed_in.cookie.expect("the session cookie");
 
@@ -138,23 +154,38 @@ async fn a_review_needs_a_signed_in_shopper_and_its_rules() {
 }
 
 #[tokio::test]
+async fn a_wrong_password_signs_no_one_in() {
+    let router = shop().await;
+    let form = "login=grace%40example.com&password=not+her+password";
+    let refused = send(&router, "POST", "/sign-in", None, Some(form)).await;
+    assert_eq!(refused.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(refused.cookie, None);
+    assert!(refused.body.contains(r#"value="grace@example.com""#), "{}", refused.body);
+}
+
+#[tokio::test]
 async fn orders_need_their_permission() {
-    let router = shop();
+    let router = shop().await;
     let signed_out = send(&router, "GET", "/orders", None, None).await;
     assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
     assert!(signed_out.body.contains("Authentication required"), "{}", signed_out.body);
 
-    let cookie = send(&router, "POST", "/sign-in", None, None).await.cookie.expect("the session cookie");
+    let cookie = send(&router, "POST", "/sign-in", None, Some(SHOPPER)).await.cookie.expect("the session cookie");
     let page = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains("No orders yet."), "{}", page.body);
+
+    // The JSON API admits the session the page signed in.
+    let api = send(&router, "GET", "/api/orders", Some(&cookie), None).await;
+    assert_eq!(api.status, StatusCode::OK, "{}", api.body);
+    assert!(api.body.contains(r#""data":[]"#), "{}", api.body);
 }
 
 #[tokio::test]
 async fn a_sqlite_shop_outlives_the_app() {
     let path = sqlite_file("outlives.db");
-    let router = sqlite_shop(&path);
-    let cookie = send(&router, "POST", "/sign-in", None, None).await.cookie.expect("the session cookie");
+    let router = sqlite_shop(&path).await;
+    let cookie = send(&router, "POST", "/sign-in", None, Some(SHOPPER)).await.cookie.expect("the session cookie");
     let review = "rating=4&title=Sturdy&body=Survived+three+coyotes.";
     let written = send(&router, "POST", "/reviews", Some(&cookie), Some(review)).await;
     assert_eq!((written.status, written.location.as_deref()), (StatusCode::SEE_OTHER, Some("/reviews")), "{}", written.body);
@@ -165,17 +196,16 @@ async fn a_sqlite_shop_outlives_the_app() {
     let order = format!(
         r#"{{"lines":[{{"productId":"{PRODUCT}","quantity":2}}],"shippingAddress":{{"recipient":"Ada Lovelace","line1":"1 Analytical Way","city":"London","postcode":"N1 9GU","country":"GB"}}}}"#
     );
-    let placed = call_api(&router, "POST", "/api/orders", &order).await;
+    let placed = call_api(&router, "POST", "/api/orders", &cookie, &order).await;
     assert!(placed.status.is_success(), "{}: {}", placed.status, placed.body);
     assert!(placed.body.contains(r#""totalCents":3998"#), "{}", placed.body);
     drop(router);
 
-    // A new app over the file, as after a restart. Sessions are in memory,
-    // so the shopper signs in again.
-    let router = sqlite_shop(&path);
+    // A new app over the file, as after a restart. The session is in the
+    // file too, so the shopper's cookie still signs them in.
+    let router = sqlite_shop(&path).await;
     let page = send(&router, "GET", "/reviews", None, None).await;
     assert!(page.body.contains(r#"<div data-field="title"><dt>Title</dt><dd>Sturdy</dd></div>"#), "{}", page.body);
-    let cookie = send(&router, "POST", "/sign-in", None, None).await.cookie.expect("the session cookie");
     let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert_eq!(orders.status, StatusCode::OK);
     assert!(orders.body.contains(r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption>"#), "{}", orders.body);

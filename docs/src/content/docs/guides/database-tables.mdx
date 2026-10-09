@@ -147,8 +147,8 @@ soft-deletable:
 `DeleteOne` records who deleted the row, so it needs the acting user on the
 context, set with `orm.WithUserID`; without one it returns
 `ErrNoUserInContext`. The generated API server authenticates callers but
-does not tell the ORM who they are, so the orders service adds that step
-to its auth middleware:
+does not tell the ORM who they are, so each method of the orders service
+that writes rows hands the caller over:
 
 <Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
 

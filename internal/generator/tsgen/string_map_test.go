@@ -61,7 +61,7 @@ func loadScalarService(t *testing.T, name string, scalarNames []string, typeName
 
 // TestCatalogJSONParserScope pins which catalog scalars get the JSON parse
 // adapter: the custom-parse scalars with a JSON shape, which in the linked
-// catalog is Generic.StringMap alone.
+// catalog are Generic.StringMap and Geo.Location.
 func TestCatalogJSONParserScope(t *testing.T) {
 	schema := loadScalarService(t, "catalog-fixture", registry.CoreScalars().Names(), "", nil)
 	output, err := Generate(schema, Options{SchemaName: schema.Name})
@@ -74,8 +74,8 @@ func TestCatalogJSONParserScope(t *testing.T) {
 			adapted = append(adapted, scalar.Name)
 		}
 	}
-	if !slices.Equal(adapted, []string{"Generic.StringMap"}) {
-		t.Fatalf("JSON parse adapters = %v, want [Generic.StringMap]", adapted)
+	if !slices.Equal(adapted, []string{"Generic.StringMap", "Geo.Location"}) {
+		t.Fatalf("JSON parse adapters = %v, want [Generic.StringMap Geo.Location]", adapted)
 	}
 }
 
@@ -225,6 +225,76 @@ assert(validators(validateGenericStringMapRequired(null)).join() === 'required',
 const wrong = validateStructuredFixture({ tags: ['k'], vec: {}, vecs: [[1], 7, null] } as unknown as StructuredFixture);
 assert(wrong !== true, 'wrong shapes were accepted');
 assert(JSON.stringify(Object.keys(wrong).sort()) === JSON.stringify(['tags', 'vec', 'vecs[1]', 'vecs[2]']), JSON.stringify(wrong));
+`
+	runGeneratedPackageScript(t, output, runtimeTest)
+}
+
+// TestGeneratedGeoLocationIsAnObject pins Geo.Location on the structured
+// object path: the {lat, lon} object or its JSON text is a value, the parser
+// hands back the canonical object, a {0, 0} location is a value, and
+// superscalar refuses what the object holds, each failure under the core's
+// own name: the "lat,lon" string is parse, an unknown, missing or
+// non-number member is custom, and an out-of-range degree is range.
+func TestGeneratedGeoLocationIsAnObject(t *testing.T) {
+	schema := loadScalarService(t, "geo-fixture", []string{"Geo.Location"}, "GeoFixture", []map[string]any{
+		{"name": "at", "typeRef": map[string]any{"name": "Geo.Location"}, "required": true},
+		{"name": "near", "typeRef": map[string]any{"name": "Geo.Location"}},
+		{"name": "route", "typeRef": map[string]any{"name": "Geo.Location", "isArray": true}},
+	})
+	output, err := Generate(schema, Options{SchemaName: schema.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scalar := range output.Scalars {
+		if scalar.Name != "Geo.Location" {
+			continue
+		}
+		if scalar.StructuredJSON != "object" || !scalar.UsesLibValidate || !scalar.HasJSONParse || scalar.TSType != "{ lat: number; lon: number }" {
+			t.Fatalf("Geo.Location: StructuredJSON = %q, UsesLibValidate = %v, HasJSONParse = %v, TSType = %q", scalar.StructuredJSON, scalar.UsesLibValidate, scalar.HasJSONParse, scalar.TSType)
+		}
+	}
+	const runtimeTest = `
+import type { GeoFixture } from './types';
+import { parseGeoLocation, validateGeoLocation, validateGeoLocationRequired } from './validators/scalars/geo_location';
+import { validateGeoFixture } from './validators/types/geofixture';
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function validators(result: ReturnType<typeof validateGeoLocation>): string[] {
+  return result[0] ? [] : (result[1] ?? []).map((e) => e.validator);
+}
+
+const valid: GeoFixture = { at: { lat: 37.7749, lon: -122.4194 }, near: null, route: [{ lat: 0, lon: 0 }] };
+assert(validateGeoFixture(valid) === true, 'a location was refused');
+for (const value of [{ lat: 90, lon: -180 }, { lat: 0, lon: 0 }, '{"lon": -122.4194, "lat": 37.7749}']) {
+  assert(validateGeoLocationRequired(value as never)[0], 'location refused: ' + JSON.stringify(value));
+}
+for (const value of [{ lon: -122.4194, lat: 37.7749 }, '{"lon": -122.4194, "lat": 37.7749}']) {
+  const parsed = parseGeoLocation(value as never);
+  assert(parsed !== null && JSON.stringify(parsed) === '{"lat":37.7749,"lon":-122.4194}', 'parse: ' + JSON.stringify(parsed));
+}
+const refused: Array<[unknown, string]> = [
+  ['37.7749,-122.4194', 'parse'],
+  [{ lat: 91, lon: 0 }, 'range'],
+  [{ lat: 0, lon: -180.5 }, 'range'],
+  [{ lat: 1, lon: 2, alt: 3 }, 'custom'],
+  [{ lat: 1 }, 'custom'],
+  [{ lat: '1', lon: 2 }, 'custom'],
+  [[37.7749, -122.4194], 'type'],
+  [42, 'type'],
+];
+for (const [value, name] of refused) {
+  assert(validators(validateGeoLocation(value as never)).join() === name, JSON.stringify(value) + ' -> ' + JSON.stringify(validateGeoLocation(value as never)));
+  assert(parseGeoLocation(value as never) === null, 'the parser accepted ' + JSON.stringify(value));
+}
+assert(validators(validateGeoLocationRequired(null)).join() === 'required', 'a required null is missing');
+assert(validators(validateGeoLocationRequired('' as never)).join() === 'required', 'a required empty string is missing');
+assert(validateGeoLocation(null)[0] && validateGeoLocation('' as never)[0], 'an optional null or empty string is absent');
+const wrong = validateGeoFixture({ at: '37.7749,-122.4194', near: { lat: 1, lon: 2, alt: 3 }, route: [{ lat: 91, lon: 0 }] } as unknown as GeoFixture);
+assert(wrong !== true, 'wrong locations were accepted');
+assert(JSON.stringify(Object.keys(wrong).sort()) === JSON.stringify(['at', 'near', 'route[0]']), JSON.stringify(wrong));
 `
 	runGeneratedPackageScript(t, output, runtimeTest)
 }

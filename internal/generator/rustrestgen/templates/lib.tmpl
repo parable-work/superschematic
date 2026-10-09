@@ -4,6 +4,9 @@
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
+{{ if .Identity -}}
+pub mod identity;
+{{ end -}}
 pub mod interfaces;
 pub mod openapi;
 pub mod operations;

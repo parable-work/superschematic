@@ -5,7 +5,8 @@
 //! the type's JSON as the API sends it, in types a record holds. A UUID, a
 //! timestamp, an enum and any other string scalar are their JSON strings; a
 //! map is its entries; a union or any JSON value is its JSON text. A field
-//! marked @uiHidden is left out: everything in a record reaches the browser.
+//! marked @uiHidden, and a secret field, is left out: everything in a record
+//! reaches the browser.
 
 use crate::api::types;
 use crate::wire;

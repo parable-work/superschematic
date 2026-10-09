@@ -890,7 +890,7 @@ describe("Branches' descriptor", () => {
         field('anything', 'Anything', 'scalar', { jsonType: 'any' }),
       ],
     },
-    Where: { name: 'Where', fields: [field('at', 'Geo.Location', 'scalar', { jsonType: 'string' })] },
+    Where: { name: 'Where', fields: [field('at', 'Geo.Location', 'scalar', { jsonType: 'object' })] },
   };
   const target = {
     schema: 'Recipe',

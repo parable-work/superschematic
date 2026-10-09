@@ -108,6 +108,7 @@ fn field_errors(prefix: &str, fields: &Value, out: &mut Vec<FieldErrorRecord>) {
         }
     }
 }
+{{- if .ProceduresTakeArgs }}
 
 /// An argument's JSON decoded into its Rust type; a value that does not
 /// decode (a UUID or a timestamp that does not parse, a value an enum does
@@ -120,6 +121,7 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
         )
     })
 }
+{{- end }}
 {{- if .ControlledProcedures }}
 
 /// Adds a `ProcedureControls` layer on the path of each procedure whose

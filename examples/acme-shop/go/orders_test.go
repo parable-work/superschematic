@@ -11,42 +11,42 @@ import (
 	shoporders "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
 	sdk "example.com/acme/sdk/go/shop-orders"
-	"example.com/acme/shop"
 	shopordersimpl "example.com/acme/shop/shop-orders"
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	scalars "github.com/parable-work/superscalar/go"
-	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
 )
 
-// grants gives every principal one role holding these permissions.
-type grants []string
-
-func (g grants) ListRolesForPrincipal(context.Context, string) ([]session.Role, error) {
-	return []session.Role{{ID: "role", Name: "Role", Permissions: g}}, nil
-}
+// shopper is a user of the shop who places orders and writes reviews.
+const (
+	shopperLogin    = "grace@example.com"
+	shopperPassword = "grace's password"
+)
 
 // ordersServer serves shop-orders in-process over the no-op database, as
-// productsServer serves shop-api, with every signed-in caller holding the
-// given permissions.
-func ordersServer(t *testing.T, permissions ...string) *httptest.Server {
+// productsServer serves shop-api, beside a shop-api over the same users,
+// whose sign-in starts the sessions shop-orders authenticates. It signs the
+// shopper in, holding the given permissions, and returns shop-orders and
+// the shopper's bearer token.
+func ordersServer(t *testing.T, permissions ...string) (*httptest.Server, string) {
 	t.Helper()
+	u := newUsers(t)
+	u.add(t, shopperLogin, "Grace Hopper", shopperPassword, permissions...)
+	token := signIn(t, productsClient(t, productsServer(t, u)), shopperLogin, shopperPassword)
+
 	deps := shoporders.Deps{DB: orm.NewNoOpDatabase(), Logger: zap.NewNop()}
 	implementations, err := shopordersimpl.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := chi.NewRouter()
+	router.Use(chimiddleware.RequestID)
 	err = shoporders.RegisterRoutes(router, shoporders.Config{
-		DB:     deps.DB,
-		Logger: deps.Logger,
-		AuthMiddleware: shopordersimpl.Authenticate(shop.Auth{
-			Validate:   verifyJWT,
-			Sessions:   fakeSessions{},
-			Principals: fakePrincipals{},
-			Roles:      grants(permissions),
-		}),
+		DB:              deps.DB,
+		Logger:          deps.Logger,
+		Identity:        u.shopOrders(t),
 		Implementations: implementations,
 	})
 	if err != nil {
@@ -54,7 +54,7 @@ func ordersServer(t *testing.T, permissions ...string) *httptest.Server {
 	}
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
-	return server
+	return server, token
 }
 
 func ordersClient(t *testing.T, server *httptest.Server, token string) *sdk.ShopOrdersSDK {
@@ -81,9 +81,10 @@ var address = types.ShippingAddress{
 }
 
 // A @publicRoute answers without a token; an @auth route in the same set
-// does not.
+// does not. A session shop-api's sign-in started authenticates the
+// shopper on shop-orders, which reads the same users.
 func TestPublicAndAuthRoutes(t *testing.T) {
-	server := ordersServer(t)
+	server, token := ordersServer(t)
 	ctx := context.Background()
 
 	reviews, err := ordersClient(t, server, "").ProductReviewsNamespace.ListReviews(ctx, productID, nil)
@@ -100,7 +101,7 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 
 	// @auth needs a caller and no permission. The no-op database returns
 	// what it was given.
-	review, err := ordersClient(t, server, "token-1").ProductReviewsNamespace.WriteReview(ctx, productID, input)
+	review, err := ordersClient(t, server, token).ProductReviewsNamespace.WriteReview(ctx, productID, input)
 	if err != nil || review.Rating != 5 {
 		t.Fatalf("WriteReview with a token: %+v, %v", review, err)
 	}
@@ -115,7 +116,8 @@ func TestPermissions(t *testing.T) {
 		ShippingAddress: address,
 	}
 
-	reader := ordersClient(t, ordersServer(t, "orders.read"), "token-1")
+	readerServer, readerToken := ordersServer(t, "orders.read")
+	reader := ordersClient(t, readerServer, readerToken)
 	if _, err := reader.OrderNamespace.ListOrders(ctx, nil); err != nil {
 		t.Fatalf("ListOrders with orders.read: %v", err)
 	}
@@ -127,7 +129,8 @@ func TestPermissions(t *testing.T) {
 
 	// With orders the request reaches PlaceOrder, which finds no product in
 	// the no-op database and answers 400 with its own message.
-	writer := ordersClient(t, ordersServer(t, "orders"), "token-1")
+	writerServer, writerToken := ordersServer(t, "orders")
+	writer := ordersClient(t, writerServer, writerToken)
 	_, err = writer.OrderNamespace.PlaceOrder(ctx, order)
 	var apiErr *sdk.APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest || !strings.Contains(apiErr.Message, "no product has id") {
@@ -143,16 +146,16 @@ func TestPermissions(t *testing.T) {
 // Both sides check an input against the schema: the SDK before it sends,
 // the server when it receives.
 func TestValidation(t *testing.T) {
-	server := ordersServer(t, "orders")
+	server, token := ordersServer(t, "orders")
 	empty := types.PlaceOrderInput{Lines: []types.PlaceOrderLine{}, ShippingAddress: address}
 
-	_, err := ordersClient(t, server, "token-1").OrderNamespace.PlaceOrder(context.Background(), empty)
+	_, err := ordersClient(t, server, token).OrderNamespace.PlaceOrder(context.Background(), empty)
 	var invalid *sdk.ValidationError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("the SDK sent an order with no lines: %v", err)
 	}
 
-	status := post(t, server.URL+"/api/orders", `{"lines": [], "shippingAddress": {"recipient": "Ada", "line1": "1", "city": "London", "postcode": "N1", "country": "gb"}}`)
+	status := post(t, server.URL+"/api/orders", token, `{"lines": [], "shippingAddress": {"recipient": "Ada", "line1": "1", "city": "London", "postcode": "N1", "country": "gb"}}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("POST /api/orders with no lines and a lowercase country answered %d", status)
 	}
@@ -161,19 +164,19 @@ func TestValidation(t *testing.T) {
 // @bodyLimit refuses a body over its size before it is read, and
 // @rateLimit refuses a caller's requests past the limit for the minute.
 func TestTrafficControls(t *testing.T) {
-	server := ordersServer(t, "orders")
+	server, token := ordersServer(t, "orders")
 
-	if status := post(t, server.URL+"/api/orders", strings.Repeat(" ", 1<<20+1)); status != http.StatusRequestEntityTooLarge {
+	if status := post(t, server.URL+"/api/orders", token, strings.Repeat(" ", 1<<20+1)); status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("a body over 1 MB answered %d", status)
 	}
 
 	url := server.URL + "/api/orders/00000000-0000-4000-8000-0000000000c1/cancel"
 	for i := 1; i <= 60; i++ {
-		if status := post(t, url, `{}`); status != http.StatusNotFound {
+		if status := post(t, url, token, `{}`); status != http.StatusNotFound {
 			t.Fatalf("request %d answered %d", i, status)
 		}
 	}
-	if status := post(t, url, `{}`); status != http.StatusTooManyRequests {
+	if status := post(t, url, token, `{}`); status != http.StatusTooManyRequests {
 		t.Fatalf("request 61 in a minute answered %d", status)
 	}
 }
@@ -187,13 +190,13 @@ func mustUUID(t *testing.T, s string) types.IdentityUUID {
 	return id
 }
 
-func post(t *testing.T, url, body string) int {
+func post(t *testing.T, url, token, body string) int {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Authorization", "Bearer token-1")
+	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {

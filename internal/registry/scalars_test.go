@@ -157,8 +157,8 @@ func TestRegisterScalarsNamesAnUnknownPrimitive(t *testing.T) {
 // object or array but which has a pattern or a length, rules on a string,
 // is refused with them named, and so is an object row the catalog declares
 // as a file upload, with a JSON mapping or without: it takes the String
-// primitive. Geo.Location, whose
-// row has a pattern and the String primitive, is no object scalar.
+// primitive. Geo.Location, a JSON object with the String primitive, is no
+// object-primitive row and passes.
 func TestRegisterScalarsJudgesARowAsTheValidatorsDo(t *testing.T) {
 	rows := map[string]*scalars.ScalarMetadata{
 		"Geo.Location": scalars.ScalarMetadataByCanonical["Geo.Location"],

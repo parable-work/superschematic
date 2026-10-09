@@ -21,6 +21,13 @@
       "address": "http://127.0.0.1:22424",
       "bindings": [
         {
+          "field": "SHOP_API_IDENTITY",
+          "source": "literal",
+          "value": "{\"cookie\":{\"secure\":false}}",
+          "default": true,
+          "identityOf": "shop-api"
+        },
+        {
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
@@ -66,6 +73,13 @@
             "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders->shop-db"
+        },
+        {
+          "field": "SHOP_ORDERS_IDENTITY",
+          "source": "literal",
+          "value": "{\"cookie\":{\"secure\":false}}",
+          "default": true,
+          "identityOf": "shop-orders"
         }
       ]
     },
@@ -191,6 +205,10 @@
         "properties": {
           "env": [
             {
+              "name": "SHOP_API_IDENTITY",
+              "value": "{\"cookie\":{\"secure\":false}}"
+            },
+            {
               "name": "SHOP_DB_DATABASE_URL",
               "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
             }
@@ -261,6 +279,10 @@
             {
               "name": "SHOP_DB_DATABASE_URL",
               "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_ORDERS_IDENTITY",
+              "value": "{\"cookie\":{\"secure\":false}}"
             }
           ],
           "language": "go",

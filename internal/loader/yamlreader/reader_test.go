@@ -127,3 +127,71 @@ sparkles: true
 		t.Errorf("error %q does not mention the unknown key", err.Error())
 	}
 }
+
+// TestReadUserTraits: the YAML form carries the user model's traits (D50)
+// as the JSON form does, userRole as an empty mapping.
+func TestReadUserTraits(t *testing.T) {
+	src := `kind: DB
+types:
+  Account:
+    name: Account
+    role: DBTable
+    user: { login: handle }
+  Role:
+    name: Role
+    role: DBTable
+    userRole: {}
+`
+	doc, err := Read([]byte(src), "accounts.schema.yaml")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if user := doc.Types["Account"].User; user == nil || user.Login != "handle" || user.Name != "" || user.NameField() != "handle" {
+		t.Errorf("Account.User = %+v", user)
+	}
+	if doc.Types["Role"].UserRole == nil {
+		t.Error("Role.UserRole is nil")
+	}
+
+	if _, err := Read([]byte("name: Role\nrole: DBTable\nuserRole: true\n"), "role.schema.yaml"); err == nil {
+		t.Error("Read accepted a userRole that is not a mapping")
+	}
+}
+
+// TestReadUserRoutes: the YAML form carries the user model's route sets
+// (D50) as the JSON form does, an empty config as an empty mapping.
+func TestReadUserRoutes(t *testing.T) {
+	src := `kind: API
+operationSets:
+  - name: Account
+    operations: []
+    userSessions: { register: true }
+  - name: AccountAdmin
+    operations: []
+    userAdministration: { path: staff/admin }
+  - name: Me
+    operations: []
+    userSessions: {}
+`
+	doc, err := Read([]byte(src), "account.schema.yaml")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	sets := doc.OperationSets
+	if len(sets) != 3 {
+		t.Fatalf("operation sets = %+v", sets)
+	}
+	if cfg := sets[0].UserSessions; cfg == nil || !cfg.Register || cfg.NoLogin || cfg.Path != "" {
+		t.Errorf("Account.UserSessions = %+v", cfg)
+	}
+	if cfg := sets[1].UserAdministration; cfg == nil || cfg.Path != "staff/admin" {
+		t.Errorf("AccountAdmin.UserAdministration = %+v", cfg)
+	}
+	if cfg := sets[2].UserSessions; cfg == nil || cfg.Register || cfg.NoLogin {
+		t.Errorf("Me.UserSessions = %+v", cfg)
+	}
+
+	if _, err := Read([]byte("kind: OperationSet\nname: Account\noperations: []\nuserSessions: { roles: true }\n"), "account.schema.yaml"); err == nil {
+		t.Error("Read accepted a userSessions key the config does not take")
+	}
+}

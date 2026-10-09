@@ -6,6 +6,13 @@ edition = "2024"
 rust-version = "1.99.0"
 description = "Topcoat pages, guards and records over the {{ .SchemaName }} API"
 license = "UNLICENSED"
+{{- if .Identity }}
+
+# The identity store's SQL client (D50), the API crate's features.
+[features]
+identity-postgres = ["{{ .APICrate }}/identity-postgres"]
+identity-sqlite = ["{{ .APICrate }}/identity-sqlite"]
+{{- end }}
 
 [dependencies]
 {{ .APICrate }} = { path = "{{ .APIDepPath }}" }

@@ -1,0 +1,13 @@
+[package]
+name = "schemas-fixture-user-model-db-types"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+description = "Generated Rust types for fixture-user-model-db schema"
+license = "UNLICENSED"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+superscalar = "0.1.0"
+serde_json = { version = "1.0" }
+superschematic-schema-runtime = "0.0.0"

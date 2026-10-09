@@ -175,7 +175,7 @@ impl SqliteShop {
 /// The path, or `file:` URI, a database URL names, or else the scheme of
 /// a URL that names another kind of database (`postgres` of
 /// `postgres://...`). A string without a scheme is a path.
-fn database_path(url: &str) -> Result<&str, &str> {
+pub(crate) fn database_path(url: &str) -> Result<&str, &str> {
     let has_scheme = |scheme: &str| {
         url.get(..scheme.len())
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))

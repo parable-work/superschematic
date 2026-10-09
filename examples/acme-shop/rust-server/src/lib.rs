@@ -1,43 +1,101 @@
 //! shop-orders' implementations over the generated Rust server, keeping
-//! orders and reviews in memory: the server in src/main.rs serves them over
-//! HTTP, and the Topcoat app in ../topcoat calls them from its pages. With
-//! the `sqlite` feature, `sqlite::SqliteShop` keeps them in a SQLite file
-//! of shop-db's tables instead.
+//! orders and reviews in memory and the shop's users in SQLite: the server
+//! in src/main.rs serves them over HTTP, and the Topcoat app in ../topcoat
+//! calls them from its pages. With the `sqlite` feature,
+//! `sqlite::SqliteShop` keeps the orders and reviews in a SQLite file of
+//! shop-db's tables instead, the users' file (`users_at`).
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use acme_shop_orders_api::runtime::identity::{
+    hash_password, Config, IdentityAuthenticator, NewUser, Rusqlite, Service,
+};
 use acme_shop_orders_api::{
-    types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs,
-    OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs, ProductReviewsImplementation,
+    identity, types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation,
+    OrderListOrdersArgs, OrderPlaceOrderArgs, ProductReviewsImplementation,
     ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs,
 };
 use async_trait::async_trait;
-use axum::http::request::Parts;
-use superschematic_http_runtime::{
-    bearer_token, ApiError, Authenticator, Principal, RequestContext,
-};
+use superschematic_http_runtime::{ApiError, RequestContext};
 
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
-/// The shopper go/orders_test.go signs in: token-1, holding `orders`, which
-/// covers orders.read and orders.write. Your identity provider verifies a
-/// real token here.
-pub struct Tokens;
+/// shop-db's identity tables in SQLite (identity.sql): its User and Role
+/// tables and the session, credential and role grant tables the build adds.
+pub const IDENTITY_TABLES: &str = include_str!("../identity.sql");
 
-#[async_trait]
-impl Authenticator for Tokens {
-    async fn authenticate(&self, request: &Parts) -> Result<Option<Principal>, ApiError> {
-        Ok(match bearer_token(&request.headers) {
-            Some("token-1") => Some(Principal::new(
-                "00000000-0000-4000-8000-0000000000a1",
-                ["orders"],
-            )),
-            _ => None,
+/// The shop's users: shop-orders' identity service over the SQLite
+/// database at `path`, which holds `IDENTITY_TABLES`, with `config`, the
+/// identity config's JSON. The service reads the session a request
+/// carries, as shop-api's login started it, and the roles of its user.
+pub fn users(path: &str, config: &str) -> Result<Arc<Service>, Box<dyn Error>> {
+    users_over(rusqlite::Connection::open(path)?, config)
+}
+
+/// The shop's users in the SQLite database `url` names, read as
+/// `sqlite::SqliteShop::open` reads it: the file the shop keeps its orders
+/// and reviews in, whose shop-db tables hold `IDENTITY_TABLES` too, so a
+/// user the identity service adds is one a review's author or an order's
+/// customer can be.
+#[cfg(feature = "sqlite")]
+pub fn users_at(url: &str, config: &str) -> Result<Arc<Service>, Box<dyn Error>> {
+    let path = sqlite::database_path(url).map_err(|scheme| format!("a {scheme} URL, not a SQLite one"))?;
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    users_over(rusqlite::Connection::open_with_flags(path, flags)?, config)
+}
+
+/// The shop's users in a SQLite database in memory, its tables created and
+/// no user in it yet: the Topcoat app's.
+pub fn users_in_memory(config: &str) -> Result<Arc<Service>, Box<dyn Error>> {
+    let connection = rusqlite::Connection::open_in_memory()?;
+    connection.execute_batch(IDENTITY_TABLES)?;
+    users_over(connection, config)
+}
+
+fn users_over(
+    connection: rusqlite::Connection,
+    config: &str,
+) -> Result<Arc<Service>, Box<dyn Error>> {
+    let store = identity::store(Rusqlite::new(connection)?)?;
+    let config = Config::parse(config.as_bytes())?;
+    Ok(Arc::new(identity::service(Arc::new(store), config)?))
+}
+
+/// Adds a shopper who signs in with `login` and `password`, holding the
+/// `shopper` role, which grants `orders`, as staff would add one through
+/// shop-api's administration routes. The first shopper creates the role.
+pub async fn add_shopper(
+    users: &Service,
+    login: &str,
+    name: &str,
+    password: &str,
+) -> Result<(), Box<dyn Error>> {
+    let store = users.store();
+    let user = store
+        .create_user(NewUser {
+            login: login.to_owned(),
+            name: name.to_owned(),
+            password_hash: hash_password(password, users.config().argon2_params())?,
+            at: SystemTime::now(),
         })
-    }
+        .await?;
+    let role = match store
+        .list_roles()
+        .await?
+        .into_iter()
+        .find(|role| role.name == "shopper")
+    {
+        Some(role) => role,
+        None => store.create_role("shopper", &["orders".to_owned()]).await?,
+    };
+    store
+        .grant_role(&user.id, &role.id, SystemTime::now())
+        .await?;
+    Ok(())
 }
 
 /// The catalog's prices by product, and the orders and reviews placed so
@@ -61,13 +119,17 @@ impl Shop {
 }
 
 /// The implementations the generated router and the Topcoat app run: the
-/// shop for both namespaces, in memory or in SQLite, and token-1 as the
-/// caller of a request.
-pub fn implementations<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>) -> Implementations {
+/// shop for both namespaces, in memory or in SQLite, and the identity
+/// runtime's authenticator over `users`, whose caller is the user a
+/// request's session signs in.
+pub fn implementations<S: OrderImplementation + ProductReviewsImplementation>(
+    shop: Arc<S>,
+    users: Arc<Service>,
+) -> Implementations {
     Implementations {
         order: shop.clone(),
         product_reviews: shop,
-        authenticator: Arc::new(Tokens),
+        authenticator: Arc::new(IdentityAuthenticator::new(users)),
     }
 }
 
@@ -79,6 +141,7 @@ fn now() -> types::TemporalDateTime {
         .expect("a timestamp in range")
 }
 
+/// The caller's id: the principal's subject, the user's base62 UUID.
 fn caller(ctx: &RequestContext) -> String {
     ctx.principal
         .as_ref()

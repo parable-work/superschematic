@@ -31,32 +31,32 @@ func TestGeneratedVersionGraphORM(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
-	ormDir := generateVersionGraphModule(t)
+	ormDir := generateORMModule(t, versionGraphFixture)
 	if err := os.WriteFile(filepath.Join(ormDir, "version_graph_test.go"), []byte(versionGraphORMTest), 0o644); err != nil {
 		t.Fatalf("write version graph test: %v", err)
 	}
-	runVersionGraphModule(t, ormDir)
+	runORMModule(t, ormDir)
 }
 
-// generateVersionGraphModule writes the Go types module, the ORM module and
-// the DDL (under the ORM's testdata) of fixture-version-graph-db into a
-// temporary tree, and returns the ORM module's directory.
-func generateVersionGraphModule(t *testing.T) string {
+// generateORMModule writes the Go types module, the ORM module and the DDL
+// (under the ORM's testdata) of the fixture service into a temporary tree,
+// and returns the ORM module's directory.
+func generateORMModule(t *testing.T, fixture string) string {
 	t.Helper()
 	paths := testpaths.Local(t)
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, versionGraphFixture))
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
-		t.Fatalf("load %s: %v", versionGraphFixture, err)
+		t.Fatalf("load %s: %v", fixture, err)
 	}
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-	typesModule := "example.com/schemas/types/go/" + versionGraphFixture
+	typesModule := "example.com/schemas/types/go/" + fixture
 	tempRoot := t.TempDir()
-	typesDir := filepath.Join(tempRoot, "types", "go", versionGraphFixture)
-	ormDir := filepath.Join(tempRoot, "orm", versionGraphFixture)
+	typesDir := filepath.Join(tempRoot, "types", "go", fixture)
+	ormDir := filepath.Join(tempRoot, "orm", fixture)
 
 	typesOutput, err := typegen.Generate(schema, typegen.Options{
-		SchemaName: versionGraphFixture,
+		SchemaName: fixture,
 		ModulePath: typesModule,
 		Clock:      fixedClock,
 	})
@@ -71,8 +71,8 @@ func generateVersionGraphModule(t *testing.T) string {
 	}
 
 	ormOutput, err := Generate(schema, Options{
-		SchemaName:  versionGraphFixture,
-		ModulePath:  "example.com/schemas/orm/" + versionGraphFixture,
+		SchemaName:  fixture,
+		ModulePath:  "example.com/schemas/orm/" + fixture,
 		TypesModule: typesModule,
 		Clock:       fixedClock,
 	})
@@ -86,7 +86,7 @@ func generateVersionGraphModule(t *testing.T) string {
 		t.Fatalf("write orm: %v", err)
 	}
 
-	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: versionGraphFixture})
+	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: fixture})
 	if err != nil {
 		t.Fatalf("generate ddl: %v", err)
 	}
@@ -98,10 +98,10 @@ func generateVersionGraphModule(t *testing.T) string {
 	return ormDir
 }
 
-// runVersionGraphModule tidies, builds, vets and tests the generated ORM
-// module, and returns the test output. It links the version-graph binding,
-// so it needs the core's archive (make versiongraph).
-func runVersionGraphModule(t *testing.T, ormDir string) string {
+// runORMModule tidies, builds, vets and tests the generated ORM module, and
+// returns the test output. A version graph's ORM links the version-graph
+// binding, so it needs the core's archive (make versiongraph).
+func runORMModule(t *testing.T, ormDir string) string {
 	t.Helper()
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir

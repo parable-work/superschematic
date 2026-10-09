@@ -2911,6 +2911,12 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "userAdministration": {
+          "$ref": "#/$defs/UserAdministrationConfig"
+        },
+        "userSessions": {
+          "$ref": "#/$defs/UserSessionsConfig"
         }
       },
       "required": [
@@ -2975,6 +2981,12 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "userAdministration": {
+          "$ref": "#/$defs/UserAdministrationConfig"
+        },
+        "userSessions": {
+          "$ref": "#/$defs/UserSessionsConfig"
         }
       },
       "required": [
@@ -3771,6 +3783,12 @@
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"
         },
+        "user": {
+          "$ref": "#/$defs/UserTrait"
+        },
+        "userRole": {
+          "$ref": "#/$defs/UserRoleTrait"
+        },
         "versionGraph": {
           "$ref": "#/$defs/VersionGraphConfig"
         },
@@ -3946,6 +3964,55 @@
         "name",
         "types",
         "kind"
+      ],
+      "type": "object"
+    },
+    "UserAdministrationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "UserRoleTrait": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "UserSessionsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "noLogin": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path": {
+          "default": "",
+          "type": "string"
+        },
+        "register": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "UserTrait": {
+      "additionalProperties": false,
+      "properties": {
+        "login": {
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "login"
       ],
       "type": "object"
     },

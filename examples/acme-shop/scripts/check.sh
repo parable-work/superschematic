@@ -32,18 +32,23 @@
 #      TypeScript, Python and Rust clients against the same server and
 #      compare what they print; then run all four clients against
 #      shop-orders served by the generated Rust server (rust-server/,
-#      built with --api-language RUST into schemas/dist-rust) and check
-#      they print the same; and, when Docker runs, `superschematic stack
-#      dev` runs shop-stack's Dev environment, Postgres, both Go servers and
-#      the storefront's TypeScript server on Bun, each on its generated
-#      entrypoint, and the test calls each Go API through its SDK and the
-#      storefront over HTTP (milestones 1 and 7 of docs/stack-model.md),
-#      then sees shop-orders' job ship an order with `superschematic stack
-#      run` and on the every-minute schedule stack dev runs (D52);
-#   4a. the Topcoat app in topcoat/ passes its tests: its pages call
-#      shop-orders in-process through the crate the Topcoat extension
-#      writes into schemas/dist-rust, with the binary that links it, over
-#      the shop in memory and in a SQLite file the migration runner
+#      built with --api-language RUST into schemas/dist-rust), with a
+#      shopper signed in through shop-api's login over a SQLite database
+#      of shop-db's identity tables (rust-server/identity.sql, whose
+#      tables have the columns shop-db's DDL gives them) that the Rust
+#      server reads too, and check they print the same; and, when Docker
+#      runs, `superschematic stack dev` runs shop-stack's Dev environment,
+#      Postgres, both Go servers and the storefront's TypeScript server on
+#      Bun, each on its generated entrypoint, and the test calls each Go
+#      API through its SDK and the storefront over HTTP (milestones 1 and
+#      7 of docs/stack-model.md), then sees shop-orders' job ship an order
+#      with `superschematic stack run` and on the every-minute schedule
+#      stack dev runs (D52);
+#   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
+#      with their password, and its pages call shop-orders in-process
+#      through the crate the Topcoat extension writes into
+#      schemas/dist-rust, with the binary that links it, over the shop and
+#      its users in memory and in a SQLite file the migration runner
 #      migrated with shop-db's SQLite plan;
 #   5. the storefront's tests call the generated TypeScript router over its
 #      implementation through the generated TypeScript SDK, and the clients'
@@ -122,6 +127,24 @@ built_before shop-api shop-stack
 built_before shop-orders shop-stack
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
+
+echo "==> rust-server/identity.sql holds shop-db's identity tables"
+# The Rust server, the Topcoat app in memory and the Go test of the Rust
+# server keep the shop's users in SQLite, in the tables
+# rust-server/identity.sql creates, shop-db's identity tables alone. Each
+# table has the columns shop-db's DDL gives it, in Postgres and in SQLite.
+columns() {
+  awk -v table="$2" '
+    $1 == "CREATE" && $2 == "TABLE" { name = $3; gsub(/"/, "", name); inside = (name == table); next }
+    inside && /^\);/ { inside = 0 }
+    inside && $1 !~ /^(PRIMARY|FOREIGN|UNIQUE)$/ { column = $1; gsub(/[",]/, "", column); print column }
+  ' "$1" | sort
+}
+for table in user role session user_credential user_role_grant; do
+  test -n "$(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")"
+  diff <(columns "$DIST/sql/shop-db/create.sql" "$table") <(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")
+  diff <(columns "$DIST/sql/shop-db/sqlite/create.sql" "$table") <(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")
+done
 
 echo "==> the commands the pages show"
 capture build-shop-common.txt superschematic build schemas/services/shop-common

@@ -29,10 +29,11 @@ import (
 var templatesFS embed.FS
 
 // postgresTypeExtensions maps PostgreSQL types to the extension they require.
+// POINT, Geo.Location's column, is one of Postgres's own geometric types and
+// needs none; geography and geometry are PostGIS's.
 var postgresTypeExtensions = map[string]string{
 	"citext":    "citext",
 	"ltree":     "ltree",
-	"point":     "postgis",
 	"geography": "postgis",
 	"geometry":  "postgis",
 }

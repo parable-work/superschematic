@@ -1,0 +1,10 @@
+{
+  "name": "fixture-user-handles",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "go": { "enabled": true }
+    }
+  }
+}

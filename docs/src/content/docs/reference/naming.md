@@ -246,6 +246,16 @@ for [projection views](/superschematic/reference/projections/):
 `<prefix>projection.settings` and the rest. Set it to the namespace the
 schemas' readers expect; the part after the prefix is fixed.
 
+### `identity_permission_prefix`
+
+Default: `identity`
+
+Prefix of the permissions the user model's `@userAdministration` routes
+need: `<prefix>.users.read` and `<prefix>.users.write` for the user routes,
+`<prefix>.roles.read` and `<prefix>.roles.write` for the role and grant
+routes. The value takes a permission's form, segments of letters, digits,
+`_` and `-` joined by dots; any other value fails the load.
+
 ### `history_actor_setting`
 
 Default: `superschematic.history_actor_id`

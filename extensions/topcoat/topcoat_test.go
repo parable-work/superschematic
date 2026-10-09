@@ -202,11 +202,12 @@ func skipped(result *registry.Result, reason string) bool {
 // need none and whose result nests records in lists of lists,
 // fixture-forms-api, whose input types make forms, fixture-controls-api,
 // whose routes have a webhook's signature check, service clauses and
-// traffic controls, and fixture-views-api, whose result's fields are of
-// every kind a display component renders, with
-// testdata/golden/<service>; -update rewrites them.
+// traffic controls, fixture-views-api, whose result's fields are of every
+// kind a display component renders, and fixture-user-routes-api, whose
+// users are the core user model's (D50), with testdata/golden/<service>;
+// -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -517,6 +518,25 @@ func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 // denied, then cargo test, on it.
 func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 	t.Helper()
+	var options crateOptions
+	for _, dep := range devDeps {
+		options.devDependencies += dep + "\n"
+	}
+	cargoTestCrateWith(t, service, test, options)
+}
+
+// crateOptions are what a test of the Topcoat crate adds to its build: the
+// crate's features, which clippy and cargo test turn on, lines of the
+// manifest's [dev-dependencies], and files of tests/ beside app.rs.
+type crateOptions struct {
+	features        []string
+	devDependencies string
+	files           map[string]string
+}
+
+// cargoTestCrateWith is cargoTestCrate with options.
+func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
 	}
@@ -538,10 +558,7 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 async-trait = "0.1.89"
 http = "1"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
-`)...)
-	for _, dep := range devDeps {
-		manifest = append(manifest, dep+"\n"...)
-	}
+`+options.devDependencies)...)
 	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -551,13 +568,22 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 	if err := os.WriteFile(filepath.Join(dir, "tests", "app.rs"), []byte(test), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for name, content := range options.files {
+		if err := os.WriteFile(filepath.Join(dir, "tests", name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	target := os.Getenv("CARGO_TARGET_DIR")
 	if target == "" {
 		target = filepath.Join(t.TempDir(), "target")
 	}
+	var features []string
+	if len(options.features) > 0 {
+		features = []string{"--features", strings.Join(options.features, ",")}
+	}
 	for _, args := range [][]string{
-		{"clippy", "--quiet", "--all-targets", "--", "-D", "warnings"},
-		{"test", "--quiet"},
+		append(append([]string{"clippy", "--quiet", "--all-targets"}, features...), "--", "-D", "warnings"),
+		append([]string{"test", "--quiet"}, features...),
 	} {
 		cmd := exec.Command(cargo, args...)
 		cmd.Dir = dir
@@ -566,6 +592,29 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 			t.Fatalf("cargo %s on the Topcoat crate of %s: %v\n%s", args[0], service, err, out)
 		}
 	}
+}
+
+// userRoutesService is the loader's fixture whose users are the core user
+// model's (D50): its authDb, fixture-user-model-db, has the User and
+// UserRole tables, and it serves the session and administration routes.
+const userRoutesService = "fixture-user-routes-api"
+
+// TestIdentityPagesShareTheAPISession builds fixture-user-routes-api's
+// crates over the authDb's SQLite DDL and runs identityAppTest: a user
+// signs in through the mounted JSON API, with the session cookie or a
+// bearer token, and an IdentityPageAuthenticator page then admits them as
+// the API does; a page refuses another site's cookie request, and a page
+// whose cookie the API's logout ended clears it.
+func TestIdentityPagesShareTheAPISession(t *testing.T) {
+	ddl, err := os.ReadFile("../../runtime/http/testdata/identity/sqlite/create.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cargoTestCrateWith(t, userRoutesService, identityAppTest, crateOptions{
+		features:        []string{"identity-sqlite"},
+		devDependencies: `rusqlite = { version = "0.40.2", features = ["bundled"] }` + "\n",
+		files:           map[string]string{"identity.sql": string(ddl)},
+	})
 }
 
 // TestPublicImportsOnly holds the extension to the D10 promise: it imports
@@ -1433,5 +1482,200 @@ async fn a_procedure_answers_its_routes_timeout_as_a_problem() {
     let (status, _, body) = post(&app(true), PLACE_ORDER, no_arguments(0), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains(r#""err""#) && body.contains(r#""code":"gateway_timeout""#) && body.contains(r#""v":"504""#), "{body}");
+}
+`
+
+// identityAppTest is tests/app.rs of fixture-user-routes-api's Topcoat
+// crate, beside tests/identity.sql, the DDL of fixture-user-model-db that
+// the identity runtimes' stores run against (runtime/http/testdata).
+const identityAppTest = `use std::sync::Arc;
+use std::time::SystemTime;
+
+use async_trait::async_trait;
+use schemas_fixture_user_routes_api_topcoat::api::runtime::identity::{
+    hash_password, Config, IdentityAuthenticator, NewUser, Rusqlite, SqlStore, Store, HOST_COOKIE_NAME,
+};
+use schemas_fixture_user_routes_api_topcoat::api::runtime::{ApiError, Principal, RequestContext};
+use schemas_fixture_user_routes_api_topcoat::api::{identity, types, GreetingImplementation, Implementations};
+use schemas_fixture_user_routes_api_topcoat::{operations, IdentityPageAuthenticator, RouterBuilderFixtureUserRoutesApiExt};
+use serde_json::{json, Value};
+use topcoat::context::Cx;
+use topcoat::router::{page, to_bytes, Body, OriginPolicy, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::view::{view, View};
+
+const CONFIG: &str = r#"{"password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
+const PASSWORD: &str = "correct horse";
+
+struct Greetings;
+
+fn name_of(principal: &Principal) -> String {
+    principal.claims.get("name").and_then(Value::as_str).unwrap_or_default().to_string()
+}
+
+#[async_trait]
+impl GreetingImplementation for Greetings {
+    async fn greet(&self, ctx: RequestContext) -> Result<types::Greeting, ApiError> {
+        Ok(types::Greeting { message: format!("Hello, {}", ctx.principal.as_ref().map(name_of).unwrap_or_default()) })
+    }
+}
+
+// The API over a SQLite database of the authDb's tables: an administrator
+// holding the identity permissions, and a member holding none.
+async fn implementations() -> Implementations {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(include_str!("identity.sql")).unwrap();
+    let store: Arc<SqlStore> = Arc::new(identity::store(Rusqlite::new(connection).unwrap()).unwrap());
+    let config = Config::parse(CONFIG.as_bytes()).unwrap();
+    let hash = hash_password(PASSWORD, config.argon2_params()).unwrap();
+    let user = |login: &str, name: &str| NewUser {
+        login: login.to_string(),
+        name: name.to_string(),
+        password_hash: hash.clone(),
+        at: SystemTime::now(),
+    };
+    let admin = store.create_user(user("admin@example.com", "Admin")).await.unwrap();
+    store.create_user(user("member@example.com", "Member")).await.unwrap();
+    let role = store.create_role("admin", &["identity".to_string()]).await.unwrap();
+    store.grant_role(&admin.id, &role.id, SystemTime::now()).await.unwrap();
+    let service = Arc::new(identity::service(store, config).unwrap());
+    Implementations { greeting: Arc::new(Greetings), authenticator: Arc::new(IdentityAuthenticator::new(service)) }
+}
+
+async fn greet(cx: &Cx) -> String {
+    match operations::greeting_greet(cx).await {
+        Ok(greeting) => greeting.message,
+        Err(err) => err.to_string(),
+    }
+}
+
+#[page("/greeting")]
+async fn greeting_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = greet(cx).await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page(POST "/greet")]
+async fn greet_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = greet(cx).await;
+    Ok(view! { <p>(said)</p> })
+}
+
+#[page("/users")]
+async fn users_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let said = match operations::can_account_admin_list_users(cx).await {
+        Ok(caller) => format!("users readable by {}", caller.as_ref().map(name_of).unwrap_or_default()),
+        Err(err) => err.to_string(),
+    };
+    Ok(view! { <p>(said)</p> })
+}
+
+// The app's pages read a caller from the identity service the JSON API
+// authenticates with. Topcoat's origin policy trusts the origins given.
+async fn app(trusted: &[&str]) -> Router {
+    let implementations = implementations().await;
+    let pages = IdentityPageAuthenticator::of(&implementations);
+    Router::builder()
+        .origin_policy(OriginPolicy::new().trust_origins(trusted.iter().copied()))
+        .discover()
+        .fixture_user_routes_api(implementations, pages)
+        .build()
+}
+
+struct Reply {
+    status: StatusCode,
+    cookies: Vec<String>,
+    body: String,
+}
+
+async fn send(router: &Router, method: &str, uri: &str, headers: &[(&str, &str)], body: Option<Value>) -> Reply {
+    let mut request = http::Request::builder().method(method).uri(uri).header("host", "app.example.com");
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
+    let response = router.handle(request.body(body).unwrap()).await;
+    let status = response.status();
+    let cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    Reply { status, cookies, body: String::from_utf8(bytes.to_vec()).unwrap() }
+}
+
+// Signs in through the mounted JSON API with a cookie session, and answers
+// the Cookie header that carries it.
+async fn sign_in(router: &Router, login: &str) -> String {
+    let credentials = json!({"login": login, "password": PASSWORD, "session": "cookie"});
+    let reply = send(router, "POST", "/api/auth/login", &[("sec-fetch-site", "same-origin")], Some(credentials)).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let cookie = reply.cookies.first().expect("the session cookie").split(';').next().unwrap().to_string();
+    assert!(cookie.starts_with(&format!("{HOST_COOKIE_NAME}=")), "{cookie}");
+    cookie
+}
+
+#[tokio::test]
+async fn a_page_admits_the_user_the_api_signed_in() {
+    let router = app(&[]).await;
+    let body = send(&router, "GET", "/greeting", &[], None).await.body;
+    assert!(body.contains("401 unauthorized: Authentication required"), "{body}");
+
+    let admin = sign_in(&router, "admin@example.com").await;
+    let reply = send(&router, "GET", "/greeting", &[("cookie", &admin)], None).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.body.contains("Hello, Admin"), "{}", reply.body);
+    assert!(send(&router, "GET", "/users", &[("cookie", &admin)], None).await.body.contains("users readable by Admin"));
+
+    let member = sign_in(&router, "member@example.com").await;
+    let body = send(&router, "GET", "/users", &[("cookie", &member)], None).await.body;
+    assert!(body.contains("403 forbidden: Insufficient permissions"), "{body}");
+
+    // A bearer session the API's login answered signs a page in too.
+    let credentials = json!({"login": "member@example.com", "password": PASSWORD});
+    let reply = send(&router, "POST", "/api/auth/login", &[], Some(credentials)).await;
+    let token: Value = serde_json::from_str(&reply.body).unwrap();
+    let bearer = format!("Bearer {}", token["data"]["token"].as_str().unwrap());
+    let body = send(&router, "GET", "/greeting", &[("authorization", &bearer)], None).await.body;
+    assert!(body.contains("Hello, Member"), "{body}");
+}
+
+#[tokio::test]
+async fn a_page_refuses_another_sites_cookie_request() {
+    // Topcoat's origin policy refuses another site's POST before a page
+    // runs.
+    let router = app(&[]).await;
+    let admin = sign_in(&router, "admin@example.com").await;
+    let cross_site = [("cookie", admin.as_str()), ("origin", "https://evil.example.com"), ("sec-fetch-site", "cross-site")];
+    assert_eq!(send(&router, "POST", "/greet", &cross_site, None).await.status, StatusCode::FORBIDDEN);
+
+    // An origin the app's policy trusts and the identity config does not:
+    // the page's cookie is refused as the JSON API refuses it.
+    let router = app(&["https://partner.example.com"]).await;
+    let admin = sign_in(&router, "admin@example.com").await;
+    let partner = [("cookie", admin.as_str()), ("origin", "https://partner.example.com"), ("sec-fetch-site", "cross-site")];
+    let body = send(&router, "POST", "/greet", &partner, None).await.body;
+    assert!(body.contains("403 cross_origin: Cross-origin request refused"), "{body}");
+    let reply = send(&router, "POST", "/api/auth/logout", &partner, None).await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert!(reply.body.contains(r#""code":"cross_origin""#), "{}", reply.body);
+
+    let same_site = [("cookie", admin.as_str()), ("sec-fetch-site", "same-origin")];
+    let body = send(&router, "POST", "/greet", &same_site, None).await.body;
+    assert!(body.contains("Hello, Admin"), "{body}");
+}
+
+#[tokio::test]
+async fn a_page_clears_the_cookie_of_an_ended_session() {
+    let router = app(&[]).await;
+    let admin = sign_in(&router, "admin@example.com").await;
+    let reply = send(&router, "POST", "/api/auth/logout", &[("cookie", &admin), ("sec-fetch-site", "same-origin")], None).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+
+    let reply = send(&router, "GET", "/greeting", &[("cookie", &admin)], None).await;
+    assert!(reply.body.contains("401 unauthorized: Authentication required"), "{}", reply.body);
+    let cleared = format!("{HOST_COOKIE_NAME}=; Path=/; Max-Age=0");
+    assert!(reply.cookies.iter().any(|cookie| cookie.starts_with(&cleared)), "{:?}", reply.cookies);
 }
 `
