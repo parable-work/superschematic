@@ -13,9 +13,11 @@ module owns how those specs are applied to one request, and the service
 caller's verifier and credential sources (D37), which import nothing from
 node: so they run on Workers too. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
-(stackconfig.ts), which map a loaded credential onto those sources, and
-the JSON-lines logger. ./hono.ts binds it to Hono and ./postgres.ts opens a
-database's pg Pool; nothing in this file imports a framework or pg.
+(stackconfig.ts), which map a loaded credential onto those sources, the
+JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
+bucket it lists (bucket.ts, D54). ./hono.ts binds it to Hono,
+./postgres.ts opens a database's pg Pool and ./gcs.ts a bucket on GCS;
+nothing in this file imports a framework, pg or a provider's client.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
@@ -71,6 +73,7 @@ export {
   CREDENTIAL_SOURCES,
   SERVICE_AUTHORIZATION_HEADER,
   StackConfigError,
+  loadBucket,
   loadCallers,
   loadCors,
   loadDatabase,
@@ -90,6 +93,7 @@ export {
 } from './cors.js';
 export type { CorsApi, CorsDecision, CorsOperation, CorsPolicy } from './cors.js';
 export type {
+  BucketConnection,
   CloudSqlConnection,
   Database,
   Service,
@@ -99,5 +103,17 @@ export type {
   ServiceCredentialSource,
   StackEnv,
 } from './stackconfig.js';
+export { DEFAULT_PAGE_SIZE, MAX_SIGNED_URL_SECONDS, ObjectNotFoundError, checkObjectName, checkSignedUrlOptions } from './bucket.js';
+export type {
+  Bucket,
+  BucketBody,
+  BucketObject,
+  BucketRead,
+  ListOptions,
+  ListPage,
+  PutOptions,
+  SignedUrlMethod,
+  SignedUrlOptions,
+} from './bucket.js';
 export { LOG_LEVELS, createLogger } from './logger.js';
 export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

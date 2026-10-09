@@ -32,7 +32,9 @@ import (
 // authenticates with the identity runtime (D50), as on a Go server: main.ts
 // builds one identity store over the pool of that database, from the
 // descriptor its TypeScript types export, and the API's identity service
-// from its identity config field.
+// from its identity config field. A server whose APIs list a
+// bucket opens each on GCS through the HTTP runtime's ./gcs entry, and
+// depends on GCS's Node client (D54).
 
 // BunVersion is the oven/bun image a TypeScript server's Dockerfile runs it
 // on: tools.env's BUN_VERSION, the Bun the repository's checks run on.
@@ -54,6 +56,14 @@ const (
 	pgVersion                = "8.23.0"
 	cloudSQLConnectorPackage = "@google-cloud/cloud-sql-connector"
 	cloudSQLConnectorVersion = "1.12.0"
+)
+
+// The GCS Node client the HTTP runtime's ./gcs entry imports, which only a
+// server whose APIs list a bucket depends on (D54): the release the
+// runtime is checked against.
+const (
+	storagePackage = "@google-cloud/storage"
+	storageNodeVer = "8.3.0"
 )
 
 // TypeScriptImplementation is where an API's TypeScript implementation
@@ -151,6 +161,10 @@ type TypeScriptServer struct {
 	Databases []*TypeScriptDatabase
 	Clients   []*TypeScriptClient
 
+	// Buckets are the buckets main.ts opens once, for every API that lists
+	// it. With one, the package depends on GCS's Node client (D54).
+	Buckets []*TypeScriptBucket
+
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. With one, the package depends on
 	// the Cloud SQL Node connector; with none main.ts refuses a Cloud SQL
@@ -217,12 +231,32 @@ type TypeScriptAPI struct {
 
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
+
+	// Buckets are Deps' buckets (D54).
+	Buckets []TypeScriptBucketUse
 }
 
 // TypeScriptCall is a client in an API's Deps.
 type TypeScriptCall struct {
 	Field  string
 	Client *TypeScriptClient
+}
+
+// TypeScriptBucketUse is a bucket in an API's Deps.
+type TypeScriptBucketUse struct {
+	Field  string
+	Bucket *TypeScriptBucket
+}
+
+// TypeScriptBucket is a bucket main.ts opens once, for every API that
+// lists it (D54).
+type TypeScriptBucket struct {
+	Service string
+	Var     string
+
+	// From is the expression that reads the bucket's connection from the
+	// first listing API's config.
+	From string
 }
 
 // TypeScriptDatabase is a database the server opens one pool to, for every
@@ -302,7 +336,7 @@ var tsReserved = []string{
 	"connectPostgres", "ping", "Pool", "Database", "Service", "DEFAULT_PORT", "SHUTDOWN_TIMEOUT_MS",
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
-	"server", "stopping", "shutdown", "port", "process",
+	"server", "stopping", "shutdown", "port", "process", "openBucket",
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 }
@@ -339,6 +373,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	}
 	databases := map[string]*TypeScriptDatabase{}
 	clients := map[string]*TypeScriptClient{}
+	buckets := map[string]*TypeScriptBucket{}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := varStem(o.SchemaName)
@@ -435,6 +470,23 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				s.Clients = append(s.Clients, c)
 			}
 			api.Calls = append(api.Calls, TypeScriptCall{Field: call.Field, Client: c})
+		}
+		for _, b := range o.Deps.Buckets {
+			h := buckets[b.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, in.Server, o.SchemaName, b.Service)
+				}
+				h = &TypeScriptBucket{
+					Service: b.Service,
+					Var:     taken.take(varStem(b.Service) + "Bucket"),
+					From:    api.Config + "." + key,
+				}
+				buckets[b.Service] = h
+				s.Buckets = append(s.Buckets, h)
+			}
+			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
 		}
 		s.APIs = append(s.APIs, api)
 	}
@@ -535,6 +587,9 @@ func (s *TypeScriptServer) planPackage() {
 	}
 	if len(s.CloudSQL) > 0 {
 		deps[cloudSQLConnectorPackage] = cloudSQLConnectorVersion
+	}
+	if len(s.Buckets) > 0 {
+		deps[storagePackage] = storageNodeVer
 	}
 	sorted := func(m map[string]string) []NpmDependency {
 		out := make([]NpmDependency, 0, len(m))

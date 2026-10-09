@@ -94,6 +94,11 @@ type ResolvedDeployable struct {
 	// of the APIs it serves, sorted by name. A job's are its API's.
 	Calls []ServiceRef `json:"calls,omitempty"`
 
+	// Buckets are the Bucket services a server reaches: the union of the
+	// `buckets` of the APIs it serves, sorted by name. A job's are its
+	// API's (D54).
+	Buckets []ServiceRef `json:"buckets,omitempty"`
+
 	// Language is a server's or a job's language; Dialect is the SQL
 	// dialect a database runs, the first of its platform's dialects every
 	// hosted schema supports.
@@ -185,7 +190,7 @@ type Edge struct {
 	// ID is `<kind>:<from>-><service>`, unique in the environment.
 	ID string `json:"id"`
 
-	// Kind is sql, http or site.
+	// Kind is sql, http, site or bucket.
 	Kind EdgeKind `json:"kind"`
 
 	// From is the server, job or site with the need; To is the deployable
@@ -193,8 +198,9 @@ type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 
-	// Service is the DB service the sql edge connects to, or the API
-	// service the http or site edge calls.
+	// Service is the DB service the sql edge connects to, the API service
+	// the http or site edge calls, or the Bucket service the bucket edge
+	// reaches.
 	Service ServiceRef `json:"service"`
 
 	// Connector is the registered connector that realizes the edge.

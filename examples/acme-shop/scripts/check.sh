@@ -39,13 +39,16 @@
 #      tables have the columns shop-db's DDL gives them) that the Rust
 #      server reads too, and check they print the same; and, when Docker
 #      runs, `superschematic stack dev` runs shop-stack's Dev environment,
-#      Postgres, both Go servers and the storefront's TypeScript server on
-#      Bun, each on its generated entrypoint, and the site shop-web, and the
-#      test calls each Go API through its SDK and the storefront over HTTP,
-#      reads the site and its config, and checks shop-api's CORS for the
-#      site's origin (milestones 1 and 7 of docs/stack-model.md), then sees
-#      shop-orders' job ship an order with `superschematic stack run` and on
-#      the every-minute schedule stack dev runs (D52);
+#      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
+#      servers and the storefront's TypeScript server on Bun, each on its
+#      generated entrypoint, and the site shop-web, and the test calls each
+#      Go API through its SDK and the storefront over HTTP, uploads a
+#      product's image to shop-media through the URL shop-api signs and
+#      reads it back (D54), reads the site and its config, and checks
+#      shop-api's CORS for the site's origin (milestones 1 and 7 of
+#      docs/stack-model.md), then sees shop-orders' job ship an order with
+#      `superschematic stack run` and on the every-minute schedule stack dev
+#      runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password, and its pages call shop-orders in-process
 #      through the crate the Topcoat extension writes into
@@ -114,7 +117,7 @@ echo "==> build-all"
 clean_dist
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 7 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 8 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -301,11 +304,11 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 7
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 8
 # The stack's references to the APIs it deploys are recorded under dist
 # (D41), so once dist is gone it builds again, and is cached under its new
 # key; every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 6
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 7
 grep -q '^  OK: shop-stack (built, cached)$' "$OUT/logs/build-all-restore.txt"
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"

@@ -35,8 +35,9 @@ const MigrationsDir = "migrations"
 const binDir = "bin"
 
 // Program is what the local provisioner runs for one environment: the
-// environment's resource graph read into the containers, databases and
-// processes it starts, in deploy order. Render writes it as ProgramFile.
+// environment's resource graph read into the containers, databases,
+// buckets and processes it starts, in deploy order. Render writes it as
+// ProgramFile.
 type Program struct {
 	Version     int    `json:"version"`
 	Stack       string `json:"stack"`
@@ -47,6 +48,10 @@ type Program struct {
 
 	// Databases are the databases on the containers, sorted by ID.
 	Databases []*Database `json:"databases,omitempty"`
+
+	// Buckets are the buckets on the storage emulator's container, sorted
+	// by ID (D54).
+	Buckets []*Bucket `json:"buckets,omitempty"`
 
 	// KeyPairs are the http edges' key pairs, sorted by ID.
 	KeyPairs []*KeyPair `json:"keyPairs,omitempty"`
@@ -66,7 +71,10 @@ type Program struct {
 	Sites []*Site `json:"sites,omitempty"`
 }
 
-// Container is a Docker container node.
+// Container is a Docker container node. Command, when set, replaces the
+// image's entrypoint, and Args follow the image as its command's
+// arguments. Readiness says how the provisioner knows the container is
+// ready, beside the published port taking connections.
 type Container struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
@@ -74,8 +82,29 @@ type Container struct {
 	Host          string            `json:"host"`
 	HostPort      int               `json:"hostPort"`
 	ContainerPort int               `json:"containerPort"`
+	Command       []string          `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
 	Env           []EnvVar          `json:"env,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
+	Readiness     *Readiness        `json:"readiness,omitempty"`
+}
+
+// Readiness is how the provisioner knows a container is ready: Exec, a
+// command `docker exec` runs inside it, succeeds; or HTTP, a path the
+// container answers 200 on its published port. Exactly one is set.
+type Readiness struct {
+	Exec []string `json:"exec,omitempty"`
+	HTTP string   `json:"http,omitempty"`
+}
+
+// Bucket is a bucket node: a bucket on the storage emulator's container,
+// reached at Endpoint (D54).
+type Bucket struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Service   string `json:"service"`
+	Container string `json:"container"`
+	Endpoint  string `json:"endpoint"`
 }
 
 // Database is a database node: a database on a container.
@@ -201,6 +230,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			if d, err = databaseOf(res); err == nil {
 				prog.Databases = append(prog.Databases, d)
 			}
+		case TypeBucket:
+			var b *Bucket
+			if b, err = bucketOf(res); err == nil {
+				prog.Buckets = append(prog.Buckets, b)
+			}
 		case TypeKeyPair:
 			var k *KeyPair
 			if k, err = keyPairOf(res); err == nil {
@@ -234,6 +268,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			return nil, fmt.Errorf("local: database %s is on container %s, which the environment does not hold", db.ID, db.Container)
 		}
 		db.Container = c.ID
+	}
+	for _, b := range prog.Buckets {
+		if _, ok := containers[b.Container]; !ok {
+			return nil, fmt.Errorf("local: bucket %s is on container %s, which the environment does not hold", b.ID, b.Container)
+		}
 	}
 	for _, step := range env.DeployOrder {
 		switch step.Step {
@@ -311,6 +350,15 @@ func (p *Program) JobOf(name string) *Job {
 	for _, j := range p.Jobs {
 		if j.Deployable == name {
 			return j
+		}
+	}
+	return nil
+}
+
+func (p *Program) bucket(id string) *Bucket {
+	for _, b := range p.Buckets {
+		if b.ID == id {
+			return b
 		}
 	}
 	return nil
@@ -423,6 +471,22 @@ func containerOf(res *ir.Resource) (*Container, error) {
 		}
 	}
 	c.Env = env
+	if c.Command, err = stringsOf(res.Properties["command"]); err != nil {
+		return nil, fmt.Errorf("its command: %w", err)
+	}
+	if c.Args, err = stringsOf(res.Properties["args"]); err != nil {
+		return nil, fmt.Errorf("its args: %w", err)
+	}
+	if readiness, ok := res.Properties["readiness"].(map[string]any); ok {
+		c.Readiness = &Readiness{}
+		if c.Readiness.Exec, err = stringsOf(readiness["exec"]); err != nil {
+			return nil, fmt.Errorf("its readiness command: %w", err)
+		}
+		c.Readiness.HTTP, _ = readiness["http"].(string)
+		if (len(c.Readiness.Exec) == 0) == (c.Readiness.HTTP == "") {
+			return nil, fmt.Errorf("its readiness is a command or a path, not both or neither")
+		}
+	}
 	if labels, ok := res.Properties["labels"].(map[string]any); ok && len(labels) > 0 {
 		c.Labels = map[string]string{}
 		for key, value := range labels {
@@ -454,6 +518,44 @@ func databaseOf(res *ir.Resource) (*Database, error) {
 	}
 	d.Container = container.Resource
 	return d, nil
+}
+
+func bucketOf(res *ir.Resource) (*Bucket, error) {
+	b := &Bucket{ID: res.ID}
+	var ok bool
+	if b.Name, ok = res.Properties["name"].(string); !ok || !bucketNamePattern.MatchString(b.Name) {
+		return nil, fmt.Errorf("its name is not a bucket's name")
+	}
+	if b.Service, ok = res.Properties["service"].(string); !ok || b.Service == "" {
+		return nil, fmt.Errorf("its service is not a string")
+	}
+	if b.Endpoint, ok = res.Properties["endpoint"].(string); !ok || b.Endpoint == "" {
+		return nil, fmt.Errorf("its endpoint is not a string")
+	}
+	container, ok := res.Properties["container"].(ir.Output)
+	if !ok {
+		return nil, fmt.Errorf("its container is not a container's output")
+	}
+	b.Container = container.Resource
+	return b, nil
+}
+
+// stringsOf reads a list of strings from a node's properties; nil is none.
+func stringsOf(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("not a list")
+	}
+	out := make([]string, len(list))
+	for i, item := range list {
+		if out[i], ok = item.(string); !ok {
+			return nil, fmt.Errorf("[%d] is not a string", i)
+		}
+	}
+	return out, nil
 }
 
 func keyPairOf(res *ir.Resource) (*KeyPair, error) {

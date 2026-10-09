@@ -10,14 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// prepareDepsServicesRoot copies the deps fixtures, a database and two
-// APIs that call each other, into a fresh repository's schemas/services
-// and returns the repository root and the services root.
+// prepareDepsServicesRoot copies the deps fixtures, a database, a bucket
+// (D54) and two APIs that call each other, into a fresh repository's
+// schemas/services and returns the repository root and the services root.
 func prepareDepsServicesRoot(t *testing.T) (string, string) {
 	t.Helper()
 	repoRoot := t.TempDir()
 	servicesRoot := filepath.Join(repoRoot, "schemas", "services")
-	for _, fixture := range []string{"deps-db", "deps-catalog", "deps-orders"} {
+	for _, fixture := range []string{"deps-db", "deps-media", "deps-catalog", "deps-orders"} {
 		copyDir(t, filepath.Join("../internal/generator/testdata/services", fixture), filepath.Join(servicesRoot, fixture))
 	}
 	return repoRoot, servicesRoot
@@ -38,24 +38,25 @@ func runCLI(t *testing.T, args ...string) string {
 // build, the build plan ordering outputs: deps-catalog comes first, so it
 // builds its base outputs, deps-orders builds whole once deps-catalog's
 // SDK is there, and deps-catalog's server builds last. build --with-deps
-// orders the closure the same way.
+// orders the closure the same way. deps-media, the bucket deps-orders
+// lists, builds nothing and orders nothing (D54).
 func TestBuildAllBuildsAPIsThatCallEachOther(t *testing.T) {
 	_, servicesRoot := prepareDepsServicesRoot(t)
 
 	out := runCLI(t, "build-all", servicesRoot, "--out", t.TempDir(), "--parallel")
-	assert.Contains(t, out, "Phase 1/4: deps-db\n")
+	assert.Contains(t, out, "Phase 1/4: deps-db, deps-media\n")
 	assert.Contains(t, out, "Phase 2/4: deps-catalog (base)\n")
 	assert.Contains(t, out, "Phase 3/4: deps-orders\n")
 	assert.Contains(t, out, "Phase 4/4: deps-catalog (server)\n")
-	assert.Contains(t, out, "All 3 schema services built successfully")
+	assert.Contains(t, out, "All 4 schema services built successfully")
 
 	out = runCLI(t, "build-all", servicesRoot, "--out", t.TempDir())
 	assert.Contains(t, out, "Base stage complete")
 	assert.Contains(t, out, "Server stage complete")
-	assert.Contains(t, out, "All 3 schema services built successfully")
+	assert.Contains(t, out, "All 4 schema services built successfully")
 
 	out = runCLI(t, "build", "--with-deps", filepath.Join(servicesRoot, "deps-orders"), "--out", t.TempDir())
-	assert.Contains(t, out, "Resolved 3 schema services for deps-orders")
+	assert.Contains(t, out, "Resolved 4 schema services for deps-orders")
 	assert.Contains(t, out, "Server stage complete")
 }
 
@@ -99,7 +100,7 @@ func TestScaffoldWritesEachMissingImplementation(t *testing.T) {
 func TestAStackScaffoldsTheImplementationsItServes(t *testing.T) {
 	repoRoot := t.TempDir()
 	servicesRoot := filepath.Join(repoRoot, "schemas", "services")
-	for _, fixture := range []string{"shop-db", "shop-api", "shop-orders", "shop-reviews", "shop-web", "shop-stack"} {
+	for _, fixture := range []string{"shop-db", "shop-media", "shop-api", "shop-orders", "shop-reviews", "shop-web", "shop-stack"} {
 		copyDir(t, filepath.Join("../internal/generator/servergen/testdata/services", fixture), filepath.Join(servicesRoot, fixture))
 	}
 	cacheRoot := t.TempDir()

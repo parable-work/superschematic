@@ -362,6 +362,9 @@ type {{ envConfigType }} struct {
 {{- if eq .Kind "sql" }}
 	// {{ .GoName }} is the connection to {{ .Service }}, the API's database:
 	// its {{ if eq .From "authDb" }}authDb{{ else }}one DB-kind dependency{{ end }}. It is read from {{ .Key }}_*.
+{{- else if eq .Kind "bucket" }}
+	// {{ .GoName }} is how the server reaches {{ .Service }}, a bucket the API
+	// lists. It is read from {{ .Key }}_*.
 {{- else }}
 	// {{ .GoName }} is the endpoint of {{ .Service }}, which the API calls.
 	// It is read from {{ .Key }}_*.

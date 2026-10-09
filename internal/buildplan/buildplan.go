@@ -36,7 +36,8 @@ type reference struct {
 	// name is the service named.
 	name string
 
-	// field is the config key that names it: dependencies, authDb or calls.
+	// field is the config key that names it: dependencies, authDb, calls
+	// or buckets.
 	field string
 
 	// kind is the kind the handle gives the service. It is empty for an
@@ -45,8 +46,8 @@ type reference struct {
 }
 
 // references lists every service the config names, in the order of its
-// fields: the declared dependencies, the authDb, then the calls. A service
-// named by two fields appears once for each.
+// fields: the declared dependencies, the authDb, the calls, then the
+// buckets. A service named by two fields appears once for each.
 func (s Service) references() []reference {
 	refs := make([]reference, 0, len(s.Config.Dependencies))
 	for _, dep := range s.Config.Dependencies {
@@ -57,6 +58,12 @@ func (s Service) references() []reference {
 	}
 	for _, call := range s.Config.Calls {
 		refs = append(refs, reference{name: call.Name, field: "calls", kind: call.Kind})
+	}
+	// A Bucket service builds nothing, so the reference orders no build
+	// step (buildDependencyNames); it checks the handle's kind and keeps
+	// the bucket in the closure `build --with-deps` builds (D54).
+	for _, bucket := range s.Config.Buckets {
+		refs = append(refs, reference{name: bucket.Name, field: "buckets", kind: bucket.Kind})
 	}
 	return refs
 }
@@ -73,9 +80,9 @@ func (s Service) dependencyNames() []string {
 // API generator loads the authDb as the upstream auth schema and the
 // generated API module imports its ORM and types packages, so the authDb
 // is a build-order edge even when the config does not also declare it as
-// a dependency.
+// a dependency. A bucket is none: a Bucket service builds nothing (D54).
 func (s Service) buildDependencyNames() []string {
-	return s.namesOf(func(ref reference) bool { return ref.field != "calls" })
+	return s.namesOf(func(ref reference) bool { return ref.field != "calls" && ref.field != "buckets" })
 }
 
 // callNames lists the APIs the service calls. Only its API server reads

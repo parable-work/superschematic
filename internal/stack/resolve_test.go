@@ -25,9 +25,11 @@ func assemble(t *testing.T, exts ...registry.Extension) *registry.Registry {
 }
 
 // shop returns the acceptance stack and services for an edit, without
-// shop-orders' job, which jobShop keeps (jobs_test.go).
+// shop-orders' job, which jobShop keeps (jobs_test.go), and without
+// shop-api's bucket, which bucketShop keeps (buckets_test.go).
 func shop() (*ir.Stack, []stack.Service) {
-	return stacktest.WithoutJobSettings(stacktest.Shop()), stacktest.WithoutJobs(stacktest.AcmeShop())
+	s := stacktest.WithoutBucketSettings(stacktest.WithoutJobSettings(stacktest.Shop()))
+	return s, stacktest.WithoutBuckets(stacktest.WithoutJobs(stacktest.AcmeShop()))
 }
 
 // jobShop returns the acceptance stack and services with shop-orders' job,
@@ -1097,7 +1099,7 @@ func brokenStack() (*ir.Stack, []stack.Service) {
 			{Name: "Parent", Target: "broken"},
 			{Name: "Child", Extends: "Parent", Parameters: []string{"pr"}},
 		},
-	}, stacktest.AcmeShop()
+	}, stacktest.WithoutBuckets(stacktest.AcmeShop())
 }
 
 func TestGraphChecks(t *testing.T) {

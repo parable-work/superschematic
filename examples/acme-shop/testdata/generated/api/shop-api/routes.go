@@ -335,6 +335,16 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("products.read"),
 			},
 		},
+		// Signs an upload of the product's image to shop-media and records the
+		// object's name on the product.
+		{
+			Method:  "POST",
+			Path:    "/products/{id}/image-upload",
+			Handler: createProductCreateProductImageUploadHandler(cfg.Implementations.Product),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("products.write"),
+			},
+		},
 	}
 }
 
@@ -443,6 +453,68 @@ func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFu
 
 		// Call implementation
 		result, err := impl.GetProduct(r.Context(), Id)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createProductCreateProductImageUploadHandler creates a handler for POST /api/products/{id}/image-upload
+//
+// Signs an upload of the product's image to shop-media and records the
+// object's name on the product.
+func createProductCreateProductImageUploadHandler(impl ProductImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.ProductImageUploadInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.CreateProductImageUpload(r.Context(), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

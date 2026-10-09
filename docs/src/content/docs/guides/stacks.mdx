@@ -18,7 +18,7 @@ such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
 
 `superschematic stack dev` runs an environment on your machine, with
-Postgres in Docker and each server as a process. The `stack` commands
+Postgres and a storage emulator in Docker and each server as a process. The `stack` commands
 bootstrap, plan and deploy the cloud environments, and the gcp target
 lowers them to Cloud Run, Cloud Scheduler, Cloud SQL, Secret Manager, load
 balancer and DNS resources that the Pulumi provisioner applies.
@@ -36,6 +36,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, and fake-gcs-server under `stack dev` | the gcp target's bucket |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 
@@ -50,9 +51,11 @@ A stack has three tiers:
 - **Schemas** are your DB and API services, as they are today.
 - **Deployables** are what runs. A database hosts DB schemas, a server
   serves API schemas, a job runs one of an API's `@job` classes to
-  completion, and a site serves a Site service's built files. With
-  nothing declared, each API service is one server, each of its jobs one
-  job, each DB service one database and each Site service one site.
+  completion, a site serves a Site service's built files, and a bucket
+  keeps a Bucket service's objects. With nothing declared, each API
+  service is one server, each of its jobs one job, each DB service one
+  database, each Site service one site, and each Bucket service an API
+  lists one bucket.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -65,6 +68,7 @@ most of them:
 | sql | a server or a job | a database | each served API's `authDb`, or its one DB-kind dependency |
 | http | a server or a job | a server | `calls` in the config of each API the calling server serves |
 | site | a site | an exposed server | `calls` in a Site service's config ([static sites](/superschematic/guides/static-sites/)) |
+| bucket | a server or a job | a bucket | `buckets` in the config of each API the server serves |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
 one server restates nothing. A job's are its API's.
@@ -93,6 +97,9 @@ export default defineConfig({
   }
 });
 ```
+
+`buckets`, beside it, lists the Bucket services the implementation keeps
+objects in ([Buckets](/superschematic/guides/buckets/)).
 
 `calls` takes only API handles, so tsc refuses a DB handle there and
 discovery refuses one in any form. The callee must generate a Go SDK, and
@@ -162,10 +169,12 @@ upper snake case.
 | --- | --- |
 | `SHOP_DB_DATABASE` | `SHOP_DB_DATABASE_URL`, or `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `_CLOUD_SQL_DATABASE` and `_CLOUD_SQL_USER` |
 | `SHOP_API_SERVICE` | `SHOP_API_SERVICE_URL`; with a credential, `SHOP_API_SERVICE_CREDENTIAL_SOURCE` and the members that source reads (`_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY`), and `_HEADERS`, joined by commas |
+| `SHOP_MEDIA_BUCKET` | `SHOP_MEDIA_BUCKET_NAME`, and `SHOP_MEDIA_BUCKET_ENDPOINT` for a bucket an emulator serves |
 
 The names come from the naming file's
 [`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
-templates, `{SERVICE}_DATABASE` and `{SERVICE}_SERVICE` by default. The
+templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
+`{SERVICE}_BUCKET` by default. The
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
@@ -186,8 +195,11 @@ type Deps struct {
 type Constructor func(deps Deps) (Implementations, error)
 ```
 
-A field is left out when the API has nothing for it. The generated server
-entrypoint fills `Deps` and calls your `New`.
+A field is left out when the API has nothing for it. An API that lists a
+bucket also gets it, `ShopMedia bucket.Bucket`, the runtime's
+provider-neutral interface, which the entrypoint opens on GCS or on the
+local emulator ([Buckets](/superschematic/guides/buckets/)). The generated
+server entrypoint fills `Deps` and calls your `New`.
 
 ## Declare a stack
 
@@ -368,10 +380,10 @@ TypeScript twin.
 | Key | What it sets |
 | --- | --- |
 | `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort }` |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort, storageImage, storagePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)) |
+| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -611,9 +623,10 @@ malformed declarations and names nothing registers.
 `shop-api` and `shop-orders`, each on a default Go server, and
 `shop-storefront`, on a default TypeScript server, and exposes all three;
 `shop-db`, the `authDb` of both Go APIs, joins as their database,
-`shop-orders`' job `ShipOrders` as a job, and `shop-web`, a static site
-whose browser code calls `shop-api`, as a site. Its one environment,
-`Dev`, is on the core's `local` target, and runs the job every minute:
+`shop-media`, the bucket `shop-api` lists, as a bucket, `shop-orders`' job
+`ShipOrders` as a job, and `shop-web`, a static site whose browser code
+calls `shop-api`, as a site. Its one environment, `Dev`, is on the core's
+`local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -630,11 +643,13 @@ the TypeScript one calls.
 the storefront's.
 
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
-in a container with `shop-db` migrated, both Go servers on their generated
-entrypoints, the storefront's on Bun, the job on its schedule, and the
-site, built once and served with its config. `go/stack_dev_test.go` runs
-it in the example's check whenever Docker is running, calls each Go server
-through its SDK, reads a cart from the storefront, reads the site and its
+in a container with `shop-db` migrated, fake-gcs-server in another with
+`shop-media`, both Go servers on their generated entrypoints, the
+storefront's on Bun, the job on its schedule, and the site, built once
+and served with its config. `go/stack_dev_test.go` runs it in the
+example's check whenever Docker is running, calls each Go server through
+its SDK, uploads a product's image to `shop-media` through the URL
+`shop-api` signs, reads a cart from the storefront, reads the site and its
 config, checks that `shop-api` answers CORS for the site's origin and no
 other, and sees the job ship the order it placed, once with `stack run`
 and once on the schedule. The job's code is `NewJobs` in
@@ -662,7 +677,9 @@ says how to install it). It then:
 1. builds the stack and every service it reaches, each with its
    dependencies;
 2. starts one Postgres container for the environment, published on
-   127.0.0.1 only, and creates a database per DB schema;
+   127.0.0.1 only, and creates a database per DB schema; and, when the
+   stack has a bucket, one fake-gcs-server container, with a bucket per
+   Bucket service;
 3. migrates each database from the model it recorded to its schema's,
    expand and contract back to back;
 4. builds each Go server's entrypoint module with `go build`, runs `bun
@@ -674,18 +691,20 @@ says how to install it). It then:
 5. builds each job's entrypoint module the same way, and runs each job
    with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
 
-Ctrl-C stops the servers, callers first, and the container, which keeps
-its data for the next run; `--remove-database` removes it instead.
+Ctrl-C stops the servers, callers first, and the containers, which keep
+their data for the next run; `--remove-data` removes them instead.
 
 | Stack concept | On `local` |
 | --- | --- |
 | server | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs. Rust servers do not run locally yet |
 | job | a Go process per run, built from its entrypoint module, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
+| bucket | a bucket on the environment's one fake-gcs-server container, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
+| bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |
 | sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
 | secret | a line in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`: `PaymentsSecrets.STRIPE_KEY=sk_test_...` |
-| port | a server's `port` setting and the `postgresPort` value; otherwise a hash of the stack, the environment and the server, the same on every run |
+| port | a server's `port` setting and the `postgresPort` and `storagePort` values; otherwise a hash of the stack, the environment and the server, the same on every run |
 
 `stack secrets set` writes the secrets file, or you edit it by hand. The
 `.superschematic` directory ignores itself in git, and holds the key

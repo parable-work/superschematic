@@ -1,17 +1,19 @@
 // Package stackconfig holds the config fields an API's edges derive in a
 // stack (docs/stack-model.md, section 3.4): a database connection for the
-// API's database, a service endpoint for each API it calls, and for an API
-// with a service clause its callers field, what its server verifies a
-// service credential against. The generated config loader and entrypoint
-// read each from the environment variables a platform sets, one per member
-// of the value the edges' connectors derived: the field's name, an
-// underscore and the member's path in upper snake case
-// (SHOP_DB_DATABASE_URL, SHOP_API_SERVICE_CREDENTIAL_SOURCE,
+// API's database, a service endpoint for each API it calls, a bucket
+// connection for each bucket it lists (D54), and for an API with a service
+// clause its callers field, what its server verifies a service credential
+// against. The generated config loader and entrypoint read each from the
+// environment variables a platform sets, one per member of the value the
+// edges' connectors derived: the field's name, an underscore and the
+// member's path in upper snake case (SHOP_DB_DATABASE_URL,
+// SHOP_API_SERVICE_CREDENTIAL_SOURCE, SHOP_MEDIA_BUCKET_NAME,
 // SHOP_API_CALLERS_ISSUERS_0_AUDIENCE). The members are those of
-// ir.DatabaseConnection, ir.ServiceEndpoint and ir.ServiceAuth.
+// ir.DatabaseConnection, ir.ServiceEndpoint, ir.BucketConnection and
+// ir.ServiceAuth.
 //
-// The TypeScript HTTP runtime's loadDatabase, loadService and loadCallers
-// read the same variables with the same refusals (D51). The vectors in
+// The TypeScript HTTP runtime's loadDatabase, loadService, loadBucket and
+// loadCallers read the same variables with the same refusals (D51). The vectors in
 // runtime/http/testdata/stackconfig_parity.json, which this package's
 // tests write with -update, hold both to one encoding.
 package stackconfig
@@ -20,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -96,6 +99,19 @@ type Credential struct {
 	Headers []string
 }
 
+// Bucket is a bucket connection: how the server reaches a bucket an API it
+// serves lists in its buckets (D54). It holds no credential: on gcp the
+// workload's own account reaches the bucket, and an emulator checks none.
+type Bucket struct {
+	// Name is the bucket's name with its provider.
+	Name string
+
+	// Endpoint is the base URL of an emulator that serves the provider's
+	// API in its place, such as the local target's fake-gcs-server; empty
+	// reaches the provider itself.
+	Endpoint string
+}
+
 // HeaderNames returns the headers the credential travels in.
 func (c *Credential) HeaderNames() []string {
 	if len(c.Headers) == 0 {
@@ -115,6 +131,32 @@ func LoadDatabase(field string) (Database, error) {
 // is set.
 func LoadService(field string) (Service, error) {
 	return loadService(field, os.Getenv)
+}
+
+// LoadBucket reads the bucket field named field from the environment:
+// field_NAME, and field_ENDPOINT when an emulator serves the bucket (D54).
+func LoadBucket(field string) (Bucket, error) {
+	return loadBucket(field, os.Getenv)
+}
+
+// endpointPattern is the shape of a bucket's endpoint: an http or https
+// URL with a host.
+var endpointPattern = regexp.MustCompile(`^https?://[^/?#]+`)
+
+func loadBucket(field string, getenv func(string) string) (Bucket, error) {
+	name := getenv(field + "_NAME")
+	endpoint := getenv(field + "_ENDPOINT")
+	var errs []error
+	if name == "" {
+		errs = append(errs, fmt.Errorf("required environment variable %s_NAME is not set", field))
+	}
+	if endpoint != "" && !endpointPattern.MatchString(endpoint) {
+		errs = append(errs, fmt.Errorf("environment variable %s_ENDPOINT is %q; want an http or https URL", field, endpoint))
+	}
+	if len(errs) > 0 {
+		return Bucket{}, errors.Join(errs...)
+	}
+	return Bucket{Name: name, Endpoint: strings.TrimRight(endpoint, "/")}, nil
 }
 
 func loadDatabase(field string, getenv func(string) string) (Database, error) {

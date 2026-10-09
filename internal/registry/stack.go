@@ -188,8 +188,9 @@ type ConnectorSpec struct {
 	Edge ir.EdgeKind
 
 	// From and To name the platforms at the two ends. From is a server or
-	// a job platform; To is a database platform for sql and a server
-	// platform for http. A job's edges are its API's (D52), so a target
+	// a job platform; To is a database platform for sql, a server platform
+	// for http and a bucket platform for bucket (D54). A job's edges are
+	// its API's (D52), so a target
 	// that places jobs registers a connector from its job platform for
 	// each edge its servers take. A site edge runs from a site platform to
 	// a server platform (D55).
@@ -553,6 +554,10 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if spec.PublicAddressOf == nil {
 			return fmt.Errorf("registry: site platform %q has no PublicAddressOf: a site is always exposed, and the CORS field of each API it calls lists its origin (D55)", spec.Name)
 		}
+	case ir.DeployableBucket:
+		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
+			return fmt.Errorf("registry: bucket platform %q declares server languages or SQL dialects; a bucket runs no code and hosts no schema (D54)", spec.Name)
+		}
 	default:
 		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s)", spec.Name, spec.Kind, deployableKindList())
 	}
@@ -612,7 +617,7 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 		return fmt.Errorf("registry: connector %q is already registered", spec.Name)
 	}
 	if !spec.Edge.Valid() {
-		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite)
+		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket)
 	}
 	if spec.From == "" || spec.To == "" {
 		return fmt.Errorf("registry: connector %q needs a From and a To platform", spec.Name)
@@ -813,6 +818,9 @@ func (r *Registry) checkStackReferences() error {
 		if spec.Edge == ir.EdgeSite {
 			// A site edge runs from a site to a server (D55).
 			fromKinds = []ir.DeployableKind{ir.DeployableSite}
+		}
+		if spec.Edge == ir.EdgeBucket {
+			toKind = ir.DeployableBucket
 		}
 		for _, end := range []struct {
 			role, platform string

@@ -15,6 +15,7 @@ import (
 
 	orm "example.com/schemas/orm/deps-db"
 	depscatalogsdk "example.com/schemas/sdk/go/deps-catalog"
+	"github.com/parable-work/superschematic/runtime/http/go/bucket"
 	"go.uber.org/zap"
 )
 
@@ -33,6 +34,11 @@ type Deps struct {
 	// DepsCatalog is a client of deps-catalog, which the API calls. It sends the
 	// server's service credential.
 	DepsCatalog *depscatalogsdk.DepsCatalogSDK
+
+	// DepsMedia is deps-media, a bucket the API lists: private object
+	// storage it puts, gets, deletes and lists objects in, and signs URLs
+	// for (D54).
+	DepsMedia bucket.Bucket
 
 	// Logger is the API's logger.
 	Logger *zap.Logger

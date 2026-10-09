@@ -1444,6 +1444,8 @@ type Product struct {
 	PriceCents GenericInt64 `json:"priceCents"`
 
 	InStock bool `json:"inStock"`
+
+	ImageObject string `json:"imageObject,omitempty"`
 }
 
 // NewProduct returns a Product with @default values from the schema applied.
@@ -1491,6 +1493,8 @@ func (t *Product) MaskSecrets() *Product {
 
 	masked.InStock = t.InStock
 
+	masked.ImageObject = t.ImageObject
+
 	return masked
 }
 
@@ -1498,7 +1502,7 @@ func (t *Product) MaskSecrets() *Product {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Product) JSONFieldNames() []string {
-	return []string{"createdAt", "updatedAt", "id", "sku", "name", "priceCents", "inStock"}
+	return []string{"createdAt", "updatedAt", "id", "sku", "name", "priceCents", "inStock", "imageObject"}
 }
 
 // Validate validates all fields in Product
@@ -1539,6 +1543,15 @@ func (t *Product) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateGenericInt64Value(t.PriceCents, true); !valid {
 		errors.SetFieldErrors("priceCents", fieldErrs)
+	}
+
+	if !reflect.ValueOf(t.ImageObject).IsZero() {
+		value := t.ImageObject
+
+		if utf8.RuneCountInString(string(value)) > 1024 {
+			errors.AddFieldError("imageObject", "maxLength", "must be at most 1024 characters")
+		}
+
 	}
 
 	return errors

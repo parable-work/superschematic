@@ -18,8 +18,9 @@ import (
 )
 
 // DepsInfo is what the generated Deps holds beside the config and the
-// logger (docs/stack-model.md, section 8.5): the ORM of the API's database
-// and a Go SDK client per API it calls.
+// logger (docs/stack-model.md, section 8.5): the ORM of the API's
+// database, a Go SDK client per API it calls, and a bucket per bucket it
+// lists (D54).
 type DepsInfo struct {
 	// Database is the DB service whose ORM Deps.DB is: the API's authDb,
 	// or its one DB-kind dependency. Empty when the API has neither.
@@ -35,6 +36,20 @@ type DepsInfo struct {
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
+
+	// Buckets are the API's buckets entries, in order (D54).
+	Buckets []DepsBucket
+}
+
+// DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
+// bucket.Bucket, which the entrypoint opens on the bucket's provider
+// (D54).
+type DepsBucket struct {
+	// Service is the Bucket service.
+	Service string
+
+	// Field is the Deps field that holds the bucket.
+	Field string
 }
 
 // DepsCall is a Go SDK client in Deps.
@@ -53,7 +68,8 @@ type DepsCall struct {
 	Client string
 }
 
-// depsFields are the fields every Deps may hold beside its clients.
+// depsFields are the fields every Deps may hold beside its clients and its
+// buckets.
 var depsFields = []string{"Config", "DB", "Logger"}
 
 // JobInfo is a job of the API (D52): a method of the generated Jobs
@@ -86,8 +102,8 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
-// SetDeps sets what Deps holds, refusing a client whose field would take
-// the name of another of its fields.
+// SetDeps sets what Deps holds, refusing a client or a bucket whose field
+// would take the name of another of its fields.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
 	for _, name := range depsFields {
@@ -98,6 +114,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("apigen: %s calls %s, whose client would be Deps.%s, the field of %s", o.SchemaName, call.Service, call.Field, prev)
 		}
 		seen[call.Field] = call.Service
+	}
+	for _, b := range deps.Buckets {
+		if prev, clash := seen[b.Field]; clash {
+			return fmt.Errorf("apigen: %s lists bucket %s, which would be Deps.%s, the field of %s", o.SchemaName, b.Service, b.Field, prev)
+		}
+		seen[b.Field] = b.Service
 	}
 	o.Deps = deps
 	return nil

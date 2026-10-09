@@ -214,20 +214,23 @@ type Naming struct {
 
 // DerivedFieldsConfig is the [derived_fields] table of superschematic.toml:
 // a template per edge kind that names the config field the edge derives
-// (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB or
-// called API service's name in upper snake case, and the rest of a
-// template holds upper-case letters, digits and underscores. The envgen
+// (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB,
+// called API or Bucket service's name in upper snake case, and the rest of
+// a template holds upper-case letters, digits and underscores. The envgen
 // loaders and the stack resolver name the fields by it.
 type DerivedFieldsConfig struct {
 	// Database names an API's database field: "{SERVICE}_DATABASE".
 	Database string `toml:"database"`
 	// Service names the field of an API it calls: "{SERVICE}_SERVICE".
 	Service string `toml:"service"`
+	// Bucket names the field of a bucket it lists: "{SERVICE}_BUCKET"
+	// (D54).
+	Bucket string `toml:"bucket"`
 }
 
 // FieldNames returns the templates as the IR's rule takes them.
 func (d DerivedFieldsConfig) FieldNames() ir.DerivedFieldNames {
-	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service}
+	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service, Bucket: d.Bucket}
 }
 
 // ImplementationPathsConfig is the [implementation_paths] table of
@@ -661,6 +664,7 @@ func Default() Naming {
 		DerivedFields: DerivedFieldsConfig{
 			Database: ir.DefaultDatabaseField,
 			Service:  ir.DefaultServiceField,
+			Bucket:   ir.DefaultBucketField,
 		},
 		ImplementationPaths: ImplementationPathsConfig{
 			Go:         "go/" + ServicePathPlaceholder,
@@ -720,6 +724,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.AuthProvider, d.AuthProvider)
 	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
 	fill(&n.DerivedFields.Service, d.DerivedFields.Service)
+	fill(&n.DerivedFields.Bucket, d.DerivedFields.Bucket)
 	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
 	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
 	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)

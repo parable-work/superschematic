@@ -14,15 +14,16 @@ import type { PublicJwk, ServiceAuthAlgorithm, ServiceAuthConfig, ServiceAuthIss
 The config fields an API's edges derive in a stack (section 3.4 of
 docs/stack-model.md), the twin of the Go runtime's stackconfig package: a
 database connection for the API's database, a service endpoint for each API
-it calls, and for an API with a service clause its callers field, what its
-server verifies a service credential against. The generated config loader
-(the API package's loadEnvConfig) and entrypoint read each from the
-environment variables a platform sets, one per member of the value the
-edges' connectors derived: the field's name, an underscore and the member's
-path in upper snake case (SHOP_DB_DATABASE_URL,
-SHOP_API_SERVICE_CREDENTIAL_SOURCE, SHOP_API_CALLERS_ISSUERS_0_AUDIENCE).
-The members are those of ir.DatabaseConnection, ir.ServiceEndpoint and
-ir.ServiceAuth.
+it calls, a bucket connection for each bucket it lists (D54), and for an API
+with a service clause its callers field, what its server verifies a service
+credential against. The generated config loader (the API package's
+loadEnvConfig) and entrypoint read each from the environment variables a
+platform sets, one per member of the value the edges' connectors derived:
+the field's name, an underscore and the member's path in upper snake case
+(SHOP_DB_DATABASE_URL, SHOP_API_SERVICE_CREDENTIAL_SOURCE,
+SHOP_MEDIA_BUCKET_NAME, SHOP_API_CALLERS_ISSUERS_0_AUDIENCE). The members
+are those of ir.DatabaseConnection, ir.ServiceEndpoint, ir.BucketConnection
+and ir.ServiceAuth.
 
 Each reader refuses what Go's refuses, with the same messages: the vectors
 in runtime/http/testdata/stackconfig_parity.json hold both runtimes to one
@@ -90,6 +91,18 @@ export interface Service {
   readonly credential?: ServiceCredential;
 }
 
+/**
+ * A bucket connection: how the server reaches a bucket an API it serves
+ * lists in its buckets (D54). It holds no credential: on gcp the workload's
+ * own account reaches the bucket, and an emulator checks none.
+ */
+export interface BucketConnection {
+  /** The bucket's name with its provider. */
+  readonly name: string;
+  /** The base URL of an emulator that serves the provider's API in its place, such as the local target's fake-gcs-server; absent reaches the provider itself. */
+  readonly endpoint?: string;
+}
+
 /** What an API's callers field adds to the API's name in upper snake case: SHOP_API_CALLERS is shop-api's. */
 export const CALLERS_SUFFIX = '_CALLERS';
 
@@ -155,6 +168,26 @@ export function loadDatabase(field: string, env: StackEnv = processEnv()): Datab
   }
   const [instance, database, user] = values as [string, string, string];
   return { cloudSql: { instance, database, user } };
+}
+
+/** The shape of a bucket's endpoint: an http or https URL with a host. */
+const ENDPOINT = /^https?:\/\/[^/?#]+/u;
+
+/**
+ * Reads the bucket field named field: field_NAME, and field_ENDPOINT when
+ * an emulator serves the bucket (D54). Throws StackConfigError without a
+ * name, and for an endpoint that is no http or https URL.
+ */
+export function loadBucket(field: string, env: StackEnv = processEnv()): BucketConnection {
+  const name = getenv(env, `${field}_NAME`);
+  const endpoint = getenv(env, `${field}_ENDPOINT`);
+  const problems: string[] = [];
+  if (name === '') problems.push(`required environment variable ${field}_NAME is not set`);
+  if (endpoint !== '' && !ENDPOINT.test(endpoint)) {
+    problems.push(`environment variable ${field}_ENDPOINT is ${quote(endpoint)}; want an http or https URL`);
+  }
+  if (problems.length > 0) throw new StackConfigError(problems);
+  return endpoint === '' ? { name } : { name, endpoint: endpoint.replace(/\/+$/u, '') };
 }
 
 /** The credential members, in the order the messages name them. */

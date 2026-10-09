@@ -545,13 +545,15 @@ part of the build cache key: moving the copy rebuilds nothing.
 ## `[derived_fields]`
 
 How the config fields an API's edges derive in a stack are named: the
-API's database connection and the endpoint of each API it `calls`
+API's database connection, the endpoint of each API it `calls`, and the
+connection of each bucket it lists in `buckets`
 (see [What an API gets from its edges](/superschematic/guides/stacks/#what-an-api-gets-from-its-edges)). In each template `{SERVICE}` is the
-DB or called API service's name in upper snake case, and the rest of the
-template holds upper-case letters, digits and underscores. A platform sets
-each field as one environment variable per member of its value
-(`SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_CREDENTIAL_SOURCE`), and the
-loader refuses an `@envVars` field named after one.
+DB, called API or Bucket service's name in upper snake case, and the rest
+of the template holds upper-case letters, digits and underscores. A
+platform sets each field as one environment variable per member of its
+value (`SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_CREDENTIAL_SOURCE`,
+`SHOP_MEDIA_BUCKET_NAME`), and the loader refuses an `@envVars` field
+named after one.
 
 ### `derived_fields.database`
 
@@ -565,6 +567,13 @@ dependency.
 Default: `{SERVICE}_SERVICE`
 
 The field of each API an API `calls`.
+
+### `derived_fields.bucket`
+
+Default: `{SERVICE}_BUCKET`
+
+The field of each bucket an API lists in `buckets`
+([Buckets](/superschematic/guides/buckets/)).
 
 ## `[implementation_paths]`
 

@@ -39,11 +39,16 @@ const (
 	// with a config per environment, and is always exposed. Its needs are
 	// the public address of each API it calls (D55).
 	DeployableSite DeployableKind = "site"
+
+	// DeployableBucket is one Bucket service: private object storage, which
+	// needs nothing. The server and jobs of each API that lists it reach it
+	// over a bucket edge (D54).
+	DeployableBucket DeployableKind = "bucket"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket
 }
 
 // HasImage reports whether a deployable of kind k runs code the stack's
@@ -62,7 +67,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -81,11 +86,15 @@ const (
 	// EdgeSite runs from a site to the server of each API it calls, which
 	// is exposed: the browser reaches the API at its public address (D55).
 	EdgeSite EdgeKind = "site"
+
+	// EdgeBucket runs from a server, and from a job, to each bucket an API
+	// it serves lists in its config's buckets (D54).
+	EdgeBucket EdgeKind = "bucket"
 )
 
 // Valid reports whether k is an edge kind v1 knows.
 func (k EdgeKind) Valid() bool {
-	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite
+	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket
 }
 
 // A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`

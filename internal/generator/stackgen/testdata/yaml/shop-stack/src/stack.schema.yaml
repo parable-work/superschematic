@@ -53,6 +53,8 @@ types:
           env: { FULFILLMENT_REGION: { value: us } }
         - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
           values: { cpu: "2" }
+        - of: { service: { name: shop-media, kind: Bucket } }
+          values: { versioning: true }
   Preview:
     name: Preview
     role: EmbeddedStruct

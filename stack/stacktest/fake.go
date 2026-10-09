@@ -7,7 +7,8 @@
 // The fake platforms lower to resource types of a provider named `fake`,
 // shaped like the gcp target's (section 7.2): a server is a service with
 // its own account, a database an instance with a database per hosted
-// schema, a sql edge a client grant and an http edge an invoker grant.
+// schema, a bucket a private bucket, a sql edge a client grant, an http
+// edge an invoker grant and a bucket edge an object user grant.
 package stacktest
 
 import (
@@ -55,6 +56,13 @@ const (
 	SitePlatform  = "fake.site"
 	SiteConnector = "fake.site-run"
 
+	// BucketPlatform keeps a bucket, as gcp keeps one in Cloud Storage;
+	// BucketConnector and JobBucketConnector grant a server's or a job's
+	// account its objects (D54).
+	BucketPlatform     = "fake.storage"
+	BucketConnector    = "fake.run-storage"
+	JobBucketConnector = "fake.job-storage"
+
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
 	FakeIssuer = "https://issuer.fake.test"
@@ -79,6 +87,7 @@ const (
 	TypeJob      = "fake:run/job:Job"
 	TypeSchedule = "fake:scheduler/job:Job"
 	TypeSite     = "fake:storage/site:Site"
+	TypeBucket   = "fake:storage/bucket:Bucket"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -201,6 +210,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 			},
 			Lower: lowerSite,
 		},
+		{
+			Name:      BucketPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableBucket,
+			Settings:  json.RawMessage(bucketSettings),
+			NameOf:    bucketName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".bucket", Name: "name"}
+			},
+			Lower: lowerBucket,
+		},
 	} {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
@@ -212,6 +232,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: JobPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: SitePlatform, To: RunPlatform, Connect: connectSite},
+		{Name: BucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: RunPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: JobBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -239,6 +261,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableDatabase: SQLPlatform,
 			ir.DeployableJob:      JobPlatform,
 			ir.DeployableSite:     SitePlatform,
+			ir.DeployableBucket:   BucketPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -297,6 +320,14 @@ const databaseSettings = `{
   "additionalProperties": false
 }`
 
+const bucketSettings = `{
+  "type": "object",
+  "properties": {
+    "versioning": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}`
+
 const dnsValues = `{
   "type": "object",
   "properties": {"zone": {"type": "string", "minLength": 1}},
@@ -347,6 +378,12 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string"}, "schedule": {"type": "string"}, "timeZone": {"type": "string"},
 	    "job": {"type": "string"}, "account": {"type": "string"}
+	  },
+	  "additionalProperties": false}`,
+	TypeBucket: `{"type": "object", "required": ["name", "location", "public"],
+	  "properties": {
+	    "name": {"type": "string"}, "location": {"type": "string"}, "public": {"type": "boolean"},
+	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
 	  },
 	  "additionalProperties": false}`,
 }
@@ -638,6 +675,57 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 			SubjectClaim: "email",
 			Callers:      []ir.ServiceAuthCaller{{Subject: account, Deployable: ctx.From.Name, Serves: serves}},
 		},
+	}, nil
+}
+
+// bucketName names a bucket after the project, the stack and the bucket,
+// since a bucket's name is unique across every project, suffixed with
+// each parameter's value under a parameter: a member of a parameterized
+// environment gets a bucket of its own (D54).
+func bucketName(ctx registry.PlatformContext) any {
+	project, _ := ctx.Environment.Values["project"].(string)
+	parts := []any{project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name)}
+	for _, param := range ctx.Environment.Parameters {
+		parts = append(parts, "-", ir.Parameter(param))
+	}
+	return Join(parts...)
+}
+
+// lowerBucket lowers a bucket to a private bucket in the environment's
+// region, versioned when its settings say so. A member of a parameterized
+// environment's bucket is its own, and its destroy empties it.
+func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	region, _ := ctx.Environment.Values["region"].(string)
+	props := map[string]any{
+		"name":     d.ResourceName,
+		"location": region,
+		"public":   false,
+	}
+	if versioning, ok := d.Settings["versioning"].(bool); ok {
+		props["versioning"] = versioning
+	}
+	if len(ctx.Environment.Parameters) > 0 {
+		props["forceDestroy"] = true
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{ID: d.Name + ".bucket", Type: TypeBucket, Properties: props}}}, nil
+}
+
+// connectBucket grants the server's or the job's account the objects of
+// the bucket and derives the bucket's name, which the account reaches with
+// no credential of the edge's own (D54).
+func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{
+		Resources: []*ir.Resource{{
+			ID:   ctx.From.Name + ".storage." + ctx.Edge.Service.Name,
+			Type: TypeGrant,
+			Properties: map[string]any{
+				"role":     "storage.objectUser",
+				"member":   ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+				"resource": ir.Output{Resource: ctx.To.Name + ".bucket", Name: "id"},
+			},
+		}},
+		Value: ir.BucketConnection{Name: ctx.To.Address},
 	}, nil
 }
 

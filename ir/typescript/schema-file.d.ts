@@ -11,7 +11,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'DB' | 'General' | 'Site' | 'Stack' | (string & {});
+export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -494,7 +494,7 @@ export interface ServiceCallers {
 }
 
 export interface ServiceRef {
-  kind: 'API' | 'DB' | 'General' | 'Site' | 'Stack';
+  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack';
   name: string;
 }
 

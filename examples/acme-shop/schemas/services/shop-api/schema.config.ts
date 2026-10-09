@@ -1,4 +1,5 @@
 import { ShopDb } from "@acme/shop-db";
+import { ShopMedia } from "@acme/shop-media";
 import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 
 export default defineConfig({
@@ -6,6 +7,8 @@ export default defineConfig({
   kind: SchemaKind.API,
   public: true,
   authDb: ShopDb,
+  // Product images (D54): the implementation's Deps holds the bucket.
+  buckets: [ShopMedia],
   outputs: {
     types: {
       [TargetLanguage.Go]: { enabled: true },

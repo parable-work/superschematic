@@ -1,4 +1,5 @@
   OK: shop-db (restored from cache)
+  OK: shop-media (restored from cache)
   OK: shop-api (restored from cache)
   OK: shop-common (restored from cache)
   OK: shop-orders (restored from cache)

@@ -6,7 +6,9 @@
 // API's implementation from its Deps and mounts every API's routes on one
 // handler beside /healthz and /readyz. cloudsql.go beside it connects a
 // database through the Cloud SQL connector, on a server that some
-// environment places on Cloud SQL. A TypeScript server's is a package at
+// environment places on Cloud SQL, and buckets.go opens each bucket on GCS,
+// or on an emulator that serves its API, on a server whose APIs list one
+// (D54). A TypeScript server's is a package at
 // the same place, whose main.ts does the same on Bun (typescript.go). The
 // generator package plans what each server serves from the stack and the
 // APIs' server outputs; this package turns that plan into files.
@@ -53,6 +55,7 @@ const RustVersion = "1.99.0"
 const (
 	MainFile         = "main.go"
 	CloudSQLFile     = "cloudsql.go"
+	BucketsFile      = "buckets.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
@@ -70,6 +73,16 @@ const (
 
 // cloudSQLConnModule is the Cloud SQL Go connector's module.
 const cloudSQLConnModule = "cloud.google.com/go/cloudsqlconn"
+
+// The GCS Go client buckets.go imports, and the version of
+// google.golang.org/api it requires, whose iterator and option packages
+// buckets.go imports too (D54).
+const (
+	storageModule    = "cloud.google.com/go/storage"
+	storageVersion   = "v1.69.0"
+	googleAPIModule  = "google.golang.org/api"
+	googleAPIVersion = "v0.288.0"
+)
 
 // ZeroVersion is the version a go.mod requires a module at that a replace
 // points at a directory, as the generated modules require one another.
@@ -230,6 +243,12 @@ type Server struct {
 	Databases []*Database
 	Clients   []*Client
 
+	// Buckets are the buckets the server opens once, for every API that
+	// lists it. With one, buckets.go opens each on GCS, or on an emulator
+	// that serves its API, and go.mod requires GCS's Go client; with none
+	// the server does not link it (D54).
+	Buckets []*Bucket
+
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. When there is one, cloudsql.go
 	// connects them through the Cloud SQL connector, which go.mod
@@ -312,12 +331,34 @@ type API struct {
 
 	// Calls are Deps' clients.
 	Calls []Call
+
+	// Buckets are Deps' buckets (D54).
+	Buckets []BucketUse
 }
 
 // Call is a client in an API's Deps.
 type Call struct {
 	Field  string
 	Client *Client
+}
+
+// BucketUse is a bucket in an API's Deps.
+type BucketUse struct {
+	Field  string
+	Bucket *Bucket
+}
+
+// Bucket is a bucket the server opens once, for every API that lists it
+// (D54).
+type Bucket struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the bucket's connection is read
+	// from, and From the expression that reads it from the first listing
+	// API's config.
+	Field string
+	From  string
 }
 
 // Database is a database the server connects to once, for every API on it.
@@ -416,6 +457,9 @@ var reserved = []string{
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
 	"identity", "identityConfig", "stdlib", "method", "requested",
 	"jobs", "started",
+	"openBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
+	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
+	"x509", "pem", "strings", "sync", "url",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -530,14 +574,15 @@ func Plan(in Input) (*Server, error) {
 	}
 	databases := map[string]*Database{}
 	clients := map[string]*Client{}
+	buckets := map[string]*Bucket{}
 	for i, a := range in.APIs {
 		o, api := a.Output, apis[i]
 		derived := map[string]string{}
 		if o.EnvConfig != nil {
 			for _, f := range o.EnvConfig.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.GoName
-				if f.Kind == ir.EdgeSQL {
-					derived["field "+f.Service] = f.Key
+				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket {
+					derived[string(f.Kind)+" field "+f.Service] = f.Key
 				}
 			}
 		}
@@ -557,7 +602,7 @@ func Plan(in Input) (*Server, error) {
 					Var:     stem,
 					Package: taken.take(packageName(db) + "orm"),
 					Module:  o.Deps.ORMModule,
-					Field:   derived["field "+db],
+					Field:   derived[string(ir.EdgeSQL)+" field "+db],
 					From:    api.Var + "Config." + goName,
 				}
 				databases[db] = d
@@ -600,6 +645,24 @@ func Plan(in Input) (*Server, error) {
 			}
 			api.Calls = append(api.Calls, Call{Field: call.Field, Client: c})
 		}
+		for _, b := range o.Deps.Buckets {
+			h := buckets[b.Service]
+			if h == nil {
+				goName, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
+				if !ok || !api.Config {
+					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, in.Server, o.SchemaName, b.Service)
+				}
+				h = &Bucket{
+					Service: b.Service,
+					Var:     taken.take(varStem(b.Service) + "Bucket"),
+					Field:   derived[string(ir.EdgeBucket)+" field "+b.Service],
+					From:    api.Var + "Config." + goName,
+				}
+				buckets[b.Service] = h
+				s.Buckets = append(s.Buckets, h)
+			}
+			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
+		}
 	}
 	s.APIs = apis
 	slices.Sort(s.CloudSQL)
@@ -617,8 +680,8 @@ func Plan(in Input) (*Server, error) {
 	return s, nil
 }
 
-// planModule plans go.mod: the third-party modules main.go and
-// cloudsql.go import, then in.Modules, each replaced by its directory.
+// planModule plans go.mod: the third-party modules main.go, cloudsql.go
+// and buckets.go import, then in.Modules, each replaced by its directory.
 func (s *Server) planModule(in Input, dir string) error {
 	direct := []Require{{"go.uber.org/zap", zapVersion}}
 	if s.Job == nil {
@@ -629,6 +692,9 @@ func (s *Server) planModule(in Input, dir string) error {
 	}
 	if len(s.CloudSQL) > 0 {
 		direct = append(direct, Require{cloudSQLConnModule, cloudSQLConnVersion})
+	}
+	if len(s.Buckets) > 0 {
+		direct = append(direct, Require{storageModule, storageVersion}, Require{googleAPIModule, googleAPIVersion})
 	}
 	seen := map[string]bool{}
 	for _, r := range direct {
@@ -812,8 +878,8 @@ func checkRoutes(in Input) error {
 
 // Write writes the entrypoint module into dir: main.go, go.mod,
 // cloudsql.go when some environment places a database of the server on
-// Cloud SQL, and the Dockerfile with its ignore file when s.Docker is
-// planned.
+// Cloud SQL, buckets.go when its APIs list a bucket (D54), and the
+// Dockerfile with its ignore file when s.Docker is planned.
 //
 // A job's module holds the same files but serviceauth.go and identity.go,
 // and its main.go runs the job (job.go.tmpl). Both main.go templates take
@@ -832,6 +898,9 @@ func Write(s *Server, dir string) error {
 	}
 	if len(s.CloudSQL) > 0 {
 		files = append(files, struct{ template, name string }{"cloudsql.go.tmpl", CloudSQLFile})
+	}
+	if len(s.Buckets) > 0 {
+		files = append(files, struct{ template, name string }{"buckets.go.tmpl", BucketsFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})

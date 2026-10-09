@@ -112,13 +112,21 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("client of shop-api: %w", err)
 	}
 
+	// One handle per bucket, shared by every API that lists it (buckets.go).
+	defer closeBuckets()
+	shopMediaBucket, err := openBucket(ctx, "SHOP_MEDIA_BUCKET", shopOrdersConfig.ShopMediaBucket)
+	if err != nil {
+		return fmt.Errorf("bucket shop-media: %w", err)
+	}
+
 	// shop-orders: its implementation, built from its Deps, and its routes.
 	shopOrdersLogger := logger.With(zap.String("api", "shop-orders"))
 	shopOrdersDeps := shoporders.Deps{
-		Config:  *shopOrdersConfig,
-		DB:      shopDb,
-		ShopApi: shopApiClient,
-		Logger:  shopOrdersLogger,
+		Config:    *shopOrdersConfig,
+		DB:        shopDb,
+		ShopApi:   shopApiClient,
+		ShopMedia: shopMediaBucket,
+		Logger:    shopOrdersLogger,
 	}
 	shopOrdersImplementations, err := shopordersimpl.New(shopOrdersDeps)
 	if err != nil {
@@ -146,9 +154,10 @@ func run(logger *zap.Logger) error {
 	// shop-reviews: its implementation, built from its Deps, and its routes.
 	shopReviewsLogger := logger.With(zap.String("api", "shop-reviews"))
 	shopReviewsDeps := shopreviews.Deps{
-		Config: *shopReviewsConfig,
-		DB:     shopDb,
-		Logger: shopReviewsLogger,
+		Config:    *shopReviewsConfig,
+		DB:        shopDb,
+		ShopMedia: shopMediaBucket,
+		Logger:    shopReviewsLogger,
 	}
 	shopReviewsImplementations, err := shopreviewsimpl.New(shopReviewsDeps)
 	if err != nil {

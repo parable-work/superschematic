@@ -9,9 +9,11 @@
 
 import {
   StackConfigError,
+  loadBucket,
   loadCallers,
   loadDatabase,
   loadService,
+  type BucketConnection,
   type Database,
   type Service,
   type ServiceAuthConfig,
@@ -28,6 +30,8 @@ export interface EnvConfig extends LoadedShopConfig {
   readonly DEPS_DB_DATABASE: Database;
   /** The endpoint of deps-ts-pricing, which the API calls. It is read from DEPS_TS_PRICING_SERVICE_*. */
   readonly DEPS_TS_PRICING_SERVICE: Service;
+  /** How the server reaches deps-media, a bucket the API lists. It is read from DEPS_MEDIA_BUCKET_*. */
+  readonly DEPS_MEDIA_BUCKET: BucketConnection;
   /**
    * What the server verifies a calling service's credential against: the
    * API's callers field, for its service clauses. It is read from DEPS_TS_SHOP_CALLERS_*.
@@ -65,6 +69,7 @@ export function loadEnvConfig(env: StackEnv = processEnv()): EnvConfig {
     ...settings,
     DEPS_DB_DATABASE: read(() => loadDatabase("DEPS_DB_DATABASE", env)),
     DEPS_TS_PRICING_SERVICE: read(() => loadService("DEPS_TS_PRICING_SERVICE", env)),
+    DEPS_MEDIA_BUCKET: read(() => loadBucket("DEPS_MEDIA_BUCKET", env)),
     DEPS_TS_SHOP_CALLERS: read(() => loadCallers("DEPS_TS_SHOP_CALLERS", env)),
   };
   if (problems.length > 0) throw new StackConfigError(problems);

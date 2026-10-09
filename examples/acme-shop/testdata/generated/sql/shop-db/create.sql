@@ -42,6 +42,7 @@ CREATE TABLE product (
   "name" VARCHAR(80) NOT NULL,
   price_cents BIGINT NOT NULL,
   in_stock BOOLEAN NOT NULL,
+  image_object TEXT,
   UNIQUE (sku)
 );
 

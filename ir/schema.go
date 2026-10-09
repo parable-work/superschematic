@@ -30,6 +30,14 @@ const (
 	// D55). Its config names the APIs it calls and how it builds
 	// (SiteConfig); its code sits at its implementation path.
 	SchemaKindSite SchemaKind = "Site"
+
+	// SchemaKindBucket represents a bucket: private object storage that the
+	// APIs listing it in their config's buckets reach through a
+	// provider-neutral interface (docs/stack-model.md, section 8.9, D54).
+	// Its config is all it has: it declares nothing in schema files and
+	// generates nothing, and each Bucket service a stack reaches is a
+	// deployable of kind bucket.
+	SchemaKindBucket SchemaKind = "Bucket"
 )
 
 // String returns the string representation of a SchemaKind.
@@ -82,6 +90,11 @@ type Schema struct {
 	// it serves (D55). Nil for every other kind, and for a site that takes
 	// every default.
 	Site *SiteConfig `json:"site,omitempty" yaml:"site,omitempty"`
+
+	// Buckets lists the Bucket services an API's implementation uses: the
+	// config's buckets (D54). Each gives the API's server and jobs a bucket
+	// edge, and its Deps a Bucket.
+	Buckets []ServiceRef `json:"buckets,omitempty" yaml:"buckets,omitempty"`
 
 	// References lists the services the schema's decorator arguments name
 	// by a service handle, other than as identities: a stack's `deploy`,

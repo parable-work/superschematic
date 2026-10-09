@@ -227,6 +227,31 @@ func TestRegisterConnectorRejects(t *testing.T) {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
+	// A bucket edge runs to a bucket platform, which declares no languages
+	// and no dialects (D54).
+	bucketPlatform := runPlatform("fake.storage")
+	bucketPlatform.Kind, bucketPlatform.Languages = ir.DeployableBucket, nil
+	toBucket := ConnectorSpec{Name: "run-storage", Edge: ir.EdgeBucket, From: "fake.run", To: "fake.storage", Connect: connect}
+	t.Run("a bucket edge", func(t *testing.T) {
+		if err := finalize(t, []PlatformSpec{runPlatform("fake.run"), bucketPlatform}, toBucket); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a bucket edge to a database platform", func(t *testing.T) {
+		spec := toBucket
+		spec.To = "fake.sql"
+		err := finalize(t, []PlatformSpec{runPlatform("fake.run"), sqlPlatform("fake.sql")}, spec)
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.sql", a database platform; a bucket edge's to is a bucket`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("a bucket platform with languages", func(t *testing.T) {
+		spec := bucketPlatform
+		spec.Languages = []string{APILanguageGo}
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `bucket platform "fake.storage" declares server languages or SQL dialects`) {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
 }
 
 // finalizeStack runs the stack part of Finalize, which the other parts of

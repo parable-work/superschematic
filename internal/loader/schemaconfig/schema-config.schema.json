@@ -76,6 +76,13 @@
         "authDb": {
           "type": "string"
         },
+        "buckets": {
+          "description": "The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry names a Bucket service.",
+          "items": {
+            "$ref": "#/definitions/ServiceDependencyRef"
+          },
+          "type": "array"
+        },
         "calls": {
           "description": "The API services this API's implementation calls, or this site's code calls from the browser. Only an API or a Site service sets it, and each entry names an API service. Each callee is built before its caller.",
           "items": {
@@ -114,13 +121,14 @@
       "type": "object"
     },
     "SchemaKind": {
-      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55).",
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.",
       "enum": [
         "DB",
         "API",
         "General",
         "Stack",
-        "Site"
+        "Site",
+        "Bucket"
       ],
       "type": "string"
     },
@@ -177,7 +185,7 @@
     },
     "ServiceDependencyRef": {
       "additionalProperties": false,
-      "description": "A service reference in the JSON/YAML config forms, in dependencies and calls. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
+      "description": "A service reference in the JSON/YAML config forms, in dependencies, calls and buckets. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
       "properties": {
         "kind": {
           "$ref": "#/definitions/SchemaKindName"

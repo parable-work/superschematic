@@ -30,9 +30,10 @@ type field struct {
 
 // DerivedField returns the name of the config field an edge of kind to
 // service fills under the core's rule: the service's name in upper snake
-// case, suffixed `_DATABASE` for a sql edge and `_SERVICE` for an http edge
-// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`). Input.FieldNames replaces the
-// rule with the naming file's (section 3.4).
+// case, suffixed `_DATABASE` for a sql edge, `_SERVICE` for an http edge
+// and `_BUCKET` for a bucket edge (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`,
+// `SHOP_MEDIA_BUCKET`). Input.FieldNames replaces the rule with the naming
+// file's (section 3.4).
 func DerivedField(kind ir.EdgeKind, service string) string {
 	return ir.DerivedFieldNames{}.Field(kind, service)
 }
@@ -62,9 +63,10 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 }
 
 // deriveEdges finds every edge: a sql edge from each server to the
-// database of each API it serves, and an http edge from each server to the
-// server of each API it calls. A job takes its API's edges, from itself
-// (D52). Each finds the connector between the two platforms.
+// database of each API it serves, an http edge from each server to the
+// server of each API it calls, and a bucket edge from each server to each
+// bucket an API it serves lists (D54). A job takes its API's edges, from
+// itself (D52). Each finds the connector between the two platforms.
 func (r *resolver) deriveEdges() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -82,6 +84,9 @@ func (r *resolver) deriveEdges() {
 		}
 		for _, callee := range d.res.Calls {
 			r.addEdge(ir.EdgeHTTP, d, callee.Name)
+		}
+		for _, bucket := range d.res.Buckets {
+			r.addEdge(ir.EdgeBucket, d, bucket.Name)
 		}
 	}
 }
@@ -321,6 +326,9 @@ func contractOf(kind ir.EdgeKind) string {
 		return "database connection (ir.DatabaseConnection)"
 	case ir.EdgeSite:
 		return "site endpoint (ir.SiteEndpoint)"
+	}
+	if kind == ir.EdgeBucket {
+		return "bucket connection (ir.BucketConnection)"
 	}
 	return "service endpoint (ir.ServiceEndpoint)"
 }

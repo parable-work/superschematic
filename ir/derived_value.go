@@ -44,6 +44,21 @@ type CloudSQLConnection struct {
 	User any `json:"user"`
 }
 
+// BucketConnection is what a bucket edge's connector derives: how a server
+// or a job reaches a bucket an API of it lists (D54). It holds no
+// credential: on gcp the workload's own account reaches the bucket, and the
+// local target's emulator checks none.
+type BucketConnection struct {
+	// Name is the bucket's name with its provider: on gcp the GCS bucket's
+	// name, which is unique across every project.
+	Name any `json:"name"`
+
+	// Endpoint is the base URL of an emulator that serves the provider's
+	// API in its place, such as the local target's fake-gcs-server
+	// (`http://127.0.0.1:24443`). Unset reaches the provider itself.
+	Endpoint any `json:"endpoint,omitempty"`
+}
+
 // ServiceEndpoint is what an http edge's connector derives: how a server
 // reaches an API it calls.
 type ServiceEndpoint struct {
@@ -108,7 +123,7 @@ type ServiceCredential struct {
 
 // CheckDerivedValue checks a derived value against the contract of an
 // edge of kind: a DatabaseConnection for sql, a ServiceEndpoint for http,
-// a SiteEndpoint for site (D55).
+// a SiteEndpoint for site (D55), a BucketConnection for bucket (D54).
 // v is the typed value or its JSON form; a member the contract does not
 // have is refused. The error names the offending member.
 func CheckDerivedValue(kind EdgeKind, v any) error {
@@ -123,8 +138,24 @@ func CheckDerivedValue(kind EdgeKind, v any) error {
 		return checkServiceEndpoint(value)
 	case EdgeSite:
 		return checkSiteEndpoint(value)
+	case EdgeBucket:
+		return checkBucketConnection(value)
 	}
 	return fmt.Errorf("edge kind %q has no derived value", kind)
+}
+
+func checkBucketConnection(v any) error {
+	m, err := members(v, "a bucket connection", "name", "endpoint")
+	if err != nil {
+		return err
+	}
+	if err := requiredString(m, "", "name"); err != nil {
+		return err
+	}
+	if endpoint, ok := m["endpoint"]; ok {
+		return stringMember("endpoint", endpoint)
+	}
+	return nil
 }
 
 func checkDatabaseConnection(v any) error {
@@ -443,8 +474,9 @@ func sortedMemberKeys(m map[string]any) []string {
 }
 
 // The core's rule for derived field names: the service's name in upper
-// snake case, suffixed `_DATABASE` for a sql edge and `_SERVICE` for an
-// http edge (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`).
+// snake case, suffixed `_DATABASE` for a sql edge, `_SERVICE` for an http
+// edge and `_BUCKET` for a bucket edge (`SHOP_DB_DATABASE`,
+// `SHOP_API_SERVICE`, `SHOP_MEDIA_BUCKET`).
 const (
 	// ServicePlaceholder is what a derived field template replaces with
 	// the service's name in upper snake case.
@@ -455,6 +487,10 @@ const (
 
 	// DefaultServiceField is the core's template for an http edge's field.
 	DefaultServiceField = ServicePlaceholder + "_SERVICE"
+
+	// DefaultBucketField is the core's template for a bucket edge's field
+	// (D54).
+	DefaultBucketField = ServicePlaceholder + "_BUCKET"
 )
 
 // DerivedFieldNames are the templates that name the config field each
@@ -466,6 +502,9 @@ type DerivedFieldNames struct {
 
 	// Service names an http edge's field, after the called API service.
 	Service string `json:"service,omitempty"`
+
+	// Bucket names a bucket edge's field, after the Bucket service (D54).
+	Bucket string `json:"bucket,omitempty"`
 }
 
 // Field returns the name of the config field an edge of kind to service
@@ -486,6 +525,12 @@ func (n DerivedFieldNames) template(kind EdgeKind) string {
 		}
 		return DefaultDatabaseField
 	}
+	if kind == EdgeBucket {
+		if n.Bucket != "" {
+			return n.Bucket
+		}
+		return DefaultBucketField
+	}
 	if n.Service != "" {
 		return n.Service
 	}
@@ -496,7 +541,7 @@ func (n DerivedFieldNames) template(kind EdgeKind) string {
 // whose other characters would not make an environment variable's name:
 // upper-case letters, digits and underscores, not starting with a digit.
 func (n DerivedFieldNames) Validate() error {
-	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}} {
+	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}, {"bucket", n.Bucket}} {
 		if t.template == "" {
 			continue
 		}
@@ -551,14 +596,16 @@ type DerivedConfigField struct {
 	// Name is the field's name.
 	Name string
 
-	// Kind is the edge's kind: sql for the database, http for a call.
+	// Kind is the edge's kind: sql for the database, http for a call,
+	// bucket for a bucket the API lists.
 	Kind EdgeKind
 
-	// Service is the DB service or the called API service.
+	// Service is the DB service, the called API service or the Bucket
+	// service.
 	Service string
 
-	// From is the config key the edge comes from: authDb, dependencies or
-	// calls.
+	// From is the config key the edge comes from: authDb, dependencies,
+	// calls or buckets.
 	From string
 }
 
@@ -587,7 +634,8 @@ func (s *Schema) Database() (service, from string, ok bool) {
 
 // DerivedConfigFields lists the config fields an API service's edges
 // derive, named by names: its database's, then one per `calls` entry in
-// order. A schema that is not an API has none.
+// order, then one per `buckets` entry in order (D54). A schema that is not
+// an API has none.
 func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigField {
 	if s.Kind != SchemaKindAPI {
 		return nil
@@ -598,6 +646,9 @@ func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigFie
 	}
 	for _, call := range s.Calls {
 		out = append(out, DerivedConfigField{Name: names.Field(EdgeHTTP, call.Name), Kind: EdgeHTTP, Service: call.Name, From: "calls"})
+	}
+	for _, bucket := range s.Buckets {
+		out = append(out, DerivedConfigField{Name: names.Field(EdgeBucket, bucket.Name), Kind: EdgeBucket, Service: bucket.Name, From: "buckets"})
 	}
 	return out
 }
@@ -613,6 +664,8 @@ func DerivedMembers(kind EdgeKind) []string {
 		return []string{"url", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
 	case EdgeSite:
 		return []string{"url"}
+	case EdgeBucket:
+		return []string{"name", "endpoint"}
 	}
 	return nil
 }

@@ -8,12 +8,13 @@ import (
 
 // AcmeShop returns the facts of the acme-shop services
 // (examples/acme-shop/schemas/services) as the resolver reads them. The
-// names, kinds, `authDb`, dependencies and languages are those of the
-// services' schema configs, and the operations, with their user clauses,
-// and shop-orders' job, ShipOrders, those of the services' schema files.
-// The services declare no `calls` and no `@envVars` yet, so the fixture
-// adds them: shop-orders calls shop-api, and both APIs' configs extend
-// PaymentsSecrets, as in docs/stack-model.md, section 4.2.
+// names, kinds, `authDb`, dependencies, `buckets` and languages are those
+// of the services' schema configs, and the operations, with their user
+// clauses, and shop-orders' job, ShipOrders, those of the services' schema
+// files. shop-api lists the Bucket service shop-media, where its product
+// images go (D54). The services declare no `calls` and no `@envVars` yet,
+// so the fixture adds them: shop-orders calls shop-api, and both APIs'
+// configs extend PaymentsSecrets, as in docs/stack-model.md, section 4.2.
 func AcmeShop() []stack.Service {
 	def := func(v string) *string { return &v }
 	user := func(name string) stack.Operation { return stack.Operation{Name: name, UserClause: true} }
@@ -22,10 +23,12 @@ func AcmeShop() []stack.Service {
 	return []stack.Service{
 		{Name: "shop-common", Kind: ir.SchemaKindGeneral},
 		{Name: "shop-db", Kind: ir.SchemaKindDB},
+		{Name: "shop-media", Kind: ir.SchemaKindBucket},
 		{
 			Name:     "shop-api",
 			Kind:     ir.SchemaKindAPI,
 			AuthDB:   &shopDB,
+			Buckets:  []ir.ServiceRef{ShopMedia},
 			Language: registry.APILanguageGo,
 			Config: &stack.Config{
 				Type: "ShopApiConfig",
@@ -165,12 +168,40 @@ func WithoutJobSettings(s *ir.Stack) *ir.Stack {
 	return s
 }
 
+// WithoutBuckets returns services with no bucket: the shop for a target
+// that places no bucket yet, or a test about the rest of the stack. The
+// Bucket services stay, and no API lists them, so no stack reaches them.
+func WithoutBuckets(services []stack.Service) []stack.Service {
+	out := make([]stack.Service, len(services))
+	for i, svc := range services {
+		svc.Buckets = nil
+		out[i] = svc
+	}
+	return out
+}
+
+// WithoutBucketSettings returns s with no settings element that names a
+// bucket, to resolve over services WithoutBuckets returns.
+func WithoutBucketSettings(s *ir.Stack) *ir.Stack {
+	for _, env := range s.Environments {
+		var kept []*ir.DeployableSettings
+		for _, settings := range env.Settings {
+			if settings == nil || settings.Of.Service == nil || settings.Of.Service.Kind != ir.SchemaKindBucket {
+				kept = append(kept, settings)
+			}
+		}
+		env.Settings = kept
+	}
+	return s
+}
+
 // Handles to the acme-shop services.
 var (
 	ShopDB     = ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	ShopAPI    = ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
 	ShopOrders = ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
 	ShopWeb    = ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}
+	ShopMedia  = ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}
 )
 
 // ShipOrders is shop-orders' job (D52): the warehouse's pick run, which
@@ -197,6 +228,8 @@ func JobOf(ref ir.ServiceRef, job string) ir.DeployableRef {
 // parameter. shop-orders' job ShipOrders runs hourly in New York's time in
 // Staging, on its decorator's schedule and two CPUs in Production, and on
 // none in Preview, whose members run no schedule they do not turn on.
+// shop-api's bucket, shop-media, joins the stack through its buckets, and
+// keeps its objects' versions in Production (D54).
 func Shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "shop-stack",
@@ -229,6 +262,7 @@ func Shop() *ir.Stack {
 					{Of: Of(ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: Of(ShopOrders), Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: JobOf(ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2"}},
+					{Of: Of(ShopMedia), Values: map[string]any{"versioning": true}},
 				},
 			},
 			{

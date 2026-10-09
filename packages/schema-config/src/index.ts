@@ -4,14 +4,17 @@
  * service declares what runs where over the others (`@superschematic/stack`)
  * and is named by none, so it has no sentinel. A Site service is a static
  * site: its config names the APIs it calls and how it builds, and its code
- * sits at its implementation path (D55).
+ * sits at its implementation path (D55). A Bucket service is private object
+ * storage that APIs list in their `buckets` (D54): its config is all it
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
  */
 export enum SchemaKind {
   DB = "DB",
   API = "API",
   General = "General",
   Stack = "Stack",
-  Site = "Site"
+  Site = "Site",
+  Bucket = "Bucket"
 }
 
 /**
@@ -176,6 +179,10 @@ export type SchemaConfig = {
    */
   readonly calls?: readonly ServiceHandle<"API">[];
   /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry is a Bucket service's handle.
+   */
+  readonly buckets?: readonly ServiceHandle<"Bucket">[];
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -186,8 +193,8 @@ export type SchemaConfig = {
 };
 
 /**
- * A service reference in the JSON/YAML config forms, in dependencies and
- * calls. The TypeScript form builds ServiceHandle sentinels with the
+ * A service reference in the JSON/YAML config forms, in dependencies,
+ * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -216,6 +223,10 @@ export type SchemaConfigDocument = {
    * The API services this API's implementation calls, or this site's code calls from the browser. Only an API or a Site service sets it, and each entry names an API service. Each callee is built before its caller.
    */
   readonly calls?: readonly ServiceDependencyRef[];
+  /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry names a Bucket service.
+   */
+  readonly buckets?: readonly ServiceDependencyRef[];
   /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */

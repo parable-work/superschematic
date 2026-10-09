@@ -74,6 +74,9 @@ Three entry points:
   database connection (below). It is the only entry that imports `pg`.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
+- `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
+  emulator that serves its API, over a derived bucket connection (below).
+  It is the only entry that imports `@google-cloud/storage`.
 
 ## Authentication and permissions
 
@@ -261,6 +264,9 @@ these, the twins of the Go runtime's `stackconfig` package (D51):
   `google-id-token` (`audience`), a `token-file` (`tokenFile`) or a
   `signed-token` (`audience`, `issuer`, `key`, a private JWK's JSON), with
   the `headers` that carry it when they are set.
+- `loadBucket(field, env)` reads a bucket connection (D54): `field_NAME`,
+  and `field_ENDPOINT` when an emulator serves the bucket. It returns a
+  `BucketConnection`, `{ name, endpoint? }`.
 - `loadCallers(field, env)` reads an API's callers field
   (`<API>_CALLERS`): its issuers, keys and callers, as the
   `ServiceAuthConfig` that `serviceAuthenticator` takes.
@@ -303,6 +309,22 @@ connects when first used, so a database that is not up fails a query, not
 the open; the connector does read the instance's settings from the Cloud
 SQL Admin API when the pool opens. `ping(pool, timeoutMs)` resolves when
 `SELECT 1` answers in time, which is what `/readyz` asks of each pool.
+
+`Bucket`, from the main entry, is the provider-neutral interface of a
+bucket an API lists in its `buckets` (D54), which its `Deps` holds: `put`
+(from a stream, the bytes or a string), `get` (a stream and the object's
+metadata), `delete`, `list` (a page under a prefix, with the next page's
+token) and `signedUrl` (a V4 URL to `GET` or `PUT` one object, for up to
+seven days). A missing object is an `ObjectNotFoundError`.
+`openBucket(connection, { env })`, from `@superschematic/http-runtime/gcs`,
+opens one over a `BucketConnection` with `@google-cloud/storage`, an
+optional peer dependency that a server installs only when its APIs list a
+bucket. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
+reaches an emulator with no credential, and signs its URLs with a key the
+process makes, which fake-gcs-server takes without checking; on GCS the
+client takes the application default credentials and signs as the
+workload's account through IAM's `signBlob`. `src/gcs.test.ts` runs
+against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
 
 ## Using it
 

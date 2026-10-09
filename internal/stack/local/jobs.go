@@ -349,9 +349,9 @@ func (p *Provisioner) RunJob(ctx context.Context, req registry.ProvisionRequest,
 	return nil
 }
 
-// checkRunning reports what of the program does not answer: a Postgres
-// container that is not running or not ready, or a server that does not
-// answer its readiness path.
+// checkRunning reports what of the program does not answer: a container,
+// Postgres's or the storage emulator's, that is not running or not ready,
+// or a server that does not answer its readiness path.
 func (p *Provisioner) checkRunning(ctx context.Context, prog *Program) error {
 	if len(prog.Containers) > 0 {
 		docker, err := p.lookPath("docker")
@@ -363,8 +363,8 @@ func (p *Provisioner) checkRunning(ctx context.Context, prog *Program) error {
 			if err != nil {
 				return err
 			}
-			if !state.running || !p.postgresReady(ctx, docker, c) {
-				return fmt.Errorf("its Postgres container %s does not run", c.Name)
+			if !state.running || p.containerReady(ctx, docker, c) != nil {
+				return fmt.Errorf("its container %s does not run", c.Name)
 			}
 		}
 	}

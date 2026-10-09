@@ -29,7 +29,8 @@ import (
 // TestStackDevRunsTheShop is milestones 1 and 7 of docs/stack-model.md
 // (section 14) on this example. `superschematic stack dev` runs
 // shop-stack's Dev environment from examples/acme-shop, as the tutorial
-// does: Postgres in a container with shop-db migrated; shop-api and
+// does: Postgres in a container with shop-db migrated; fake-gcs-server in a
+// container with shop-media, the bucket shop-api lists (D54); shop-api and
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; and shop-storefront on
 // its generated TypeScript entrypoint, which Bun runs with the
@@ -39,15 +40,17 @@ import (
 // shop-db with the identity runtime's store, as staff would through the
 // administration routes, signs them in through shop-api's generated login,
 // calls each Go API through its generated Go SDK with the session and the
-// storefront over HTTP. It reads the static site shop-web, which stack dev
-// built and serves with its config, and asks shop-api, as a browser would,
-// whether the site's origin may call it, and another origin (D55). Then
-// shop-orders' job ShipOrders, on its generated entrypoint with the
-// implementation's NewJobs, ships the order placed: once on demand with
-// `superschematic stack run`, and again on the every-minute schedule Dev's
-// settings give it, which stack dev runs (section 8.7, D52). Last, the
-// test stops the stack as Ctrl-C does, which with --remove-database removes
-// the container.
+// storefront over HTTP. shop-api signs an upload of a product's image,
+// which the test PUTs to the emulator through the signed URL, as a browser
+// would, and reads back from shop-media. It reads the static site
+// shop-web, which stack dev built and serves with its config, and asks
+// shop-api, as a browser would, whether the site's origin may call it, and
+// another origin (D55). Then shop-orders' job ShipOrders, on its generated
+// entrypoint with the implementation's NewJobs, ships the order placed:
+// once on demand with `superschematic stack run`, and again on the
+// every-minute schedule Dev's settings give it, which stack dev runs
+// (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
+// with --remove-data removes the containers.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
@@ -80,7 +83,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	})
 	output := &lockedBuffer{}
-	stack := exec.Command(binary, "stack", "dev", "--remove-database", "--out", outputRoot)
+	stack := exec.Command(binary, "stack", "dev", "--remove-data", "--out", outputRoot)
 	stack.Dir = ".."
 	stack.Stdout, stack.Stderr = output, output
 	if err := stack.Start(); err != nil {
@@ -89,8 +92,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	exited := make(chan error, 1)
 	go func() { exited <- stack.Wait() }()
 	// On a failure, stop stack dev as Ctrl-C does, then remove the
-	// container whatever it left.
-	stopped, container := false, ""
+	// containers whatever it left.
+	stopped, containers := false, []string(nil)
 	t.Cleanup(func() {
 		if !stopped {
 			_ = stack.Process.Signal(os.Interrupt)
@@ -100,7 +103,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 				_ = stack.Process.Kill()
 			}
 		}
-		if container != "" {
+		for _, container := range containers {
 			_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
 		}
 		if t.Failed() {
@@ -124,7 +127,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
-	container = env.container
+	containers = env.containers
 	for _, server := range []string{"shop-api", "shop-orders", "shop-storefront"} {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
@@ -159,6 +162,44 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if !containsProduct(listed, product.Id) {
 		t.Fatalf("ListProducts returned %+v, without %s", listed, product.Id)
+	}
+
+	// shop-media (D54): shop-api names an object for the product's image
+	// and signs its upload; the image goes straight to the bucket through
+	// the signed URL, as a browser would send it, never through shop-api.
+	upload, err := products.ProductNamespace.CreateProductImageUpload(ctx, product.Id.String(), apitypes.ProductImageUploadInput{ContentType: "image/png"})
+	if err != nil {
+		t.Fatalf("CreateProductImageUpload: %v", err)
+	}
+	if !strings.HasPrefix(upload.UploadUrl, env.bucket+"/") || !strings.Contains(upload.UploadUrl, "X-Goog-Signature=") {
+		t.Fatalf("the upload URL %s is no signed URL of the bucket at %s", upload.UploadUrl, env.bucket)
+	}
+	image := []byte("\x89PNG\r\n\x1a\n green tea")
+	put, err := http.NewRequest(http.MethodPut, upload.UploadUrl, bytes.NewReader(image))
+	if err != nil {
+		t.Fatal(err)
+	}
+	put.Header.Set("Content-Type", "image/png")
+	uploaded, err := http.DefaultClient.Do(put)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploaded.Body.Close()
+	if uploaded.StatusCode != http.StatusOK {
+		t.Fatalf("PUT the image through the signed URL: %s", uploaded.Status)
+	}
+	got, err := products.ProductNamespace.GetProduct(ctx, product.Id.String())
+	if err != nil || got.ImageObject != upload.ObjectName {
+		t.Fatalf("GetProduct = %+v, %v; want the image object %s recorded", got, err, upload.ObjectName)
+	}
+	back, err := http.Get(env.bucket + "/" + upload.ObjectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := io.ReadAll(back.Body)
+	back.Body.Close()
+	if err != nil || back.StatusCode != http.StatusOK || !bytes.Equal(stored, image) || back.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
 
 	// shop-orders: a shopper orders two of it, in one transaction over
@@ -282,7 +323,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	}
 
-	// Ctrl-C stops the servers, then removes the container and its data.
+	// Ctrl-C stops the servers, then removes the containers and their data:
+	// Postgres's and the storage emulator's.
 	stopped = true
 	if err := stack.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
@@ -296,11 +338,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		_ = stack.Process.Kill()
 		t.Fatal("stack dev did not stop in 2 minutes")
 	}
-	if !strings.Contains(output.String(), "removed container "+env.container) {
-		t.Fatalf("stack dev did not remove container %s", env.container)
-	}
-	if exec.Command("docker", "container", "inspect", env.container).Run() == nil {
-		t.Fatalf("container %s outlived --remove-database", env.container)
+	for _, container := range env.containers {
+		if !strings.Contains(output.String(), "removed container "+container) {
+			t.Fatalf("stack dev did not remove container %s", container)
+		}
+		if exec.Command("docker", "container", "inspect", container).Run() == nil {
+			t.Fatalf("container %s outlived --remove-data", container)
+		}
 	}
 }
 
@@ -341,12 +385,14 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 
 // environment is what the test reads from the environment the build
 // resolved: each server's URL, the site's origin, shop-db's connection
-// string and the Postgres container's name.
+// string, shop-media's URL on the storage emulator, and the names of the
+// containers, Postgres's and the emulator's.
 type environment struct {
-	servers   map[string]string
-	site      string
-	database  string
-	container string
+	servers    map[string]string
+	site       string
+	database   string
+	bucket     string
+	containers []string
 }
 
 func readEnvironment(t *testing.T, path string) environment {
@@ -384,13 +430,18 @@ func readEnvironment(t *testing.T, path string) environment {
 	for _, r := range resolved.Resources.Resources {
 		switch {
 		case r.Type == "local:docker/container:Container":
-			env.container, _ = r.Properties["name"].(string)
+			name, _ := r.Properties["name"].(string)
+			env.containers = append(env.containers, name)
 		case r.Type == "local:postgres/database:Database" && r.Properties["service"] == "shop-db":
 			env.database, _ = r.Properties["url"].(string)
+		case r.Type == "local:storage/bucket:Bucket" && r.Properties["service"] == "shop-media":
+			endpoint, _ := r.Properties["endpoint"].(string)
+			name, _ := r.Properties["name"].(string)
+			env.bucket = endpoint + "/" + name
 		}
 	}
-	if env.database == "" || env.container == "" {
-		t.Fatalf("%s names no shop-db database or no container", path)
+	if env.database == "" || env.bucket == "" || len(env.containers) != 2 {
+		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
 	}
 	return env
 }
