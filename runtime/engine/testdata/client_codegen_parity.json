@@ -175,6 +175,15 @@
               }
             },
             {
+              "name": "Numbering",
+              "config": {
+                "format": "T-{seq}",
+                "scope": {
+                  "link": "project"
+                }
+              }
+            },
+            {
               "name": "Dependencies",
               "config": {
                 "schemas": [
@@ -986,6 +995,22 @@
               "type": "object"
             },
             "present": true
+          }
+        },
+        "Numbering": {
+          "label": {
+            "schema": {
+              "description": "The number as the format prints it, unique within its scope; absent until it is numbered.",
+              "type": "string"
+            },
+            "present": false
+          },
+          "seq": {
+            "schema": {
+              "description": "The instance's number in its count, from 1; absent until it is numbered.",
+              "type": "integer"
+            },
+            "present": false
           }
         },
         "Workflow": {

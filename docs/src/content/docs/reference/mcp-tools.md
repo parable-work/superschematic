@@ -357,7 +357,7 @@ the required ones required. The engine takes the invocation policy and
 the vendor keys above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Branches`, `Approvals`, and `Reactions`, `Constants`, `Variants` and `StateRules`,
+`Branches`, `Approvals`, `Numbering`, and `Reactions`, `Constants`, `Variants` and `StateRules`,
 which have no operations),
 which every engine registers, name none, and neither do the work-queue
 behaviors `@superschematic/engine-workqueue` implements.

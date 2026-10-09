@@ -275,8 +275,12 @@ deployment that wants it through lists it in `exempt`. Another
 principal's sign-off is refused the same way: on a type that also
 composes the engine's `Approvals`, `"Approvals.signOff"` and
 `"Approvals.withdrawSignOff"` in `exempt` let approvers sign the leased
-instance off. Nothing changes
-the field `maxHoldField` names while a lease is held, unless with
+instance off. So is a
+backfill's: `Numbering`'s `assignNumber`, which numbers an instance made
+before its schema composed `Numbering`, writes, so a deployment that
+backfills leased instances lists `"Numbering.assignNumber"`; a create
+holds no lease, and numbers its instance whatever the guard. Nothing
+changes the field `maxHoldField` names while a lease is held, unless with
 `overridePermission`, so a holder cannot extend its own hold.
 
 ### Directives

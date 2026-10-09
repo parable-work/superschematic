@@ -48,6 +48,8 @@ export type {
   LeaseTransition,
   LinkConfig,
   LinksConfig,
+  NumberingConfig,
+  NumberingScope,
   PresenceConfig,
   PresenceTransition,
   ReactionRule,

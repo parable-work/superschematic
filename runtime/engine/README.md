@@ -24,9 +24,10 @@ reach other instances, `Search`, full-text search with vectors an outside
 embedder computes, and a search across a namespace's schemas,
 `Reactions`, which the runner runs, `Constants` and `Variants`, which
 judge the fields a write stores, `Branches`, a version graph on each
-instance (D32), and `StateRules`, the fields each Workflow state
-requires or freezes (D56), and `Approvals`, sign-offs a move of the type's Workflow
-waits for (D56). The plug-in interface has what D32 gives a behavior that
+instance (D32), and the behaviors D56 adds for business records:
+`StateRules`, the fields each Workflow state requires or freezes;
+`Numbering`, a number a person reads on each instance; and `Approvals`,
+sign-offs a move of the type's Workflow waits for. The plug-in interface has what D32 gives a behavior that
 keeps values of other types in its own tables: the schema's other types
 in `parseConfig`, `validate(type, value)` in its contexts, and schedules
 a schema turns off and whose runs write the behavior's own tables; a
@@ -623,8 +624,9 @@ holds and the work no one holds.
   a boolean, as for an index, by its key, or one a behavior lets a list
   filter on (its implementation's `filters`, "The implementation" under
   "Behaviors"), by its qualified name, the behavior's name, a dot and
-  the filter's: `Workflow.status`, and in the work-queue package
-  `Assignment.assignee`, `Lease.holder` and `Retries.exhausted`. An own
+  the filter's: `Workflow.status`, `Numbering.seq` and `Numbering.label`,
+  and in the work-queue package `Assignment.assignee`, `Lease.holder` and
+  `Retries.exhausted`. An own
   field's key holds no dot, so the two never meet. A
   value has the field's JSON type, an integer for an integer scalar, or
   is null; another type, an empty list and a field that is not one of
@@ -639,7 +641,8 @@ holds and the work no one holds.
   past the cursor in position order, at most 100 of them
   (`MAX_FILTER_RANGES`), merged. A unique index answers a combination
   with one instance at most, and a behavior's index serves its filter
-  (`Workflow`'s on `Workflow.status`), null being one more range. An own index
+  (`Workflow`'s on `Workflow.status`, `Numbering`'s on each of its
+  two), null being one more range. An own index
   holds no instance without a value in each of its fields, so it serves
   no member that lists null. With none, the page reads the list index,
   at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The
@@ -1275,9 +1278,10 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
-`Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches` and
-`StateRules`, and the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`,
-`Blueprint`, `Budget` and `Retries`), so its loader refuses any other.
+`Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`,
+`StateRules`, `Numbering` and `Approvals`, and the work-queue package's
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and
+`Retries`), so its loader refuses any other.
 
 ### The implementation
 
@@ -2206,7 +2210,7 @@ tell a caller its read is stale.
 
 ### Core behaviors
 
-The core declares thirteen behaviors the engine implements
+The core declares fourteen behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -2308,9 +2312,18 @@ schema whose claims two approvers sign off before they are approved:
     "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] } } } }
 ```
 
+`Numbering` numbers each instance at its create from the counts it
+keeps in a table of its own, on an `invoices` schema whose invoices
+count per project and per year:
+
+```json
+{ "name": "Numbering", "config": { "format": "INV-{yyyy}-{seq:4}", "scope": { "link": "project" }, "reset": "yearly" } }
+```
+
 Where they number their records, they number from 1 per instance (a
 comment's id, a revision, a proposal's id), so a number says nothing
-about another instance. Their
+about another instance; `Numbering`'s number is the one a person reads
+across them. Their
 list operations are read-only, so the policy is asked for `read` and they
 append no event: they take `limit` (1 to 500, 50 by default) and
 `cursor`, and return `{ items, next }` in the order the records were
@@ -3406,6 +3419,60 @@ sign-offs. On a type that also composes `Lease`, `signOff` and
 holder: `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` belong in
 Lease's `exempt` (`runtime/engine-workqueue/README.md`, "The guard").
 
+#### Numbering
+
+A number a person reads on each instance (D56): an invoice's
+`INV-2026-0042`, a ticket's `T-17`.
+
+| | |
+| --- | --- |
+| Config | `format` (required, 1 to 128 characters): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` and `{yy}`, the UTC year the instance was created in, as often as wanted; `scope: { link }`, a link of the type's `Links` config, required and holding one target, whose each target counts on its own; `reset: "yearly"`, which starts each count again at 1 every UTC year and needs the year in `format` |
+| Fields | `seq`, the number in its count, from 1, and `label`, the number as `format` prints it; both absent until the instance is numbered. A list filters on each (`where: { 'Numbering.label': 'INV-2026-0042' }`, `'Numbering.seq'`), through an index on its column |
+| Operations | `assignNumber()` -> `{ seq, label }`, writes: numbers an instance made before its schema composed `Numbering`; on one numbered already, `unchanged()` |
+| Storage | columns `number` and `label` on the instance, each indexed; `counters(namespace, schema, scope_key, last)`, the last number of each count; `labels(namespace, schema, id, scope_key, label)`, unique on `(namespace, schema, scope_key, label)` |
+| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year in `format`, and a `scope` link that is not a link of the type's `Links`, is optional or holds many targets (`many: true`, read from the `Links` config as the type gives it), all `invalid_schema` |
+| Events | a create's event carries the number under `Numbering`; `assignNumber`'s operation event, `patch: { behaviors: { Numbering: { seq, label } } }` |
+| `configChange` | added to a schema with instances, which hold no number until `assignNumber`; while the schema has instances, `format`, `scope` and `reset` stay, and it is not removed: added again, it would count from 1. With none, any change, and the counts start again at 1 |
+
+The count runs per namespace and schema; with `scope`, per target of
+the link; with `reset`, per UTC year too. A count is a row of the
+behavior's own `counters`, keyed by the target's id and the year, with
+a `/` between, which no id holds.
+
+- **In the create's transaction.** `afterChange` of the create sets the
+  number, after every behavior's `initialize`, so the scope link the
+  create gives is held whatever the list order. A create a later
+  behavior refuses rolls the count back with it, so a refused create
+  takes no number and leaves no gap. A delete leaves one: the next create
+  takes the next number, and the deleted instance's label row goes.
+- **Unique within its scope.** Only `{seq}` varies in width, and it is
+  there once, so a label's length fixes where each token sits: two
+  numbers of one count print two labels, and with the year in the label
+  a yearly count's labels differ across years too. `labels` holds each
+  label unique within its scope key, so a defect that would print one
+  twice fails the write (`BehaviorError`). With `scope`, each target
+  counts from 1, so two targets each have an `INV-2026-0001`, and a list
+  by label returns one instance per target.
+- **The year.** `{yyyy}`, `{yy}` and `reset` read the UTC year of the
+  instance's `createdAt`, read with the scope link's target in one read
+  of the instance (`instances.get`, as the caller), so a number
+  `assignNumber` gives later counts in the year the instance was made.
+- **Nothing changes a number.** No operation writes the columns once
+  set: a create or an update writes own fields only, and `assignNumber`
+  writes them only while they are empty. Moving the scope link keeps the
+  number, counted in the count of the target it was numbered under.
+- **Backfill.** An instance made before the schema composed `Numbering`
+  reads `behaviors.Numbering` as `{}`, and `where: { 'Numbering.seq':
+  null }` lists them; `assignNumber()` numbers one with an operation
+  event, in the count of its year and target. A deployment backfills by
+  invoking it on each in creation order.
+- **The `number` column.** The column that holds `seq` is named `number`,
+  since the relation over the instances (`sql.instances()`) has a `seq`
+  of its own, the instance's event sequence.
+- **Lease.** On a type that composes `Lease`, list
+  `"Numbering.assignNumber"` in Lease's `exempt`, or the backfill of a
+  leased instance is refused for anyone but its holder.
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -4000,6 +4067,7 @@ in `@superschematic/engine-workqueue`):
 | `Branches` | the kinds and the primary line, the `release` field, and each operation's version-graph refusals |
 | `StateRules` | what each state requires and freezes, and the permission that changes a frozen field; `missing_fields` on `transition`, a create's required fields, `required_fields` and `frozen_fields` on `update` and on `Revisions`' `approve` |
 | `Approvals` | each gate's count, permission and `from`, whether the creator may sign, and what consumes a sign-off; `approvals_missing` on `transition`, and that `update` consumes them |
+| `Numbering` | the format with an example label, what the count runs per; create's number, list's `where` on `Numbering.label` and `Numbering.seq`, that update and a scope link's `link` change no number, and when `assignNumber` is the call |
 | `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
 | `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
 | `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |

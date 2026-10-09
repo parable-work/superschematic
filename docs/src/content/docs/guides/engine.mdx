@@ -420,7 +420,8 @@ applies after a change commits, `Constants` and `Variants`, which keep
 fields as their create set them and type a JSON field by another field's
 value, `Branches`, which makes each instance the root of a version
 graph whose drafts merge into its primary line, and `StateRules`, which
-holds fields to the Workflow state an instance is in; [Engine behaviors](/superschematic/guides/engine-behaviors/)
+holds fields to the Workflow state an instance is in, and `Numbering`, which
+gives each instance a number a person reads; [Engine behaviors](/superschematic/guides/engine-behaviors/)
 covers them. [Work queues](/superschematic/guides/work-queues/) covers
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and
 `Retries`, which make instances claimable work.
@@ -931,8 +932,8 @@ field the file lacks goes live over HTTP, the next start refuses the file.
 
 - [Engine behaviors](/superschematic/guides/engine-behaviors/): the
   runner, schema-level operations, and the Dependencies, Links, Rollups,
-  Search, Reactions, Constants, Variants, Branches, StateRules and
-  Approvals behaviors.
+  Search, Reactions, Constants, Variants, Branches, StateRules,
+  Numbering and Approvals behaviors.
 - [Work queues](/superschematic/guides/work-queues/): claimable work with
   `@superschematic/engine-workqueue`, and a worker over the client.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md):

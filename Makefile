@@ -282,10 +282,10 @@ docs:
 # General service from the fixture corpus, and loads fixture-behaviors-json,
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
-# fixture-staterules-json, fixture-approvals-json and fixture-workqueue-json,
-# whose types compose the core's behaviors (D10): --emit-ir carries all
-# twenty and json-schema admits them. The engine runs the first nine
-# documents with its own behaviors in
+# fixture-staterules-json, fixture-numbering-json, fixture-approvals-json and
+# fixture-workqueue-json, whose types compose the core's behaviors (D10):
+# --emit-ir carries all twenty-one and json-schema admits them. The engine
+# runs the first ten documents with its own behaviors in
 # runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
 # package runs the last in
 # runtime/engine-workqueue/typescript/test/package.test.ts.
@@ -313,10 +313,12 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-approvals-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-numbering-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Lease Assignment Queue Presence Blueprint Budget Retries; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Lease Assignment Queue Presence Blueprint Budget Retries; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

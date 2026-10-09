@@ -77,6 +77,7 @@ var coreNarrowers = map[string]narrower{
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
 	"Approvals":    narrowApprovals,
+	"Numbering":    narrowNumbering,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -535,6 +536,16 @@ func narrowVariants(n *narrowing, config map[string]any, target narrowTarget) er
 	}
 	n.variants = out
 	return nil
+}
+
+// Numbering: the number and its label are absent on an instance made
+// before its schema composed Numbering, until assignNumber numbers it. The
+// config changes neither's type, so a nil config narrows as any does.
+func narrowNumbering(n *narrowing, _ map[string]any, _ narrowTarget) error {
+	return setFields(n,
+		typedField{"seq", integer(), false},
+		typedField{"label", map[string]any{"type": "string"}, false},
+	)
 }
 
 // stringScalar reports whether a scalar's values are strings.

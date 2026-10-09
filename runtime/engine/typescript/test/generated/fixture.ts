@@ -734,6 +734,12 @@ export type TaskBehaviors = {
       };
     };
   };
+  readonly Numbering: {
+    /** The instance's number in its count, from 1; absent until it is numbered. */
+    readonly seq?: number;
+    /** The number as the format prints it, unique within its scope; absent until it is numbered. */
+    readonly label?: string;
+  };
   readonly Dependencies: {
     /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
     readonly blocked: boolean;
@@ -924,6 +930,17 @@ export type TaskListLinkedResult = {
   next: string | null;
 };
 
+/** The parameters of Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+export type TaskAssignNumberParams = Record<string, never>;
+
+/** The instance's number. */
+export type TaskAssignNumberResult = {
+  /** The number as the format prints it. */
+  label: string;
+  /** Its number in its count. */
+  seq: number;
+};
+
 /** The parameters of Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
 export type TaskAddBlockerParams = {
   /** The blocker's id. */
@@ -998,6 +1015,7 @@ export type TaskOperations = {
   link: { scope: 'instance'; params: TaskLinkParams; result: TaskLinkResult };
   unlink: { scope: 'instance'; params: TaskUnlinkParams; result: TaskUnlinkResult };
   listLinked: { scope: 'schema'; params: TaskListLinkedParams; result: TaskListLinkedResult };
+  assignNumber: { scope: 'instance'; params: TaskAssignNumberParams; result: TaskAssignNumberResult };
   addBlocker: { scope: 'instance'; params: TaskAddBlockerParams; result: TaskAddBlockerResult };
   removeBlocker: { scope: 'instance'; params: TaskRemoveBlockerParams; result: TaskRemoveBlockerResult };
   listBlockers: { scope: 'instance'; params: TaskListBlockersParams; result: TaskListBlockersResult };
@@ -1005,13 +1023,14 @@ export type TaskOperations = {
 };
 
 /** The name of an operation on one Task. */
-export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'assignNumber' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Task's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Comments: never;
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
+  Numbering: never;
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Variants: never;
@@ -1054,6 +1073,8 @@ export interface TaskClient {
   unlink(id: string, params: TaskUnlinkParams, options?: TaskWriteOptions): Promise<TaskUnlinkResult>;
   /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: TaskListLinkedParams, options?: CallOptions): Promise<TaskListLinkedResult>;
+  /** Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+  assignNumber(id: string, params?: TaskAssignNumberParams, options?: TaskWriteOptions): Promise<TaskAssignNumberResult>;
   /** Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
   addBlocker(id: string, params: TaskAddBlockerParams, options?: TaskWriteOptions): Promise<TaskAddBlockerResult>;
   /** Dependencies' removeBlocker: Stops another instance from blocking this one. */
@@ -1102,6 +1123,9 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     listLinked(params, options) {
       return client.instances.invokeSchema<TaskListLinkedResult>('Task', 'listLinked', params, options);
+    },
+    assignNumber(id, params, options) {
+      return client.instances.invoke<TaskAssignNumberResult>('Task', id, 'assignNumber', params ?? {}, options);
     },
     addBlocker(id, params, options) {
       return client.instances.invoke<TaskAddBlockerResult>('Task', id, 'addBlocker', params, options);

@@ -10,7 +10,8 @@
 // a result of the kind's shape, fixture-branches-json, whose recipes
 // are version graphs, and fixture-staterules-json, whose invoices need
 // and keep fields by their status, and fixture-approvals-json, whose expense claims
-// wait for sign-offs.
+// wait for sign-offs, and fixture-numbering-json, whose invoices are
+// numbered per project and per year.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -21,9 +22,10 @@ import {
   cleanup,
   documentsDocument,
   drivers,
-  invoicesDocument,
   expensesDocument,
+  invoicesDocument,
   notesDocument,
+  numberedInvoicesDocument,
   openTestEngine,
   projectTreeDocument,
   projectsDocument,
@@ -50,7 +52,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -471,6 +473,34 @@ for (const driver of drivers) {
       assert.match(thrown(() => engine.instances.update(writer, 'invoices', 'march', { notes: 'Thanks' })).message, /is paid, which freezes notes/);
       const read = engine.instances.get(alice, 'invoices', 'march');
       assert.deepEqual([read?.data, read?.behaviors.Workflow?.status, read?.seq], [{ title: 'March', customer: 'Acme', amount: 1300, lines: ['Consulting'] }, 'paid', 5]);
+    });
+
+    test("it runs the invoices document beside the projects one: an invoice is numbered at its create in its project's count, which starts again each year", () => {
+      let now = Date.UTC(2026, 11, 31);
+      const engine = openTestEngine({ driver, clock: () => now });
+      for (const document of [documents, tasks, projects, numberedInvoicesDocument()]) {
+        engine.schemas.define(alice, document);
+        engine.schemas.publish(alice, document.name as string);
+      }
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'invoices').map(({ name }) => name),
+        ['Links', 'Numbering']
+      );
+      for (const id of ['launch', 'site']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      const bill = (id: string, project: string) =>
+        engine.instances.create(writer, 'invoices', { title: id, amount: 100 }, { id, behaviors: { Links: { project } } }).behaviors.Numbering;
+      assert.deepEqual(bill('a', 'launch'), { seq: 1, label: 'INV-2026-0001' });
+      assert.deepEqual(bill('b', 'launch'), { seq: 2, label: 'INV-2026-0002' });
+      assert.deepEqual(bill('c', 'site'), { seq: 1, label: 'INV-2026-0001' });
+      now = Date.UTC(2027, 0, 1);
+      assert.deepEqual(bill('d', 'launch'), { seq: 1, label: 'INV-2027-0001' });
+      const found = engine.instances.list(alice, 'invoices', { where: { 'Numbering.label': 'INV-2026-0001' } }).items;
+      assert.deepEqual(found.map((item) => [item.id, item.behaviors.Links.targets]), [
+        ['a', { project: { schema: 'projects', id: 'launch' } }],
+        ['c', { project: { schema: 'projects', id: 'site' } }],
+      ]);
     });
   });
 }

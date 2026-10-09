@@ -44,6 +44,7 @@
             }
           }
         },
+        { "name": "Numbering", "config": { "format": "T-{seq}", "scope": { "link": "project" } } },
         { "name": "Dependencies", "config": { "schemas": ["Task", "Spec"] } },
         { "name": "Constants", "config": { "fields": ["kind"] } },
         { "name": "Variants", "config": { "field": "detail", "by": "kind", "types": { "build": "BuildDetail", "review": "ReviewDetail" } } }
