@@ -52,7 +52,7 @@ func TestFilesImportEachPackageOnceWithTheUserModel(t *testing.T) {
 	}
 	for file, wants := range map[string][]string{
 		"middleware.go": {"time"},
-		"routes.go":     {"time", "github.com/parable-work/superschematic/runtime/http/go/identity", "github.com/parable-work/superschematic/runtime/http/go/session"},
+		"routes.go":     {"time", "github.com/parable-work/superschematic/runtime/http/go/identity"},
 		"identity.go":   {"fmt", "github.com/parable-work/superschematic/runtime/http/go/identity"},
 	} {
 		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(outDir, file), nil, parser.ImportsOnly)

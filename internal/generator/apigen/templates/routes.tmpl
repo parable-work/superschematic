@@ -315,7 +315,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- end }}
 				{{- if not .ServiceCallers }}
 				{{- if .RequiredPerms }}
-				{{- authSnippet "routePermissions" .EndpointInfo }}
+				{{- template "routePermissionCheck" . }}
 				{{- end }}
 				{{- else if eq .ServiceCallers.Mode "require" }}
 				serviceauth.Require({{ range $i, $api := .ServiceCallers.From }}{{ if $i }}, {{ end }}{{ printf "%q" $api }}{{ end }}),
@@ -343,6 +343,15 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- authSnippet "routesProtectedMiddleware" .Output }}
 				{{- end }}
 				{{- if .RequiredPerms }}
+				{{- template "routePermissionCheck" . }}
+				{{- end }}
+{{- end }}
+
+{{- /* routePermissionCheck is a route's permission check: the identity service's for a user model operation (D50), which answers the problems the routes' contract names, and the provider's routePermissions snippet for every other. Its data is route $ <endpoint>. */ -}}
+{{- define "routePermissionCheck" }}
+				{{- if .IdentityOperation }}
+				cfg.Identity.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}{{ printf "%q" $perm }}{{- end }}),
+				{{- else }}
 				{{- authSnippet "routePermissions" .EndpointInfo }}
 				{{- end }}
 {{- end }}

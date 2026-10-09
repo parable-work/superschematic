@@ -93,6 +93,9 @@ func newHarness(t *testing.T, db testDB, config string) *harness {
 	r.With(svc.Middleware, session.RequirePermissions("orders.write")).Post("/orders", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, session.GetPrincipalName(r.Context()))
 	})
+	r.With(svc.RequirePermissions("orders.read", "orders.write")).Get("/orders", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, session.GetPrincipalName(r.Context()))
+	})
 	h.router = svc.CORS()(r)
 
 	ctx := context.Background()
@@ -617,6 +620,20 @@ func TestCORS(t *testing.T) {
 		if other.status == 204 || other.header.Get("Access-Control-Allow-Origin") != "" || other.header.Get("Vary") != "Origin" {
 			t.Errorf("another origin's preflight: %d %v", other.status, other.header)
 		}
+	})
+}
+
+// TestRequirePermissions: the service's own permission check, which a
+// generated server runs on an administration route, authenticates the
+// caller and answers its refusals with the contract's problems, 401
+// unauthorized and 403 forbidden, where session.RequirePermissions answers
+// no code.
+func TestRequirePermissions(t *testing.T) {
+	eachHarness(t, testConfig, func(t *testing.T, h *harness) {
+		h.expect(h.do("GET", "/orders", nil), 401, identity.CodeUnauthorized)
+		h.expect(h.do("GET", "/orders", nil, bearer(h.login("member@example.com", userPassword))...), 403, identity.CodeForbidden)
+		admitted := h.do("GET", "/orders", nil, bearer(h.login("admin@example.com", adminPassword))...)
+		h.expect(admitted, 200, "")
 	})
 }
 

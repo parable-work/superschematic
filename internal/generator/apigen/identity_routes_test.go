@@ -112,7 +112,10 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if len(view.IdentityEndpoints) != 18 || len(view.RoutedEndpoints()) != 19 {
 		t.Fatalf("view: %d identity endpoints, %d routed", len(view.IdentityEndpoints), len(view.RoutedEndpoints()))
 	}
-	if !slices.Equal(view.Namespaces, []string{"greeting"}) || !view.RoutesNeedTime || !view.HasPermissionEndpoints || !view.HasAuth {
+	// The administration routes' permission check is the identity
+	// service's, so HasPermissionEndpoints, which gates the provider's
+	// routePermissions imports, leaves them out.
+	if !slices.Equal(view.Namespaces, []string{"greeting"}) || !view.RoutesNeedTime || view.HasPermissionEndpoints || !view.HasAuth {
 		t.Errorf("view: namespaces %v, RoutesNeedTime %v, HasPermissionEndpoints %v, HasAuth %v", view.Namespaces, view.RoutesNeedTime, view.HasPermissionEndpoints, view.HasAuth)
 	}
 	if !view.Auth.Identity || !view.AuthWired() || view.IsPublic {
@@ -135,7 +138,7 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(alone.Endpoints) != 0 || !alone.HasAuth || !alone.HasPermissionEndpoints || !alone.RoutesNeedTime {
+	if len(alone.Endpoints) != 0 || !alone.HasAuth || alone.HasPermissionEndpoints || !alone.RoutesNeedTime {
 		t.Errorf("the route sets alone: %d endpoints, HasAuth %v, HasPermissionEndpoints %v, RoutesNeedTime %v", len(alone.Endpoints), alone.HasAuth, alone.HasPermissionEndpoints, alone.RoutesNeedTime)
 	}
 }
@@ -246,7 +249,7 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 		`Path:    "/auth/login",`,
 		`Handler: identityHandler(cfg.Identity, "login"),`,
 		`Handler: identityHandler(cfg.Identity, "grantRole"),`,
-		`runtimesession.RequirePermissions("identity.roles.write"),`,
+		`cfg.Identity.RequirePermissions("identity.roles.write"),`,
 		`runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),`,
 		"Identity *identity.Service",
 		"cfg.AuthMiddleware = cfg.Identity.Middleware",

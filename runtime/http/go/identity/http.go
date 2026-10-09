@@ -56,6 +56,31 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequirePermissions is the permission check a generated server runs on a
+// user model route that needs permissions (an administration route), in
+// the route's place for one (after its rate and body limits and its
+// service step, before its timeout). It admits the caller when the
+// service's matcher gives their roles one of permissions, as the route's
+// handler and capabilities do, and answers a refusal with the problem the
+// routes' contract names (ir.IdentityOperationErrors): 401 unauthorized
+// without a usable session, 403 forbidden otherwise.
+func (s *Service) RequirePermissions(permissions ...string) func(http.Handler) http.Handler {
+	required := append([]string(nil), permissions...)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := s.principal(w, r)
+			if !ok {
+				return
+			}
+			if !s.matcher(p.Roles, required) {
+				WriteError(w, r, forbidden("Insufficient permissions", nil))
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+		})
+	}
+}
+
 // CORS is the credentialed CORS middleware for the config's trusted
 // origins (package function CORS).
 func (s *Service) CORS() func(http.Handler) http.Handler {

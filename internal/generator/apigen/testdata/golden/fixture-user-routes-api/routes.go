@@ -16,7 +16,6 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
-	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
 )
 
@@ -176,7 +175,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/roles",
 			Handler: identityHandler(cfg.Identity, "listRoles"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.read"),
+				cfg.Identity.RequirePermissions("identity.roles.read"),
 			},
 		},
 		// Creates a role. The caller's own permissions must cover each permission it grants.
@@ -185,7 +184,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/roles",
 			Handler: identityHandler(cfg.Identity, "createRole"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.write"),
+				cfg.Identity.RequirePermissions("identity.roles.write"),
 			},
 		},
 		// Deletes a role and every grant of it. It answers true.
@@ -194,7 +193,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/roles/{id}",
 			Handler: identityHandler(cfg.Identity, "deleteRole"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.write"),
+				cfg.Identity.RequirePermissions("identity.roles.write"),
 			},
 		},
 		// Renames a role or replaces its permissions. The caller's own permissions must cover each permission given.
@@ -203,7 +202,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/roles/{id}",
 			Handler: identityHandler(cfg.Identity, "updateRole"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.write"),
+				cfg.Identity.RequirePermissions("identity.roles.write"),
 			},
 		},
 		// Lists the users and the roles each holds.
@@ -212,7 +211,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users",
 			Handler: identityHandler(cfg.Identity, "listUsers"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.read"),
+				cfg.Identity.RequirePermissions("identity.users.read"),
 			},
 		},
 		// Creates a user with the login, name and password given.
@@ -221,7 +220,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users",
 			Handler: identityHandler(cfg.Identity, "createUser"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.write"),
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// One user and the roles they hold.
@@ -230,7 +229,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}",
 			Handler: identityHandler(cfg.Identity, "getUser"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.read"),
+				cfg.Identity.RequirePermissions("identity.users.read"),
 			},
 		},
 		// Disables a user, who can no longer sign in, and ends their sessions.
@@ -239,7 +238,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}/disable",
 			Handler: identityHandler(cfg.Identity, "disableUser"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.write"),
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// Enables a disabled user.
@@ -248,7 +247,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}/enable",
 			Handler: identityHandler(cfg.Identity, "enableUser"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.write"),
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// Sets a user's password and ends their sessions. It answers true.
@@ -257,7 +256,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}/password",
 			Handler: identityHandler(cfg.Identity, "setUserPassword"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.users.write"),
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// Revokes a role from a user.
@@ -266,7 +265,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}/roles/{roleId}",
 			Handler: identityHandler(cfg.Identity, "revokeRole"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.write"),
+				cfg.Identity.RequirePermissions("identity.roles.write"),
 			},
 		},
 		// Grants a user a role. The caller's own permissions must cover the role's.
@@ -275,7 +274,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/admin/users/{id}/roles/{roleId}",
 			Handler: identityHandler(cfg.Identity, "grantRole"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimesession.RequirePermissions("identity.roles.write"),
+				cfg.Identity.RequirePermissions("identity.roles.write"),
 			},
 		},
 		// For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.

@@ -20,8 +20,9 @@ import (
 // IdentityOperation), which the identity runtime serves (D50), in
 // IdentityEndpoints, and the flags, namespaces and imports the endpoints
 // give. The router mounts the identity runtime's routes too, so the flags
-// it reads (summarizeRoute) count them: a server whose only routes that
-// need a caller are the user model's still wires its auth middleware. The
+// it reads count them (HasAuth, RoutesNeedTime, HasServiceCallers): a
+// server whose only routes that need a caller are the user model's still
+// wires its auth middleware. The
 // OpenAPI document it embeds still describes every route. output itself is
 // unchanged, and an output without such an operation is returned as it is.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
@@ -45,8 +46,15 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	if err := view.summarizeEndpoints(); err != nil {
 		return nil, err
 	}
+	// The router mounts the identity runtime's routes too: one that needs
+	// a caller sits behind the auth middleware, and one with a rate limit
+	// calls time. Its permission check is the identity service's, not the
+	// provider's routePermissions, so HasPermissionEndpoints, which gates
+	// the snippet's imports, counts the project's routes alone.
 	for _, endpoint := range view.IdentityEndpoints {
+		permissions := view.HasPermissionEndpoints
 		view.summarizeRoute(endpoint)
+		view.HasPermissionEndpoints = permissions
 	}
 	imports, err := rawBodyCheckImports(view.Endpoints)
 	if err != nil {
