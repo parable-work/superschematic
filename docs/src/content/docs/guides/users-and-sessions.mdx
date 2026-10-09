@@ -1,0 +1,207 @@
+---
+title: Users and sessions
+description: Turn on the core user model with the User and UserRole traits, sign users in and out over bearer or cookie sessions, manage roles, and create the first administrator.
+sidebar:
+  order: 4.5
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A project's users can be a core model it turns on in its schemas. One DB
+table takes the `User` trait and, for roles, one takes the `UserRole` trait.
+The build adds the tables that hold sessions, password hashes and role
+grants. An API serves the routes users sign in and out with, and every
+server, Go, TypeScript or Rust, and the engine, authenticate those sessions
+the same way. [Auth and permissions](/superschematic/guides/auth-and-permissions/)
+covers what a route requires; this page covers who the caller is.
+[D50](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+records the design.
+
+## Turn it on
+
+The traits come from `@superschematic/db`. `User` names the field a user
+signs in with, and `name` the field their display name comes from, the
+login when it is left out. `shop-db` declares both:
+
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['User', 'Role']} />
+
+The rules, which the build checks in every schema form:
+
+- A DB schema has at most one `User` table and one `UserRole` table, and a
+  `UserRole` table needs a `User` table beside it.
+- The login is a `@unique`, required field typed by a scalar superscalar
+  declares case-insensitive, such as `Contact.Email` or `Identity.Slug`. The
+  scalar folds case and its column is `CITEXT` (`TEXT COLLATE NOCASE` on
+  SQLite), so `Ada@Example.com` and `ada@example.com` are one login.
+- A role table has a `@unique` text `name` and a `permissions` list of
+  strings.
+- Both tables have one `@key`.
+
+A schema without the traits builds exactly as before.
+
+## What the build adds
+
+Beside a `User` table, the build adds three tables the core owns. They go
+through the DDL, the ORM, the types and migrations like any other table:
+
+| Table | Columns |
+| --- | --- |
+| `Session` | `id`, `user`, `tokenHash` (the SHA-256 of the session's token, never the token), `createdAt`, `expiresAt`, `lastSeenAt`, `revokedAt`; indexed on `user` |
+| `UserCredential` | `id`, `user` (unique), `passwordHash` (an argon2id PHC string), `passwordChangedAt`, `disabledAt` |
+| `UserRoleGrant`, with a `UserRole` table | `id`, `user`, `role`, `grantedAt`; unique on `user` and `role` |
+
+It also writes the identity descriptor, `identity/<schema>.json` beside the
+Go types and a constant in the Go, TypeScript and Rust types
+(`IdentityDescriptor`, `identityDescriptor`, `IDENTITY_DESCRIPTOR`). The
+runtimes' stores read it to find these tables and the user table's
+columns.
+
+## Serve the session routes
+
+An API whose config's `authDb` names that schema serves the routes with
+two decorators from `@superschematic/api`, each on a class with no
+methods. `shop-api` serves both:
+
+<Snippet file="schemas/services/shop-api/src/account.schema.ts" />
+
+`@userSessions({ path?, login?, register? })` serves these, under `auth` by
+default:
+
+| Operation | Route | Rule |
+| --- | --- | --- |
+| `login` | `POST auth/login`, `{ login, password, session? }`, answers `{ user, expiresAt, token? }` | anyone; 10 a minute |
+| `logout` | `POST auth/logout`, revokes the session and clears the cookie | a caller |
+| `me` | `GET auth/me`, answers the user, their roles and their permissions | a caller |
+| `capabilities` | `GET auth/capabilities`, answers which of the API's operations the caller may call | a caller |
+| `changePassword` | `POST auth/password`, `{ current, password }`, revokes the user's other sessions | a caller; 10 a minute |
+| `register`, with `register: true` | `POST auth/register`, answers as `login` | anyone; 5 a minute |
+
+`@userSessions({ login: false })` serves `me` and `capabilities` alone,
+for an API whose users sign in through another.
+`@userAdministration({ path? })` serves the routes that create, list,
+disable and enable users and set their passwords; create, list, update and
+delete roles; and grant and revoke them, under `auth/admin`. They need
+`identity.users.read` or `.write` and `identity.roles.read` or `.write`;
+the naming file's `identity_permission_prefix` renames `identity`.
+
+These are ordinary operations in the OpenAPI document, every SDK and the
+tool manifest, but the runtime implements them: the implementation you
+write has no method for them. The routes that carry a password publish no
+MCP tool.
+
+Every server of an API whose `authDb` has a `User` table authenticates
+with the identity runtime, whether or not it serves these routes, so
+`shop-orders` accepts the sessions `shop-api`'s login starts.
+
+## Run it
+
+Each server takes the identity service, built over a store of the
+`authDb`'s tables and an identity config:
+
+| Server | It takes | Built with |
+| --- | --- | --- |
+| Go | `Config.Identity`, which `Validate` requires | the generated `NewIdentity(store, cfg)` over `identity.NewSQLStore(db, identity.Postgres, []byte(IdentityDescriptor))` |
+| TypeScript | `buildRouter(implementations, { identity })`, which refuses `authenticate` beside it | the generated `identityService()` over `postgresIdentityStore(pool, identityDescriptor)` or `sqliteIdentityStore(...)` |
+| Rust | `Implementations.authenticator`, an `Arc<IdentityAuthenticator>` | the crate's `identity::store(client)` and `identity::service(store, config)`, with its `identity-postgres` or `identity-sqlite` feature |
+
+[Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-go)
+shows the Go wiring in `shop-orders`. A stack's Go entrypoint builds it for
+you, reading each API's config as JSON from `<API>_IDENTITY`
+(`SHOP_API_IDENTITY`). The config, which the three runtimes read alike:
+
+| Member | Default | Meaning |
+| --- | --- | --- |
+| `sessionTtlSeconds` | 1209600 (14 days) | how long a session lasts after login |
+| `idleTimeoutSeconds` | 0 (off) | ends a session not seen for this long |
+| `touchIntervalSeconds` | 60 | how often a session's `lastSeenAt` is written |
+| `cookie.name` | `__Host-session` | `__Secure-session` with a `domain`, `session` without `secure` |
+| `cookie.domain` | none | shares the cookie across sibling hosts |
+| `cookie.secure` | true | false only on plain HTTP; the `local` target sets it |
+| `cookie.sameSite` | `Lax` | |
+| `trustedOrigins` | none | the other origins a browser app is served from |
+| `password.argon2` | 19456 KiB, 2 passes, 1 lane | the hash's cost; a login rehashes a password whose cost differs |
+
+## Sign in from an SDK
+
+A client chooses its session's transport per login. A bearer session
+returns its token, which the SDK sends as `Authorization: Bearer`:
+
+```go
+result, err := client.AccountNamespace.Login(ctx, types.LoginInput{
+	Login:    types.ContactEmail("ada@example.com"),
+	Password: types.AuthPassword(password),
+})
+client.SetToken(result.Token)
+```
+
+A browser app takes a cookie session. The TypeScript SDK passes
+`credentials` to `fetch`, and a login with session `cookie` sets an
+`HttpOnly` cookie and returns no token, so no script on the page reads it:
+
+```typescript
+const sdk = new ShopApiSDK({ baseUrl: 'https://api.example.com', credentials: 'include' });
+await sdk.account.login({ login: 'ada@example.com', password, session: SessionTransport.Cookie });
+```
+
+A server reads `Authorization` first and the cookie only without one, and
+an `Authorization` that fails is 401 with no fallback. A cookie login, and
+every cookie request but `GET`, `HEAD` and `OPTIONS`, from an origin the
+config does not trust is refused with 403 `cross_origin`, the check Go's
+`net/http.CrossOriginProtection` makes; a bearer request skips it. A
+server answers preflights from the trusted origins. A session has no
+refresh: after a 401, sign in again.
+
+Every failed login is 401 `invalid_credentials`, whether the login is
+unknown, the password wrong or the user disabled, and an unknown login
+takes as long to refuse as a wrong password.
+
+## Roles and capabilities
+
+Roles are rows, which the administration routes edit at run time, and a
+user holds any number of them. A user's permissions are their roles',
+with the same dotted rule `@requirePermission` uses. No one grants what
+they do not hold: writing a role's permissions, or granting a role, needs
+the caller's own permissions to cover each one given, or it is 403 with
+the uncovered permissions in `details.permissions`.
+
+`capabilities` answers, for each operation of the API, keyed by its OpenAPI
+operation id, whether the route admits the caller, by the router's own
+rule, so a UI shows or hides an action without restating it. An
+`@requireOwnership` operation answers whether a caller is admitted;
+whether they own a resource is still the implementation's.
+
+Each API with permissions also gets `permissions.json` beside its OpenAPI
+document: every permission its operations name, with the operations that
+need it. A role editor can read it.
+
+## Create the first administrator
+
+An empty database has no roles, so the first administrator comes from a
+command. It reads the password from standard input, never a flag, and
+refuses once any role has been granted:
+
+```bash
+superschematic identity bootstrap schemas/services/shop-db --database-url "$DATABASE_URL" --login ada@example.com --permission identity --permission orders --permission products
+```
+
+The compiler builds the descriptor and hands the write to
+`superschematic-identity`, the runner in the HTTP runtime's release, so no
+database driver is in the compiler. A deploy job runs the runner itself,
+with the descriptor the build wrote and the password from a secret on
+standard input. See [CLI](/superschematic/reference/cli/).
+
+## The engine
+
+An engine server takes `identity` in place of `authenticate`, and serves
+the session routes under `/auth`. A behavior's permission, such as a
+Workflow transition's, is then a role's like any other, and the opt-in
+`permissionPolicy()` allows an action to a caller holding
+`<schema>.<action>`. See the engine README's Users section.
+
+## What it does not do
+
+The core model has no organizations or tenancy, single sign-on, second
+factors or passkeys, email verification, password reset or account
+lockout; login's rate limit and the hash's cost bound guessing instead. A
+deployment that needs its own identity model registers its own auth
+provider, as `examples/acme-schematic` does for API keys.
