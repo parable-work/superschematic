@@ -13,11 +13,11 @@ import (
 // table in SQLite's types, with its defaults in SQLite's forms. A unique
 // constraint keeps the name Postgres gives it and becomes a unique index of
 // that name. A @searchField's search_text column keeps its expression,
-// without the trigram index, which SQLite has no operator class for (D27,
-// amended). SQLite keeps no comments, so the model has none. The model
-// refuses what SQLite has no form of (D27), naming the feature:
-// @versioned, @optimistic, projections, GIN and GIST indexes, and types it
-// has no storage for.
+// with each field quoted as SQLite quotes it, and loses the trigram index,
+// which SQLite has no operator class for (D27, amended). SQLite keeps no
+// comments, so the model has none. The model refuses what SQLite has no
+// form of (D27), naming the feature: @versioned, @optimistic, projections,
+// GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -42,10 +42,12 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		if err != nil {
 			return nil, err
 		}
-		if len(out.Tables[i].SearchFields) > 0 {
+		if fields := out.Tables[i].SearchFields; len(fields) > 0 {
 			table.Indexes = slices.DeleteFunc(table.Indexes, func(idx *Index) bool {
 				return idx.Name == sqlgen.SearchIndexName(table.Name)
 			})
+			// SQLite's keywords are not Postgres's, so every field is quoted.
+			columnNamed(table, sqlgen.SearchTextColumn).Generated = sqlgen.SearchTextExprQuoted(fields, qs)
 		}
 		errs = append(errs, sqliteTable(table))
 		m.Tables = append(m.Tables, table)

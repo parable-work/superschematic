@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
-  "hash": "7ce014c9c1c60e2eae4ce92358028d0002f63d807fba776f508e11b2937b9d05",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "22c651fa8a86372ede1d3c04e866967d123a9e0a8793584dd6b0b9f67c62999a",
   "service": "shop-db",
   "steps": [
     {
@@ -20,13 +20,13 @@
       "phase": "expand",
       "statements": [
         "ALTER TABLE \"product\" DROP COLUMN \"search_text\"",
-        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(title, '') || ' ' || COALESCE(blurb, '')) VIRTUAL"
+        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"title\", '') || ' ' || COALESCE(\"blurb\", '')) VIRTUAL"
       ],
       "subject": "table/product/column/search_text",
       "transactional": true
     }
   ],
-  "to": "facd6a94873611bc45877d2d111e6f634b710e24fd751f503d08b02a3c28fea8",
+  "to": "492049a86761d34df4b16862f119d7d61b0adfc008db7d157a32888769eb87a6",
   "toModel": null,
   "version": 1
 }

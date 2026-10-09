@@ -75,8 +75,9 @@ func TestRunWritesSQLiteDDL(t *testing.T) {
 }
 
 // TestRunWritesSQLiteSearchText: a @searchField builds for SQLite as its
-// search_text column, VIRTUAL, with the expression Postgres's has and no
-// trigram index, which SQLite has no operator class for (D27, amended).
+// search_text column, VIRTUAL, with the expression Postgres's has, each
+// field quoted as SQLite quotes it, and no trigram index, which SQLite has
+// no operator class for (D27, amended).
 func TestRunWritesSQLiteSearchText(t *testing.T) {
 	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-list-defaults-db"))
 	if err != nil {
@@ -100,7 +101,7 @@ func TestRunWritesSQLiteSearchText(t *testing.T) {
 		t.Errorf("create.sql has no trigram index:\n%s", postgres)
 	}
 	sqlite := read(SQLiteSubdir, "create.sql")
-	if want := `"search_text" TEXT GENERATED ALWAYS AS (COALESCE(note, '')) VIRTUAL`; !strings.Contains(sqlite, want) {
+	if want := `"search_text" TEXT GENERATED ALWAYS AS (COALESCE("note", '')) VIRTUAL`; !strings.Contains(sqlite, want) {
 		t.Errorf("sqlite/create.sql does not contain %s:\n%s", want, sqlite)
 	}
 	if strings.Contains(sqlite, "search_trgm") {

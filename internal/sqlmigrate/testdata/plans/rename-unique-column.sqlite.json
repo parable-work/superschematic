@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
-  "hash": "5ba95f329323342f3a0746eaaa4cd62873a5611aa1616bec58130313563674f3",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "94b83564618249cac231190ba29f0223c1e67d77dacbf8c790b6953335fa0b3c",
   "renames": [
     "customer.email=customer.contact_email"
   ],
@@ -45,7 +45,7 @@
       "transactional": true
     }
   ],
-  "to": "36e3c00a1c34b9c70f8da7b2bab73ca6b43f4810b10686db9c1da88e807e7f07",
+  "to": "d3c1b43da65967377586cfcc633ac193272e12d391b7c73ace774faf14b28c8f",
   "toModel": null,
   "version": 1
 }

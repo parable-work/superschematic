@@ -324,6 +324,17 @@ var planCases = []planCase{
 	}},
 	{name: "drop-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }},
 	{name: "retype-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").TypeRef = stringRef }},
+	// A table's first search field is a column the plan adds, whose name
+	// sorts after search_text: the column is added first, since
+	// search_text reads it.
+	{name: "add-search-field-column", after: func(s *ir.Schema) {
+		addField(s, "Customer", &ir.FieldDef{Name: "tagline", TypeRef: stringRef, SearchField: true})
+	}},
+	// A table's only search field is dropped, and its name sorts before
+	// search_text: search_text, which reads it, is dropped first.
+	{name: "drop-search-field-column", before: func(s *ir.Schema) {
+		addField(s, "Customer", &ir.FieldDef{Name: "bio", TypeRef: stringRef, SearchField: true})
+	}},
 
 	// @versioned and @optimistic.
 	{name: "versioned-on", noSQLite: "sqlite does not support @versioned", after: func(s *ir.Schema) { versioned(s, "Order", nil) }},

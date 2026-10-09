@@ -190,12 +190,13 @@ a retype, a required column without a default or a unique constraint on an
 existing table, stays in `expand` and carries `compat`. A deploy without a
 rollout runs both phases back to back.
 
-Steps run in this order: renames; creates and adds in dependency order;
+Steps run in this order: renames; creates and adds in dependency order,
+a generated column such as `search_text` after the columns it reads;
 alterations, each wrapped by the drop and re-creation of the views that
 read the altered columns; indexes, constraints, functions, triggers, views
 and comments; then the contract steps, tightenings before drops, drops in
-reverse dependency order. Extensions are created and never dropped, as
-`drop.sql` leaves them.
+reverse dependency order, a generated column before the columns it reads.
+Extensions are created and never dropped, as `drop.sql` leaves them.
 
 A step on a table the previous version already has uses the online form
 where Postgres has one. A table the plan creates gets the plain forms.
@@ -398,10 +399,10 @@ statement of its own, not a rebuild. SQLite names neither a primary key
 nor a foreign key, so renaming one is no step. SQLite keeps no comments.
 
 A `@searchField` gives its table the `search_text` column Postgres has,
-with the same expression, as a `VIRTUAL` generated column: SQLite
-computes it when a row is read and stores nothing. It has no index, since
-SQLite has no trigram operator class, so a search on SQLite reads every
-row of the table.
+with the same expression, each field quoted as SQLite quotes it, as a
+`VIRTUAL` generated column: SQLite computes it when a row is read and
+stores nothing. It has no index, since SQLite has no trigram operator
+class, so a search on SQLite reads every row of the table.
 
 ### Steps
 

@@ -4684,16 +4684,22 @@ and leaves the index out.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| SQLite gives a table with search fields the `search_text` column Postgres gives it, with the same expression (`COALESCE(field, '')`, joined by `' '`), which SQLite runs as written. The model keeps the column, so plans diff it as they diff Postgres's. | Refusing it, as D27 did; leaving the column out on SQLite, so a query written for `search_text` fails there |
+| SQLite gives a table with search fields the `search_text` column Postgres gives it, with the same expression (`COALESCE(field, '')`, joined by `' '`), each field quoted as SQLite quotes every identifier: a field named as a keyword of SQLite's that Postgres does not reserve, such as `escape` or `exists`, still parses. The model keeps the column, so plans diff it as they diff Postgres's. | Refusing it, as D27 did; leaving the column out on SQLite, so a query written for `search_text` fails there; Postgres's expression as written, quoted by Postgres's reserved words |
 | The column is `VIRTUAL`: SQLite computes it when a row is read. `ADD COLUMN` can add a `VIRTUAL` column and not a `STORED` one, so adding a search field is a statement, not a rebuild; changing the search fields drops the column and adds it again, and dropping it rewrites no rows. A rebuild leaves it out of the copy. | `STORED`, as on Postgres, which costs a rebuild for every change of the search fields and gives a read nothing without an index |
 | No index: SQLite has no trigram operator class, so a search on SQLite reads every row of the table. | An FTS5 table with the `trigram` tokenizer, kept in step by triggers or by the writer: a virtual table the model, the diff and the runner do not know, and triggers, which D27 keeps out of SQLite; left for when a SQLite reader needs search to be fast |
+| In both dialects a generated column is added after the plain columns its phase adds, and dropped before the plain columns its phase drops: its expression may read them, and neither Postgres nor SQLite adds a generated column before a column it reads or drops a column a generated column reads. Ordered by subject alone, a table's first search field added as a new column whose name sorts after `search_text`, or its only one dropped with a name that sorts before, failed on both. | Ordering a generated column after exactly the columns its expression reads, which parses the expression for the order the simpler rule already gives; `DROP COLUMN ... CASCADE` on Postgres, which SQLite has no form of |
 
 Status: built. `internal/sqlmigrate`'s SQLite model keeps `search_text`
 and drops the trigram index, the shop's SQLite plan cases keep their
-search field, and the four `@searchField` cases and `rename-search-field`
+search field, and the `@searchField` cases and `rename-search-field`
 plan and converge on SQLite; the SQLite convergence check compares columns
 through `pragma table_xinfo`, so a generated column, and whether it is
-`VIRTUAL`, is compared too.
+`VIRTUAL`, is compared too. Two plan cases, which failed to apply on both
+dialects before the order above, plan and converge on both:
+`add-search-field-column` gives `Customer` its first search field as a new
+column, `tagline`, and `drop-search-field-column` drops its only one,
+`bio`. `add-keyword-search-fields`, on SQLite, adds search fields named
+`escape` and `exists`, which failed to parse unquoted.
 
 The rule is reversible until the first release.
 

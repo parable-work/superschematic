@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
-  "hash": "dfb4a87decf1d7b549d91e96f7e5fca2d88003993f86a37e27e5fbd45cc67b95",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "7ead59dfd2ce51a4003bbcf6b4e41858cb02380b790e6276aaa373f132dad467",
   "renames": [
     "product.title=product.heading"
   ],
@@ -31,13 +31,13 @@
       "phase": "expand",
       "statements": [
         "ALTER TABLE \"product\" DROP COLUMN \"search_text\"",
-        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(heading, '')) VIRTUAL"
+        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"heading\", '')) VIRTUAL"
       ],
       "subject": "table/product/column/search_text",
       "transactional": true
     }
   ],
-  "to": "50a54f73357ea51adabf2198629e35acaaad82285f9684ab16382860f65da6a2",
+  "to": "aad191372c6548be62ba5bd91726fde1e733e3470f8e167983e3947570876a45",
   "toModel": null,
   "version": 1
 }

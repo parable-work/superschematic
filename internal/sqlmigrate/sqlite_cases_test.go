@@ -166,6 +166,12 @@ var sqliteOnlyCases = []planCase{
 	// added again with the expression the new model writes.
 	{name: "rename-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").Name = "heading" },
 		renames: []Rename{{From: "product.title", To: "product.heading"}}},
+	// Search fields named as SQLite keywords that Postgres does not
+	// reserve: search_text's expression quotes them as SQLite does.
+	{name: "add-keyword-search-fields", after: func(s *ir.Schema) {
+		addField(s, "Customer", &ir.FieldDef{Name: "escape", TypeRef: stringRef, SearchField: true})
+		addField(s, "Customer", &ir.FieldDef{Name: "exists", TypeRef: stringRef, SearchField: true})
+	}},
 }
 
 // addCustomerChildren adds tables that reference customer, beside order's

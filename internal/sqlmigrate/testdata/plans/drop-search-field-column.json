@@ -1,0 +1,50 @@
+{
+  "dialect": "postgres",
+  "expanded": "ca7cf2587b1dd3fa74581d1d7ec7df93c0cfb95f11dfb65fbd0b18fa5c998179",
+  "from": "7e0b815d7ef517ff40f620c57596ded99531c82cf51eb976d7a5d646adb77b47",
+  "hash": "325b516c70783ec785445e6cc1ad261c95f55e2ec1207b426600cf3777e6f92d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_customer_search_trgm"
+      ],
+      "subject": "table/customer/index/idx_customer_search_trgm",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer DROP COLUMN search_text"
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/customer/column/bio",
+          "reason": "Dropping customer.bio deletes the values of Customer.bio.",
+          "subject": "table/customer/column/bio"
+        }
+      ],
+      "index": 3,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer DROP COLUMN bio"
+      ],
+      "subject": "table/customer/column/bio",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}
