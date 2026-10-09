@@ -4675,3 +4675,63 @@ script with no lockfile, a current one and a stale one.
 `CI=true`. No generated workflow has run on GitHub Actions.
 
 The rule is reversible until the first release.
+
+## D53. A queue is a table a DB service declares, in its dialect, and a worker is a deployable an API declares to handle it
+
+Milestone 7 of `docs/stack-model.md` left queues and workers after jobs
+(D52). The engine's work queue (D16) is TypeScript only, and its single
+SQLite writer cannot run on Cloud Run. The maintainer chose queues built
+on the DB layer the stack already places, so the schema author picks the
+backing by picking the database.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A DB service declares a queue with `@queue` on a message class: `retries`, `backoff`, and the claim's lease, all optional. sqlgen writes its table in the service's dialect, and the migration plan (D27) carries it. The database the stack places the service on (the local Postgres container, Cloud SQL, SQLite, D1 when a target offers it) is the queue's backing. | Pub/Sub or Cloud Tasks per target, a deployable with edges of its own and an emulator locally, whose push delivery puts Google's token in `Authorization` (D37). The engine's Queue and Lease behaviors, TypeScript only and not deployable to Cloud Run. A queue declared on an API naming its DB, which ties enqueue to one API. |
+| The DB's ORM gains a typed `Enqueue` per queue that takes the caller's transaction, so a message commits with the writes that caused it. Each dialect claims its own way: `FOR UPDATE SKIP LOCKED` on Postgres, a write transaction on SQLite and D1. An expired claim returns the message to ready. Delivery is at least once; a handler that fails retries after the backoff, up to the retries, and then the message is dead. | A separate outbox table and relay. Exactly-once delivery, which no backing offers across a crash. |
+| An API declares `@worker({ queue, concurrency })`. Its implementation implements a typed handler per worker with the API's `Deps`, through a generated `Workers` interface and scaffold. Each worker is a deployable of kind `worker` by default, named after its API and its class, with its API's edges and identity, as a job (D52). The queue's DB must be the API's `authDb` or one of its DB dependencies. | A worker declared in the stack, whose code would get no `Deps`. A long-running `Run(ctx)` the engineer loops in, which each worker would write again. |
+| A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
+| On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+## D54. A bucket is a service of the core kind Bucket that APIs list in their config, private, reached through a provider-neutral interface
+
+Milestone 7 left buckets for later. An API that stores files needs a
+bucket in `Deps`, so the API must declare the need where its generator
+can see it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A bucket is a service of the core kind `Bucket`, with a sentinel, and an API lists the buckets it uses in its config, `buckets: [ShopMedia]`, as it lists `calls`. Several APIs may share one. Each Bucket service in a stack is a deployable of kind `bucket`, and the API's server, jobs and workers each get a `bucket` edge to it. | `@bucket` on an API, which other APIs could reach only by calling the owner. A bucket declared in the stack, which no API's generator sees. |
+| A bucket edge derives a field holding the bucket's name and how to reach it: on gcp the name alone, since the workload's account reaches it; locally the emulator's endpoint as well. The Go and TypeScript runtimes read it, held to one encoding by the shared vectors (D51). | Credentials in the field, which a workload identity makes unnecessary on gcp. |
+| `Deps` gains a `Bucket` per listed bucket: a provider-neutral interface in each runtime to put, get, delete and list objects and to sign a URL for one. The GCS implementation is linked only into a workload some environment places on gcp, as the Cloud SQL connector is (D30, amended), and reads `STORAGE_EMULATOR_HOST`. | A configured provider client in `Deps`, whose type would fix one provider for every environment. The provider's client in the runtime modules, which every generated module requires. |
+| Buckets are private. A browser reaches an object through a signed URL, signed on gcp by IAM's `signBlob` as the workload's own account, which also avoids Cloud Run's 32 MiB request limit. | Public-read buckets, which need an exception to the no-public-grants rule and overlap static sites (D55). |
+| `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
+| On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+## D55. A static site is a service of the core kind Site, built once, configured per environment when it loads, and served on gcp from a bucket behind the load balancer
+
+Milestone 7 left static sites for later. A site is a directory a
+front-end build writes, served as files; a front end rendered on a server
+is a TypeScript or Rust server, not a site.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A site is a service of the core kind `Site`. Its config names the APIs it `calls`, its build script, its output directory and its single-page fallback. Its code sits at its implementation path in the Bun workspace (D51), so it imports the SDKs of the APIs it calls, and the build writes a typed browser config there that returns a client per API. | `@site` in the stack, whose code would get no generated config and whose edges the stack would restate. |
+| A site gets a `site` edge to each API it calls, which must be exposed. The edge derives the API's public address and nothing else, since the browser carries its end user's token. Platforms gain a public address beside their internal one, which the generic connector will also need. | A site edge to an unexposed API, which no browser can reach. |
+| One build serves every environment. The site reads `/__superschematic/config.json` when it loads, which the deploy writes per environment with each API's public address and never caches. | Environment variables at build time, which need a build per environment and per preview member, and an image promoted from Staging could not carry. |
+| Each API answers CORS for the origins of the sites that call it, derived into a field of the API as its callers are (D37), and checked by the Go and TypeScript runtimes. | One load balancer per environment routing `/` to the site and API paths to servers, which needs an environment-wide exposure lowering and an end to every API mounting at `/api`. CORS on the load balancer, which `stack dev` would not have. |
+| The deploy builds the site after a frozen install, digests its output as it digests a build context (D46), and uploads through a new target seam beside `Builder` when the digest changes. The manifest records the digest, so a rollback points back to it. | Files as resources of the graph, whose digests D46 keeps out of it. |
+| On gcp the output goes to a bucket under a prefix per digest, served by a backend bucket with Cloud CDN behind the HTTPS load balancer exposure builds, with the fallback on the URL map. The deploy uploads, then points the URL map at the new prefix, so the switch is atomic. A site is always exposed. | A Cloud Run container serving the files, with cold starts and an image per change. Firebase Hosting, with a second certificate path and a project onboarded to Firebase. |
+| `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
+| superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
+
+Status: not built.
+
+The rule is reversible until the first release.

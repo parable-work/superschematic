@@ -72,10 +72,15 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | database | one or more DB schemas | a SQL connection per hosted schema | nothing |
 | server | one or more API schemas | an HTTP endpoint per served API | a connection to each served API's database; the address of each service it calls |
 | job | one `@job` of an API schema | a run to completion, on a schedule or on demand | its API's needs: the same connection and addresses (D52) |
+| worker | one `@worker` of an API schema | a loop that handles a queue's messages until stopped | its API's needs; its queue lives in one of the API's databases (D53) |
+| bucket | one Bucket schema | object storage, private, with signed URLs | nothing (D54) |
+| site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 
-Workers, buckets, queues and static sites come later. Each lands the same
-way: a deployable kind, a platform per target that realizes it (section
-6.1), and the edges it takes part in.
+A queue is not a deployable: it lives in the database of the DB schema
+that declares it (section 8.8). A second target, and the generic
+connector that lets compute mix across targets, come later. Each kind
+lands the same way: a deployable kind, a platform per target that
+realizes it (section 6.1), and the edges it takes part in.
 
 ### 3.2 Defaults
 
@@ -2049,6 +2054,146 @@ export abstract class ShipOrders {}
 
 Workers, which run until stopped, come with queues. A job that runs on
 every deploy is not built.
+
+### 8.8 Queues and workers
+
+A queue is data, so it lives in a database (D53). A DB service's schema
+declares one with `@queue` on a message class. The database the stack
+places that service on is its backing, in the service's dialect: Postgres
+on the local container or Cloud SQL, SQLite, and D1 when a target offers
+it.
+
+```ts
+// shop-db (DB service)
+@queue({ retries: 5, backoff: "30s" })
+export class OrderPlaced { orderId!: string }
+
+// shop-orders (API service)
+@worker({ queue: OrderPlaced, concurrency: 4 })
+export abstract class FulfilOrders {}
+```
+
+- **Storage.** sqlgen writes the queue's table, and the migration plan
+  (D27) carries it like any table. Each message has:
+  - its fields, as the message class declares them;
+  - a state: ready, claimed, done or dead;
+  - an attempt count, a time it is next due, and a claim's expiry.
+- **Enqueue.** The DB's ORM gains a typed `Enqueue` per queue, which takes
+  the transaction the caller writes in. A message commits with the writes
+  that caused it, or not at all.
+- **Claim.** Each dialect claims its own way: `FOR UPDATE SKIP LOCKED` on
+  Postgres, and a write transaction on SQLite and D1, which have one
+  writer. A claim that expires returns its message to ready, so a worker
+  that dies loses nothing. Delivery is at least once, and handlers are
+  idempotent.
+- **Retries.** A failed handler retries after the queue's backoff, up to
+  its retries, then marks the message dead, where an operator finds it.
+- **Workers.** An API declares `@worker({ queue })`. Its implementation
+  implements a typed handler per worker with the API's `Deps`, through a
+  generated `Workers` interface and scaffold. Each worker is a deployable
+  of kind `worker` by default, named after its API and its class. Its
+  edges and its identity are its API's, as a job's are (section 8.7). The
+  queue's DB must be the API's `authDb` or one of its DB dependencies, so
+  the worker already has the connection.
+- **Entrypoint.** A worker gets a module of its own beside the servers'.
+  Its `main`:
+  - builds `Deps` as a server's does;
+  - claims and handles up to `concurrency` messages at a time;
+  - on SIGTERM stops claiming, lets the running handlers finish within
+    the platform's grace, and returns what is left to ready.
+- **Local.** `stack dev` runs each worker as a process with no port. A
+  worker that exits stops the environment, as a server's exit does.
+- **gcp.** A worker is a Cloud Run worker pool
+  (`gcp:cloudrunv2/workerPool:WorkerPool`), which has no port and no URL.
+  Its instance count is a setting, one unless set. A member of a
+  parameterized environment runs one instance per worker unless its
+  settings say otherwise.
+
+The engine's work-queue behaviors (D16) stay the engine's. A stack does
+not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
+
+### 8.9 Buckets
+
+A bucket is object storage, a service of the core kind `Bucket` (D54).
+An API lists the buckets it uses in its config, by handle, as it lists
+its `calls`:
+
+```ts
+// schemas/services/shop-media/schema.config.ts
+export default defineConfig({ name: "shop-media", kind: SchemaKind.Bucket });
+
+// schemas/services/shop-api/schema.config.ts
+export default defineConfig({ name: "shop-api", kind: SchemaKind.API, buckets: [ShopMedia], ... });
+```
+
+- **Deployable.** Each Bucket service in the stack is a deployable of
+  kind `bucket`. An API's server, jobs and workers each get a `bucket`
+  edge to every bucket the API lists.
+- **Derived value.** A bucket edge derives a field holding the bucket's
+  name and how to reach it. On gcp that is the bucket alone, since the
+  workload's account reaches it. Locally it adds the emulator's endpoint.
+  The runtimes read it as they read a database's.
+- **Code.** `Deps` gains a `Bucket` per bucket the API lists: a
+  provider-neutral interface in the Go and TypeScript runtimes to put,
+  get, delete and list objects, and to sign a URL for one. The GCS
+  implementation reads `STORAGE_EMULATOR_HOST`, so it reaches the local
+  emulator too. Only a server, job or worker some environment places on a
+  provider links that provider's client, as Cloud SQL's connector is
+  linked (D30, amended).
+- **Private.** Buckets are private. A browser uploads or downloads an
+  object directly through a signed URL, which also avoids Cloud Run's
+  32 MiB request limit. On gcp, signing goes through IAM's `signBlob` as
+  the workload's own account.
+- **Local.** `stack dev` runs fake-gcs-server in a container beside
+  Postgres, one per environment, with a bucket per Bucket service.
+- **gcp.** A bucket is a `gcp:storage/bucket:Bucket` with uniform access
+  and public access prevention. Its name starts with the project, since
+  bucket names are global. The connector grants the workload's account
+  `roles/storage.objectUser` on it, and the right to sign as itself. A
+  member of a parameterized environment gets a bucket of its own, which
+  its destroy empties.
+
+### 8.10 Static sites
+
+A static site is a directory a front-end build writes, served as files.
+It is a service of the core kind `Site` (D55):
+
+```ts
+// schemas/services/shop-web/schema.config.ts
+export default defineConfig({
+  name: "shop-web",
+  kind: SchemaKind.Site,
+  calls: [ShopApi, ShopOrders],
+  site: { build: "build", output: "dist", fallback: "index.html" },
+});
+```
+
+- **Source.** The site's code sits at its implementation path, a member
+  of the Bun workspace (D51), so it imports the SDKs of the APIs it calls.
+  The build writes a typed browser config there: a function that returns a
+  client per API the site calls. superscalar's browser build is a
+  prerequisite, since the SDKs validate through it.
+- **Build.** The deploy runs the site's `build` script after a frozen
+  install. It digests the output as it digests a server's build context,
+  and uploads only what changed.
+- **Edges.** A site gets a `site` edge to each API it calls. The API must
+  be exposed, since a browser reaches it at its public address. The edge
+  derives that address and nothing else: the browser carries its end
+  user's token.
+- **Config.** One build serves every environment. The site reads
+  `/__superschematic/config.json` when it loads, which the deploy writes
+  per environment with each API's public address. It is never cached.
+- **CORS.** Each API answers CORS for the origins of the sites that call
+  it. Those origins are derived into a field of the API, as its callers
+  are (section 9.2), and the Go and TypeScript runtimes check them.
+- **Local.** `stack dev` serves the built directory and its config from a
+  small file server, with the single-page fallback.
+- **gcp.** The output goes to a bucket under a prefix per content digest.
+  A backend bucket with Cloud CDN serves it behind the HTTPS load balancer
+  that exposure builds, with the fallback on the URL map. A deploy writes
+  the new prefix and then points the URL map at it, so the switch is
+  atomic and the manifest can roll it back. A site is always exposed.
+
 
 ## 9. End-user auth and service auth
 
