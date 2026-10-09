@@ -179,6 +179,42 @@ runtime's `identity` package, held to the same parity vectors
   CORS middleware for the trusted origins. Every success is the `{data,
   meta}` envelope; logout, changePassword, setUserPassword and deleteRole
   answer `data: true`.
+- `identityOperations` holds each operation's rule (public, a caller, or
+  an administration permission) and rate limit (login 10, register 5,
+  changePassword 10 a minute per client). `identityOperationSpec` writes
+  an operation table entry from them, and `mountIdentityOperations` mounts
+  the routes through `mountManualOperation` with those entries, so the
+  request id, the rate limit, the gate and the timeout run first: for a
+  server whose router has no generated table, such as the engine.
+- `identityRouterOptions(options)` checks a router's options and returns
+  them with `identityAuthenticator(options.identity)` as `authenticate`: it
+  refuses options without `identity`, and an `authenticate` beside it.
+
+A generated router (`internal/generator/tsrestgen`) of an API whose authDb
+has a `User` table takes `identity` in place of `authenticate` and passes
+its options through `identityRouterOptions`, so every route authenticates
+with the service. It puts `identityCors` in front of its routes and mounts
+each operation of the API's route sets with
+`mountManualOperation(router, spec, identityHandler(service, name), ...)`,
+with the rate limit and body limit of the spec and of the router's
+options. Its `identityService(options)` builds the service with
+`routes: routesOf(operationSpecs)`, so capabilities answers for every
+operation of the API. The project builds the store from the authDb's
+identity descriptor, which its generated TypeScript types export as
+`identityDescriptor`:
+
+```ts
+import pg from 'pg';
+import { parseIdentityConfig, postgresIdentityStore } from '@superschematic/http-runtime/identity';
+import { identityDescriptor } from '@acme/shop-db-types/identity';
+import { buildRouter, identityService } from '@acme/shop-storefront-api';
+
+const identity = identityService({
+  store: postgresIdentityStore(new pg.Pool({ connectionString: process.env.DATABASE_URL }), identityDescriptor),
+  config: parseIdentityConfig(JSON.parse(process.env.IDENTITY_CONFIG ?? '{}')),
+});
+app.route('/', buildRouter(implementations, { identity }));
+```
 
 The store tests run on `node:sqlite` and `bun:sqlite` always, and on the
 Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set.

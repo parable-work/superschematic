@@ -15,10 +15,14 @@ users, roles and grants over the tables the core owns.
 - IdentityStore, with SqlIdentityStore over Postgres (postgresIdentityStore,
   over pg) and SQLite (sqliteIdentityStore, over node:sqlite or
   bun:sqlite), built from the schema's identity descriptor.
-- IdentityService, every session and administration operation; and
-  identityAuthenticator, the router's Authenticator over it.
+- IdentityService, every session and administration operation;
+  identityAuthenticator, the router's Authenticator over it; and
+  identityRouterOptions, the router options a generated router and the
+  engine authenticate every route with.
 - The Hono handlers of every route (identityHandler, identityHandlers,
-  identityRoutes, mountIdentityRoutes) and identityCors.
+  identityRoutes, mountIdentityRoutes), their operation table entries for
+  a server that generates none (identityOperationSpec,
+  mountIdentityOperations) and identityCors.
 
 It needs node:crypto's argon2 (Node.js 24.7 or later, or Bun) and
 superscalar. It imports no database driver: pg and the SQLite modules are
@@ -98,15 +102,28 @@ export type {
   SessionUser,
   SetPasswordInput,
 } from './service.js';
-export { identityAuthenticator, identityPrincipalOf, principalOf } from './authenticator.js';
+export { identityAuthenticator, identityPrincipalOf, identityRouterOptions, principalOf } from './authenticator.js';
 export {
+  CHANGE_PASSWORD_RATE_LIMIT,
   DEFAULT_USER_ADMINISTRATION_PATH,
   DEFAULT_USER_SESSIONS_PATH,
+  LOGIN_RATE_LIMIT,
+  REGISTER_RATE_LIMIT,
   identityCors,
   identityHandler,
   identityHandlers,
+  identityOperationSpec,
   identityOperations,
   identityRoutes,
+  mountIdentityOperations,
   mountIdentityRoutes,
 } from './hono.js';
-export type { IdentityHandler, IdentityOperation, IdentityOperationName, IdentityRouteEntry, IdentityRoutesOptions } from './hono.js';
+export type {
+  IdentityHandler,
+  IdentityOperation,
+  IdentityOperationName,
+  IdentityOperationSpecOptions,
+  IdentityRouteEntry,
+  IdentityRoutesOptions,
+  IdentityRule,
+} from './hono.js';

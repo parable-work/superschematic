@@ -1,20 +1,25 @@
 import type { Context, Env, Hono, MiddlewareHandler } from 'hono';
 import { envelopeResponse, requestIdOf } from '../envelope.js';
-import type { RequestContext } from '../operation.js';
+import { mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
+import type { OperationAuth, OperationSpec, RequestContext } from '../operation.js';
 import { HttpProblem, badRequest, internal, problemResponse } from '../problem.js';
-import { identityPrincipalOf } from './authenticator.js';
+import { identityAuthenticator, identityPrincipalOf } from './authenticator.js';
 import { corsAnswer, requestHost } from './crossorigin.js';
 import { bodyRefusal, crossOrigin } from './errors.js';
-import type {
-  ChangePasswordInput,
-  CreateUserInput,
-  IdentityPrincipal,
-  IdentityService,
-  IssuedSession,
-  LoginInput,
-  RegisterInput,
-  RoleInput,
-  SetPasswordInput,
+import {
+  PERMISSION_ROLES_READ,
+  PERMISSION_ROLES_WRITE,
+  PERMISSION_USERS_READ,
+  PERMISSION_USERS_WRITE,
+  type ChangePasswordInput,
+  type CreateUserInput,
+  type IdentityPrincipal,
+  type IdentityService,
+  type IssuedSession,
+  type LoginInput,
+  type RegisterInput,
+  type RoleInput,
+  type SetPasswordInput,
 } from './service.js';
 
 /*
@@ -32,17 +37,40 @@ zero value, as the Go runtime decodes it.
 
 mountIdentityRoutes mounts them on a Hono app as the Go runtime's
 Service.Routes lists them, for a server that does not go through the
-generated router (the engine); identityCors is the credentialed CORS
-middleware for the config's trusted origins.
+generated router; mountIdentityOperations mounts the same routes through
+the router runtime's pipeline, each with the operation table entry
+identityOperationSpec writes from the contract's rules, for a server whose
+router does not generate a table (the engine). identityCors is the
+credentialed CORS middleware for the config's trusted origins.
 */
 
-/** One of the user model's routes: its name, its set, its method and its path under the set's path, {id} and {roleId} its parameters. */
+/**
+ * Who may call a route: anyone (public), any caller with a session
+ * (caller), or a caller holding an administration permission, one of the
+ * PERMISSION_* names under the service's prefix.
+ */
+export type IdentityRule =
+  | 'public'
+  | 'caller'
+  | typeof PERMISSION_USERS_READ
+  | typeof PERMISSION_USERS_WRITE
+  | typeof PERMISSION_ROLES_READ
+  | typeof PERMISSION_ROLES_WRITE;
+
+/**
+ * One of the user model's routes: its name, its set, its method, its path
+ * under the set's path ({id} and {roleId} its parameters), its rule and,
+ * for login, register and changePassword, its rate limit.
+ */
 export interface IdentityOperation {
   readonly name: IdentityOperationName;
   /** @userAdministration's, under its path (auth/admin by default); otherwise @userSessions', under auth by default. */
   readonly administration: boolean;
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   readonly path: string;
+  readonly rule: IdentityRule;
+  /** The requests per minute the route allows per client; absent for a route the contract does not rate-limit. */
+  readonly rateLimitPerMinute?: number;
 }
 
 export type IdentityOperationName =
@@ -65,26 +93,31 @@ export type IdentityOperationName =
   | 'grantRole'
   | 'revokeRole';
 
-/** Every route of the user model, in ir/identity_routes.go's order. */
+/** The requests per minute login, register and changePassword allow per client, as ir/identity_routes.go states them. */
+export const LOGIN_RATE_LIMIT = 10;
+export const REGISTER_RATE_LIMIT = 5;
+export const CHANGE_PASSWORD_RATE_LIMIT = 10;
+
+/** Every route of the user model, in ir/identity_routes.go's order, with its rule and rate limit. */
 export const identityOperations: readonly IdentityOperation[] = [
-  { name: 'login', administration: false, method: 'POST', path: 'login' },
-  { name: 'logout', administration: false, method: 'POST', path: 'logout' },
-  { name: 'me', administration: false, method: 'GET', path: 'me' },
-  { name: 'capabilities', administration: false, method: 'GET', path: 'capabilities' },
-  { name: 'changePassword', administration: false, method: 'POST', path: 'password' },
-  { name: 'register', administration: false, method: 'POST', path: 'register' },
-  { name: 'createUser', administration: true, method: 'POST', path: 'users' },
-  { name: 'listUsers', administration: true, method: 'GET', path: 'users' },
-  { name: 'getUser', administration: true, method: 'GET', path: 'users/{id}' },
-  { name: 'disableUser', administration: true, method: 'POST', path: 'users/{id}/disable' },
-  { name: 'enableUser', administration: true, method: 'POST', path: 'users/{id}/enable' },
-  { name: 'setUserPassword', administration: true, method: 'PUT', path: 'users/{id}/password' },
-  { name: 'listRoles', administration: true, method: 'GET', path: 'roles' },
-  { name: 'createRole', administration: true, method: 'POST', path: 'roles' },
-  { name: 'updateRole', administration: true, method: 'PUT', path: 'roles/{id}' },
-  { name: 'deleteRole', administration: true, method: 'DELETE', path: 'roles/{id}' },
-  { name: 'grantRole', administration: true, method: 'PUT', path: 'users/{id}/roles/{roleId}' },
-  { name: 'revokeRole', administration: true, method: 'DELETE', path: 'users/{id}/roles/{roleId}' },
+  { name: 'login', administration: false, method: 'POST', path: 'login', rule: 'public', rateLimitPerMinute: LOGIN_RATE_LIMIT },
+  { name: 'logout', administration: false, method: 'POST', path: 'logout', rule: 'caller' },
+  { name: 'me', administration: false, method: 'GET', path: 'me', rule: 'caller' },
+  { name: 'capabilities', administration: false, method: 'GET', path: 'capabilities', rule: 'caller' },
+  { name: 'changePassword', administration: false, method: 'POST', path: 'password', rule: 'caller', rateLimitPerMinute: CHANGE_PASSWORD_RATE_LIMIT },
+  { name: 'register', administration: false, method: 'POST', path: 'register', rule: 'public', rateLimitPerMinute: REGISTER_RATE_LIMIT },
+  { name: 'createUser', administration: true, method: 'POST', path: 'users', rule: PERMISSION_USERS_WRITE },
+  { name: 'listUsers', administration: true, method: 'GET', path: 'users', rule: PERMISSION_USERS_READ },
+  { name: 'getUser', administration: true, method: 'GET', path: 'users/{id}', rule: PERMISSION_USERS_READ },
+  { name: 'disableUser', administration: true, method: 'POST', path: 'users/{id}/disable', rule: PERMISSION_USERS_WRITE },
+  { name: 'enableUser', administration: true, method: 'POST', path: 'users/{id}/enable', rule: PERMISSION_USERS_WRITE },
+  { name: 'setUserPassword', administration: true, method: 'PUT', path: 'users/{id}/password', rule: PERMISSION_USERS_WRITE },
+  { name: 'listRoles', administration: true, method: 'GET', path: 'roles', rule: PERMISSION_ROLES_READ },
+  { name: 'createRole', administration: true, method: 'POST', path: 'roles', rule: PERMISSION_ROLES_WRITE },
+  { name: 'updateRole', administration: true, method: 'PUT', path: 'roles/{id}', rule: PERMISSION_ROLES_WRITE },
+  { name: 'deleteRole', administration: true, method: 'DELETE', path: 'roles/{id}', rule: PERMISSION_ROLES_WRITE },
+  { name: 'grantRole', administration: true, method: 'PUT', path: 'users/{id}/roles/{roleId}', rule: PERMISSION_ROLES_WRITE },
+  { name: 'revokeRole', administration: true, method: 'DELETE', path: 'users/{id}/roles/{roleId}', rule: PERMISSION_ROLES_WRITE },
 ];
 
 /** The default route prefixes of the two sets. */
@@ -346,6 +379,81 @@ export function mountIdentityRoutes<E extends Env = Env>(
   for (const route of identityRoutes<E>(service, options)) {
     app.on(route.method, `${base}${route.path}`.replace(/\{([^{}]+)\}/gu, ':$1'), c => route.handler(c));
   }
+}
+
+/** What identityOperationSpec and mountIdentityOperations put in an entry beside the contract. */
+export interface IdentityOperationSpecOptions {
+  /** Prefixes each path ("" by default). */
+  readonly basePath?: string;
+  /** The entries' namespace: identity by default. */
+  readonly namespace?: string;
+  /** Requests per minute per client on a route the contract does not rate-limit; absent or 0 for none. */
+  readonly rateLimitPerMinute?: number;
+  /** Seconds a route may take before it answers 504; absent or 0 for none. */
+  readonly timeoutSeconds?: number;
+}
+
+/** The auth requirement of a rule: none for a public route, a caller, or a caller holding the permission under the service's prefix. */
+function authOf(service: IdentityService, rule: IdentityRule): OperationAuth {
+  if (rule === 'public') return { public: true, required: false, permissions: [] };
+  return { public: false, required: true, permissions: rule === 'caller' ? [] : [service.permission(rule)] };
+}
+
+/**
+ * The operation table entry of one identity route, for a server whose
+ * router does not generate a table (the engine): the route's method and
+ * path after basePath, its {id} and {roleId} as path parameters, the
+ * contract's rule as its auth requirement, and the contract's rate limit
+ * where it has one. It is a manual entry with no input: the handler
+ * decodes the body and the path itself.
+ */
+export function identityOperationSpec(
+  service: IdentityService,
+  route: Pick<IdentityRouteEntry, 'operation' | 'method' | 'path'>,
+  options: IdentityOperationSpecOptions = {}
+): OperationSpec {
+  const op = identityOperations.find(candidate => candidate.name === route.operation);
+  if (!op) throw new Error(`identity: ${JSON.stringify(route.operation)} is not an operation of the user model`);
+  const path = `${(options.basePath ?? '').replace(/\/+$/u, '')}${route.path}`;
+  const rateLimitPerMinute = op.rateLimitPerMinute ?? options.rateLimitPerMinute;
+  return {
+    name: op.name,
+    namespace: options.namespace ?? 'identity',
+    method: route.method,
+    path,
+    pathParams: [...path.matchAll(/\{([^{}]+)\}/gu)].map(match => ({ name: match[1]!, kind: 'string', required: true })),
+    queryParams: [],
+    bodyParams: [],
+    auth: authOf(service, op.rule),
+    ...(rateLimitPerMinute ? { rateLimitPerMinute } : {}),
+    ...(options.timeoutSeconds ? { timeoutSeconds: options.timeoutSeconds } : {}),
+    manual: true,
+  };
+}
+
+/**
+ * Mounts identityRoutes on app through the router runtime's pipeline, each
+ * with its identityOperationSpec, so the request id, the rate limit, the
+ * auth gate and the timeout run before the handler, and the gate
+ * authenticates with identityAuthenticator(service) whatever runtime
+ * names. It returns the entries it mounted.
+ */
+export function mountIdentityOperations<E extends Env = Env>(
+  app: Hono<E>,
+  service: IdentityService,
+  options: IdentityRoutesOptions & IdentityOperationSpecOptions,
+  runtime: RouterRuntimeOptions = {}
+): OperationSpec[] {
+  // One options object for every mount, so the routes share the runtime's
+  // default rate-limit store.
+  const router: RouterRuntimeOptions = { ...runtime, authenticate: identityAuthenticator(service) };
+  const specs: OperationSpec[] = [];
+  for (const route of identityRoutes<E>(service, options)) {
+    const spec = identityOperationSpec(service, route, options);
+    mountManualOperation(app, spec, route.handler, router);
+    specs.push(spec);
+  }
+  return specs;
 }
 
 /**
