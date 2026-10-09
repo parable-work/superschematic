@@ -123,9 +123,10 @@ for (const driver of drivers) {
       assert.equal(engine.runner.runDue().scheduled, 1);
       const index = engine.instances.get(alice, 'jobs', 'index');
       assert.deepEqual(index?.data, { title: 'index', topic: 'search', priority: 5, timeLimitMs: 45000 });
-      // Each behavior that declares a field has an entry, an unassigned job's Assignment an empty one.
+      // Each behavior that declares a field has an entry, an unassigned job's
+      // Assignment an empty one; the sweep's move entered queued now.
       assert.deepEqual(index?.behaviors, {
-        Workflow: { status: 'queued' },
+        Workflow: { status: 'queued', enteredAt: clock.ms },
         Lease: { token: 2, active: false, expiries: 1, ended: { reason: 'maxHold', at: 1_045_000 } },
         Assignment: {},
         Budget: { meters: { cpuSeconds: { used: 100, reserved: 0, limit: 3600, remaining: 3500 } } },

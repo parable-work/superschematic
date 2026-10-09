@@ -646,6 +646,13 @@
           }
         },
         "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
           "status": {
             "schema": {
               "description": "The state the instance is in.",
@@ -722,6 +729,13 @@
           }
         },
         "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
           "status": {
             "schema": {
               "description": "The state the instance is in.",
@@ -951,6 +965,13 @@
           }
         },
         "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
           "status": {
             "schema": {
               "description": "The state the instance is in.",
@@ -995,6 +1016,13 @@
           }
         },
         "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
           "status": {
             "schema": {
               "description": "The state the instance is in.",

@@ -1061,7 +1061,7 @@
                         },
                         "when": {
                           "additionalProperties": false,
-                          "description": "What sets the rule off: one of enters, allTerminal, anyTerminal, holds and revised.",
+                          "description": "What sets the rule off: one of enters, changes, allTerminal, anyTerminal, holds and revised.",
                           "maxProperties": 1,
                           "minProperties": 1,
                           "properties": {
@@ -1131,6 +1131,28 @@
                                 "schema",
                                 "link",
                                 "outcomes"
+                              ],
+                              "type": "object"
+                            },
+                            "changes": {
+                              "additionalProperties": false,
+                              "description": "The rule fires when a create, an update or an operation of the instance moves the value of field: to to when it is given, from from when it is given. A create moves a field from absent; a delete sets nothing off.",
+                              "properties": {
+                                "field": {
+                                  "description": "An own field of the type, by its JSON key, or a field of a behavior the type lists, by qualified name (Workflow.status), a member path after it allowed (Lease.ended.reason). A volatile field, which moves at a read with no event, and Workflow.enteredAt, which moves with the status, are refused.",
+                                  "maxLength": 512,
+                                  "pattern": "^[^.]+(\\.[^.]+)*$",
+                                  "type": "string"
+                                },
+                                "from": {
+                                  "description": "The value the field moves from; any value when absent. A create moves a field from absent, which from never names."
+                                },
+                                "to": {
+                                  "description": "The value the field moves to; any value when absent."
+                                }
+                              },
+                              "required": [
+                                "field"
                               ],
                               "type": "object"
                             },

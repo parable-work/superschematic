@@ -226,12 +226,16 @@ func setField(n *narrowing, name string, schema map[string]any, present bool) er
 	return nil
 }
 
-// Workflow: the status and transition's states are the config's.
+// Workflow: the status and transition's states are the config's; when the
+// status was entered is absent on an instance from before Workflow kept it.
 func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) error {
 	states := stringsOf(config["states"])
 	state := target.base + "State"
 	n.aliases = append(n.aliases, alias{name: state, doc: fmt.Sprintf("A state of %s's Workflow.", an(target.base)), schema: enumOf(states)})
 	if err := setField(n, "status", ref(state, ""), true); err != nil {
+		return err
+	}
+	if err := setField(n, "enteredAt", integer(), false); err != nil {
 		return err
 	}
 	if err := setOperationProperty(n.params, "transition", nil, "to", ref(state, "")); err != nil {

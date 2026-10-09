@@ -29,6 +29,8 @@ export type BatchBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: BatchState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Blueprint: {
     /** What was stamped: each step's key and its child's id, in the order they were created; absent until the instance is stamped. */
@@ -164,6 +166,8 @@ export type JobBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: JobState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Lease: {
     /** The subject of the principal that holds the lease; absent when the instance is free. */
@@ -1184,6 +1188,8 @@ export type WorkerBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: WorkerState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Presence: {
     /** When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat. */

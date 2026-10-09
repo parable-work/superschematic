@@ -46,7 +46,10 @@ for (const driver of drivers) {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
       assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
-      assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
+      assert.deepEqual(
+        engine.behaviors.declaration('Workflow')?.fields?.map((field) => field.name),
+        ['status', 'enteredAt']
+      );
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
       assert.throws(() => openTestEngine({ driver, behaviors: [impostor] }), /already registered/);
@@ -75,7 +78,11 @@ for (const driver of drivers) {
 
       const created = engine.instances.create(writer, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
       assert.deepEqual(created.data, { title: 'Launch plan' });
-      assert.deepEqual(created.behaviors, { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } });
+      assert.deepEqual(created.behaviors, {
+        Workflow: { status: 'draft', enteredAt: created.createdAt },
+        Comments: { commentCount: 0 },
+        Revisions: { revision: 1, pendingProposals: 0 },
+      });
 
       engine.instances.invoke(writer, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'review' });
@@ -87,25 +94,33 @@ for (const driver of drivers) {
       engine.instances.invoke(publisher, 'documents', 'doc-1', 'transition', { to: 'published' });
 
       const read = engine.instances.get(alice, 'documents', 'doc-1');
+      const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.' });
-      assert.deepEqual(read?.behaviors, { Workflow: { status: 'published' }, Comments: { commentCount: 2 }, Revisions: { revision: 2, pendingProposals: 0 } });
+      // The status was last entered by the last transition, the seventh event.
+      assert.deepEqual(read?.behaviors, {
+        Workflow: { status: 'published', enteredAt: events[6].at },
+        Comments: { commentCount: 2 },
+        Revisions: { revision: 2, pendingProposals: 0 },
+      });
       assert.equal(read?.seq, 7);
 
-      const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { patch: unknown }).patch : event.change]),
         [
           [
             'create',
             'wes',
-            { data: { title: 'Launch plan' }, behaviors: { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } } },
+            {
+              data: { title: 'Launch plan' },
+              behaviors: { Workflow: { status: 'draft', enteredAt: events[0].at }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } },
+            },
           ],
           ['operation', 'wes', { behaviors: { Comments: { commentCount: 1 } } }],
-          ['operation', 'wes', { behaviors: { Workflow: { status: 'review' } } }],
+          ['operation', 'wes', { behaviors: { Workflow: { status: 'review', enteredAt: events[2].at } } }],
           ['operation', 'wes', { behaviors: { Revisions: { pendingProposals: 1 } } }],
           ['operation', 'rae', { data: { body: 'The plan, in full.' }, behaviors: { Revisions: { revision: 2, pendingProposals: 0 } } }],
           ['operation', 'rae', { behaviors: { Comments: { commentCount: 2 } } }],
-          ['operation', 'pat', { behaviors: { Workflow: { status: 'published' } } }],
+          ['operation', 'pat', { behaviors: { Workflow: { status: 'published', enteredAt: events[6].at } } }],
         ]
       );
       // The log replays, a merge patch at a time, to the instance a read returns.
@@ -143,7 +158,11 @@ for (const driver of drivers) {
       engine.instances.update(writer, 'documents', 'doc-1', { summary: 'Withdrawn.' });
       const retracted = engine.instances.get(alice, 'documents', 'doc-1');
       assert.deepEqual(retracted?.data, { title: 'Launch plan', body: 'The plan, in full.', summary: 'Withdrawn.' });
-      assert.deepEqual(retracted?.behaviors, { Workflow: { status: 'retracted' }, Comments: { commentCount: 2 }, Revisions: { revision: 3, pendingProposals: 0 } });
+      assert.deepEqual(retracted?.behaviors, {
+        Workflow: { status: 'retracted', enteredAt: engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events[7].at },
+        Comments: { commentCount: 2 },
+        Revisions: { revision: 3, pendingProposals: 0 },
+      });
     });
 
     test('it runs the notes document: its title and body are searched, the title weighing more, and its embedder pulls their text', () => {
@@ -190,7 +209,11 @@ for (const driver of drivers) {
       const created = engine.instances.create(writer, 'tasks', { title: 'Build' }, { id: 'build', behaviors: project });
       assert.deepEqual([created.data, created.behaviors], [
         { title: 'Build' },
-        { Workflow: { status: 'todo' }, Dependencies: { blocked: false }, Links: { targets: { project: { schema: 'projects', id: 'launch' } } } },
+        {
+          Workflow: { status: 'todo', enteredAt: created.createdAt },
+          Dependencies: { blocked: false },
+          Links: { targets: { project: { schema: 'projects', id: 'launch' } } },
+        },
       ]);
 
       // build waits on plan and on the design, implements the design at its
@@ -200,8 +223,9 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'spec', id: 'doc-1' });
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'parent', id: 'plan' });
       engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'doing' });
-      assert.deepEqual(engine.instances.get(alice, 'tasks', 'build')?.behaviors, {
-        Workflow: { status: 'doing' },
+      const doing = engine.instances.get(alice, 'tasks', 'build');
+      assert.deepEqual(doing?.behaviors, {
+        Workflow: { status: 'doing', enteredAt: doing?.updatedAt },
         Dependencies: { blocked: true },
         Links: {
           targets: {
@@ -237,6 +261,7 @@ for (const driver of drivers) {
         next: null,
       });
       assert.deepEqual(engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' }), { from: 'doing', to: 'done' });
+      const enteredDone = engine.instances.get(alice, 'tasks', 'build')?.updatedAt;
 
       // launch is the tasks' required project, so it stays; the design can
       // go, which removes build's edge to it and clears its spec link.
@@ -255,7 +280,7 @@ for (const driver of drivers) {
       assert.deepEqual([done?.data, done?.behaviors], [
         { title: 'Build' },
         {
-          Workflow: { status: 'done' },
+          Workflow: { status: 'done', enteredAt: enteredDone },
           Dependencies: { blocked: false },
           Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
         },
@@ -275,7 +300,7 @@ for (const driver of drivers) {
       const created = engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
       assert.deepEqual([created.data, created.behaviors], [
         { title: 'Launch' },
-        { Workflow: { status: 'active' }, Rollups: { values: { tasks: 0, tasksByStatus: {}, tasksFinished: true } } },
+        { Workflow: { status: 'active', enteredAt: created.createdAt }, Rollups: { values: { tasks: 0, tasksByStatus: {}, tasksFinished: true } } },
       ]);
       for (const id of ['plan', 'build']) {
         engine.instances.create(writer, 'tasks', { title: id }, { id, behaviors: { Links: { project: 'launch' } } });

@@ -193,7 +193,7 @@ for (const driver of drivers) {
       assert.deepEqual([p3?.data, p3?.behaviors], [
         { title: 'p3' },
         {
-          Workflow: { status: 'active' },
+          Workflow: { status: 'active', enteredAt: p3?.createdAt },
           Rollups: { values: { byKind: {}, byStatus: {}, byUrgency: {}, estimate: 0, finished: true, started: false, tasks: 0 } },
         },
       ]);
@@ -537,7 +537,7 @@ for (const driver of drivers) {
       assert.equal(thrown(() => move(engine, 'Project', 'p1', 'done'), BehaviorVetoError).behavior, 'Rollups');
       publish(engine, schema('Project', [{ name: 'Workflow', config: projectFlow }]));
       const p1 = engine.instances.get(alice, 'Project', 'p1');
-      assert.deepEqual([p1?.data, p1?.behaviors], [{ title: 'p1' }, { Workflow: { status: 'active' } }]);
+      assert.deepEqual([p1?.data, p1?.behaviors], [{ title: 'p1' }, { Workflow: { status: 'active', enteredAt: p1?.createdAt } }]);
       assert.deepEqual(move(engine, 'Project', 'p1', 'done'), { from: 'active', to: 'done' });
     });
   });

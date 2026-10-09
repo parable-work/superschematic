@@ -46,7 +46,7 @@ export function workflowGuidance(config: WorkflowConfig, target: DescribeTarget)
           terminal.length > 0 ? `Do not use from ${list(terminal, 'or')}: no transition leaves a terminal state.` : undefined,
           'Do not use to stay where the instance is.'
         ),
-        success: 'Returns from and to; status holds to from then on.',
+        success: 'Returns from and to; status holds to from then on, and enteredAt the time of the move.',
         errors: [
           {
             code: 'transition_not_allowed',

@@ -225,7 +225,8 @@ export interface DescribedBehavior {
   config: unknown;
   /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
   summary?: string;
-  fields: Array<{ name: string; description?: string }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
+  fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: string[];
   vetoes: Array<{ code: string; description?: string }>;
 }
@@ -313,7 +314,8 @@ export interface BehaviorDocument {
   preconditionSchema?: JSONSchema;
   requires: string[];
   conflicts: string[];
-  fields: Array<{ name: string; description?: string }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
+  fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: BehaviorOperationDocument[];
   vetoes: Array<{ code: string; description?: string }>;
 }

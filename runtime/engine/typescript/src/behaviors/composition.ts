@@ -55,6 +55,7 @@ import { fieldPath } from './fields.js';
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import {
   BehaviorConfigError,
+  type ConfigBehaviorField,
   type ConfigChange,
   type ConfigSchema,
   type ConfigSchemas,
@@ -179,7 +180,7 @@ export function compose(
       issues.push({ path, message: `behavior ${ref.name} on type ${target.instanceType}: no implementation registered` });
       return;
     }
-    const parsed = parseConfig(behavior, ref.config, target, schemas);
+    const parsed = parseConfig(behavior, ref.config, target, registry, schemas);
     if ('problem' in parsed) {
       issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
       return;
@@ -287,7 +288,7 @@ export function configChanges(
       if (jsonEqual(earlier.config ?? {}, ref.config ?? {})) {
         continue;
       }
-      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change', populated);
+      const reason = decide(behavior, registry, earlier.config, before, ref.config, after, 'it allows no config change', populated);
       if (reason !== undefined) {
         changes.push({
           path,
@@ -295,7 +296,7 @@ export function configChanges(
         });
       }
     } else if (populated()) {
-      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances', populated);
+      const reason = decide(behavior, registry, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances', populated);
       if (reason !== undefined) {
         changes.push({ path, message: `behavior ${ref.name} cannot be added to type ${type}, which has instances: ${reason}` });
       }
@@ -305,7 +306,7 @@ export function configChanges(
     if (afterRefs.some((candidate) => candidate.name === ref.name) || !populated()) {
       continue;
     }
-    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances', populated);
+    const reason = decide(registry.lookup(ref.name), registry, ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances', populated);
     if (reason !== undefined) {
       changes.push({
         path: `${type}.behaviors.${ref.name}`,
@@ -331,7 +332,7 @@ export function checkedTypes(before: ComposeTarget, after: ComposeTarget, regist
   const beforeRefs = (before.document.types ?? {})[before.instanceType]?.behaviors ?? [];
   const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
   const named = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): readonly string[] => {
-    const parsed = parseConfig(behavior, json, target);
+    const parsed = parseConfig(behavior, json, target, registry);
     return 'problem' in parsed ? [] : checkedTypesOf(behavior, parsed.config);
   };
   const carried = new Set<string>();
@@ -397,7 +398,7 @@ export function readTypes(version: ComposeTarget, registry: BehaviorRegistry): s
       continue;
     }
     seen.add(ref.name);
-    const parsed = parseConfig(behavior, ref.config, version);
+    const parsed = parseConfig(behavior, ref.config, version, registry);
     if (!('problem' in parsed)) {
       for (const name of parsed.read) {
         read.add(name);
@@ -444,7 +445,7 @@ export function configTransitions(before: ComposeTarget | undefined, after: Comp
   const beforeRefs = before === undefined ? [] : ((before.document.types ?? {})[before.instanceType]?.behaviors ?? []);
   const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
   const parsed = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): unknown => {
-    const result = parseConfig(behavior, json, target);
+    const result = parseConfig(behavior, json, target, registry);
     return 'problem' in result ? undefined : result.config;
   };
   const transitions: ConfigTransition[] = [];
@@ -473,9 +474,10 @@ export function configTransitions(before: ComposeTarget | undefined, after: Comp
 // targetOf is what parseConfig is told about the type a config is given
 // on: its schema, its fields with their JSON Schemas, the document's other
 // types through the call's reader, every behavior it lists with its config
-// as the schema holds it, and, when given, the other schemas it reaches. A
-// behavior listed twice keeps its first config; compose refuses the list.
-function targetOf(target: ComposeTarget, types: ConfigTypes, schemas?: ConfigSchemas): ConfigTarget {
+// as the schema holds it and the fields the registry's declaration of it
+// gives, and, when given, the other schemas it reaches. A behavior listed
+// twice keeps its first config; compose refuses the list.
+function targetOf(target: ComposeTarget, types: ConfigTypes, registry: BehaviorRegistry, schemas?: ConfigSchemas): ConfigTarget {
   const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
   const refs = typeDef.behaviors ?? [];
   const fieldSchemas: Record<string, unknown> = {};
@@ -489,6 +491,7 @@ function targetOf(target: ComposeTarget, types: ConfigTypes, schemas?: ConfigSch
     fieldSchemas,
     types,
     behaviors: refs.map((ref) => ref.name),
+    behaviorFields: behaviorFieldsOf(refs, registry),
     configs: configsOf(refs),
     ...(schemas === undefined ? {} : { schemas }),
   });
@@ -598,11 +601,27 @@ function configsOf(refs: ReadonlyArray<{ readonly name: string; readonly config?
   return configs;
 }
 
+// behaviorFieldsOf is ConfigTarget.behaviorFields: the fields each listed
+// behavior's declaration gives, by name, with whether each is volatile. A
+// behavior with no implementation registered has no declaration here, and
+// so no entry; compose refuses it.
+function behaviorFieldsOf(refs: ReadonlyArray<{ readonly name: string }>, registry: BehaviorRegistry): Record<string, ConfigBehaviorField[]> {
+  const fields: Record<string, ConfigBehaviorField[]> = {};
+  for (const ref of refs) {
+    const behavior = registry.lookup(ref.name);
+    if (behavior !== undefined && !Object.prototype.hasOwnProperty.call(fields, ref.name)) {
+      fields[ref.name] = (behavior.declaration.fields ?? []).map((field) => ({ name: field.name, volatile: field.volatile === true }));
+    }
+  }
+  return fields;
+}
+
 // decide asks an implementation's configChange; undefined allows.
 // populated says whether the schema has instances, asked only when the
 // implementation reads change.instances.
 function decide(
   behavior: RegisteredBehavior | undefined,
+  registry: BehaviorRegistry,
   beforeJSON: unknown,
   beforeTarget: ComposeTarget | undefined,
   afterJSON: unknown,
@@ -618,7 +637,7 @@ function decide(
     return refusal;
   }
   const parse = (json: unknown, target: ComposeTarget | undefined): { config: unknown } | { problem: string } | undefined =>
-    target === undefined ? undefined : parseConfig(behavior, json, target);
+    target === undefined ? undefined : parseConfig(behavior, json, target, registry);
   const before = parse(beforeJSON, beforeTarget);
   const after = parse(afterJSON, afterTarget);
   for (const side of [before, after]) {
@@ -649,12 +668,14 @@ function decide(
 
 // parseConfig checks a config against the behavior's configSchema, then
 // its parseConfig, on the type target composes, with schemas in reach when
-// given. An absent config is checked as {}. read is what it read through
+// given and the type's behaviors' fields as the registry declares them.
+// An absent config is checked as {}. read is what it read through
 // ConfigTarget.types.
 function parseConfig(
   behavior: RegisteredBehavior,
   raw: unknown,
   target: ComposeTarget,
+  registry: BehaviorRegistry,
   schemas?: ConfigSchemas
 ): { json: unknown; config: unknown; read: readonly string[] } | { problem: string } {
   const json = deepFreeze(raw === undefined ? {} : (JSON.parse(JSON.stringify(raw)) as unknown));
@@ -675,7 +696,7 @@ function parseConfig(
   const reader = new TypeReader(target, behavior.name);
   let config: unknown;
   try {
-    config = parse.call(behavior.implementation, json, targetOf(target, reader.types, schemas));
+    config = parse.call(behavior.implementation, json, targetOf(target, reader.types, registry, schemas));
   } catch (error) {
     if (error instanceof BehaviorConfigError) {
       return { problem: `behavior ${behavior.name} config: ${error.message}` };

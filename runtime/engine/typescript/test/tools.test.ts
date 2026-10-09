@@ -22,7 +22,20 @@ import {
   type ToolSummary,
 } from '../dist/index.js';
 import { counterDeclaration, flagDeclaration, hold, holdDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  documentsDocument,
+  freshPath,
+  openTestEngine,
+  orderDocument,
+  projectsDocument,
+  schemaDocument,
+  stepsDocument,
+  tasksDocument,
+  thrown,
+  track,
+} from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
@@ -599,7 +612,14 @@ describe("the core's behaviors", () => {
     assert.deepEqual(
       Object.entries(behaviors).map(([name, behavior]) => [name, behavior.readOnly, Object.entries(behavior.properties).map(([field, schema]) => [field, schema.readOnly])]),
       [
-        ['Workflow', true, [['status', true]]],
+        [
+          'Workflow',
+          true,
+          [
+            ['status', true],
+            ['enteredAt', true],
+          ],
+        ],
         ['Comments', true, [['commentCount', true]]],
         [
           'Revisions',
@@ -612,6 +632,34 @@ describe("the core's behaviors", () => {
       ]
     );
     assert.deepEqual(Object.keys(described.instance.properties as object), ['body', 'title']);
+  });
+
+  test('a volatile field says so in the describe document, in instanceBehaviors and in its behavior\'s document', () => {
+    const engine = openTestEngine({ policy });
+    for (const document of [documentsDocument(), tasksDocument(), projectsDocument()]) {
+      publish(engine, document);
+    }
+    // Dependencies' blocked and Links' targets move with other instances, Rollups' values too; Workflow's fields do not.
+    const flagged = (name: string) =>
+      engine.tools.describe(alice, name).behaviors.map((behavior) => [behavior.name, behavior.fields.map((field) => [field.name, field.volatile])]);
+    assert.deepEqual(flagged('tasks'), [
+      [
+        'Workflow',
+        [
+          ['status', undefined],
+          ['enteredAt', undefined],
+        ],
+      ],
+      ['Dependencies', [['blocked', true]]],
+      ['Links', [['targets', true]]],
+    ]);
+    assert.deepEqual(flagged('projects')[1], ['Rollups', [['values', true]]]);
+    const behaviors = engine.tools.describe(alice, 'tasks').instanceBehaviors.properties as Record<string, { properties: Record<string, { volatile?: boolean }> }>;
+    assert.deepEqual(
+      [behaviors.Workflow.properties.status.volatile, behaviors.Dependencies.properties.blocked.volatile, behaviors.Links.properties.targets.volatile],
+      [undefined, true, true]
+    );
+    assert.deepEqual(engine.tools.describeBehavior(alice, 'Links').fields.map((field) => [field.name, field.volatile]), [['targets', true]]);
   });
 
   test("under a distribution's policy they take its default, and the engine still opens", () => {

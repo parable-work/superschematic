@@ -137,7 +137,11 @@ for (const driver of drivers) {
             'create',
             {
               data: { step: 'build', title: 'Build it', topic: 'public' },
-              behaviors: { Workflow: { status: 'todo' }, Dependencies: { blocked: true }, Links: { targets: { run: { schema: 'Run', id: 'r1' } } } },
+              behaviors: {
+                Workflow: { status: 'todo', enteredAt: events[0].at },
+                Dependencies: { blocked: true },
+                Links: { targets: { run: { schema: 'Run', id: 'r1' } } },
+              },
             },
           ],
         ]

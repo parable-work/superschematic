@@ -28,7 +28,7 @@ schema that composes one until a deployment registers that package.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
-| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
+| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
 | `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
@@ -131,7 +131,7 @@ behavior's:
 { "id": "t1", "seq": 3,
   "data": { "title": "Build", "status": "draft" },
   "behaviors": {
-    "Workflow": { "status": "doing" },
+    "Workflow": { "status": "doing", "enteredAt": 1790790700324 },
     "Dependencies": { "blocked": false },
     "Links": { "targets": { "project": { "schema": "projects", "id": "launch" } } } } }
 ```
@@ -155,6 +155,11 @@ same.
   entry, `{}` while none has a value; a field with no value is absent.
   A behavior that adds no field, such as `Search` or `Constants`, has
   none.
+- **Volatile fields.** A field the engine computes at a read, from other
+  instances, the clock or the config, moves with no event of its own
+  instance: `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
+  `Lease.active` and `Budget.meters`. Its declaration says
+  `"volatile": true`, and so does the describe document.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`.
@@ -447,7 +452,7 @@ cannot be done while a task it waits on is open.
 engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
 // { schema: 'Task', id: 't2', status: 'todo', open: true }
 engine.instances.get(alice, 'Task', 't1')?.behaviors;
-// { Workflow: { status: 'todo' }, Dependencies: { blocked: true } }
+// { Workflow: { status: 'todo', enteredAt: 1790790700324 }, Dependencies: { blocked: true } }
 ```
 
 - A blocker that ends in a `failure` or `neutral` state stays open, so a
@@ -674,11 +679,16 @@ Rules that move Workflow statuses after a change commits. They need
 
 | | |
 | --- | --- |
-| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `then` is `{ transition: <state>, link? }` |
+| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ changes: { field, to?, from? } }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `then` is `{ transition: <state>, link? }` |
 | Fields, operations | none |
 
 - `enters` fires when this instance's status becomes the state, by a
   create or a transition.
+- `changes` fires when a create, an update or an operation of this
+  instance moves `field`, to `to` and from `from` when they are given.
+  `field` is an own field or a behavior's by qualified name, with a
+  member path after it for an object (`Lease.ended.reason`). A create
+  moves a field from absent; a delete moves nothing.
 - `allTerminal` fires when an instance of `schema` that links here
   through `link` changes or goes, and every such instance is in a
   terminal state of its Workflow, with an outcome `outcomes` lists when
@@ -749,6 +759,21 @@ failed step while the first is still failed; `anyTerminal` would fail it
 again. An `all` over no step sets nothing off, so removing a run's last
 unfinished step completes it only when a passed step is left.
 
+A ticket escalates when its priority turns urgent, and is triaged at its
+first comment:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
+    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+```
+
+A rule reads the move from the event, so an update that gives the
+priority the ticket already holds moves nothing. A rule with `to` on the
+instance itself, as the first is, acts only while the field still holds
+`to` when the runner gets to it, as an `enters` rule acts only while the
+status is still in its state.
+
 Work done against a spec goes back to review when the spec changes:
 
 ```json
@@ -765,9 +790,14 @@ claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)
   is left alone.
-- States, links and rollups that do not exist, a `holds` rollup that is
-  not an `all` or an `any`, and `enters` rules that cycle, are refused
-  when the schema is defined.
+- States, links, rollups and fields that do not exist, a `holds` rollup
+  that is not an `all` or an `any`, and `enters` and `changes` rules on
+  the status that cycle, are refused when the schema is defined. So is a
+  `changes` on a volatile field, one the engine computes at a read from
+  other instances, the clock or the config (`Rollups.values`,
+  `Dependencies.blocked`, `Links.targets`), since no event records its
+  moves, and on `Workflow.enteredAt`, which every move of the status
+  moves.
 - Rules across instances can chain, a `holds` rule up a tree of tasks
   say; the runner's `maxDepth` stops a loop.
 

@@ -64,6 +64,23 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
 		t.Errorf("Reactions fields %v and operations %v, want none", reactions.Fields, reactions.Operations)
 	}
+	// The fields that move at a read, with no event of their own instance,
+	// say so (D56): no other core field does.
+	var volatile []string
+	for _, name := range coreBehaviorNames {
+		b, _ := reg.Behavior(name)
+		for _, field := range b.Fields {
+			if field.Volatile {
+				volatile = append(volatile, BehaviorFieldPath(name, field.Name))
+			}
+		}
+	}
+	if want := []string{"Budget.meters", "Dependencies.blocked", "Lease.active", "Links.targets", "Rollups.values"}; !slices.Equal(volatile, want) {
+		t.Errorf("volatile fields = %v, want %v", volatile, want)
+	}
+	if names := fieldNames(workflow.Fields); !slices.Equal(names, []string{"status", "enteredAt"}) {
+		t.Errorf("Workflow fields = %v, want status and enteredAt", names)
+	}
 	var scopes []string
 	for _, op := range links.Operations {
 		scopes = append(scopes, op.Name+":"+op.Scope)
@@ -298,6 +315,13 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"enters": "doing"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"leaves": "doing"}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority", "to": "urgent"}}, "then": {"transition": "escalated"}},
+			{"when": {"changes": {"field": "Lease.ended.reason", "from": "ttl"}}, "then": {"transition": "queued"}},
+			{"when": {"changes": {"field": "Workflow.status", "to": {"any": "JSON"}}}, "then": {"link": "project", "transition": "active"}}]}`, ""},
+		{reactions, `{"rules": [{"when": {"changes": {"to": "urgent"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority", "into": "urgent"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "Workflow..status"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority"}, "enters": "doing"}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "the tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
@@ -481,4 +505,13 @@ func TestCoreBehaviorNamesAreTaken(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `behavior name "Workflow" of extension acme must be acme.<Name>`) {
 		t.Fatalf("an extension's bare Workflow: err = %v", err)
 	}
+}
+
+// fieldNames lists the names of a behavior's fields, in order.
+func fieldNames(fields []BehaviorField) []string {
+	names := make([]string, len(fields))
+	for i, field := range fields {
+		names[i] = field.Name
+	}
+	return names
 }

@@ -814,7 +814,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name` and `description` |
+| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
@@ -825,9 +825,14 @@ engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
 and as a tool that takes its parameters and no `id` (D16, amended).
 `RegisterBehavior` refuses any other value, and the engine does too.
 
-A field carries only a name and a description. A field's type can depend
-on the behavior's config, and the loader needs only the name to refuse a
-collision.
+A field carries a name, a description and whether it is volatile, no
+type. A field's type can depend on the behavior's config, and the loader
+needs only the name to refuse a collision. A volatile field
+(`"volatile": true`) can move without an event of its own instance: it
+is computed when the instance is read, from other instances, the clock
+or the config, as `Rollups.values` and `Dependencies.blocked` are. No
+event records such a move, so `Reactions`' `changes`, which hears a
+field through its instance's events, refuses one (D56).
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
@@ -981,14 +986,14 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`, `vectors` (`dimensions`, `model`, `permission`); required | none | `search`, `similar`, `staleEmbeddings` and `settleEmbeddings`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `changes` (`field`, `to`, `from`), `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
 | `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | `release` | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |

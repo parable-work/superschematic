@@ -149,7 +149,9 @@ for (const driver of drivers) {
 
   describe(`Reactions (${driver})`, () => {
     test('a task that starts moves its project to active, as the runner, and the move records its cause', () => {
-      const engine = world();
+      const clock = testClock();
+      const engine = world({ clock });
+      clock.now += 1_000;
       const started = move(engine, 'Task', 't1', 'doing');
       assert.equal(status(engine, 'Project', 'p1'), 'planned');
       engine.runner.runDue();
@@ -160,7 +162,7 @@ for (const driver of drivers) {
         [
           'operation',
           'runner',
-          { behavior: 'Workflow', operation: 'transition', params: { to: 'active' }, patch: { behaviors: { Workflow: { status: 'active' } } } },
+          { behavior: 'Workflow', operation: 'transition', params: { to: 'active' }, patch: { behaviors: { Workflow: { status: 'active', enteredAt: clock.now } } } },
           { behavior: 'Reactions', event: started.cursor, depth: 1 },
         ]
       );

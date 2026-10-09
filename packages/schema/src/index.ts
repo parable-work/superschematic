@@ -48,6 +48,7 @@ export type {
   LinksConfig,
   PresenceConfig,
   PresenceTransition,
+  ReactionChanges,
   ReactionRule,
   ReactionSource,
   ReactionThen,

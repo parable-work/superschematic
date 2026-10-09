@@ -10,6 +10,21 @@ A rule is one when and one then:
 
 - when.enters: the instance's status became the state, by a create or a
   transition, as the event's change records it.
+- when.changes { field, to?, from? }: a create, an update or an
+  operation event of the instance moved the value of field, to to and
+  from from when they are given (D56). field is an own field, by its JSON
+  key, or a field of a behavior the type lists, by qualified name, a
+  member path after it allowed (Lease.ended.reason); the behavior is the
+  longest of the type's behavior names that prefixes it. A create moves a
+  field from absent, and a delete moves nothing. The event's change says
+  what moved: an operation's patch and an update's behaviors part are
+  diffs of the instance's fields, so a field they leave out has not
+  moved, and a value they replace is the value now. The instance before
+  the event (before()) is folded, once per event, only for from, for a
+  value whose patch is an object, a diff member by member, and for an own
+  field of an update, whose data is the caller's patch rather than a
+  diff. A value the event keeps in the value store is loaded before it is
+  compared.
 - when.allTerminal { schema, link, outcomes? }: an instance of schema
   that links here through link changed, linked, unlinked or went, and
   every instance that links here through it is now in a terminal state of
@@ -61,40 +76,49 @@ may run before or after the parent's.
 A rule acts only where it can. A target already in the state, with no
 transition to it from where it is, or whose guards veto the transition
 is left as it is, and so is an enters rule on the instance itself once
-the instance has moved on from the state. A target without Workflow, a
-state its Workflow lacks, a schema that does not link here through the
-link, and a revised link whose schema composes neither Revisions nor
-Branches are failures, which retry and then halt the subscription: the
-deployment's config is wrong, and only it can say what to do.
+the instance has moved on from the state, and a changes rule with to on
+the instance itself once the field holds another value. A target
+without Workflow, a state its Workflow lacks, a schema that does not
+link here through the link, and a revised link whose schema composes
+neither Revisions nor Branches are failures, which retry and then halt
+the subscription: the deployment's config is wrong, and only it can say
+what to do.
 
-Cycles and depth: enters rules on the instance itself chain, and
-parseConfig refuses their cycles. A holds rule hears only the rollup's
-schema, so a move of the instance itself sets one off only through
-another instance that links to it, up a tree of the type's own schema
-say; a revised rule hears revisions and releases, which no transition
-makes. Neither sets itself off on one instance, and chains across
+Cycles and depth: enters rules on the instance itself chain, and so do
+changes rules on Workflow.status, and parseConfig refuses their cycles:
+a changes rule with to moves from that state, one without it from each
+state a transition to its state leaves. A holds rule hears only the
+rollup's schema, so a move of the instance itself sets one off only
+through another instance that links to it, up a tree of the type's own
+schema say; a revised rule hears revisions and releases, which no
+transition makes. Neither sets itself off on one instance, and chains across
 instances stop at the runner's depth limit.
 
 parseConfig checks what the type's own configs show: every state of an
-enters rule and of a rule on the instance itself against the type's
-Workflow, every link a then or a revised names against its Links, every
-rollup a holds names against its Rollups (an all or an any), and an
-allTerminal or anyTerminal on the type's own schema against its own
-link. It refuses a rule on the instance itself that no transition of the
-type's Workflow allows, and enters rules on the instance itself whose
-states form a cycle. A linked schema's states and links are checked when
-a rule runs.
+enters rule, of a changes rule on Workflow.status and of a rule on the
+instance itself against the type's Workflow, every field a changes rule
+names against the type's own fields and the fields its behaviors declare
+(ConfigTarget.behaviorFields), refusing a volatile one, which moves at a
+read with no event to hear, and Workflow.enteredAt, which every move of
+the status moves, every link a then or a revised names against its
+Links, every rollup a holds names against its Rollups (an all or an
+any), and an allTerminal or anyTerminal on the type's own schema against
+its own link. It refuses a rule on the instance itself that no
+transition of the type's Workflow allows, and enters and changes rules
+on the instance itself whose states form a cycle. A linked schema's
+states and links are checked when a rule runs.
 
 configChange: rules hold no state, so any change is allowed, and
 Reactions may be added to and removed from a schema with instances.
 */
 
 import type { InstanceRecord } from '../../instances/store.js';
-import { LINKS_TARGETS, WORKFLOW_STATUS, behaviorField, type InstanceFields } from '../fields.js';
+import { LINKS_TARGETS, WORKFLOW_STATUS, behaviorField, fieldPath, type InstanceFields } from '../fields.js';
 import { BehaviorError, BehaviorVetoError } from '../../errors.js';
 import type { EngineEvent, OperationChange } from '../../events/log.js';
-import { mergePatch } from '../../instances/patch.js';
-import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
+import { isPlainObject, jsonEqual, mergePatch, setMember } from '../../instances/patch.js';
+import { pointer } from '../../registry/document.js';
+import { BehaviorConfigError, defineBehavior, type ConfigTarget, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
 import { reactionsGuidance } from './guidance/reactions.js';
 import { linkPin, type LinkPin } from './links.js';
@@ -110,9 +134,28 @@ export interface ReactionsTerminal {
   readonly outcomes?: readonly WorkflowOutcome[];
 }
 
+/** A move of a field a changes rule hears: to to and from from, when they are given. */
+export interface ReactionsChanges {
+  /** An own field's JSON key, or a behavior's field by qualified name, with a member path after it. */
+  readonly field: string;
+  readonly to?: unknown;
+  readonly from?: unknown;
+}
+
+/** A field a changes rule names, as parseConfig resolved it. */
+export interface ReactionsField {
+  /** The behavior whose field it is; absent for an own field. */
+  readonly behavior?: string;
+  /** The own field's JSON key, or the name the behavior's declaration gives the field. */
+  readonly field: string;
+  /** The members below the field's value the rule reads, outermost first; [] for the value itself. */
+  readonly members: readonly string[];
+}
+
 /** What sets a rule off. */
 export type ReactionsWhen =
   | { readonly enters: string }
+  | { readonly changes: ReactionsChanges }
   | { readonly allTerminal: ReactionsTerminal }
   | { readonly anyTerminal: ReactionsTerminal & { readonly outcomes: readonly WorkflowOutcome[] } }
   | { readonly holds: string }
@@ -144,9 +187,11 @@ export interface ReactionsRevisedLink {
   readonly pin?: LinkPin;
 }
 
-/** Reactions' config, parsed: the rules, and what the type's other configs say of the rollups and links they name. */
+/** Reactions' config, parsed: the rules, and what the type's other configs say of the fields, rollups and links they name. */
 export interface ReactionsConfig {
   readonly rules: readonly ReactionsRule[];
+  /** Each field a changes rule names, by the name the rule gives it. */
+  readonly fields: Readonly<Record<string, ReactionsField>>;
   /** Each rollup a holds rule names, by name. */
   readonly rollups: Readonly<Record<string, ReactionsRollup>>;
   /** Each link a revised rule names, by name. */
@@ -382,6 +427,115 @@ function madeHold(context: ReactionContext<ReactionsConfig>, rollup: ReactionsRo
   return holdsOver(rollup, as(leftBy(event, was))) && !holdsOver(rollup, as(was));
 }
 
+// memberOf reads a member path below a value: the value itself for [],
+// undefined where a step is not an object or lacks the member.
+function memberOf(value: unknown, members: readonly string[]): unknown {
+  let at = value;
+  for (const member of members) {
+    if (!isPlainObject(at) || !Object.prototype.hasOwnProperty.call(at, member)) {
+      return undefined;
+    }
+    at = at[member];
+  }
+  return at;
+}
+
+// An instance as a read or before() returns it, or a change of one as the
+// log records it: its own fields in data, its behaviors' in behaviors.
+type LoggedFields =
+  | {
+      readonly data?: Readonly<Record<string, unknown>> | null;
+      readonly behaviors?: Readonly<Record<string, Readonly<Record<string, unknown>> | undefined>> | null;
+    }
+  | null
+  | undefined;
+
+// partOf is the object of an instance, or of a change of one, that holds
+// a changes rule's field: its own fields, or its behavior's.
+function partOf(record: LoggedFields, field: ReactionsField): Readonly<Record<string, unknown>> | null | undefined {
+  return field.behavior === undefined ? record?.data : record?.behaviors?.[field.behavior];
+}
+
+// fieldOf reads a changes rule's field of an instance as a read or
+// before() returns it: undefined when it has no value.
+function fieldOf(record: LoggedFields, field: ReactionsField): unknown {
+  const part = partOf(record, field);
+  return isPlainObject(part) && Object.prototype.hasOwnProperty.call(part, field.field) ? part[field.field] : undefined;
+}
+
+// patchedField is what an event's change records of a changes rule's
+// field: present false when the change leaves it out, else its value
+// there, a create's value or a patch's, with a value the event keeps in
+// the value store loaded.
+function patchedField(context: ReactionContext<ReactionsConfig>, event: EngineEvent, field: ReactionsField): { present: false } | { present: true; value: unknown } {
+  const part = partOf(patchOf(event) as LoggedFields, field);
+  if (!isPlainObject(part) || !Object.prototype.hasOwnProperty.call(part, field.field)) {
+    return { present: false };
+  }
+  const value = part[field.field];
+  const at = pointer(
+    ...(event.kind === 'operation' ? ['patch'] : []),
+    ...(field.behavior === undefined ? ['data'] : ['behaviors', field.behavior]),
+    field.field
+  );
+  if (!(event.valueRefs ?? []).includes(at)) {
+    return { present: true, value };
+  }
+  return { present: true, value: context.values.load(JSON.stringify({ value }), JSON.stringify(['/value'])).value };
+}
+
+// changesFired reports whether an event of the type's own schema moved a
+// changes rule's field: to to and from from, when the rule gives them.
+// was is the instance before the event, folded at most once per event; it
+// is asked only for from, for a patch whose value is an object (a diff
+// member by member), and for an own field of an update (the caller's
+// patch, not a diff). A create moves the field from absent; a delete
+// moves nothing.
+function changesFired(
+  context: ReactionContext<ReactionsConfig>,
+  event: EngineEvent,
+  changes: ReactionsChanges,
+  field: ReactionsField,
+  was: () => InstanceFields | undefined
+): boolean {
+  if (event.kind !== 'create' && event.kind !== 'update' && event.kind !== 'operation') {
+    return false;
+  }
+  const patched = patchedField(context, event, field);
+  if (!patched.present) {
+    return false;
+  }
+  const holds = (value: unknown, wanted: unknown): boolean => wanted === undefined || jsonEqual(value, wanted);
+  if (event.kind === 'create') {
+    const after = memberOf(patched.value === null ? undefined : patched.value, field.members);
+    return after !== undefined && changes.from === undefined && holds(after, changes.to);
+  }
+  const diff = event.kind === 'operation' || field.behavior !== undefined;
+  if (diff && !isPlainObject(patched.value)) {
+    // The diff replaced the value, or removed it with null: the patch holds
+    // what it is now.
+    const after = memberOf(patched.value === null ? undefined : patched.value, field.members);
+    if (!holds(after, changes.to)) {
+      return false;
+    }
+    if (changes.from === undefined && field.members.length === 0) {
+      return true;
+    }
+  }
+  const before = fieldOf(was(), field);
+  const merged = mergePatch(before, patched.value);
+  const from = memberOf(before, field.members);
+  const to = memberOf(merged === null ? undefined : merged, field.members);
+  return !jsonEqual(from, to) && holds(to, changes.to) && holds(from, changes.from);
+}
+
+// stillHolds reports whether the instance's field holds the value a
+// changes rule moved it to, as it is when the rule runs.
+function stillHolds(context: ReactionContext<ReactionsConfig>, field: ReactionsField, id: string, to: unknown): boolean {
+  const fields = field.behavior === undefined ? [] : [fieldPath(field.behavior, field.field)];
+  return jsonEqual(memberOf(fieldOf(context.instances.get(context.schema, id, { fields }), field), field.members), to);
+}
+
 // apply moves a rule's target to its state, where it can. from, for an
 // enters rule on the instance itself, is the state the instance must
 // still be in.
@@ -525,6 +679,54 @@ function resolve(
   return { rollups, revised };
 }
 
+// fieldsOf holds the fields changes rules name to the type's own fields
+// and the ones its behaviors declare, and returns each resolved: an own
+// field has no dot; a behavior's field is the longest of the type's
+// behavior names that prefixes it, a dot, a field it declares, and the
+// members below. It refuses a volatile field, which moves at a read with
+// no event of the instance, and Workflow.enteredAt, which every move of
+// the status moves.
+function fieldsOf(rules: readonly ReactionsRule[], target: ConfigTarget): Record<string, ReactionsField> {
+  const fields: Record<string, ReactionsField> = {};
+  rules.forEach((rule, index) => {
+    if (!('changes' in rule.when)) {
+      return;
+    }
+    const at = `rule ${index + 1}: when.changes`;
+    const name = rule.when.changes.field;
+    if (!name.includes('.')) {
+      if (!target.fields.includes(name)) {
+        throw new BehaviorConfigError(`${at} names ${name}, which is not a field of ${target.type} (${target.fields.join(', ') || 'none'})`);
+      }
+      setMember(fields, name, { field: name, members: [] });
+      return;
+    }
+    const behavior = Object.keys(target.behaviorFields)
+      .filter((candidate) => name.startsWith(`${candidate}.`))
+      .sort((a, b) => b.length - a.length)[0] as string | undefined;
+    if (behavior === undefined) {
+      throw new BehaviorConfigError(`${at} names ${name}, which is not a field of a behavior the type lists (${target.behaviors.join(', ')})`);
+    }
+    const [field, ...members] = name.slice(behavior.length + 1).split('.');
+    const declared = target.behaviorFields[behavior];
+    const found = declared.find((candidate) => candidate.name === field);
+    if (found === undefined) {
+      const names = declared.map((candidate) => candidate.name);
+      throw new BehaviorConfigError(`${at} names ${name}, but ${behavior} declares no field ${field} (${names.join(', ') || 'none'})`);
+    }
+    if (found.volatile) {
+      throw new BehaviorConfigError(
+        `${at} names ${name}, a volatile field: it moves at a read, with no event of the instance to hear; a rule hears what moves it with holds, allTerminal, anyTerminal or revised`
+      );
+    }
+    if (behavior === 'Workflow' && field === 'enteredAt') {
+      throw new BehaviorConfigError(`${at} names ${name}, which every move of the status moves; a rule on ${WORKFLOW_STATUS} hears those`);
+    }
+    setMember(fields, name, { behavior, field, members });
+  });
+  return fields;
+}
+
 export const reactions = defineBehavior<ReactionsConfig>({
   declaration,
 
@@ -534,7 +736,7 @@ export const reactions = defineBehavior<ReactionsConfig>({
   // Workflow, Links and Rollups.
   parseConfig(json, target) {
     const raw = json as { rules: ReactionsRule[] };
-    const resolved = resolve(raw.rules, target.behaviors, target.configs);
+    const resolved = { fields: fieldsOf(raw.rules, target), ...resolve(raw.rules, target.behaviors, target.configs) };
     const workflow = target.configs.Workflow as Partial<RawWorkflow> | undefined;
     if (!Array.isArray(workflow?.states) || !Array.isArray(workflow.transitions)) {
       // Without Workflow, or with a Workflow config its own checks refuse,
@@ -551,6 +753,17 @@ export const reactions = defineBehavior<ReactionsConfig>({
       const at = `rule ${index + 1}`;
       if ('enters' in rule.when && !flow.states.includes(rule.when.enters)) {
         throw new BehaviorConfigError(`${at}: when.enters ${states(rule.when.enters)}`);
+      }
+      // A changes rule on the status names states, as an enters rule does.
+      const status = 'changes' in rule.when && rule.when.changes.field === WORKFLOW_STATUS ? rule.when.changes : undefined;
+      for (const key of ['to', 'from'] as const) {
+        const state = status?.[key];
+        if (typeof state === 'string' && !flow.states.includes(state)) {
+          throw new BehaviorConfigError(`${at}: when.changes.${key} ${states(state)}`);
+        }
+        if (state !== undefined && typeof state !== 'string') {
+          throw new BehaviorConfigError(`${at}: when.changes.${key} ${JSON.stringify(state)} is not a state of the type's Workflow (${flow.states.join(', ')})`);
+        }
       }
       const heard = terminalOf(rule.when);
       if (heard !== undefined && heard.terminal.schema === target.schema) {
@@ -572,14 +785,24 @@ export const reactions = defineBehavior<ReactionsConfig>({
       if (!flow.states.includes(to)) {
         throw new BehaviorConfigError(`${at}: then.transition ${states(to)}`);
       }
-      if ('enters' in rule.when) {
-        const from = rule.when.enters;
+      // An enters rule, and a changes rule on the status with to, acts only
+      // while the instance is still in that state.
+      const from = 'enters' in rule.when ? rule.when.enters : (status?.to as string | undefined);
+      if (from !== undefined) {
         if (!flow.transitions.some((transition) => transition.from === from && transition.to === to)) {
           throw new BehaviorConfigError(`${at}: no transition of the type's Workflow leads from ${from} to ${to}, so the rule could never move the instance`);
         }
         moves.push([from, to]);
       } else if (!flow.transitions.some((transition) => transition.to === to)) {
         throw new BehaviorConfigError(`${at}: no transition of the type's Workflow leads to ${to}, so the rule could never move the instance`);
+      } else if (status !== undefined) {
+        // Without to it hears every move of the status, so it moves the
+        // instance on from each state a transition to its state leaves.
+        for (const transition of flow.transitions) {
+          if (transition.to === to) {
+            moves.push([transition.from, to]);
+          }
+        }
       }
     });
     const loop = cycle(moves);
@@ -603,11 +826,30 @@ export const reactions = defineBehavior<ReactionsConfig>({
     },
 
     react(context, event) {
+      // The instance before the event, for the changes rules that need it:
+      // folded once for the event, whichever rules ask.
+      let folded: { was: InstanceFields | undefined } | undefined;
+      const was = (): InstanceFields | undefined => (folded ??= { was: context.before(event) }).was;
       for (const rule of context.config.rules) {
         if ('enters' in rule.when) {
           if (event.schema === context.schema && entered(event) === rule.when.enters) {
             apply(context, rule.then, event.instanceId as string, rule.then.link === undefined ? rule.when.enters : undefined);
           }
+          continue;
+        }
+        if ('changes' in rule.when) {
+          const changes = rule.when.changes;
+          const field = own(context.config.fields, changes.field) as ReactionsField;
+          const id = event.instanceId as string;
+          if (event.schema !== context.schema || !changesFired(context, event, changes, field, was)) {
+            continue;
+          }
+          // As an enters rule does, one on the instance itself acts only
+          // while the field still holds what it moved to.
+          if (rule.then.link === undefined && changes.to !== undefined && !stillHolds(context, field, id, changes.to)) {
+            continue;
+          }
+          apply(context, rule.then, id);
           continue;
         }
         if ('holds' in rule.when) {

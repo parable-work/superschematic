@@ -90,7 +90,12 @@ test('an author creates a note; a reader may not', async () => {
   // its name: Workflow's status, Comments' commentCount and Revisions'
   // revision and pendingProposals.
   assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'] });
-  assert.deepEqual(created.body.behaviors, { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } });
+  // Workflow's enteredAt is when the status last changed: here, the create.
+  assert.deepEqual(created.body.behaviors, {
+    Workflow: { status: 'draft', enteredAt: created.body.createdAt },
+    Comments: { commentCount: 0 },
+    Revisions: { revision: 1, pendingProposals: 0 },
+  });
 });
 
 test('a transition that names a permission needs it', async () => {
@@ -138,7 +143,14 @@ test('a reader comments and proposes a change; an editor approves it', async () 
 
   const note = await api('carol-token', 'GET', '/schemas/notes/instances/launch');
   assert.deepEqual(note.body.data, { title: 'Launch', body: 'Ships on the first.', tags: ['launch'] });
-  assert.deepEqual(note.body.behaviors, { Workflow: { status: 'published' }, Comments: { commentCount: 1 }, Revisions: { revision: 2, pendingProposals: 0 } });
+  // The status was last entered when bob published the note.
+  const log: EngineEvent[] = (await api('carol-token', 'GET', '/events?after=0')).body.events;
+  const publishedAt = log.find((event) => (event.change as { params?: { to?: string } } | null)?.params?.to === 'published')?.at;
+  assert.deepEqual(note.body.behaviors, {
+    Workflow: { status: 'published', enteredAt: publishedAt },
+    Comments: { commentCount: 1 },
+    Revisions: { revision: 2, pendingProposals: 0 },
+  });
   const revisions = await operation('carol-token', 'listRevisions', {});
   assert.deepEqual(
     revisions.body.items.map(({ revision, data }: { revision: number; data: unknown }) => [revision, data]),
@@ -224,7 +236,12 @@ test('the event log reads from a cursor, as JSON pages and as a stream', async (
   try {
     const first = await stream.next();
     assert.equal(first.cursor, events[3].cursor);
-    assert.deepEqual(first.change, { behavior: 'Workflow', operation: 'transition', params: { to: 'review' }, patch: { behaviors: { Workflow: { status: 'review' } } } });
+    // The stream sends the event the page holds: the move to review.
+    assert.deepEqual(first.change, events[3].change);
+    assert.deepEqual(
+      [(first.change as { params: unknown }).params, (first.change as { patch: { behaviors: { Workflow: { status: string } } } }).patch.behaviors.Workflow.status],
+      [{ to: 'review' }, 'review']
+    );
     for (const expected of events.slice(4)) {
       assert.equal((await stream.next()).cursor, expected.cursor);
     }

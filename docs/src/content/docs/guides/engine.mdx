@@ -93,8 +93,8 @@ from a TypeScript or YAML schema file. The notes schema:
   the document, alone, as a list or as a list of lists. The engine
   refuses a union or a map, which the schema runtime does not check.
 - `behaviors` lists what `Note` composes, with each one's config.
-  `Workflow` keeps a `status` and moves it only along the listed
-  transitions; moving a note from review to published, or from published
+  `Workflow` keeps a `status`, and when it last moved in `enteredAt`,
+  and moves it only along the listed transitions; moving a note from review to published, or from published
   to archived, needs the permission `notes.publish`. `Comments` keeps
   comments on the note. `Revisions` records a revision at every change,
   and its `review` config lets a caller propose a change that someone
@@ -263,7 +263,8 @@ curl -s $API/schemas/notes/instances \
     },
     "behaviors": {
       "Workflow": {
-        "status": "draft"
+        "status": "draft",
+        "enteredAt": 1790790700324
       },
       "Comments": {
         "commentCount": 0
@@ -286,8 +287,8 @@ curl -s $API/schemas/notes/instances \
 
 The response is 201. The note's `data` holds its own fields, and
 `behaviors` the fields its behaviors add, under each behavior's name:
-Workflow's `status`, Comments' `commentCount` and Revisions' `revision`
-and `pendingProposals`. They never collide with the note's own fields,
+Workflow's `status` and `enteredAt`, Comments' `commentCount` and
+Revisions' `revision` and `pendingProposals`. They never collide with the note's own fields,
 which could hold a `status` of their own. Only a behavior's operations
 change its fields: a create or an update writes `data`, and a name it
 does not declare there is 422. `seq` is the sequence of the note's last
@@ -334,7 +335,7 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft"},"Comments":{"commentCount":0},"Revisions":{"revision":2,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft","enteredAt":1790790700324},"Comments":{"commentCount":0},"Revisions":{"revision":2,"pendingProposals":0}}}
 ```
 
 `GET $API/schemas/notes/instances` lists notes in creation order, a page
@@ -559,7 +560,7 @@ curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-toke
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published"},"Comments":{"commentCount":1},"Revisions":{"revision":3,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published","enteredAt":1790790702190},"Comments":{"commentCount":1},"Revisions":{"revision":3,"pendingProposals":0}}}
 ```
 
 `reject` settles a proposal without applying it, `listProposals` and
