@@ -13,8 +13,9 @@ import (
 )
 
 // argsService is the extension's own fixture whose operations take path,
-// query and body arguments a form holds, one an input beside a path
-// argument, and one a map a form does not hold.
+// query and body arguments, one an input beside a path argument, one a map
+// its form holds as JSON text, and a GET whose path carries its one
+// argument.
 const argsService = "fixture-args-api"
 
 // TestArgumentFormsServeATopcoatApp does what TestFormsServeATopcoatApp
@@ -25,48 +26,54 @@ const argsService = "fixture-args-api"
 // each error at its control or the form's; a GET filter reads repeated
 // enum values, a comma-separated list, a limit, a page and a flag from the
 // query and renders them as sent, and a limit out of range at its control;
-// a form that embeds its input's form parses both.
+// a form that embeds its input's form parses both; a map argument is JSON
+// text; and the app's choices make an argument a select.
 func TestArgumentFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, argsService, argsAppTest)
 }
 
-// TestWhatHasNoArgumentForm builds fixture-args-api: every operation with
-// an argument beside its input has an argument form, save tagOrder, whose
-// map the build log names; the filter is a GET form; writeReview's embeds
-// its input's form. With outputs.topcoat.forms false the crate has
-// neither kind of form.
+// TestWhatHasNoArgumentForm builds fixture-args-api: every operation a
+// form submits has an argument form in forms.rs, tagOrder's map as JSON
+// text, save getOrder, a GET whose path carries its one argument, which
+// is a link and which the build log names; the filter is a GET form; and
+// writeReview's embeds its input's form. With outputs.topcoat.forms false
+// the crate has no forms.
 func TestWhatHasNoArgumentForm(t *testing.T) {
 	root := testpaths.TempDir(t)
 	var log bytes.Buffer
 	if _, err := buildWithNaming(t, registry.DefaultNaming(), argsService, root, rustOutputs(), &log); err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, argsService), "src", "arg_forms.rs"))
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, argsService), "src", "forms.rs"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	forms := string(data)
 	for _, want := range []string{
 		"pub struct OrderCancelOrderArgsForm {",
-		"pub struct OrderGetOrderArgsForm {",
+		"pub struct OrderTagOrderArgsForm {",
 		"pub struct OrderListOrdersArgsForm {\n    pub statuses: Vec<String>,",
-		"pub struct ProductReviewsWriteReviewArgsForm {\n    pub product_id: Option<String>,\n    pub input: crate::forms::WriteReviewInputForm,\n}",
+		"pub struct ProductReviewsWriteReviewArgsForm {\n    pub product_id: Option<String>,\n    pub input: WriteReviewInputForm,\n}",
 		"impl OrderListOrdersArgsForm {\n    /// How a page sends the form: `<form method=(Self::METHOD)>`.\n    pub const METHOD: &'static str = \"get\";",
-		"push(&mut form.statuses, value, true);",
-		"let arg_archived = single(&mut errors, \"archived\", self.archived.as_deref(), flag);",
+		`statuses: posted.get("statuses").values(true),`,
+		`let arg_archived = single(&mut errors, "archived", flag(self.archived.as_deref()));`,
+		`let arg_labels = single(&mut errors, "labels", json_text(self.labels.as_deref()));`,
 		"pub fn new(id: impl ToString) -> Self {",
 		"pub async fn order_cancel_order_args_fields(",
-		"write_review_input_fields(form: form.input.clone(), errors: input_errors)",
+		"input: WriteReviewInputForm::from_post(&posted),",
 	} {
 		if !strings.Contains(forms, want) {
-			t.Errorf("arg_forms.rs lacks %q", want)
+			t.Errorf("forms.rs lacks %q", want)
 		}
 	}
-	if strings.Contains(forms, "OrderTagOrderArgsForm") {
-		t.Error("arg_forms.rs has a form for tagOrder, whose map a form does not hold")
+	if strings.Contains(forms, "OrderGetOrderArgsForm") {
+		t.Error("forms.rs has a form for getOrder, a GET whose path carries its one argument")
 	}
-	if want := "no argument form for order.tagOrder: argument labels is a map"; !strings.Contains(log.String(), want) {
+	if want := "no argument form for order.getOrder: a GET whose arguments its path carries is a link"; !strings.Contains(log.String(), want) {
 		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, argsService), "src", "arg_forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("arg_forms.rs written beside forms.rs: %v", err)
 	}
 
 	outputs := rustOutputs()
@@ -75,10 +82,8 @@ func TestWhatHasNoArgumentForm(t *testing.T) {
 	if _, err := buildService(t, argsService, root, outputs); err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	for _, file := range []string{"arg_forms.rs", "forms.rs"} {
-		if _, err := os.Stat(filepath.Join(topcoat.Dir(root, argsService), "src", file)); !os.IsNotExist(err) {
-			t.Errorf("%s written with forms false: %v", file, err)
-		}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, argsService), "src", "forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("forms.rs written with forms false: %v", err)
 	}
 }
 
@@ -91,11 +96,11 @@ use schemas_fixture_args_api_topcoat::api::{
     types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
     OrderTagOrderArgs, ProductReviewsImplementation, ProductReviewsWriteReviewArgs,
 };
-use schemas_fixture_args_api_topcoat::arg_forms::{
-    order_cancel_order_args_fields, order_list_orders_args_fields, product_reviews_write_review_args_fields,
-    OrderCancelOrderArgsForm, OrderListOrdersArgsForm, ProductReviewsWriteReviewArgsForm,
+use schemas_fixture_args_api_topcoat::forms::{
+    order_cancel_order_args_fields, order_list_orders_args_fields, order_tag_order_args_fields,
+    product_reviews_write_review_args_fields, Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm,
+    OrderTagOrderArgsForm, ProductReviewsWriteReviewArgsForm,
 };
-use schemas_fixture_args_api_topcoat::forms::FormErrors;
 use schemas_fixture_args_api_topcoat::RouterBuilderFixtureArgsApiExt;
 use serde_json::json;
 use topcoat::context::Cx;
@@ -144,8 +149,10 @@ impl OrderImplementation for Shop {
         let note = format!("cancelled {} {} {:?}", which(&args.id), json!(args.code), args.reason);
         Ok(order(types::OrderStatus::Cancelled, note))
     }
-    async fn tag_order(&self, _ctx: RequestContext, _args: OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
-        Err(ApiError::not_implemented("tag_order"))
+    async fn tag_order(&self, _ctx: RequestContext, args: OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
+        let mut labels: Vec<_> = args.labels.into_iter().collect();
+        labels.sort();
+        Ok(order(types::OrderStatus::Placed, format!("tagged {} {labels:?}", which(&args.id))))
     }
 }
 
@@ -175,6 +182,30 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
             <p class="done">(note)</p>
         }
         <form method="post">order_cancel_order_args_fields(form: form, errors: errors)</form>
+    })
+}
+
+/// The cancel form with the reasons the shop offers.
+#[page("/cancel/choices")]
+async fn cancel_choices_page() -> topcoat::Result<impl View> {
+    let choices = Choices::new().with("reason", [("Found it cheaper", "I found it cheaper"), ("Too slow", "It is too slow")]);
+    Ok(view! {
+        <form method="post">order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER), choices: choices)</form>
+    })
+}
+
+#[page(POST "/tag")]
+async fn tag(cx: &Cx, Form(form): Form<OrderTagOrderArgsForm>) -> topcoat::Result<impl View> {
+    let (status, note, errors) = match form.submit(cx).await {
+        Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
+        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+    };
+    Ok(view! {
+        (status)
+        if let Some(note) = note {
+            <p class="done">(note)</p>
+        }
+        <form method="post">order_tag_order_args_fields(form: form, errors: errors)</form>
     })
 }
 
@@ -224,7 +255,9 @@ async fn review_page() -> topcoat::Result<impl View> {
 fn app() -> Router {
     Router::builder()
         .page(cancel_page)
+        .page(cancel_choices_page)
         .page(cancel)
+        .page(tag)
         .page(orders)
         .page(filter_page)
         .page(review)
@@ -317,8 +350,10 @@ async fn a_filter_reads_the_query_and_renders_it_as_sent() {
         r#"<form method="get">"#,
         r#"value="placed" checked="""#,
         r#"value="shipped" checked="""#,
-        r#"<input name="tags" type="text" maxlength="20" aria-label="Tags" value="fragile">"#,
-        r#"<input name="tags" type="text" maxlength="20" aria-label="Tags" value="heavy">"#,
+        r#"<label for="order-list-orders-tags-0">Tags 1</label><input id="order-list-orders-tags-0" name="tags" type="text" maxlength="20" value="fragile">"#,
+        r#"<input id="order-list-orders-tags-1" name="tags" type="text" maxlength="20" value="heavy">"#,
+        // A blank input for another tag.
+        r#"<input id="order-list-orders-tags-2" name="tags" type="text" maxlength="20">"#,
         r#"type="number" step="any" min="1" max="100" value="5">"#,
         r#"type="number" step="1" min="1" max="9007199254740991" value="2">"#,
         r#"name="archived" type="checkbox" checked="""#,
@@ -385,5 +420,34 @@ fn a_form_parses_into_its_arguments() {
 
     let errors = OrderCancelOrderArgsForm::new(ORDER).parse().unwrap_err();
     assert_eq!(errors.of("code"), vec!["is required"]);
+
+    // The input's fields are read beside the arguments.
+    let sent = ProductReviewsWriteReviewArgsForm::from_pairs(
+        [("productId", PRODUCT), ("rating", "4"), ("title", "Fine"), ("rating", "5")].map(|(k, v)| (k.to_owned(), v.to_owned())),
+    );
+    assert_eq!((sent.product_id.as_deref(), sent.input.rating.as_deref()), (Some(PRODUCT), Some("5")));
+}
+
+#[tokio::test]
+async fn a_map_argument_is_json_text() {
+    let (_, html) = post("/tag", &format!("id={ORDER}&labels=")).await;
+    assert!(html.contains(r#"<label for="order-tag-order-labels">Labels (JSON)</label><textarea id="order-tag-order-labels" name="labels" rows="4" spellcheck="false" required="""#), "{html}");
+
+    let (status, html) = post("/tag", &format!("id={ORDER}&labels=%7B%22vip%22%3A%22yes%22%7D")).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains(r#"<p class="done">tagged order [(&quot;vip&quot;, &quot;yes&quot;)]</p>"#) || html.contains(r#"tagged order [("vip", "yes")]"#), "{html}");
+
+    let (status, html) = post("/tag", &format!("id={ORDER}&labels=%7Bvip")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains(r#"<p class="field-error">must be JSON</p>"#), "{html}");
+}
+
+#[tokio::test]
+async fn the_apps_choices_make_an_argument_a_select() {
+    let (_, html) = get("/cancel/choices").await;
+    assert!(
+        html.contains(r#"<select id="order-cancel-order-reason" name="reason"><option value="" selected=""></option><option value="Found it cheaper">I found it cheaper</option>"#),
+        "{html}"
+    );
 }
 `

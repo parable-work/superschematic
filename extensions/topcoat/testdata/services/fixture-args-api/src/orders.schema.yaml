@@ -1,8 +1,9 @@
 # Orders and reviews, through argument forms: a list of orders filtered by
 # a list of statuses, a list of tags, a limit, a page and a flag in the
-# query; an order cancelled by its id in the path and an optional reason in
-# the body; a review written by its product's id in the path and an input;
-# and an order tagged by a map, which a form does not hold.
+# query; an order fetched by its id alone, a link with no form; an order
+# cancelled by its id in the path and a code and an optional reason in the
+# body; a review written by its product's id in the path and an input; and
+# an order tagged by a map, which its form holds as JSON text.
 name: fixture-args-api
 kind: API
 scalars:
@@ -131,7 +132,7 @@ operationSets:
             description: Why the order is cancelled, as the shopper wrote it.
             typeRef: { name: string }
             validateMaxLength: 500
-      # Tags an order; a form holds no map.
+      # Tags an order; its form holds the map as JSON text.
       - name: tagOrder
         typeRef: { name: OrderView }
         required: true

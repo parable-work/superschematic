@@ -56,7 +56,7 @@ pub async fn order_cancel_order(cx: &Cx, args: crate::api::OrderCancelOrderArgs)
         .await
 }
 
-/// order.tagOrder (`POST /api/orders/{id}/tags`): Tags an order; a form holds no map.
+/// order.tagOrder (`POST /api/orders/{id}/tags`): Tags an order; its form holds the map as JSON text.
 pub async fn order_tag_order(cx: &Cx, args: crate::api::OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_tag_order(cx).await?;
     args.check()?;

@@ -74,7 +74,10 @@ type formField struct {
 	Name     string // the struct's field: display_name
 	JSONName string // the input's and the form's: displayName
 	Label    string
-	Kind     string
+	// Hint is the field's description, its first line, shown under its
+	// label.
+	Hint string
+	Kind string
 	// Hidden marks an @uiHidden field: in the struct and its parse, not in
 	// the rendered fields.
 	Hidden bool
@@ -226,6 +229,7 @@ func (b *formBuilder) structOf(typeDef *ir.TypeDef) (*formStruct, error) {
 			Name:     rustName,
 			JSONName: field.Name,
 			Label:    labelOf(field),
+			Hint:     firstLine(field.Description),
 			Hidden:   field.UIHidden,
 			Required: field.Required && field.Default == nil,
 		}
@@ -509,14 +513,13 @@ func defaultOf(field *ir.FieldDef, f *formField) string {
 		return ""
 	}
 	text := *field.Default
-	switch {
-	case f.Read == "boolean":
-		if strings.EqualFold(strings.TrimSpace(text), "true") {
-			return `Some("on".to_owned())`
-		}
-		return ""
+	if f.Read != "boolean" {
+		return "Some(" + rustString(text) + ".to_owned())"
 	}
-	return "Some(" + rustString(text) + ".to_owned())"
+	if strings.EqualFold(strings.TrimSpace(text), "true") {
+		return `Some("on".to_owned())`
+	}
+	return ""
 }
 
 // control sets a value's control, its reader and its attributes from its

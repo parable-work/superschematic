@@ -232,7 +232,11 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		if out.Forms, out.FormStructs, err = formsOf(schemas, inProcess, c.Logf); err != nil {
 			return nil, err
 		}
-		if out.ArgForms, err = argFormsOf(schemas, inProcess, out.Forms, c.Logf); err != nil {
+		inputs := map[string]*formStruct{}
+		for _, f := range out.Forms {
+			inputs[f.TypeName] = f.Struct
+		}
+		if out.ArgForms, err = argFormsOf(schemas, inProcess, inputs, c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -264,59 +268,87 @@ func (c *crate) ProceduresTakeArgs() bool {
 	return false
 }
 
-// FormsUse reports whether a form uses item, so forms.rs declares the
-// helpers it needs: a kind of field ("value", "object", "objectRows",
-// "valueRows", "group"), a reader ("text", "integer", "number",
-// "boolean", "date_time", "json_text"), or "read", "list", "rows",
-// "noRows", "choosable", and what a rendered field needs ("checked",
-// "localDateTime", "showsAll", "showsRow", "showsRows").
+// HasForms reports whether the crate has a form of either kind, an input
+// form or an argument form, so it writes forms.rs.
+func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+
+// FormsUse reports whether a form uses item, so forms.rs declares what it
+// needs: a kind of an input form's field ("value", "object", "objectRows",
+// "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
+// "flag", "date_time", "json_text"), "read" for any; "put", "list" and
+// "rows" for writing an input form; "first", "values", "postedText" and
+// "postedRows" for reading a post; "args", "argsSingle", "argsList",
+// "argsInput" and "query" for argument forms; "noRows", "choosable"; and what a rendered control
+// needs ("checked", "localDateTime", "showsAll", "showsRow",
+// "showsRows").
 func (c *crate) FormsUse(item string) bool {
-	if item == "choosable" {
-		for _, f := range c.Forms {
-			if f.Choosable {
-				return true
-			}
-		}
-		return false
-	}
-	for _, st := range c.FormStructs {
-		if item == "rows" && st.Rows {
-			return true
-		}
-		for _, f := range st.Fields {
-			if formUses(st, f, item) {
-				return true
-			}
-		}
-	}
-	return false
+	return c.formUses()[item]
 }
 
-// formUses reports whether f, a field of st, uses item (FormsUse).
-func formUses(st *formStruct, f *formField, item string) bool {
-	shown := st.Shown && !f.Hidden
-	reads := f.Kind == kindValue || f.Kind == kindValueRows
-	switch item {
-	case kindValue, kindObject, kindObjectRows, kindValueRows, kindGroup:
-		return f.Kind == item
-	case "read":
-		return reads
-	case "list":
-		return f.Kind == kindObjectRows || f.Kind == kindValueRows || f.Kind == kindGroup
-	case "noRows":
-		return f.Kind == kindValueRows || f.Kind == kindObjectRows && !f.Child.Rows
-	case "checked":
-		return shown && f.Kind == kindGroup
-	case "localDateTime":
-		return shown && reads && f.Control == "datetime-local"
-	case "showsAll":
-		return shown && (f.Kind == kindGroup || f.Kind == kindValue && f.Control == "textarea")
-	case "showsRow":
-		return shown && f.Kind == kindValueRows
-	case "showsRows":
-		return shown && f.Kind == kindObjectRows
+// formUses is every item a form of the crate uses (FormsUse).
+func (c *crate) formUses() map[string]bool {
+	uses := map[string]bool{}
+	for _, f := range c.Forms {
+		uses["choosable"] = uses["choosable"] || f.Choosable
 	}
-	return reads && f.Read == item
+	for _, st := range c.FormStructs {
+		if st.Rows {
+			uses["rows"], uses["postedText"] = true, true
+		}
+		for _, f := range st.Fields {
+			shown := st.Shown && !f.Hidden
+			uses[f.Kind] = true
+			switch f.Kind {
+			case kindValue:
+				uses["put"], uses["postedText"] = true, true
+			case kindValueRows:
+				uses["list"], uses["postedRows"], uses["postedText"], uses["noRows"], uses["showsRow"] = true, true, true, true, uses["showsRow"] || shown
+			case kindObjectRows:
+				uses["list"], uses["postedRows"], uses["showsRows"] = true, true, uses["showsRows"] || shown
+				uses["noRows"] = uses["noRows"] || !f.Child.Rows
+			case kindGroup:
+				uses["list"], uses["values"] = true, true
+			}
+			if f.Kind == kindValue || f.Kind == kindValueRows {
+				uses["read"], uses[f.Read] = true, true
+			}
+			if shown {
+				addRendered(uses, f)
+			}
+		}
+	}
+	for _, f := range c.ArgForms {
+		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
+		uses["query"] = uses["query"] || f.IsGet()
+		uses["argsInput"] = uses["argsInput"] || f.Input != nil
+		for _, a := range f.Fields {
+			uses["read"], uses[a.Read] = true, true
+			if a.IsList() {
+				uses["values"], uses["argsList"] = true, true
+			} else {
+				uses["first"], uses["argsSingle"] = true, true
+			}
+			if a.Kind != kindPath {
+				addRendered(uses, a.formField)
+				if a.Kind == kindRepeated {
+					uses["showsAll"] = true
+				}
+			}
+		}
+	}
+	return uses
+}
+
+// addRendered adds what a rendered control of f needs.
+func addRendered(uses map[string]bool, f *formField) {
+	switch {
+	case f.Kind == kindGroup:
+		uses["checked"], uses["showsAll"] = true, true
+	case f.Control == "textarea":
+		uses["showsAll"] = true
+	case f.Control == "datetime-local":
+		uses["localDateTime"] = true
+	}
 }
 
 // ControlledProcedures are the procedures whose routes have a traffic
@@ -362,9 +394,6 @@ func (c *crate) write(dir string) error {
 	if c.HasForms() {
 		files = append(files, struct{ template, path string }{"forms.tmpl", filepath.Join("src", "forms.rs")})
 	}
-	if len(c.ArgForms) > 0 {
-		files = append(files, struct{ template, path string }{"arg_forms.tmpl", filepath.Join("src", "arg_forms.rs")})
-	}
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
@@ -376,11 +405,13 @@ func (c *crate) write(dir string) error {
 		"escapeBraces": escapeBraces,
 		"join":         strings.Join,
 		"doc":          doc,
+		"doc4":         doc4,
 	}).ParseFS(templates, "templates/*.tmpl")
 	if err != nil {
 		return err
 	}
-	// A crate written before with records or forms keeps no stale module.
+	// A crate written before with records or forms keeps no stale module,
+	// arg_forms.rs among them, which argument forms were once written to.
 	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
@@ -439,6 +470,22 @@ func doc(text string) string {
 		line += " " + word
 	}
 	return strings.Join(append(lines, line), "\n")
+}
+
+// doc4 is doc for an item indented by four spaces: each line after the
+// first, which the template indents, starts with them, and every line
+// stays within 80 columns.
+func doc4(text string) string {
+	var lines []string
+	line := "///"
+	for _, word := range strings.Fields(text) {
+		if line != "///" && 4+len(line)+1+len(word) > 80 {
+			lines = append(lines, line)
+			line = "///"
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n    ")
 }
 
 // rustString renders a Rust string literal.

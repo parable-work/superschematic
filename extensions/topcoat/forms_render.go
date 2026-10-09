@@ -169,9 +169,22 @@ func (r *formRenderer) value(sc scope, f *formField, path []pathSegment, indent 
 	field := r.bind(indent+1, "name", text, dynamic)
 	id := r.bind(indent+1, "id", controlID(sc.idBase, path), dynamic)
 	r.line(indent+1, "<label for="+id.attr+">"+rustString(f.Label)+"</label>")
-	r.control(indent+1, f, sc.form+"."+f.Name, field, id, f.Required && !sc.optional, choicePath(path))
+	described := r.hint(indent+1, f, controlID(sc.idBase, path)+"-hint", dynamic)
+	r.control(indent+1, f, sc.form+"."+f.Name, field, id, f.Required && !sc.optional, choicePath(path), described)
 	r.errors(indent+1, f.Control == "textarea", field.arg)
 	r.line(indent, "</div>")
+}
+
+// hint writes a field's description under its label, and returns the
+// attribute that ties its control to it, or nothing for a field without
+// one.
+func (r *formRenderer) hint(indent int, f *formField, id string, dynamic bool) string {
+	if f.Hint == "" {
+		return ""
+	}
+	hint := r.bind(indent, "hint", id, dynamic)
+	r.line(indent, `<p class="field-hint" id=`+hint.attr+">"+rustString(f.Hint)+"</p>")
+	return " aria-describedby=" + hint.attr
 }
 
 // errors writes the messages of a control, or of a value and what is
@@ -186,17 +199,20 @@ func (r *formRenderer) errors(indent int, under bool, arg string) {
 	r.line(indent, "}")
 }
 
-// control writes f's control over value, an Option<String> place.
-func (r *formRenderer) control(indent int, f *formField, value string, field, id name, required bool, choices string) {
+// control writes f's control over value, an Option<String> place, tied to
+// its hint by described.
+func (r *formRenderer) control(indent int, f *formField, value string, field, id name, required bool, choices, described string) {
 	req := ""
 	if required && f.Control != "checkbox" {
 		req = " required=(true)"
 	}
+	// The hint ties in after the rules' attributes.
+	attrs := f.Attrs + described
 	invalid := " aria-invalid=(errors.invalid(" + field.arg + "))"
 	open := "id=" + id.attr + " name=" + field.attr
 	switch f.Control {
 	case "select":
-		r.line(indent, "<select "+open+req+invalid+">")
+		r.line(indent, "<select "+open+req+described+invalid+">")
 		if !required {
 			r.line(indent+1, `<option value="" selected=(`+value+`.is_none())>""</option>`)
 		}
@@ -205,30 +221,24 @@ func (r *formRenderer) control(indent int, f *formField, value string, field, id
 		}
 		r.line(indent, "</select>")
 	case "checkbox":
-		r.line(indent, "<input "+open+` type="checkbox" checked=(`+value+".is_some())"+invalid+">")
+		r.line(indent, "<input "+open+` type="checkbox" checked=(`+value+".is_some())"+described+invalid+">")
 	case "password":
 		// A secret is never rendered back: a refused form asks for it again.
-		r.line(indent, "<input "+open+` type="password"`+req+f.Attrs+` autocomplete="off"`+invalid+">")
+		r.line(indent, "<input "+open+` type="password"`+req+attrs+` autocomplete="off"`+invalid+">")
 	case "datetime-local":
-		r.line(indent, "<input "+open+` type="datetime-local"`+req+f.Attrs+" value=(local_date_time("+value+".as_deref()))"+invalid+">")
+		r.line(indent, "<input "+open+` type="datetime-local"`+req+attrs+" value=(local_date_time("+value+".as_deref()))"+invalid+">")
 	case "textarea":
-		r.line(indent, "<textarea "+open+` rows="4" spellcheck="false"`+req+invalid+">("+value+".clone())</textarea>")
+		r.line(indent, "<textarea "+open+` rows="4" spellcheck="false"`+req+described+invalid+">("+value+".clone())</textarea>")
 	default:
-		input := "<input " + open + " type=" + rustString(f.Control) + req + f.Attrs + " value=(" + value + ".clone())" + invalid + ">"
+		input := "<input " + open + " type=" + rustString(f.Control) + req + attrs + " value=(" + value + ".clone())" + invalid + ">"
 		if !f.Choosable {
 			r.line(indent, input)
 			return
 		}
+		// The app's choices, when it names the field, make it a select.
 		r.choosable = true
 		r.line(indent, "match choices.of("+field.arg+", "+rustString(choices)+") {")
-		r.line(indent+1, "Some(options) => {")
-		r.line(indent+2, "<select "+open+req+invalid+">")
-		r.line(indent+3, `<option value="" selected=(`+value+`.is_none())>""</option>`)
-		r.line(indent+3, "for (value, label, selected) in choice_options(options, "+value+".as_deref()) {")
-		r.line(indent+4, "<option value=(value) selected=(selected)>(label)</option>")
-		r.line(indent+3, "}")
-		r.line(indent+2, "</select>")
-		r.line(indent+1, "}")
+		r.line(indent+1, fmt.Sprintf("Some(options) => choice_select(id: %s, name: %s, required: %t, invalid: errors.invalid(%s), options: choice_options(options, %s.as_deref())),", id.arg, field.arg, required, field.arg, value))
 		r.line(indent+1, "None => "+input+",")
 		r.line(indent, "}")
 	}
@@ -265,6 +275,7 @@ func (r *formRenderer) rows(sc scope, f *formField, path []pathSegment, indent i
 	field := r.bind(indent+1, "list", text, dynamic)
 	r.line(indent+1, "<legend>"+rustString(f.Label)+"</legend>")
 	r.errors(indent+1, false, field.arg)
+	r.line(indent+1, "#[key("+index+")]")
 	r.line(indent+1, "for ("+index+", "+row+") in "+list+".iter().enumerate() {")
 	if f.Kind == kindObjectRows {
 		r.line(indent+2, `<fieldset class="ss-row">`)
@@ -285,7 +296,7 @@ func (r *formRenderer) rows(sc scope, f *formField, path []pathSegment, indent i
 		if f.Control == "checkbox" {
 			r.line(indent+3, `<input type="hidden" name=(&name) value="">`)
 		}
-		r.control(indent+3, f, row, name{attr: "(&name)", arg: "&name"}, name{attr: "(&id)", arg: "&id"}, true, choicePath(path))
+		r.control(indent+3, f, row, name{attr: "(&name)", arg: "&name"}, name{attr: "(&id)", arg: "&id"}, true, choicePath(path), "")
 		r.removeButton(indent+3, list, f.Min, fmt.Sprintf(remove, "name"))
 		r.errors(indent+3, f.Control == "textarea", "&name")
 		r.line(indent+2, "</div>")
@@ -326,9 +337,38 @@ func (r *formRenderer) group(sc scope, f *formField, path []pathSegment, indent 
 	r.line(indent, `<fieldset class="ss-choices" data-field=`+rustString(f.JSONName)+">")
 	field := r.bind(indent+1, "name", text, dynamic)
 	r.line(indent+1, "<legend>"+rustString(f.Label)+"</legend>")
+	if f.Hint != "" {
+		r.line(indent+1, `<p class="field-hint">`+rustString(f.Hint)+"</p>")
+	}
 	r.errors(indent+1, true, field.arg)
 	for _, option := range f.Options {
 		r.line(indent+1, `<label class="ss-choice"><input type="checkbox" name=`+field.attr+" value="+rustString(option.Value)+" checked=(checked(&"+value+", "+rustString(option.Value)+"))>"+rustString(option.Label)+"</label>")
 	}
+	r.line(indent, "</fieldset>")
+}
+
+// repeated writes an argument's list of values as a fieldset of inputs of
+// the argument's name, one per value sent and a blank one for another, as
+// a query list is sent: the router reads each value of a repeated key.
+func (r *formRenderer) repeated(sc scope, f *formField, path []pathSegment, indent int) {
+	text, dynamic := controlName(path)
+	index, row := fmt.Sprintf("i%d", sc.depth), fmt.Sprintf("row%d", sc.depth)
+	rowPath := with(path, pathSegment{index: index})
+	r.line(indent, `<fieldset class="ss-list" data-field=`+rustString(f.JSONName)+">")
+	field := r.bind(indent+1, "name", text, dynamic)
+	r.line(indent+1, "<legend>"+rustString(f.Label)+"</legend>")
+	if f.Hint != "" {
+		r.line(indent+1, `<p class="field-hint">`+rustString(f.Hint)+"</p>")
+	}
+	r.errors(indent+1, true, field.arg)
+	r.line(indent+1, "#[key("+index+")]")
+	r.line(indent+1, "for ("+index+", "+row+") in "+sc.form+"."+f.Name+".iter().cloned().map(Some).chain([None]).enumerate() {")
+	r.line(indent+2, `<div class="field ss-row">`)
+	r.line(indent+3, "let id = format!("+rustString(controlID(sc.idBase, rowPath))+");")
+	r.line(indent+3, "let label = format!("+rustString(escapeBraces(f.Label)+" {}")+", "+index+" + 1);")
+	r.line(indent+3, "<label for=(&id)>(&label)</label>")
+	r.control(indent+3, f, row, field, name{attr: "(&id)", arg: "&id"}, false, choicePath(path), "")
+	r.line(indent+2, "</div>")
+	r.line(indent+1, "}")
 	r.line(indent, "</fieldset>")
 }
