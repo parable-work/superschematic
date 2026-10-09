@@ -52,15 +52,18 @@ type formOption struct {
 	Label string
 }
 
-// formsOf is a form per input type an operation of api takes whose fields
-// are all a form holds (a string, a number, a boolean or an enum, each
-// alone), declared by the service itself, sorted by name. Any other input
-// type gets none, and log says why.
-func formsOf(schemas schemaSet, api *registry.RustAPI, log func(format string, args ...any)) ([]form, error) {
+// formsOf is a form per input type an operation of inProcess takes whose
+// fields are all a form holds (a string, a number, a boolean or an enum,
+// each alone), declared by the service itself, sorted by name. Any other
+// input type gets none, and log says why. A form submits through the
+// operation's in-process call, so an operation without one, a webhook's or
+// one the service mounts, gives its input none, as it gives its result no
+// record.
+func formsOf(schemas schemaSet, inProcess []declared, log func(format string, args ...any)) ([]form, error) {
 	seen := map[string]bool{}
 	var forms []form
-	for _, endpoint := range api.Endpoints {
-		input := endpoint.Input
+	for _, d := range inProcess {
+		input := d.endpoint.Input
 		if input == nil || seen[input.RustType] {
 			continue
 		}

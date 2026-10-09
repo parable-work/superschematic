@@ -8,14 +8,15 @@
 // as the router checks them, D43), save a webhook and one the service
 // mounts itself, offers a guard per operation, and mirrors each type such
 // a call returns as a Topcoat record, which a page can hand the browser. A
-// form per input type whose fields a form holds parses what the browser
-// sends by the input type's rules (D14) and renders its fields with the
-// attributes those rules give them. A procedure per operation lets browser
-// code call it, its arguments and its result records, its refusal a record
-// the browser reads, under its route's traffic controls. An operation whose
-// route a browser's request cannot meet, a webhook's or one only a service
-// may call, has none. A detail and a table component per record render it
-// as HTML, labeled by the schema's titles and its types' @display.
+// form per input type such a call takes whose fields a form holds parses
+// what the browser sends by the input type's rules (D14) and renders its
+// fields with the attributes those rules give them. A procedure per
+// operation lets browser code call it, its arguments and its result
+// records, its refusal a record the browser reads, under its route's
+// traffic controls. An operation whose route a browser's request cannot
+// meet, a webhook's or one only a service may call, has none. A detail and
+// a table component per record render it as HTML, labeled by the schema's
+// titles and its types' @display.
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.
@@ -106,8 +107,8 @@ var OutputSchema = json.RawMessage(`{
   "additionalProperties": false,
   "properties": {
     "enabled": {"type": "boolean"},
-    "records": {"type": "boolean", "description": "Mirror each type an operation returns as a Topcoat record (default true)."},
-    "forms": {"type": "boolean", "description": "A form per input type whose fields a form holds (default true)."},
+    "records": {"type": "boolean", "description": "Mirror each type an in-process call returns as a Topcoat record (default true)."},
+    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes whose fields a form holds (default true)."},
     "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."},
     "views": {"type": "boolean", "description": "Components that render each record as a description list and a table (default true; needs records)."}
   }

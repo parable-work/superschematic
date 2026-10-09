@@ -4,10 +4,11 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
-//! `records` mirrors each type an operation returns as a record a page
-//! can hand the browser.
-//! `procedures` lets browser code call each operation, its arguments and
-//! result records; the app's `.discover()` registers them.
+//! `records` mirrors each type a call in `operations` returns as a record a
+//! page can hand the browser; the result of an operation without a call, a
+//! webhook's, has none.
+//! `procedures` lets browser code call each operation a browser may, its
+//! arguments and result records; the app's `.discover()` registers them.
 //! `fixture_controls_api` puts each route's traffic controls in front of its
 //! procedure.
 //! `views` renders each record as a description list and as a table.
