@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -210,6 +211,13 @@ type EndpointInfo struct {
 	// generated so services can register the route themselves.
 	ManualRouteRegistration bool
 
+	// IdentityOperation names the user model's operation (D50) the endpoint
+	// is, one of the ir.IdentityOp constants; empty for every other. The
+	// identity runtime serves it, so the server writers leave it out of the
+	// implementation (ImplementedOutput), and the OpenAPI document and the
+	// SDKs read it as any other endpoint.
+	IdentityOperation string
+
 	IsWebhook                    bool
 	WebhookHMACProvider          string
 	WebhookHMACProviderTypesExpr string
@@ -270,6 +278,13 @@ type APIOutput struct {
 	Endpoints  []EndpointInfo
 	Namespaces []string
 
+	// IdentityEndpoints are the user model's operations (D50), which the
+	// identity runtime serves: ImplementedOutput moves them here from
+	// Endpoints, so the Go server mounts them on the runtime's handlers
+	// and implements none of them. Nil in the output Generate returns,
+	// whose Endpoints hold every operation.
+	IdentityEndpoints []EndpointInfo
+
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
 	HasPermissionEndpoints   bool
@@ -298,6 +313,10 @@ type APIOutput struct {
 	Timestamp      string
 	OpenAPISpec    string // backtick-escaped JSON for Go embedding
 	OpenAPISpecRaw string // raw JSON written to openapi.json
+	// PermissionCatalogJSON is permissions.json, written beside
+	// openapi.json: every permission the endpoints name (package
+	// permcatalog). It is empty when none names one, and no file is written.
+	PermissionCatalogJSON string
 
 	// Scalars carries JSON Schema metadata for tool-calling bindings.
 	Scalars map[string]ScalarJSONSchemaInfo
@@ -369,6 +388,31 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 	return goutil.UniqueModules([]string{o.TypesModule}, o.ModuleDependencies, o.IndirectModules)
 }
 
+// RoutedEndpoints are the endpoints RegisterRoutes mounts and the identity
+// route table lists: Endpoints and IdentityEndpoints, in Generate's order
+// (by path, then method). Without IdentityEndpoints they are Endpoints.
+func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
+	if len(o.IdentityEndpoints) == 0 {
+		return o.Endpoints
+	}
+	routed := append(append([]EndpointInfo{}, o.Endpoints...), o.IdentityEndpoints...)
+	sort.SliceStable(routed, func(i, j int) bool {
+		if routed[i].Path != routed[j].Path {
+			return routed[i].Path < routed[j].Path
+		}
+		return routed[i].Method < routed[j].Method
+	})
+	return routed
+}
+
+// AuthWired reports whether the Go server's Config takes an auth
+// middleware, which every protected route runs: a public API's, or one
+// whose server authenticates with the identity runtime (Auth.Identity)
+// whether or not it is public. The database wiring stays public's alone.
+func (o *APIOutput) AuthWired() bool {
+	return o.IsPublic || o.Auth.Identity
+}
+
 // HasConstants reports whether constants.go is generated: public schemas
 // with a UUID-like scalar get a SystemUserID constant.
 func (o *APIOutput) HasConstants() bool {
@@ -382,6 +426,22 @@ func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.Endpoints {
 		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
 			return true
+		}
+	}
+	return false
+}
+
+// RoutesNeedScalars gates the scalar Go module's import in routes.go, as
+// scalars: a body argument or a query-string list of a JSON-object scalar
+// is built with superscalar's check of the scalar (BodyArg.ChecksJSON).
+func (o *APIOutput) RoutesNeedScalars() bool {
+	for _, endpoint := range o.Endpoints {
+		for _, args := range [][]BodyArg{endpoint.BodyArgs, endpoint.QueryListArgs} {
+			for _, arg := range args {
+				if arg.ChecksJSON() {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -528,9 +588,11 @@ type Options struct {
 	// APIs.
 	UpstreamSchema string
 
-	// UpstreamIR is the loaded IR of the upstream schema, used to gate the
-	// auth store adapters on the tables it declares. Required when
-	// UpstreamSchema is set.
+	// UpstreamIR is the loaded IR of the upstream schema, which the auth
+	// provider analyzes: the user model it declares (D50) and any store of
+	// the provider's own. Required when UpstreamSchema is set. A non-public
+	// API sets it alone, to its authDb's, when that declares the user
+	// model.
 	UpstreamIR *ir.Schema
 
 	// ORMModule is the upstream ORM module path. Derived from
@@ -658,53 +720,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, nil
 	}
 
-	for _, endpoint := range output.Endpoints {
-		if endpoint.RequiresAuth {
-			output.HasAuth = true
-		}
-		if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
-			output.RoutesNeedTime = true
-		}
-		if endpoint.HasFileUpload {
-			output.HasFileUpload = true
-		}
-		if endpoint.Encrypted {
-			output.HasEncryptedEndpoints = true
-		}
-		if len(endpoint.RequiredPerms) > 0 {
-			output.HasPermissionEndpoints = true
-		}
-		if endpoint.Filterable {
-			if endpoint.Method != "GET" {
-				return nil, fmt.Errorf("@filterable is only supported on GET operations, but %s.%s is %s", endpoint.Namespace, endpoint.Name, endpoint.Method)
-			}
-			output.HasFilterableEndpoints = true
-		}
-		if endpoint.WebhookHMACProvider != "" {
-			output.HasWebhookHMACEndpoints = true
-		}
-		if endpoint.ServiceCallers != nil {
-			output.HasServiceCallers = true
-		}
-		if endpoint.NeedsTypesImport {
-			output.NeedsTypesImport = true
-		}
+	if err := output.summarizeEndpoints(); err != nil {
+		return nil, err
 	}
-	if output.HasWebhookHMACEndpoints {
-		// The WebhookVerifiers map is keyed by the directive provider string.
-		output.NeedsTypesImport = true
-	}
-
-	webhookProvSet := make(map[string]struct{})
-	for _, endpoint := range output.Endpoints {
-		if endpoint.WebhookHMACProvider != "" {
-			webhookProvSet[endpoint.WebhookHMACProvider] = struct{}{}
-		}
-	}
-	for p := range webhookProvSet {
-		output.RequiredWebhookProviders = append(output.RequiredWebhookProviders, p)
-	}
-	sort.Strings(output.RequiredWebhookProviders)
 
 	sort.Slice(output.Endpoints, func(i, j int) bool {
 		if output.Endpoints[i].Path != output.Endpoints[j].Path {
@@ -712,15 +730,6 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		}
 		return output.Endpoints[i].Method < output.Endpoints[j].Method
 	})
-
-	namespaceSet := make(map[string]bool)
-	for _, endpoint := range output.Endpoints {
-		namespaceSet[endpoint.Namespace] = true
-	}
-	for ns := range namespaceSet {
-		output.Namespaces = append(output.Namespaces, ns)
-	}
-	sort.Strings(output.Namespaces)
 
 	if err := validateRouteCollisions(output.Endpoints); err != nil {
 		return nil, err
@@ -750,8 +759,110 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	output.OpenAPISpecRaw = rawSpec
 	output.OpenAPISpec = escapedSpec
 	output.Scalars = extractScalarJSONSchemaInfo(schema)
+	if output.PermissionCatalogJSON, err = permissionCatalog(output, schema); err != nil {
+		return nil, err
+	}
 
 	return output, nil
+}
+
+// permissionCatalog is the API's permissions.json, from every endpoint, the
+// user model's included, or "" when no endpoint names a permission.
+func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
+	operations := make([]permcatalog.Operation, len(output.Endpoints))
+	for i, endpoint := range output.Endpoints {
+		operations[i] = permcatalog.Operation{
+			ID:          endpoint.HandlerName,
+			Permissions: endpoint.RequiredPerms,
+			Identity:    endpoint.IdentityOperation != "",
+		}
+	}
+	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations)
+	if !ok {
+		return "", nil
+	}
+	data, err := catalog.JSON()
+	if err != nil {
+		return "", fmt.Errorf("apigen: %w", err)
+	}
+	return string(data), nil
+}
+
+// summarizeEndpoints sets what output holds about its endpoints as a
+// whole: the flags the templates gate on, the webhook providers and the
+// namespaces. Generate calls it on every endpoint, and ImplementedOutput
+// again on the ones a server implements.
+func (o *APIOutput) summarizeEndpoints() error {
+	o.HasAuth, o.RoutesNeedTime, o.HasFileUpload, o.HasEncryptedEndpoints = false, false, false, false
+	o.HasPermissionEndpoints, o.HasFilterableEndpoints, o.HasWebhookHMACEndpoints = false, false, false
+	o.HasServiceCallers, o.NeedsTypesImport = false, false
+	o.RequiredWebhookProviders, o.Namespaces = nil, nil
+	for _, endpoint := range o.Endpoints {
+		o.summarizeRoute(endpoint)
+		if endpoint.HasFileUpload {
+			o.HasFileUpload = true
+		}
+		if endpoint.Encrypted {
+			o.HasEncryptedEndpoints = true
+		}
+		if endpoint.Filterable {
+			if endpoint.Method != "GET" {
+				return fmt.Errorf("@filterable is only supported on GET operations, but %s.%s is %s", endpoint.Namespace, endpoint.Name, endpoint.Method)
+			}
+			o.HasFilterableEndpoints = true
+		}
+		if endpoint.WebhookHMACProvider != "" {
+			o.HasWebhookHMACEndpoints = true
+		}
+		if endpoint.NeedsTypesImport {
+			o.NeedsTypesImport = true
+		}
+	}
+	if o.HasWebhookHMACEndpoints {
+		// The WebhookVerifiers map is keyed by the directive provider string.
+		o.NeedsTypesImport = true
+	}
+
+	webhookProvSet := make(map[string]struct{})
+	for _, endpoint := range o.Endpoints {
+		if endpoint.WebhookHMACProvider != "" {
+			webhookProvSet[endpoint.WebhookHMACProvider] = struct{}{}
+		}
+	}
+	for p := range webhookProvSet {
+		o.RequiredWebhookProviders = append(o.RequiredWebhookProviders, p)
+	}
+	sort.Strings(o.RequiredWebhookProviders)
+
+	namespaceSet := make(map[string]bool)
+	for _, endpoint := range o.Endpoints {
+		namespaceSet[endpoint.Namespace] = true
+	}
+	for ns := range namespaceSet {
+		o.Namespaces = append(o.Namespaces, ns)
+	}
+	sort.Strings(o.Namespaces)
+	return nil
+}
+
+// summarizeRoute sets the flags the router reads of a route RegisterRoutes
+// mounts: whether it needs a caller or a permission, whether its
+// middlewares call time, and whether it has a service clause.
+// summarizeEndpoints calls it on every endpoint, and ImplementedOutput on
+// the identity runtime's too, since the router mounts them.
+func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
+	if endpoint.RequiresAuth {
+		o.HasAuth = true
+	}
+	if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
+		o.RoutesNeedTime = true
+	}
+	if len(endpoint.RequiredPerms) > 0 {
+		o.HasPermissionEndpoints = true
+	}
+	if endpoint.ServiceCallers != nil {
+		o.HasServiceCallers = true
+	}
 }
 
 // extractNamespace derives the kebab-case namespace from an operation set
@@ -933,6 +1044,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		Encrypted:                    operationEncrypted(set, op),
 		Filterable:                   op.Filterable,
 		ManualRouteRegistration:      op.ManualRouteRegistration,
+		IdentityOperation:            op.IdentityOperation,
 		IsWebhook:                    op.Webhook,
 		WebhookHMACProvider:          op.HMACVerifiedProvider,
 		WebhookHMACProviderTypesExpr: webhookHMACTypesExpr,

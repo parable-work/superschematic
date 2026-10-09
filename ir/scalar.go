@@ -124,8 +124,8 @@ func (s *ScalarDef) IsAnyJSON() bool {
 }
 
 // JSONSchemaObjectType and JSONSchemaArrayType are the json_schema type
-// mappings of a scalar whose value is a JSON object (Generic.StringMap in the
-// core catalog) or a JSON array (Embedding.Vector).
+// mappings of a scalar whose value is a JSON object (Generic.StringMap and
+// Geo.Location in the core catalog) or a JSON array (Embedding.Vector).
 const (
 	JSONSchemaObjectType = "object"
 	JSONSchemaArrayType  = "array"
@@ -136,10 +136,9 @@ const (
 // json_schema type mapping declares the shape. The scalar catalog gives such
 // a scalar the String primitive, but every generated type holds the object or
 // the array. A scalar that also declares a pattern or a length, which are
-// rules on a string, contradicts itself (Geo.Location's row has a "lat,lon"
-// pattern) and is not structured: it keeps the String primitive's checks
-// until its metadata agrees. Validators key the rule off this, not the
-// scalar's name or primitive.
+// rules on a string, contradicts itself and is not structured: it keeps the
+// String primitive's checks until its metadata agrees. Validators key the
+// rule off this, not the scalar's name or primitive.
 func (s *ScalarDef) StructuredJSONType() string {
 	if s == nil || s.Pattern != "" || s.MinLength > 0 || s.MaxLength > 0 {
 		return ""

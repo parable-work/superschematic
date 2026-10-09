@@ -123,7 +123,7 @@ type ServiceCredential struct {
 
 // CheckDerivedValue checks a derived value against the contract of an
 // edge of kind: a DatabaseConnection for sql, a ServiceEndpoint for http,
-// a BucketConnection for bucket.
+// a SiteEndpoint for site (D55), a BucketConnection for bucket (D54).
 // v is the typed value or its JSON form; a member the contract does not
 // have is refused. The error names the offending member.
 func CheckDerivedValue(kind EdgeKind, v any) error {
@@ -136,6 +136,8 @@ func CheckDerivedValue(kind EdgeKind, v any) error {
 		return checkDatabaseConnection(value)
 	case EdgeHTTP:
 		return checkServiceEndpoint(value)
+	case EdgeSite:
+		return checkSiteEndpoint(value)
 	case EdgeBucket:
 		return checkBucketConnection(value)
 	}
@@ -341,7 +343,8 @@ type DerivedVariable struct {
 // variables, one per member (section 3.4). A member's variable is the
 // field's name, an underscore, and the member's name in upper snake case;
 // a nested member adds its own name the same way, and a list of strings
-// is one variable that joins them with commas. A list of objects, or an
+// is one variable that joins them with commas, a concatenation when one
+// of them is a reference. A list of objects, or an
 // empty list, is a variable that holds the list's length, and each
 // object's members add the object's index to the list's name. A whole
 // number is its decimal:
@@ -387,14 +390,40 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 				return nil
 			}
 			parts := make([]string, len(v))
+			referenced := false
 			for i, item := range v {
-				s, ok := item.(string)
-				if !ok || strings.Contains(s, ",") {
+				switch item := item.(type) {
+				case Output, Parameter, Concat:
+					referenced = true
+				case string:
+					if strings.Contains(item, ",") {
+						return fmt.Errorf("%s: a list member is %s; a list holds strings without commas, or objects", name, describeMember(item))
+					}
+					parts[i] = item
+				default:
 					return fmt.Errorf("%s: a list member is %s; a list holds strings without commas, or objects", name, describeMember(item))
 				}
-				parts[i] = s
 			}
-			out = append(out, DerivedVariable{Name: name, Value: strings.Join(parts, ",")})
+			if !referenced {
+				out = append(out, DerivedVariable{Name: name, Value: strings.Join(parts, ",")})
+				return nil
+			}
+			// A reference joins the others in a concatenation the platform
+			// renders, as a site's origin does that a load balancer's
+			// output names (D55).
+			joined := Concat{}
+			for i, item := range v {
+				if i > 0 {
+					joined = append(joined, ",")
+				}
+				if inner, ok := item.(Concat); ok {
+					// A concatenation holds no other.
+					joined = append(joined, inner...)
+					continue
+				}
+				joined = append(joined, item)
+			}
+			out = append(out, DerivedVariable{Name: name, Value: joined})
 		case float64:
 			if v != math.Trunc(v) || math.Abs(v) > 1<<53 {
 				return fmt.Errorf("%s: %s is not a whole number", name, describeMember(v))
@@ -479,8 +508,13 @@ type DerivedFieldNames struct {
 }
 
 // Field returns the name of the config field an edge of kind to service
-// fills.
+// fills. A site edge's is the called API service's name itself, the key
+// of the API in the site's config (SiteConfigPath, D55), which no template
+// names.
 func (n DerivedFieldNames) Field(kind EdgeKind, service string) string {
+	if kind == EdgeSite {
+		return service
+	}
 	return strings.ReplaceAll(n.template(kind), ServicePlaceholder, EnvName(service))
 }
 
@@ -628,6 +662,8 @@ func DerivedMembers(kind EdgeKind) []string {
 		return []string{"url", "cloudSql.instance", "cloudSql.database", "cloudSql.user"}
 	case EdgeHTTP:
 		return []string{"url", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
+	case EdgeSite:
+		return []string{"url"}
 	case EdgeBucket:
 		return []string{"name", "endpoint"}
 	}

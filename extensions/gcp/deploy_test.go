@@ -65,6 +65,12 @@ type fakeCloud struct {
 	// numbers holds each project's number.
 	numbers map[string]string
 
+	// served holds the content type and Cache-Control of each object a
+	// site's bucket serves, by `<bucket>/<object>` (D55); absent names the
+	// buckets that do not exist, which every other bucket does.
+	served map[string][2]string
+	absent map[string]bool
+
 	log *stacktest.FakeProvisioner
 }
 
@@ -103,6 +109,7 @@ func newFakeCloud() *fakeCloud {
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
 		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
 		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
+		served:  map[string][2]string{}, absent: map[string]bool{},
 	}
 }
 
@@ -277,6 +284,20 @@ func (c *fakeCloud) WriteObject(_ context.Context, bucket, object string, data [
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.objects[bucket+"/"+object] = slices.Clone(data)
+	return nil
+}
+
+func (c *fakeCloud) WriteSiteObject(_ context.Context, bucket, object string, data []byte, contentType, cacheControl string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.absent[bucket] {
+		return fmt.Errorf("gs://%s: %w", bucket, fs.ErrNotExist)
+	}
+	c.objects[bucket+"/"+object] = slices.Clone(data)
+	c.served[bucket+"/"+object] = [2]string{contentType, cacheControl}
+	if strings.Contains(object, "/__superschematic/") {
+		c.record("write gs://%s/%s", bucket, object)
+	}
 	return nil
 }
 

@@ -98,7 +98,8 @@ var (
 	// Logging, and enable APIs. Cloud Scheduler's admin role is the one
 	// that creates, updates and deletes scheduler jobs (D52); naming a
 	// job's account in one is acting as it, which
-	// roles/iam.serviceAccountUser allows.
+	// roles/iam.serviceAccountUser allows. Storage's admin role creates a
+	// site's bucket, sets its public grant, and writes its files (D55).
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
@@ -115,6 +116,7 @@ var (
 		"roles/run.admin",
 		"roles/secretmanager.admin",
 		"roles/serviceusage.serviceUsageConsumer",
+		"roles/storage.admin",
 	}
 
 	// plannerRoles let `planner` read every resource and IAM policy a

@@ -1,0 +1,168 @@
+{
+  "token": "gcp:compute/backendBucket:BackendBucket",
+  "terraform": {
+    "type": "google_compute_backend_bucket",
+    "renames": {
+      "bucketName": "bucket_name",
+      "cdnPolicy": "cdn_policy",
+      "cdnPolicy.bypassCacheOnRequestHeaders": "bypass_cache_on_request_headers",
+      "cdnPolicy.bypassCacheOnRequestHeaders.headerName": "header_name",
+      "cdnPolicy.cacheKeyPolicy": "cache_key_policy",
+      "cdnPolicy.cacheKeyPolicy.includeHttpHeaders": "include_http_headers",
+      "cdnPolicy.cacheKeyPolicy.queryStringWhitelists": "query_string_whitelist",
+      "cdnPolicy.cacheMode": "cache_mode",
+      "cdnPolicy.clientTtl": "client_ttl",
+      "cdnPolicy.defaultTtl": "default_ttl",
+      "cdnPolicy.maxTtl": "max_ttl",
+      "cdnPolicy.negativeCaching": "negative_caching",
+      "cdnPolicy.negativeCachingPolicies": "negative_caching_policy",
+      "cdnPolicy.requestCoalescing": "request_coalescing",
+      "cdnPolicy.serveWhileStale": "serve_while_stale",
+      "cdnPolicy.signedUrlCacheMaxAgeSec": "signed_url_cache_max_age_sec",
+      "compressionMode": "compression_mode",
+      "customResponseHeaders": "custom_response_headers",
+      "deletionPolicy": "deletion_policy",
+      "edgeSecurityPolicy": "edge_security_policy",
+      "enableCdn": "enable_cdn",
+      "loadBalancingScheme": "load_balancing_scheme",
+      "params.resourceManagerTags": "resource_manager_tags"
+    }
+  },
+  "inputProperties": {
+    "bucketName": {
+      "type": "string"
+    },
+    "cdnPolicy": {
+      "$ref": "#/types/gcp:compute/BackendBucketCdnPolicy:BackendBucketCdnPolicy"
+    },
+    "compressionMode": {
+      "type": "string"
+    },
+    "customResponseHeaders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "edgeSecurityPolicy": {
+      "type": "string"
+    },
+    "enableCdn": {
+      "type": "boolean"
+    },
+    "loadBalancingScheme": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/types/gcp:compute/BackendBucketParams:BackendBucketParams"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "bucketName"
+  ],
+  "types": {
+    "gcp:compute/BackendBucketCdnPolicy:BackendBucketCdnPolicy": {
+      "type": "object",
+      "properties": {
+        "bypassCacheOnRequestHeaders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendBucketCdnPolicyBypassCacheOnRequestHeader:BackendBucketCdnPolicyBypassCacheOnRequestHeader"
+          }
+        },
+        "cacheKeyPolicy": {
+          "$ref": "#/types/gcp:compute/BackendBucketCdnPolicyCacheKeyPolicy:BackendBucketCdnPolicyCacheKeyPolicy"
+        },
+        "cacheMode": {
+          "type": "string"
+        },
+        "clientTtl": {
+          "type": "integer"
+        },
+        "defaultTtl": {
+          "type": "integer"
+        },
+        "maxTtl": {
+          "type": "integer"
+        },
+        "negativeCaching": {
+          "type": "boolean"
+        },
+        "negativeCachingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:compute/BackendBucketCdnPolicyNegativeCachingPolicy:BackendBucketCdnPolicyNegativeCachingPolicy"
+          }
+        },
+        "requestCoalescing": {
+          "type": "boolean"
+        },
+        "serveWhileStale": {
+          "type": "integer"
+        },
+        "signedUrlCacheMaxAgeSec": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendBucketCdnPolicyBypassCacheOnRequestHeader:BackendBucketCdnPolicyBypassCacheOnRequestHeader": {
+      "type": "object",
+      "properties": {
+        "headerName": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:compute/BackendBucketCdnPolicyCacheKeyPolicy:BackendBucketCdnPolicyCacheKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "includeHttpHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "queryStringWhitelists": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:compute/BackendBucketCdnPolicyNegativeCachingPolicy:BackendBucketCdnPolicyNegativeCachingPolicy": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "ttl": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:compute/BackendBucketParams:BackendBucketParams": {
+      "type": "object",
+      "properties": {
+        "resourceManagerTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

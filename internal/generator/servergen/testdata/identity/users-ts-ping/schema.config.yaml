@@ -1,0 +1,8 @@
+# A TypeScript API with no authDb, so no user model: it authenticates no
+# one and answers no identity CORS.
+name: users-ts-ping
+kind: API
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

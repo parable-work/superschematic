@@ -25,6 +25,17 @@
           }
         },
         "deployable": "shop-api"
+      },
+      {
+        "name": "shop-web.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-web.route",
+            "name": "target"
+          }
+        },
+        "deployable": "shop-web"
       }
     ]
   },
@@ -142,12 +153,26 @@
           "name": "url"
         }
       },
+      "publicAddress": "https://shop-api.staging.acme.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",
           "source": "literal",
           "value": "info",
           "default": true
+        },
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "https://shop-web.staging.acme.dev"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -321,6 +346,42 @@
           "secret": "PaymentsSecrets.STRIPE_KEY"
         }
       ]
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "fake.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "publicAddress": "https://shop-web.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "https://shop-api.staging.acme.dev"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
     }
   ],
   "edges": [
@@ -359,6 +420,18 @@
       },
       "connector": "fake.job-run",
       "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "fake.site-run",
+      "field": "shop-api"
     },
     {
       "id": "sql:Orders->shop-db",
@@ -616,6 +689,28 @@
         ]
       },
       {
+        "id": "dns.shop-web.1",
+        "type": "fake:dns/record:Record",
+        "properties": {
+          "name": "shop-web.staging.acme.dev",
+          "type": "CNAME",
+          "value": {
+            "$output": {
+              "resource": "shop-web.route",
+              "name": "target"
+            }
+          },
+          "zone": "acme.dev"
+        },
+        "dependsOn": [
+          "shop-web.route"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
         "id": "secret.PaymentsSecrets.STRIPE_KEY",
         "type": "fake:secrets/secret:Secret",
         "properties": {
@@ -700,6 +795,10 @@
             {
               "name": "LOG_LEVEL",
               "value": "info"
+            },
+            {
+              "name": "SHOP_API_CORS_ORIGINS",
+              "value": "https://shop-web.staging.acme.dev"
             },
             {
               "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
@@ -1076,6 +1175,40 @@
         "owners": [
           "sql:shop-orders-ship-orders->shop-db"
         ]
+      },
+      {
+        "id": "shop-web.route",
+        "type": "fake:run/route:Route",
+        "properties": {
+          "host": "shop-web.staging.acme.dev",
+          "service": {
+            "$output": {
+              "resource": "shop-web.site",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-web.site"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.site",
+        "type": "fake:storage/site:Site",
+        "properties": {
+          "fallback": "index.html",
+          "name": "shop-web",
+          "prefix": "/{site-digest}/",
+          "public": true
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
       }
     ]
   },
@@ -1123,12 +1256,14 @@
       "wave": 2,
       "deployables": [
         "Orders",
-        "shop-orders-ship-orders"
+        "shop-orders-ship-orders",
+        "shop-web"
       ],
       "resources": [
         "Orders.service",
         "shop-orders-ship-orders.job",
-        "shop-orders-ship-orders.schedule"
+        "shop-orders-ship-orders.schedule",
+        "shop-web.site"
       ]
     },
     {
@@ -1142,7 +1277,9 @@
       "step": "exposure",
       "resources": [
         "dns.shop-api.1",
-        "shop-api.route"
+        "dns.shop-web.1",
+        "shop-api.route",
+        "shop-web.route"
       ]
     }
   ]

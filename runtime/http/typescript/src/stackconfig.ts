@@ -496,3 +496,43 @@ export function serviceCredentialFor(credential: ServiceCredential | undefined, 
   const source: never = credential;
   throw new Error(`service credential source ${quote((source as { source: string }).source)} is not one the runtime ships`);
 }
+
+/** What the name of an API's CORS field adds to the API's name in upper snake case: SHOP_API_CORS is shop-api's (D55). */
+export const CORS_SUFFIX = '_CORS';
+
+/** An origin a browser sends: an http or https URL with a host and nothing after it. */
+const ORIGIN = /^https?:\/\/[^/?#@\s]+$/u;
+
+/**
+ * Reads the CORS field named field: the origins of the sites that call the
+ * API (section 8.10 of docs/stack-model.md, D55), its one member
+ * field_ORIGINS, a comma-separated list. An unset or empty field_ORIGINS is
+ * no origin: no site calls the API in the environment, and its server
+ * answers no CORS. Throws StackConfigError for an entry that is no origin
+ * and for a variable under the field's name that is no member, as Go's
+ * LoadCORS refuses them.
+ */
+export function loadCors(field: string, env: StackEnv = processEnv()): string[] {
+  const problems: string[] = [];
+  const origins: string[] = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || !name.startsWith(`${field}_`)) continue;
+    if (name !== `${field}_ORIGINS`) {
+      problems.push(`environment variable ${name} is no member of the CORS field ${field}`);
+      continue;
+    }
+    if (value === '') continue;
+    for (const entry of value.split(',')) {
+      const origin = entry.trim();
+      if (origin === '') {
+        problems.push(`environment variable ${name}: an entry is empty`);
+      } else if (!ORIGIN.test(origin)) {
+        problems.push(`environment variable ${name}: ${quote(origin)} is no origin: an origin is <scheme>://<host>[:<port>] and nothing more`);
+      } else if (!origins.includes(origin)) {
+        origins.push(origin);
+      }
+    }
+  }
+  if (problems.length > 0) throw new StackConfigError(problems.sort());
+  return origins;
+}

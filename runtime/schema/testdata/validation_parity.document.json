@@ -7,7 +7,9 @@
       "minLength": 1,
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "data-analysis",
+      "x-reservedWordsCaseInsensitive": true,
       "x-scalar": "AgentSkill_Name",
       "x-typeMapping": {
         "go": "AgentSkillName",
@@ -43,6 +45,7 @@
       "maxLength": 255,
       "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-hasCustomNormalize": true,
       "x-hasCustomValidate": true,
       "x-scalar": "Contact_Email",
@@ -60,7 +63,7 @@
       "maxLength": 16,
       "pattern": "^\\+[1-9]\\d{1,14}$",
       "type": "string",
-      "x-example": "+1234567890",
+      "x-example": "+14155552671",
       "x-hasCustomNormalize": true,
       "x-hasCustomValidate": true,
       "x-scalar": "Contact_PhoneNumber",
@@ -222,14 +225,16 @@
     },
     "Geo_Location": {
       "description": "Geographic location with latitude and longitude",
-      "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
-      "type": "string",
-      "x-example": "37.7749,-122.4194",
+      "type": "object",
+      "x-hasCustomParse": true,
       "x-scalar": "Geo_Location",
       "x-typeMapping": {
         "go": "GeoLocation",
         "json_schema": "object",
-        "sql": "POINT"
+        "python": "superscalar.GeoLocation",
+        "rust": "superscalar::metadata::geo_location::Location",
+        "sql": "POINT",
+        "typescript": "{ lat: number; lon: number }"
       }
     },
     "Git_PathPattern": {
@@ -268,6 +273,7 @@
       "minLength": 1,
       "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "acme-corp",
       "x-scalar": "Identity_Slug",
       "x-typeMapping": {
@@ -466,11 +472,33 @@
         "sql": "VARCHAR(35)"
       }
     },
+    "LocationMatrix": {
+      "properties": {
+        "locList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Geo_Location"
+          },
+          "type": "array"
+        },
+        "optLoc": {
+          "$ref": "#/definitions/scalars/Geo_Location"
+        },
+        "reqLoc": {
+          "$ref": "#/definitions/scalars/Geo_Location"
+        }
+      },
+      "required": [
+        "reqLoc"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
     "Network_DnsLabel": {
       "description": "Single DNS label (RFC 1035): one hostname segment, no dots",
       "maxLength": 63,
       "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "mycompany",
       "x-scalar": "Network_DnsLabel",
       "x-typeMapping": {
@@ -484,6 +512,7 @@
       "maxLength": 255,
       "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "example.com",
       "x-scalar": "Network_DomainName",
       "x-typeMapping": {
@@ -946,6 +975,7 @@
       "minLength": 2,
       "pattern": "^[Qq][1-4]$",
       "type": "string",
+      "x-caseInsensitive": true,
       "x-example": "Q1",
       "x-scalar": "Temporal_Quarter",
       "x-typeMapping": {

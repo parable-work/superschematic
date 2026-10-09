@@ -164,7 +164,7 @@ func TestBucketRefusals(t *testing.T) {
 		s, services := bucketShop()
 		s.Expose = append(s.Expose, media)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-media, a bucket; only a server is exposed")
+		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-media, a bucket; only a server or a site is exposed")
 	})
 	t.Run("env on a bucket", func(t *testing.T) {
 		s, services := bucketShop()

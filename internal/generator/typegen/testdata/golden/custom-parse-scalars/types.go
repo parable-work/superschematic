@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	scalars "github.com/parable-work/superscalar/go"
 )
 
 func toMapValue(value any) (map[string]any, error) {
@@ -144,21 +146,237 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
-// jsonValueMissing reports whether a required field of a scalar that holds
-// any JSON value (Generic.JSON), or a JSON object (Generic.StringMap), has
-// none: it is absent, which decodes to the zero value (a nil map), or it is
-// the JSON null token. Every other JSON value, an empty object included, is
-// one.
-func jsonValueMissing(value any) bool {
-	rv := reflect.ValueOf(value)
-	if !rv.IsValid() || rv.IsZero() {
-		return true
+// jsonObjectField is a field of a JSON-object scalar (its json_schema type
+// mapping is "object": Generic.StringMap, Geo.Location) as decodeJSONObjects
+// reads it: its JSON key, the scalar, a pointer to the field, whether it is
+// a required single value, its list depth, whether it is a map, and whether
+// an InputField wraps it.
+type jsonObjectField struct {
+	name     string
+	scalar   string
+	value    any
+	required bool
+	depth    int
+	isMap    bool
+	wrapped  bool
+}
+
+// jsonObjectDecode is what a type's UnmarshalJSON learned about its fields
+// of a JSON-object scalar that their Go values cannot show, by JSON key.
+// encoding/json drops an unknown key and zero-fills a missing one, so JSON
+// that superscalar refuses for its keys can decode to a value it accepts;
+// and a required struct value the JSON left absent or null decodes to its
+// zero value, which is itself a value ({"lat":0,"lon":0} is a
+// Geo.Location). Validate reports an entry only while its field still holds
+// the value decoded, so a field set after decoding is checked as set.
+type jsonObjectDecode map[string]jsonObjectEntry
+
+type jsonObjectEntry struct {
+	decoded any
+	missing bool
+	errors  []jsonObjectError
+}
+
+type jsonObjectError struct {
+	path      string
+	validator string
+	message   string
+}
+
+// decodeJSONObjects checks every value of fields in data, the JSON object a
+// type was decoded from, and returns what Validate must report, or nil when
+// there is nothing.
+func decodeJSONObjects(data []byte, fields ...jsonObjectField) *jsonObjectDecode {
+	members, ok := jsonObjectMembers(data, fields)
+	if !ok {
+		return nil
 	}
-	if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
-		token := bytes.TrimSpace(rv.Bytes())
-		return len(token) == 0 || bytes.Equal(token, []byte("null"))
+	decoded := jsonObjectDecode{}
+	for _, field := range fields {
+		value := reflect.ValueOf(field.value).Elem()
+		var entry jsonObjectEntry
+		if raw, present := members[field.name]; !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			// A nil map reads as missing on its own; a struct's zero value
+			// does not. One the field already held before decoding is kept,
+			// as encoding/json keeps it, and is a value.
+			entry.missing = field.required && value.Kind() == reflect.Struct && value.IsZero()
+		} else {
+			inner := value
+			if field.wrapped {
+				inner = value.FieldByName("Value")
+			}
+			entry.errors = checkJSONObjectValues(field.scalar, field.name, raw, inner, field.isMap, field.depth)
+		}
+		if entry.missing || len(entry.errors) > 0 {
+			entry.decoded = copyJSONObjectValue(value).Interface()
+			decoded[field.name] = entry
+		}
 	}
-	return false
+	if len(decoded) == 0 {
+		return nil
+	}
+	return &decoded
+}
+
+// jsonObjectMembers returns, for each of fields, the JSON of the last key
+// of data's object that encoding/json decodes into it: the key equal to the
+// field's name, or else equal to it without regard to case.
+func jsonObjectMembers(data []byte, fields []jsonObjectField) (map[string]json.RawMessage, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	members := map[string]json.RawMessage{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, _ := token.(string)
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return nil, false
+		}
+		for _, field := range fields {
+			if key == field.name || strings.EqualFold(key, field.name) {
+				members[field.name] = raw
+				break
+			}
+		}
+	}
+	return members, true
+}
+
+// checkJSONObjectValues checks each scalar value raw holds with superscalar
+// and returns the failures the decoded value at the same path does not show,
+// which Validate's own check of that value would therefore miss.
+func checkJSONObjectValues(scalar, path string, raw json.RawMessage, value reflect.Value, isMap bool, depth int) []jsonObjectError {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		// A null decodes to the zero value: a nil map or pointer, which reads
+		// as absent or missing on its own, or a struct's zero value, which
+		// reads as a value, so it is reported missing here (a map's value).
+		if value.Kind() == reflect.Struct {
+			return []jsonObjectError{{path: path, validator: "required", message: "required field"}}
+		}
+		return nil
+	}
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return nil
+		}
+		value = value.Elem()
+	}
+	var failures []jsonObjectError
+	switch {
+	case isMap:
+		var items map[string]json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || value.Kind() != reflect.Map {
+			return nil
+		}
+		for key, item := range items {
+			if elem := value.MapIndex(reflect.ValueOf(key)); elem.IsValid() {
+				failures = append(failures, checkJSONObjectValues(scalar, fmt.Sprintf("%s[%s]", path, key), item, elem, false, depth)...)
+			}
+		}
+	case depth > 0:
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || value.Kind() != reflect.Slice {
+			return nil
+		}
+		for i, item := range items {
+			if i < value.Len() {
+				failures = append(failures, checkJSONObjectValues(scalar, fmt.Sprintf("%s[%d]", path, i), item, value.Index(i), false, depth-1)...)
+			}
+		}
+	default:
+		err := scalars.Validate(scalar, string(raw))
+		if err == nil {
+			return nil
+		}
+		// The decoded value breaks a rule too, so Validate reports it.
+		if text, marshalErr := json.Marshal(value.Interface()); marshalErr == nil && scalars.Validate(scalar, string(text)) != nil {
+			return nil
+		}
+		failures = append(failures, jsonObjectError{path: path, validator: scalarErrorValidator(err), message: err.Error()})
+	}
+	return failures
+}
+
+// scalarErrorValidator names a superscalar error as the scalar package's
+// Validate methods do: by the kind its message starts with.
+func scalarErrorValidator(err error) string {
+	message := err.Error()
+	if strings.Contains(message, "reserved") {
+		return "reservedWord"
+	}
+	kind, _, _ := strings.Cut(message, ":")
+	switch kind {
+	case "pattern", "length", "range", "enum", "custom", "parse":
+		return kind
+	case "empty":
+		return "required"
+	}
+	return "scalar"
+}
+
+// copyJSONObjectValue copies value deeply enough that a later change to the
+// field it came from does not change the copy.
+func copyJSONObjectValue(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Pointer:
+		if value.IsNil() {
+			return value
+		}
+		copied := reflect.New(value.Type().Elem())
+		copied.Elem().Set(copyJSONObjectValue(value.Elem()))
+		return copied
+	case reflect.Slice:
+		if value.IsNil() {
+			return value
+		}
+		copied := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			copied.Index(i).Set(copyJSONObjectValue(value.Index(i)))
+		}
+		return copied
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		copied := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for entries := value.MapRange(); entries.Next(); {
+			copied.SetMapIndex(entries.Key(), copyJSONObjectValue(entries.Value()))
+		}
+		return copied
+	case reflect.Struct:
+		copied := reflect.New(value.Type()).Elem()
+		copied.Set(value)
+		for i := 0; i < value.NumField(); i++ {
+			if copied.Field(i).CanSet() {
+				copied.Field(i).Set(copyJSONObjectValue(value.Field(i)))
+			}
+		}
+		return copied
+	}
+	return value
+}
+
+// report adds to errors what UnmarshalJSON found for the field name, unless
+// the field no longer holds the value it decoded.
+func (d *jsonObjectDecode) report(errors ValidationErrors, name string, current any) {
+	if d == nil {
+		return
+	}
+	entry, ok := (*d)[name]
+	if !ok || !reflect.DeepEqual(entry.decoded, current) {
+		return
+	}
+	if entry.missing {
+		errors.AddFieldError(name, "required", "required field")
+	}
+	for _, failure := range entry.errors {
+		errors.AddFieldError(failure.path, failure.validator, failure.message)
+	}
 }
 
 func mapFromYAMLValue(data []byte) (map[string]any, error) {
@@ -445,6 +663,8 @@ type CustomParseScalars struct {
 
 	GenericStringMap GenericStringMap `json:"genericStringMap"`
 
+	GeoLocation GeoLocation `json:"geoLocation"`
+
 	IdentityUUID IdentityUUID `json:"identityUUID"`
 
 	IdentityUserID IdentityUserID `json:"identityUserID"`
@@ -462,6 +682,12 @@ type CustomParseScalars struct {
 	TemporalMinutes TemporalMinutes `json:"temporalMinutes"`
 
 	TemporalSeconds TemporalSeconds `json:"temporalSeconds"`
+
+	// jsonObjects is what UnmarshalJSON found in the JSON of the fields that
+	// hold a JSON-object scalar and their Go values cannot show; Validate
+	// reports it. It is nil for a value that was not decoded or had nothing
+	// to report.
+	jsonObjects *jsonObjectDecode
 }
 
 // MaskSecrets returns a copy of CustomParseScalars with secret fields cleared.
@@ -477,6 +703,8 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 	masked.GenericInt64 = t.GenericInt64
 
 	masked.GenericStringMap = t.GenericStringMap
+
+	masked.GeoLocation = t.GeoLocation
 
 	masked.IdentityUUID = t.IdentityUUID
 
@@ -503,7 +731,7 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*CustomParseScalars) JSONFieldNames() []string {
-	return []string{"financeMoney", "genericInt64", "genericStringMap", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
+	return []string{"financeMoney", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
 }
 
 // Validate validates all fields in CustomParseScalars
@@ -522,9 +750,16 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("genericInt64", fieldErrs)
 	}
 
-	// Validate genericStringMap (required): a JSON object, which may be empty.
-	if jsonValueMissing(t.GenericStringMap) {
-		errors.AddFieldError("genericStringMap", "required", "required field")
+	// Validate genericStringMap (required)
+
+	if valid, fieldErrs := t.GenericStringMap.ValidateRequired(); !valid {
+		errors.SetFieldErrors("genericStringMap", fieldErrs)
+	}
+
+	// Validate geoLocation (required)
+
+	if valid, fieldErrs := t.GeoLocation.ValidateRequired(); !valid {
+		errors.SetFieldErrors("geoLocation", fieldErrs)
 	}
 
 	// Validate identityUUID (required)
@@ -581,6 +816,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("temporalSeconds", fieldErrs)
 	}
 
+	// Report what UnmarshalJSON found in the JSON-object scalar fields' JSON.
+	t.jsonObjects.report(errors, "genericStringMap", t.GenericStringMap)
+	t.jsonObjects.report(errors, "geoLocation", t.GeoLocation)
+
 	return errors
 }
 
@@ -601,6 +840,14 @@ func (t *CustomParseScalars) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
 	}
+
+	// Check each JSON-object scalar value's own JSON with superscalar, which
+	// sees what encoding/json drops, and note a required struct value the
+	// JSON left absent or null, whose zero value is a value.
+	t.jsonObjects = decodeJSONObjects(data,
+		jsonObjectField{name: "genericStringMap", scalar: "Generic.StringMap", value: &t.GenericStringMap, required: true},
+		jsonObjectField{name: "geoLocation", scalar: "Geo.Location", value: &t.GeoLocation, required: true},
+	)
 
 	// Preserve nil lists on input: absent/null required arrays must fail Validate.
 	return nil

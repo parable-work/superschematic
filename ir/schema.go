@@ -25,6 +25,12 @@ const (
 	// a [Stack]; it generates each environment's environment.json.
 	SchemaKindStack SchemaKind = "Stack"
 
+	// SchemaKindSite represents a static site: a directory a front-end
+	// build writes, served as files (docs/stack-model.md, section 8.10,
+	// D55). Its config names the APIs it calls and how it builds
+	// (SiteConfig); its code sits at its implementation path.
+	SchemaKindSite SchemaKind = "Site"
+
 	// SchemaKindBucket represents a bucket: private object storage that the
 	// APIs listing it in their config's buckets reach through a
 	// provider-neutral interface (docs/stack-model.md, section 8.9, D54).
@@ -75,9 +81,15 @@ type Schema struct {
 	// Dependencies lists the services the config declares as dependencies.
 	Dependencies []ServiceRef `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 
-	// Calls lists the API services an API's implementation calls: the
-	// config's calls (docs/stack-model.md, section 3.3).
+	// Calls lists the API services an API's implementation calls, or a
+	// site's code calls from the browser: the config's calls
+	// (docs/stack-model.md, sections 3.3 and 8.10).
 	Calls []ServiceRef `json:"calls,omitempty" yaml:"calls,omitempty"`
+
+	// Site is a Site service's `site` config: how its code builds and what
+	// it serves (D55). Nil for every other kind, and for a site that takes
+	// every default.
+	Site *SiteConfig `json:"site,omitempty" yaml:"site,omitempty"`
 
 	// Buckets lists the Bucket services an API's implementation uses: the
 	// config's buckets (D54). Each gives the API's server and jobs a bucket

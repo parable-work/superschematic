@@ -16,7 +16,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	want := map[DecoratorTarget][]string{
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "optimistic", "versionGraph", "graphMember", "index", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "sourceMustProject", "docs", "purpose", "icon", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "docs", "mcp", "icon"},
 	}
 	total := 0
@@ -353,6 +353,94 @@ func TestServiceCallersApply(t *testing.T) {
 		}
 	}
 	if err := apply("requireService", TargetOperation, Node{Field: &ir.FieldDef{}}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@requireService takes at most one config object" {
+		t.Errorf("two configs: %v", err)
+	}
+}
+
+// TestIdentityRoutesApply: @userSessions and @userAdministration write the
+// set's config, login on and register off by default; a class takes one
+// of the two, once; register needs the login; and a key the config does
+// not take, or a value of the wrong type, is refused at the config.
+func TestIdentityRoutesApply(t *testing.T) {
+	reg := New(naming.Naming{})
+	apply := func(name string, set *ir.OperationSet, args ...any) error {
+		spec, ok := reg.Decorator(name, TargetOperationSet)
+		if !ok {
+			t.Fatalf("no core decorator @%s for an operation set", name)
+		}
+		if spec.Args != nil || !spec.DeclaredIn("@superschematic/api") {
+			t.Errorf("@%s: Args must stay nil and the package be @superschematic/api: %+v", name, spec)
+		}
+		return spec.Apply(Node{OperationSet: set}, args, Site{})
+	}
+
+	for _, tc := range []struct {
+		arg  any
+		want ir.UserSessionsConfig
+	}{
+		{nil, ir.UserSessionsConfig{}},
+		{map[string]any{}, ir.UserSessionsConfig{}},
+		{map[string]any{"path": "account", "register": true}, ir.UserSessionsConfig{Path: "account", Register: true}},
+		{map[string]any{"login": true, "register": false}, ir.UserSessionsConfig{}},
+		{map[string]any{"login": false}, ir.UserSessionsConfig{NoLogin: true}},
+	} {
+		set := &ir.OperationSet{}
+		var args []any
+		if tc.arg != nil {
+			args = []any{tc.arg}
+		}
+		if err := apply("userSessions", set, args...); err != nil {
+			t.Fatalf("userSessions(%v): %v", tc.arg, err)
+		}
+		if !reflect.DeepEqual(set.UserSessions, &tc.want) {
+			t.Errorf("userSessions(%v) = %+v, want %+v", tc.arg, set.UserSessions, tc.want)
+		}
+	}
+	admin := &ir.OperationSet{}
+	if err := apply("userAdministration", admin, map[string]any{"path": "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.UserAdministrationConfig{Path: "admin"}); !reflect.DeepEqual(admin.UserAdministration, want) {
+		t.Errorf("userAdministration({ path }) = %+v, want %+v", admin.UserAdministration, want)
+	}
+
+	if err := apply("userAdministration", admin); err == nil || err.Error() != "@userAdministration is declared twice on the same class" {
+		t.Errorf("twice on one class: %v", err)
+	}
+	if err := apply("userSessions", admin); err == nil || err.Error() != "@userSessions contradicts @userAdministration on the same class: a class takes one of them" {
+		t.Errorf("both on one class: %v", err)
+	}
+	sessions := &ir.OperationSet{}
+	if err := apply("userSessions", sessions); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply("userAdministration", sessions); err == nil || err.Error() != "@userAdministration contradicts @userSessions on the same class: a class takes one of them" {
+		t.Errorf("both on one class: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		arg  any
+		want string
+	}{
+		{"userSessions", map[string]any{"login": false, "register": true}, "@userSessions: register needs the login; drop register: true or login: false"},
+		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes login, path and register`},
+		{"userSessions", map[string]any{"login": "yes"}, "@userSessions login must be true or false"},
+		{"userSessions", map[string]any{"path": 1.0}, "@userSessions path must be a string literal"},
+		{"userSessions", "auth", "@userSessions config must be an object literal"},
+		{"userAdministration", map[string]any{"register": true}, `@userAdministration config has unknown key "register"; it takes path`},
+	} {
+		set := &ir.OperationSet{}
+		err := apply(tc.name, set, tc.arg)
+		var argErr *ArgError
+		if !errors.As(err, &argErr) || argErr.Index != 0 || argErr.Msg != tc.want {
+			t.Errorf("%s(%v) = %v, want the config error %q", tc.name, tc.arg, err, tc.want)
+		}
+		if set.IsIdentityRoutes() {
+			t.Errorf("%s(%v) failed and still marked the set: %+v", tc.name, tc.arg, set)
+		}
+	}
+	if err := apply("userSessions", &ir.OperationSet{}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@userSessions takes at most one config object" {
 		t.Errorf("two configs: %v", err)
 	}
 }

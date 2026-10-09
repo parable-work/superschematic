@@ -69,15 +69,29 @@ export type {
 export type { OperationAuth, OperationInput, OperationServiceCallers, OperationSpec, RequestContext } from './operation.js';
 export {
   CALLERS_SUFFIX,
+  CORS_SUFFIX,
   CREDENTIAL_SOURCES,
   SERVICE_AUTHORIZATION_HEADER,
   StackConfigError,
   loadBucket,
   loadCallers,
+  loadCors,
   loadDatabase,
   loadService,
   serviceCredentialFor,
 } from './stackconfig.js';
+export {
+  CORS_ALLOWED_HEADERS,
+  CORS_MAX_AGE,
+  CORS_PREFLIGHT_VARY,
+  CORS_VARY,
+  corsDecision,
+  corsHandler,
+  corsMethods,
+  isPreflight,
+  matchOperations,
+} from './cors.js';
+export type { CorsApi, CorsDecision, CorsOperation, CorsPolicy } from './cors.js';
 export type {
   BucketConnection,
   CloudSqlConnection,

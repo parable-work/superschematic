@@ -70,18 +70,31 @@ COMMENT ON TABLE review IS 'A shopper''s review of a product. Shoppers search re
 and each shopper reviews a product once. A moderator hides a review by
 deleting it; the row stays, marked deleted.';
 
-CREATE TABLE "session" (
+CREATE TABLE role (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-  jti UUID NOT NULL,
-  user_id UUID NOT NULL,
-  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  UNIQUE (jti)
+  "name" CITEXT NOT NULL,
+  permissions TEXT[] DEFAULT '{}' NOT NULL,
+  UNIQUE ("name")
 );
 
-COMMENT ON TABLE "session" IS 'A signed-in session. The session auth provider looks a bearer token up
-by its jti.';
+COMMENT ON TABLE role IS 'A named set of permissions a user is granted: staff hold products, to
+add products, and shoppers orders, to place them. Users hold roles
+through the UserRoleGrant table the build adds.';
+
+CREATE TABLE "session" (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  user_id UUID NOT NULL,
+  token_hash VARCHAR(64) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  last_seen_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  UNIQUE (token_hash)
+);
+
+COMMENT ON TABLE "session" IS 'A signed-in session: the user it signs in, the SHA-256 of its token, and when it ends.';
 
 CREATE TABLE stock_level (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -102,7 +115,31 @@ CREATE TABLE "user" (
   UNIQUE (email)
 );
 
-COMMENT ON TABLE "user" IS 'A person who can sign in to the shop.';
+COMMENT ON TABLE "user" IS 'A person who can sign in to the shop, with their email and a password.
+The User trait makes the table the core user model''s (D50): the build
+adds the Session and UserCredential tables beside it, and both APIs sign
+users in and out with the identity runtime. The trait is imported as
+UserTrait, since the table is named User too.';
+
+CREATE TABLE user_credential (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  user_id UUID NOT NULL,
+  password_hash TEXT NOT NULL,
+  password_changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  disabled_at TIMESTAMPTZ,
+  UNIQUE (user_id)
+);
+
+COMMENT ON TABLE user_credential IS 'A user''s password hash, kept apart from the user row.';
+
+CREATE TABLE user_role_grant (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  user_id UUID NOT NULL,
+  role_id UUID NOT NULL,
+  granted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE user_role_grant IS 'A role a user holds.';
 
 -- Add foreign key constraints
 
@@ -148,6 +185,24 @@ ALTER TABLE stock_level
   REFERENCES product(id)
   ON DELETE CASCADE;
 
+ALTER TABLE user_credential
+  ADD CONSTRAINT fk_user_credential_user_id
+  FOREIGN KEY (user_id)
+  REFERENCES "user"(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE user_role_grant
+  ADD CONSTRAINT fk_user_role_grant_user_id
+  FOREIGN KEY (user_id)
+  REFERENCES "user"(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE user_role_grant
+  ADD CONSTRAINT fk_user_role_grant_role_id
+  FOREIGN KEY (role_id)
+  REFERENCES role(id)
+  ON DELETE CASCADE;
+
 -- Create indexes
 
 CREATE INDEX idx_order_customer_placed_at ON "order" USING BTREE (customer_id, placed_at);
@@ -155,3 +210,7 @@ CREATE INDEX idx_order_customer_placed_at ON "order" USING BTREE (customer_id, p
 CREATE UNIQUE INDEX uq_review_one_per_author ON review USING BTREE (product_id, author_id) WHERE deleted_at IS NULL;
 
 CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_ops);
+
+CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
+
+CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);

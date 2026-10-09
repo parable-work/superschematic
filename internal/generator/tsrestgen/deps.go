@@ -98,7 +98,13 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 // ChecksEndUsers reports whether an operation requires an authenticated
 // end user, which the router establishes with RouterOptions.authenticate:
 // the implementation then exports authenticate, an AuthenticatorFactory.
+// An API whose authDb has a User table has the identity service establish
+// every end user (D50), so its implementation exports none, as a Go
+// implementation of such an API writes no AuthMiddleware.
 func (o *APIOutput) ChecksEndUsers() bool {
+	if o.Identity != nil {
+		return false
+	}
 	for _, ep := range o.Endpoints {
 		if ep.RequiresAuth && !ep.PublicRoute {
 			return true

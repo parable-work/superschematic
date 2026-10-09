@@ -246,6 +246,16 @@ for [projection views](/superschematic/reference/projections/):
 `<prefix>projection.settings` and the rest. Set it to the namespace the
 schemas' readers expect; the part after the prefix is fixed.
 
+### `identity_permission_prefix`
+
+Default: `identity`
+
+Prefix of the permissions the user model's `@userAdministration` routes
+need: `<prefix>.users.read` and `<prefix>.users.write` for the user routes,
+`<prefix>.roles.read` and `<prefix>.roles.write` for the role and grant
+routes. The value takes a permission's form, segments of letters, digits,
+`_` and `-` joined by dots; any other value fails the load.
+
 ### `history_actor_setting`
 
 Default: `superschematic.history_actor_id`
@@ -567,9 +577,9 @@ The field of each bucket an API lists in `buckets`
 
 ## `[implementation_paths]`
 
-Where each API service's implementation lives, per language, as a path
-from the repository root (the parent of the schemas root) in which
-`{service}` is the service's name. A stack's build writes a missing
+Where each API service's implementation lives, per language, and each
+site's code, as a path from the repository root (the parent of the
+schemas root) in which `{service}` is the service's name. A stack's build writes a missing
 implementation there for each API its servers serve, and
 `build --scaffold` and `build-all --scaffold` for each Go or TypeScript
 API built. A server's generated entrypoint imports the implementation
@@ -592,6 +602,18 @@ package's `Constructor` types. The scaffold names it
 output root's Bun workspace has every directory the template matches,
 with `*` for `{service}`, as a member, so keep other packages out of
 them.
+
+### `implementation_paths.site`
+
+Default: `web/{service}`
+
+The package of a Site service's code, a static site (D55). Every build of
+the site writes its typed browser config there, `config.generated.ts`,
+and scaffolds the package once when the directory is missing, naming it
+`<npm_scope>/<service>-site`. The output root's Bun workspace has every
+directory the template matches as a member, as it has the TypeScript
+implementations, so the site imports the SDKs of the APIs it calls with
+`workspace:*`. A stack's provisioner and deploy build the site there.
 
 ## `[extension.<name>]`
 

@@ -99,6 +99,15 @@ type PlatformSpec struct {
 	// platform (`minInstances`, `tier`). Nil accepts no settings.
 	Settings json.RawMessage
 
+	// IdentityConfig is the identity config, a JSON object, that a server
+	// on this platform runs each API over the user model with (D50;
+	// ir.IdentityConfigField) unless its environment sets the field: the
+	// local platform's turns the session cookie's Secure attribute off,
+	// since it serves plain HTTP. Empty leaves the field unbound, and the
+	// server runs with the identity runtime's defaults. Only a server
+	// platform declares one: a job builds no identity service.
+	IdentityConfig string
+
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
 	NameOf func(PlatformContext) any
@@ -106,6 +115,17 @@ type PlatformSpec struct {
 	// AddressOf returns how an edge reaches the deployable: a value that
 	// usually references an output of one of the deployable's nodes.
 	AddressOf func(PlatformContext) any
+
+	// PublicAddressOf returns where a browser reaches the deployable from
+	// outside the environment when it is exposed: an https URL of its
+	// host under the environment's domain, or of a host the platform gives
+	// it, with no path. A site edge derives the API's from its server's,
+	// and a site's own is the origin the CORS field of each API it calls
+	// lists (D55). The generic connector, which joins deployables on two
+	// targets, will read it too. It sees what AddressOf sees, and the
+	// Address. Nil, or a nil result, gives the deployable none: a site
+	// edge to it fails to resolve. A site platform must have it.
+	PublicAddressOf func(PlatformContext) any
 
 	// Lower returns the deployable's resources. It is pure: the same
 	// context gives the same result.
@@ -172,7 +192,8 @@ type ConnectorSpec struct {
 	// for http and a bucket platform for bucket (D54). A job's edges are
 	// its API's (D52), so a target
 	// that places jobs registers a connector from its job platform for
-	// each edge its servers take.
+	// each edge its servers take. A site edge runs from a site platform to
+	// a server platform (D55).
 	From string
 	To   string
 
@@ -257,6 +278,12 @@ type TargetSpec struct {
 	// (`stack run`, section 8.7, D52). Nil runs none, and `stack run`
 	// refuses the target's environments.
 	Jobs JobRunner
+
+	// Sites publishes the files a site's build writes, and its config
+	// for each run, where the site's platform serves them (section 8.10,
+	// D55). Nil publishes none, and a deploy of an environment with a site
+	// on the target is refused.
+	Sites SitePublisher
 
 	// CI says how a generated CI job signs in to the target's
 	// environments (section 11.3, D47). Nil gives CI no identity, and the
@@ -353,6 +380,12 @@ type ProvisionRequest struct {
 	// at `<OutputRoot>/server/<stack>/<server>`. Empty when the run needs
 	// no build output.
 	OutputRoot string
+
+	// RepositoryRoot is the repository root, the parent of the schemas
+	// root, under which each site's package lies at the directory its
+	// ir.ResolvedSite names: the local provisioner builds a site there
+	// (D55). Empty when the run needs no site's code.
+	RepositoryRoot string
 
 	// Backend is where the provisioner keeps the environment's state, as
 	// the target's bootstrap created it.
@@ -481,7 +514,8 @@ var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeSc
 // name, an unknown kind, a server or job platform without languages or a
 // database platform without dialects (or either with the other's list), an
 // unknown or repeated language or dialect, a settings schema that does not
-// compile, and a missing NameOf, AddressOf or Lower.
+// compile, an identity config that is not a server platform's JSON object,
+// and a missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -513,6 +547,13 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
 		}
+	case ir.DeployableSite:
+		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
+			return fmt.Errorf("registry: site platform %q declares server languages or SQL dialects; a site serves files its own build writes (D55)", spec.Name)
+		}
+		if spec.PublicAddressOf == nil {
+			return fmt.Errorf("registry: site platform %q has no PublicAddressOf: a site is always exposed, and the CORS field of each API it calls lists its origin (D55)", spec.Name)
+		}
 	case ir.DeployableBucket:
 		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
 			return fmt.Errorf("registry: bucket platform %q declares server languages or SQL dialects; a bucket runs no code and hosts no schema (D54)", spec.Name)
@@ -522,6 +563,15 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
+	}
+	if spec.IdentityConfig != "" {
+		var object map[string]any
+		if spec.Kind != ir.DeployableServer {
+			return fmt.Errorf("registry: %s platform %q declares an identity config; only a server platform does", spec.Kind, spec.Name)
+		}
+		if err := json.Unmarshal([]byte(spec.IdentityConfig), &object); err != nil || object == nil {
+			return fmt.Errorf("registry: platform %q IdentityConfig is not a JSON object: %v", spec.Name, err)
+		}
 	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")
@@ -567,7 +617,7 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 		return fmt.Errorf("registry: connector %q is already registered", spec.Name)
 	}
 	if !spec.Edge.Valid() {
-		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeBucket)
+		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket)
 	}
 	if spec.From == "" || spec.To == "" {
 		return fmt.Errorf("registry: connector %q needs a From and a To platform", spec.Name)
@@ -590,9 +640,9 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // values schema or resource type schema that does not compile, a resource
 // type another target registered with a different schema, a policy rule
 // without a name or Check, or with a repeated name, and a deploy seam it
-// cannot use: State, Bootstrap, Migrations, Builder, CI or Jobs without a
-// provisioner, and Bootstrap, Migrations, Builder, CI or Jobs without
-// State.
+// cannot use: State, Bootstrap, Migrations, Builder, CI, Jobs or Sites
+// without a provisioner, and Bootstrap, Migrations, Builder, CI, Jobs or
+// Sites without State.
 // Finalize checks that the platforms, the DNS platform and the provisioner
 // it names are registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {
@@ -764,6 +814,11 @@ func (r *Registry) checkStackReferences() error {
 		if spec.Edge == ir.EdgeSQL {
 			toKind = ir.DeployableDatabase
 		}
+		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob}
+		if spec.Edge == ir.EdgeSite {
+			// A site edge runs from a site to a server (D55).
+			fromKinds = []ir.DeployableKind{ir.DeployableSite}
+		}
 		if spec.Edge == ir.EdgeBucket {
 			toKind = ir.DeployableBucket
 		}
@@ -771,7 +826,7 @@ func (r *Registry) checkStackReferences() error {
 			role, platform string
 			kinds          []ir.DeployableKind
 		}{
-			{"From", spec.From, []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob}},
+			{"From", spec.From, fromKinds},
 			{"To", spec.To, []ir.DeployableKind{toKind}},
 		} {
 			platform, ok := r.stack.platforms[end.platform]

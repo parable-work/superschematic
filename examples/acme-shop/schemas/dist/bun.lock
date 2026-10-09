@@ -37,6 +37,13 @@
         "typescript": "5.9.3",
       },
     },
+    "../../web/shop-web": {
+      "name": "@acme/shop-web-site",
+      "version": "0.0.0",
+      "devDependencies": {
+        "typescript": "5.9.3",
+      },
+    },
     "api/shop-storefront": {
       "name": "@acme/shop-storefront-api",
       "version": "1.0.0",
@@ -201,6 +208,8 @@
     "@acme/shop-storefront-sdk": ["@acme/shop-storefront-sdk@workspace:sdk/typescript/shop-storefront"],
 
     "@acme/shop-storefront-types": ["@acme/shop-storefront-types@workspace:types/typescript/shop-storefront"],
+
+    "@acme/shop-web-site": ["@acme/shop-web-site@workspace:../../web/shop-web"],
 
     "@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
 

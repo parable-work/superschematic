@@ -5,3 +5,4 @@
   OK: shop-orders (up to date)
   OK: shop-stack (up to date)
   OK: shop-storefront (up to date)
+  OK: shop-web (up to date)

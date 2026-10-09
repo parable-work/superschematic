@@ -29,9 +29,9 @@ export interface Targets {
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container and of its storage emulator
- * (D54), a server's settings its port, and a database, a job and a bucket
- * take no settings. A port left out is derived from the stack, the
- * environment and the server.
+ * (D54), a server's and a site's settings its port, and a database, a job
+ * and a bucket take no settings. A port left out is derived from the stack,
+ * the environment and the deployable.
  */
 export interface LocalTarget {
   values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
@@ -40,6 +40,7 @@ export interface LocalTarget {
   database: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   job: {};
+  site: { port?: number };
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   bucket: {};
 }
@@ -48,7 +49,7 @@ export interface LocalTarget {
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "bucket";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -111,11 +112,13 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
   ? { readonly env?: EnvOf<C> } & SettingsOf<T, "server">
   : Of extends ServiceHandle<"DB">
     ? SettingsOf<T, "database">
-    : Of extends ServiceHandle<"Bucket">
-      ? SettingsOf<T, "bucket">
-      : Of extends DeployableClass
-      ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
-      : never);
+    : Of extends ServiceHandle<"Site">
+      ? SettingsOf<T, "site">
+      : Of extends ServiceHandle<"Bucket">
+        ? SettingsOf<T, "bucket">
+        : Of extends DeployableClass
+          ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
+          : never);
 
 /**
  * A job's schedule as an environment changes it (D52): a five-field cron
@@ -167,7 +170,7 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
-  : { readonly of: ServiceHandle<"API" | "DB" | "Bucket"> | DeployableClass };
+  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket"> | DeployableClass };
 
 /** The argument of `@environment`. */
 export type EnvironmentOptions<T extends TargetName | undefined, S extends readonly unknown[]> = {
@@ -185,10 +188,14 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
 
 const noop: ClassDecorator = () => {};
 
-/** Declares the stack: its entry points and what is reachable from outside. */
+/**
+ * Declares the stack: its entry points and what is reachable from outside.
+ * A site (a Site service's handle) is always exposed, named in `expose` or
+ * not, and each API it calls must be exposed (D55).
+ */
 export function stack(_options: {
-  readonly deploy?: readonly ServiceHandle<"API" | "DB">[];
-  readonly expose?: readonly (ServiceHandle<"API"> | DeployableClass)[];
+  readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
+  readonly expose?: readonly (ServiceHandle<"API" | "Site"> | DeployableClass)[];
 }): ClassDecorator {
   return noop;
 }

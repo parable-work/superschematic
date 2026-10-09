@@ -38,6 +38,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, and fake-gcs-server under `stack dev` | the gcp target's bucket |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
+| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -50,10 +51,11 @@ A stack has three tiers:
 - **Schemas** are your DB and API services, as they are today.
 - **Deployables** are what runs. A database hosts DB schemas, a server
   serves API schemas, a job runs one of an API's `@job` classes to
-  completion, and a bucket keeps a Bucket service's objects. With nothing
-  declared, each API service is one server, each of its jobs one job, each
-  DB service one database, and each Bucket service an API lists one
-  bucket.
+  completion, a site serves a Site service's built files, and a bucket
+  keeps a Bucket service's objects. With nothing declared, each API
+  service is one server, each of its jobs one job, each DB service one
+  database, each Site service one site, and each Bucket service an API
+  lists one bucket.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -65,6 +67,7 @@ most of them:
 | --- | --- | --- | --- |
 | sql | a server or a job | a database | each served API's `authDb`, or its one DB-kind dependency |
 | http | a server or a job | a server | `calls` in the config of each API the calling server serves |
+| site | a site | an exposed server | `calls` in a Site service's config ([static sites](/superschematic/guides/static-sites/)) |
 | bucket | a server or a job | a bucket | `buckets` in the config of each API the server serves |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
@@ -512,6 +515,25 @@ the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
 
+## Static sites
+
+A Site service is a static site: its config names the APIs its browser
+code calls and how it builds, and a stack that deploys it serves the
+files its build writes, always exposed, with a config per environment
+that holds each API's public address. Each API a site calls must be
+exposed, and answers CORS for the site's origin, which its CORS field,
+`<API>_CORS`, lists:
+
+```ts
+@stack({ deploy: [ShopApi, ShopOrders, ShopStorefront, ShopWeb], expose: [ShopApi, ShopOrders, ShopStorefront] })
+export abstract class Shop {}
+```
+
+`stack dev` builds the site once and serves it on a port of its own, and
+`stack deploy` builds it, publishes its files and its config through the
+target, and records their digest. [Static
+sites](/superschematic/guides/static-sites/) is the guide.
+
 ## Build a stack
 
 Build the stack like any service. A single build loads the services it
@@ -543,9 +565,13 @@ describes, and each one a Go server serves: `implementation.go` at the naming fi
 until you implement it. Where the API's generated `Config` takes them, it
 also writes `AuthMiddleware(deps)`, which refuses every request with 401
 until it verifies your end users, and `PayloadDecryptor(deps)`, which
-refuses every encrypted payload. When no `go.mod` holds the package, it
-writes one beside it. It never writes into a directory that holds a Go
-file, so the package is yours from then on. Outside a stack,
+refuses every encrypted payload. An API over the user model takes the
+identity service instead of an auth middleware, or a TypeScript
+implementation's `authenticate`, which the entrypoint builds over its
+database and its identity config field, `<API>_IDENTITY`; a job's
+entrypoint builds none. When no `go.mod` holds the package, it writes
+one beside it. It never writes into a directory that holds a Go file, so
+the package is yours from then on. Outside a stack,
 `build --scaffold` writes the same scaffold for each Go API built. This
 is a different stub from `outputs.api.scaffoldsOutputDir`
 ([API routes](/superschematic/guides/api-routes/#operation-sets)), which
@@ -597,16 +623,18 @@ malformed declarations and names nothing registers.
 `shop-api` and `shop-orders`, each on a default Go server, and
 `shop-storefront`, on a default TypeScript server, and exposes all three;
 `shop-db`, the `authDb` of both Go APIs, joins as their database,
-`shop-media`, the bucket `shop-api` lists, as a bucket, and
-`shop-orders`' job `ShipOrders` as a job. Its one environment, `Dev`, is
-on the core's `local` target, and runs the job every minute:
+`shop-media`, the bucket `shop-api` lists, as a bucket, `shop-orders`' job
+`ShipOrders` as a job, and `shop-web`, a static site whose browser code
+calls `shop-api`, as a site. Its one environment, `Dev`, is on the core's
+`local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
-default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` and
-`AuthMiddleware(deps)` the Go entrypoints call, and
+default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` the Go
+entrypoints call, building each API's identity service over `shop-db`,
+whose `User` table has the user model's trait, and
 `typescript/shop-storefront`, whose `create(deps)` and `authenticate(deps)`
 the TypeScript one calls.
 [Serve and call it from Go](/superschematic/first-project/go-api/) walks
@@ -617,12 +645,14 @@ the storefront's.
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
 `shop-media`, both Go servers on their generated entrypoints, the
-storefront's on Bun, and the job on its schedule. `go/stack_dev_test.go`
-runs it in the example's check whenever Docker is running, calls each Go
-server through its SDK, uploads a product's image to `shop-media` through
-the URL `shop-api` signs, reads a cart from the storefront, and sees the
-job ship the order it placed, once with `stack run` and once on the
-schedule. The job's code is `NewJobs` in
+storefront's on Bun, the job on its schedule, and the site, built once
+and served with its config. `go/stack_dev_test.go` runs it in the
+example's check whenever Docker is running, calls each Go server through
+its SDK, uploads a product's image to `shop-media` through the URL
+`shop-api` signs, reads a cart from the storefront, reads the site and its
+config, checks that `shop-api` answers CORS for the site's origin and no
+other, and sees the job ship the order it placed, once with `stack run`
+and once on the schedule. The job's code is `NewJobs` in
 `go/shop-orders/jobs.go`:
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
@@ -836,6 +866,7 @@ and the [generated CI](#generated-ci) signs in with.
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
+| site | a Cloud Storage bucket, `<project>-<site>`, readable by `allUsers`, and a backend bucket with Cloud CDN behind a load balancer of its own, whose URL map serves the files of the build the deploy switched to; with a domain at `https://<site>.<domain>`, without one over HTTP at the load balancer's address ([Static sites](/superschematic/guides/static-sites/#on-google-cloud)) |
 | secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server and job, and an environment variable that reads its latest version |
 | image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`), and a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits |
@@ -865,9 +896,9 @@ rules run over every gcp environment: `production-databases-highly-available`
 refuses a zonal instance when `production` is set, and
 `nothing-public-unless-exposed` refuses an internal server that takes
 outside traffic or turns its invoker check off, a load balancer for
-anything but an exposed server, a grant to `allUsers` or
-`allAuthenticatedUsers`, a job's included, and an instance open to
-`0.0.0.0/0`. Every
+anything but an exposed server or a site, a grant to `allUsers` or
+`allAuthenticatedUsers`, a job's included, but a site's bucket's, and an
+instance open to `0.0.0.0/0`. Every
 resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
 and resolution checks each node's properties against it.
 

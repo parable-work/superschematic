@@ -1,0 +1,772 @@
+{
+  "version": 1,
+  "stack": "site-stack",
+  "environment": "Dev",
+  "target": "local",
+  "provisioner": "local",
+  "deployables": [
+    {
+      "name": "Orders",
+      "kind": "server",
+      "declared": true,
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "resourceName": "orders",
+      "address": "http://127.0.0.1:20753",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-api",
+              "issuer": "Orders",
+              "key": {
+                "$output": {
+                  "resource": "Orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:20833"
+          },
+          "edge": "http:Orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+          },
+          "edge": "sql:Orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-api",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "language": "GO",
+      "exposed": true,
+      "resourceName": "shop-api",
+      "address": "http://127.0.0.1:20833",
+      "publicAddress": "http://127.0.0.1:20833",
+      "bindings": [
+        {
+          "field": "LOG_LEVEL",
+          "source": "literal",
+          "value": "info",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "http://127.0.0.1:20347"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-api->shop-db"
+        },
+        {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "endpoint": "http://127.0.0.1:23736",
+            "name": "shop-media"
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-db",
+      "kind": "database",
+      "platform": "local.postgres",
+      "services": [
+        {
+          "name": "shop-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "shop-db",
+      "address": "127.0.0.1:30736"
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "local.gcs",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "resourceName": "shop-media",
+      "address": "http://127.0.0.1:23736"
+    },
+    {
+      "name": "shop-orders-ship-orders",
+      "kind": "job",
+      "platform": "local.job",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "job": {
+        "api": "shop-orders",
+        "name": "ShipOrders",
+        "schedule": "*/15 * * * *",
+        "timeZone": "UTC",
+        "timeoutSeconds": 300,
+        "retries": 1
+      },
+      "resourceName": "shop-orders-ship-orders",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-api",
+              "issuer": "shop-orders-ship-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:20833"
+          },
+          "edge": "http:shop-orders-ship-orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-orders-ship-orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "local.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "address": "http://127.0.0.1:20347",
+      "publicAddress": "http://127.0.0.1:20347",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "http://127.0.0.1:20833"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "local.process-gcs",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
+    {
+      "id": "http:Orders->shop-api",
+      "kind": "http",
+      "from": "Orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.process-process",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-ship-orders->shop-api",
+      "kind": "http",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.job-process",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.site-process",
+      "field": "shop-api"
+    },
+    {
+      "id": "sql:Orders->shop-db",
+      "kind": "sql",
+      "from": "Orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-api->shop-db",
+      "kind": "sql",
+      "from": "shop-api",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-orders-ship-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.job-postgres",
+      "field": "SHOP_DB_DATABASE"
+    }
+  ],
+  "secrets": [
+    {
+      "id": "PaymentsSecrets.STRIPE_KEY",
+      "type": "PaymentsSecrets",
+      "field": "STRIPE_KEY",
+      "readers": [
+        "Orders",
+        "shop-api",
+        "shop-orders-ship-orders"
+      ]
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "Orders.calls.shop-api.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-api",
+          "caller": "Orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:Orders->shop-api"
+        ]
+      },
+      {
+        "id": "Orders.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "FULFILLMENT_REGION",
+              "value": "us"
+            },
+            {
+              "name": "MAX_LINE_ITEMS",
+              "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-api"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+              "value": "Orders"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "Orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": "http://127.0.0.1:20833"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            }
+          ],
+          "language": "go",
+          "module": "server/site-stack/Orders",
+          "name": "orders",
+          "port": 20753,
+          "readiness": "/readyz"
+        },
+        "dependsOn": [
+          "Orders.calls.shop-api.key"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "postgres.container",
+        "type": "local:docker/container:Container",
+        "properties": {
+          "env": [
+            {
+              "name": "POSTGRES_HOST_AUTH_METHOD",
+              "value": "trust"
+            }
+          ],
+          "image": "postgres:16-alpine",
+          "labels": {
+            "superschematic.environment": "Dev",
+            "superschematic.stack": "site-stack"
+          },
+          "name": "superschematic-site-stack-dev-postgres",
+          "ports": [
+            {
+              "containerPort": 5432,
+              "host": "127.0.0.1",
+              "hostPort": 30736
+            }
+          ],
+          "readiness": {
+            "exec": [
+              "pg_isready",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              "5432",
+              "--username",
+              "postgres",
+              "--quiet"
+            ]
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "LOG_LEVEL",
+              "value": "info"
+            },
+            {
+              "name": "SHOP_API_CORS_ORIGINS",
+              "value": "http://127.0.0.1:20347"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
+              "value": "http://127.0.0.1:23736"
+            },
+            {
+              "name": "SHOP_MEDIA_BUCKET_NAME",
+              "value": "shop-media"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            }
+          ],
+          "language": "go",
+          "module": "server/site-stack/shop-api",
+          "name": "shop-api",
+          "port": 20833,
+          "readiness": "/readyz"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-db.database.shop-db",
+        "type": "local:postgres/database:Database",
+        "properties": {
+          "container": {
+            "$output": {
+              "resource": "postgres.container",
+              "name": "name"
+            }
+          },
+          "name": "shop_db",
+          "service": "shop-db",
+          "url": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+        },
+        "dependsOn": [
+          "postgres.container"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "local:storage/bucket:Bucket",
+        "properties": {
+          "container": {
+            "$output": {
+              "resource": "storage.container",
+              "name": "name"
+            }
+          },
+          "endpoint": "http://127.0.0.1:23736",
+          "name": "shop-media",
+          "service": "shop-media"
+        },
+        "dependsOn": [
+          "storage.container"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.calls.shop-api.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-api",
+          "caller": "shop-orders-ship-orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders-ship-orders->shop-api"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.job",
+        "type": "local:process/job:Job",
+        "properties": {
+          "api": "shop-orders",
+          "env": [
+            {
+              "name": "FULFILLMENT_REGION",
+              "value": "us"
+            },
+            {
+              "name": "MAX_LINE_ITEMS",
+              "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-api"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": "http://127.0.0.1:20833"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30736/shop_db?sslmode=disable"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            }
+          ],
+          "job": "ShipOrders",
+          "language": "go",
+          "module": "server/site-stack/shop-orders-ship-orders",
+          "name": "shop-orders-ship-orders",
+          "retries": 1,
+          "schedule": "*/15 * * * *",
+          "timeZone": "UTC",
+          "timeoutSeconds": 300
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.calls.shop-api.key"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-web.site",
+        "type": "local:site/site:Site",
+        "properties": {
+          "build": "build",
+          "config": {
+            "apis": {
+              "shop-api": {
+                "url": "http://127.0.0.1:20833"
+              }
+            }
+          },
+          "dir": "web/shop-web",
+          "fallback": "index.html",
+          "name": "shop-web",
+          "output": "dist",
+          "port": 20347
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "storage.container",
+        "type": "local:docker/container:Container",
+        "properties": {
+          "args": [
+            "-scheme",
+            "http",
+            "-host",
+            "0.0.0.0",
+            "-port",
+            "4443",
+            "-backend",
+            "filesystem",
+            "-filesystem-root",
+            "/storage",
+            "-public-host",
+            "127.0.0.1:23736",
+            "-external-url",
+            "http://127.0.0.1:23736"
+          ],
+          "image": "fsouza/fake-gcs-server:1.56.1",
+          "labels": {
+            "superschematic.environment": "Dev",
+            "superschematic.stack": "site-stack"
+          },
+          "name": "superschematic-site-stack-dev-storage",
+          "ports": [
+            {
+              "containerPort": 4443,
+              "host": "127.0.0.1",
+              "hostPort": 23736
+            }
+          ],
+          "readiness": {
+            "http": "/storage/v1/b"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "Orders.calls.shop-api.key",
+        "postgres.container",
+        "shop-db.database.shop-db",
+        "shop-media.bucket",
+        "shop-orders-ship-orders.calls.shop-api.key",
+        "storage.container"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "shop-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-api"
+      ],
+      "resources": [
+        "shop-api.process"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "Orders",
+        "shop-orders-ship-orders",
+        "shop-web"
+      ],
+      "resources": [
+        "Orders.process",
+        "shop-orders-ship-orders.job",
+        "shop-web.site"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "shop-db"
+      ]
+    }
+  ]
+}

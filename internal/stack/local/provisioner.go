@@ -106,6 +106,9 @@ type Provisioner struct {
 	// jobs are the jobs each environment's rollout built, which Wait runs
 	// on their schedules (jobs.go).
 	jobs map[string][]*builtJob
+
+	// sites are the file servers of each environment's sites (sites.go).
+	sites map[string][]*runningSite
 }
 
 var _ registry.Provisioner = (*Provisioner)(nil)
@@ -285,6 +288,9 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 	for _, j := range prog.Jobs {
 		changes = append(changes, registry.PlannedChange{Resource: j.ID, Action: "build"})
 	}
+	for _, s := range prog.Sites {
+		changes = append(changes, registry.PlannedChange{Resource: s.ID, Action: "build"})
+	}
 	return changes, nil
 }
 
@@ -316,6 +322,7 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	var keyPairs []*KeyPair
 	var servers []*Server
 	var jobs []*Job
+	var sites []*Site
 	for _, id := range step.Resources {
 		if c := prog.container(id); c != nil {
 			containers = append(containers, c)
@@ -329,6 +336,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			servers = append(servers, s)
 		} else if j := prog.job(id); j != nil {
 			jobs = append(jobs, j)
+		} else if site := prog.site(id); site != nil {
+			sites = append(sites, site)
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
 		}
@@ -395,7 +404,12 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 		}
 	}
 	if len(jobs) > 0 {
-		return p.buildJobs(ctx, req, prog, jobs)
+		if err := p.buildJobs(ctx, req, prog, jobs); err != nil {
+			return err
+		}
+	}
+	if len(sites) > 0 {
+		return p.startSites(ctx, req, sites)
 	}
 	return nil
 }
@@ -420,7 +434,7 @@ func (p *Provisioner) destroy(ctx context.Context, req registry.ProvisionRequest
 	if err != nil {
 		return err
 	}
-	errs := []error{p.stopServers(key(req.Environment))}
+	errs := []error{p.stopSites(key(req.Environment)), p.stopServers(key(req.Environment))}
 	if len(prog.Containers) > 0 {
 		docker, err := p.lookPath("docker")
 		if err != nil {
@@ -488,6 +502,9 @@ func (prog *Program) outputs() map[string]map[string]any {
 		out[b.ID] = map[string]any{"name": b.Name, "endpoint": b.Endpoint}
 	}
 	for _, s := range prog.Servers {
+		out[s.ID] = map[string]any{"url": s.URL, "port": s.Port}
+	}
+	for _, s := range prog.Sites {
 		out[s.ID] = map[string]any{"url": s.URL, "port": s.Port}
 	}
 	return out

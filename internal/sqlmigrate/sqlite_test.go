@@ -83,9 +83,7 @@ func refusedSchemas(t *testing.T) []struct {
 			"Order is @versioned, which the sqlite dialect does not support"},
 		{"@optimistic", shop(func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }),
 			"Product is @optimistic, which the sqlite dialect does not support"},
-		{"@searchField", shop(func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = true }),
-			"Product.title is a @searchField, which the sqlite dialect does not support"},
-		{"projection", planCase{}.load(t, func(s *ir.Schema) { fieldNamed(s, "Product", "title").SearchField = false }),
+		{"projection", planCase{}.load(t, nil),
 			"OrderSummary is a projection (report.order_summary), which the sqlite dialect does not support"},
 		{"GIN index", shop(func(s *ir.Schema) {
 			addField(s, "Order", &ir.FieldDef{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}})

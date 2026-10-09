@@ -8,7 +8,7 @@ runtime/engine/README.md.
 export { Engine, openEngine } from './engine.js';
 export type { EngineOptions } from './engine.js';
 
-export { SERVICE_SUBJECT_PREFIX, allowAll, servicePrincipal, standsIn } from './access.js';
+export { SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';
 export type {
   AccessPolicy,
   AccessRequest,
@@ -42,7 +42,7 @@ export { DEFAULT_NAMESPACE, NAMESPACE_NAME, Namespaces } from './namespaces.js';
 export type { NamespaceOptions, NamespaceRecord } from './namespaces.js';
 
 export { SchemaRegistry } from './registry/registry.js';
-export type { ComposedBehavior, DefineOptions, SchemaTarget, ValidateOptions } from './registry/registry.js';
+export type { ComposedBehavior, DefineOptions, SchemaCapabilities, SchemaTarget, ValidateOptions } from './registry/registry.js';
 export type { PublishResult, SchemaRecord, SchemaSummary } from './registry/catalog.js';
 export { SCHEMA_NAME } from './registry/document.js';
 export { SchemaValidator } from './registry/validator.js';

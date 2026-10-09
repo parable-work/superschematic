@@ -158,6 +158,7 @@ func renderTS(names []string, classes map[string]string) []byte {
 			Pattern:            meta.Pattern,
 			Format:             meta.Format,
 			ReservedWords:      []string{},
+			CaseInsensitive:    meta.CaseInsensitive,
 			Minimum:            meta.Minimum,
 			Maximum:            meta.Maximum,
 			HasCustomNormalize: meta.HasCustomNormalize,
@@ -165,6 +166,11 @@ func renderTS(names []string, classes map[string]string) []byte {
 			HasCustomParse:     meta.HasCustomParse,
 			TypeMappings:       map[string]string{},
 		}
+		if len(meta.ReservedWords) > 0 {
+			row.ReservedWords = append(row.ReservedWords, meta.ReservedWords...)
+		}
+		row.ReservedWordsCaseInsensitive = meta.ReservedWordsCaseInsensitive
+		row.ReservedWordsMatchPartial = meta.ReservedWordsMatchPartial
 		if len(meta.Examples) > 0 {
 			row.Example = meta.Examples[0]
 		}

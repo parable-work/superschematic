@@ -191,6 +191,15 @@
           "name": "uri"
         }
       },
+      "publicAddress": {
+        "$concat": [
+          "https://shop-api-pr",
+          {
+            "$parameter": "pr"
+          },
+          ".staging.acme.dev"
+        ]
+      },
       "bindings": [
         {
           "field": "LOG_LEVEL",

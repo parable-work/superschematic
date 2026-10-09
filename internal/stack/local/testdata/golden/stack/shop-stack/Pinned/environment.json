@@ -101,6 +101,7 @@
       },
       "resourceName": "shop-api",
       "address": "http://127.0.0.1:8080",
+      "publicAddress": "http://127.0.0.1:8080",
       "bindings": [
         {
           "field": "LOG_LEVEL",

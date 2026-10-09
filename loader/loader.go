@@ -40,6 +40,13 @@ func WithRegistry(reg *registry.Registry) Option { return loader.WithRegistry(re
 // WithNaming overrides the naming the load resolves authoring packages with.
 func WithNaming(n registry.Naming) Option { return loader.WithNaming(n) }
 
+// WithDependencyLoader supplies how the load reads another service by name:
+// the authDb an API's user model route sets read their users from. Without
+// it the loader reads the service of that name beside this one.
+func WithDependencyLoader(load func(name string) (*ir.Schema, error)) Option {
+	return loader.WithDependencyLoader(load)
+}
+
 // WithSchemaCatalog supplies the discovered schema set that document loaders
 // resolve cross-service references against (LoadContext.Catalog). Without it
 // the resolution check is skipped, the single-service case; build-all always

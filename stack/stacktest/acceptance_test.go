@@ -40,11 +40,11 @@ func assemble(t *testing.T) (*registry.Registry, *stacktest.Extension) {
 // each environment's environment.json.
 func TestAcceptance(t *testing.T) {
 	reg, ext := assemble(t)
-	shop := stacktest.Shop()
+	shop := stacktest.WithSite(stacktest.Shop())
 	out := t.TempDir()
 	for _, env := range shop.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			resolved, err := stack.Resolve(reg, stack.Input{Stack: shop, Services: stacktest.AcmeShop(), Environment: env.Name})
+			resolved, err := stack.Resolve(reg, stack.Input{Stack: shop, Services: stacktest.SiteShop(), Environment: env.Name})
 			if err != nil {
 				t.Fatal(err)
 			}
