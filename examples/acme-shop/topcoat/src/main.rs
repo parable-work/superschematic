@@ -3,9 +3,12 @@
 //! page would post there), then write a review at `/reviews`.
 //!
 //! With `DATABASE_URL` set, as superschematic-migrate reads it
-//! (`sqlite:shop.db`, or a path), the shop is that SQLite file, which
-//! shop-db's SQLite plan must have migrated: its reviews and orders outlive
-//! the process. Without it the shop is in memory.
+//! (`sqlite:shop.db`, a `file:` URI, or a path), the shop is that SQLite
+//! file, which shop-db's SQLite plan must have migrated: its reviews and
+//! orders outlive the process. A URL of another database, such as a
+//! Postgres one left in the shell, stops the app, and the error names its
+//! scheme alone, since the URL may hold a password. Without it the shop is
+//! in memory.
 
 use std::sync::Arc;
 
@@ -17,7 +20,7 @@ use acme_shop_topcoat::{app, product, shopper};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = match std::env::var("DATABASE_URL") {
         Ok(url) => {
-            let shop = SqliteShop::open(&url)?;
+            let shop = SqliteShop::open(&url).map_err(|err| format!("DATABASE_URL: {err}"))?;
             // The demo's shopper and product, which a real shop's own
             // flows add.
             shop.add_user(&shopper(), "shopper@example.com", "Demo Shopper")?;

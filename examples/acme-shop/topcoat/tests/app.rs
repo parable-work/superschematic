@@ -203,3 +203,24 @@ fn a_file_nothing_migrated_is_refused() {
     assert!(err.to_string().starts_with("open "), "{err}");
     assert!(!missing.exists());
 }
+
+#[test]
+fn a_url_of_another_database_is_refused_without_its_password() {
+    for url in [
+        "postgres://shop:hunter2@127.0.0.1:5432/shop_db",
+        "postgresql://shop:hunter2@db.internal/shop_db?sslmode=require",
+        "d1://hunter2@shop-db",
+    ] {
+        let err = SqliteShop::open(url).err().expect("a refusal");
+        let (message, debug) = (err.to_string(), format!("{err:?}"));
+        assert!(message.contains("is not a SQLite database: give a sqlite: URL, a file: URI or a path"), "{message}");
+        assert!(!message.contains("hunter2") && !debug.contains("hunter2"), "the refusal shows the password: {message} / {debug}");
+    }
+    let err = SqliteShop::open("postgres://shop:hunter2@127.0.0.1/shop_db").err().expect("a refusal");
+    assert!(err.to_string().starts_with("a postgres:// URL "), "{err}");
+
+    // A path is still a path, and a file: URI a URI.
+    let migrated = sqlite_file("by-path.db");
+    SqliteShop::open(&migrated.display().to_string()).unwrap();
+    SqliteShop::open(&format!("file:{}?mode=rw", migrated.display())).unwrap();
+}

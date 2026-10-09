@@ -4,12 +4,13 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
-//! `records` mirrors each type an operation returns as a record a page
-//! can hand the browser.
-//! `forms` reads and renders a form per input type whose fields a form
-//! holds.
-//! `procedures` lets browser code call each operation, its arguments and
-//! result records; the app's `.discover()` registers them.
+//! `records` mirrors each type a call in `operations` returns as a record a
+//! page can hand the browser; the result of an operation without a call, a
+//! webhook's, has none.
+//! `forms` reads and renders a form per input type a call in `operations`
+//! takes whose fields a form holds.
+//! `procedures` lets browser code call each operation a browser may, its
+//! arguments and result records; the app's `.discover()` registers them.
 //! `views` renders each record as a description list and as a table.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps

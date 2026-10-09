@@ -215,7 +215,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		}
 	}
 	if cfg.WritesForms() {
-		if out.Forms, err = formsOf(schemas, api, c.Logf); err != nil {
+		if out.Forms, err = formsOf(schemas, inProcess, c.Logf); err != nil {
 			return nil, err
 		}
 	}

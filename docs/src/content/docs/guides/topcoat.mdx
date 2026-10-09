@@ -12,9 +12,9 @@ server-rendered pages. Its pages run in the same process as a service's
 Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
-rules. The crate also has a form per input type, a record per result
-type and components that render each record, and mounts the JSON API
-beside the pages.
+rules. For the operations a page can call, the crate also has a form per
+input type and a record per result type, with components that render each
+record, and it mounts the JSON API beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
@@ -86,13 +86,14 @@ only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 
-An input type gets a form when each of its fields is a string, a number,
-a boolean or an enum, alone, and the service declares it; the build log
-names any other and why. `forms::WriteReviewInputForm` holds the form's
-fields as the browser sends them, each an `Option<String>`, so a refused
-form renders again as it was sent. `parse()` reads them by
-`WriteReviewInput`'s rules, and `FormErrors::from_api` turns the
-operation's refusal into the same field messages:
+An input type gets a form when an operation a page can call takes it,
+each of its fields is a string, a number, a boolean or an enum, alone,
+and the service declares it; the build log names any other and why.
+`forms::WriteReviewInputForm` holds the form's fields as the browser sends
+them, each an `Option<String>`, so a refused form renders again as it was
+sent. `parse()` reads them by `WriteReviewInput`'s rules, and
+`FormErrors::from_api` turns the operation's refusal into the same field
+messages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="post_review" />
 
@@ -103,14 +104,16 @@ form, and `parse()` checks every rule again.
 
 ## Records
 
-`records` mirrors each type an operation returns as a Topcoat record,
-which a page hands the browser, here through a shard:
+`records` mirrors each type a page's call returns, and the types it
+nests, as a Topcoat record, which a page hands the browser, here through a
+shard:
 
 <Snippet file="topcoat/src/lib.rs" symbol="review_card" />
 
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
 enums are strings, a map is its entries, and an `@uiHidden` field is left
-out, since a record reaches the browser.
+out, since a record reaches the browser. A webhook's result reaches no
+page, so it has no record ([Procedures](#procedures)).
 
 ## Display components
 
@@ -175,7 +178,7 @@ no procedure, since a browser holds no service credential; an
 `@allowService` one keeps both, since its route admits an end user too.
 Each guard's or call's doc says why, and so does the build log. The
 result of an operation without a call reaches no page, so it has no
-record and no display components.
+record and no display components, and its input has no form.
 
 A procedure keeps its route's traffic controls, in the route's order, and
 refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
@@ -199,7 +202,10 @@ The Rust server's `sqlite` feature adds `SqliteShop`, the shop's
 implementations over a file of `shop-db`'s tables, through rusqlite. The
 app turns it on. With `DATABASE_URL` set, the app opens that file, which
 must hold `shop-db`'s tables, and its reviews and orders outlive the
-process; without it, the shop is in memory:
+process; without it, the shop is in memory. `DATABASE_URL` is a `sqlite:`
+URL, a `file:` URI or a path. A URL of another database, such as a
+Postgres one already in the shell, stops the app with an error that names
+its scheme alone, since the URL may hold a password:
 
 <Snippet file="topcoat/src/main.rs" symbol="main" />
 

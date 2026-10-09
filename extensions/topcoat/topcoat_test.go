@@ -426,13 +426,14 @@ func TestViewsOff(t *testing.T) {
 }
 
 // TestWhatHasNoProcedure builds fixture-controls-api. Its signed webhook
-// has a guard and neither an in-process call nor a procedure, and its
-// result, which no other operation returns, no record and so no display
-// components. Its @requireService operation keeps its in-process call,
-// whose doc says it applies the end-user step alone, and has no procedure;
-// its result keeps its record and components. Its @allowService one has
-// both. A procedure whose route has traffic controls gets a layer with
-// them, and the build log says why each item is left out.
+// has a guard and neither an in-process call nor a procedure, its input,
+// whose fields a form holds, no form, and its result, which no other
+// operation returns, no record and so no display components. Its
+// @requireService operation keeps its in-process call, whose doc says it
+// applies the end-user step alone, and has no procedure; its result keeps
+// its record and components. Its @allowService one has both. A procedure
+// whose route has traffic controls gets a layer with them, and the build
+// log says why each item is left out.
 func TestWhatHasNoProcedure(t *testing.T) {
 	root := testpaths.TempDir(t)
 	var log bytes.Buffer
@@ -481,6 +482,9 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	if strings.Contains(records, "ReceiptRecord") {
 		t.Error("records.rs mirrors the webhook's result, which no page receives")
 	}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, controlsService), "src", "forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("forms.rs written for the webhook's input, which no page submits: %v", err)
+	}
 	if strings.Contains(views, "pub async fn receipt_") {
 		t.Error("views.rs renders the webhook's result, which has no record")
 	}
@@ -501,8 +505,8 @@ func TestWhatHasNoProcedure(t *testing.T) {
 // does for fixture-controls-api with controlsAppTest: the webhook and the
 // @requireService operation have no procedure path, the @allowService one
 // has, a procedure answers its route's rate limit, body limit and timeout
-// as a ProblemRecord, and the mounted JSON API's rate limit counts each
-// client by the address Topcoat records for it.
+// as a ProblemRecord, and the procedure's rate limit and the mounted JSON
+// API's each count each client by the address Topcoat records for it.
 func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
 }
@@ -1243,7 +1247,7 @@ struct Shop {
 #[async_trait]
 impl HookImplementation for Shop {
     async fn receive_payment(&self, _ctx: RequestContext, args: HookReceivePaymentArgs) -> Result<types::Receipt, ApiError> {
-        Ok(types::Receipt { event_id: args.event_id })
+        Ok(types::Receipt { event_id: args.input.event_id })
     }
 }
 
@@ -1282,9 +1286,24 @@ fn app(slow: bool) -> Router {
 }
 
 async fn post(router: &Router, uri: &str, body: String, length: Option<usize>) -> (StatusCode, http::HeaderMap, String) {
+    post_as(router, uri, body, length, None).await
+}
+
+// A post from a client at ip, as Topcoat's server records the connection's
+// address; none when ip is.
+async fn post_as(
+    router: &Router,
+    uri: &str,
+    body: String,
+    length: Option<usize>,
+    ip: Option<[u8; 4]>,
+) -> (StatusCode, http::HeaderMap, String) {
     let mut request = http::Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json");
     if let Some(length) = length {
         request = request.header(header::CONTENT_LENGTH, length);
+    }
+    if let Some(ip) = ip {
+        request = request.extension(RemoteAddr(SocketAddr::from((ip, 40000))));
     }
     let response = router.handle(request.body(Body::from(body)).unwrap()).await;
     let (status, headers) = (response.status(), response.headers().clone());
@@ -1347,6 +1366,23 @@ async fn a_procedure_answers_its_routes_rate_limit_as_a_problem() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains(r#""err""#) && body.contains(r#""code":"too_many_requests""#) && body.contains(r#""v":"429""#), "{body}");
     assert!(headers.contains_key(header::RETRY_AFTER), "{headers:?}");
+}
+
+#[tokio::test]
+async fn each_client_of_a_procedure_has_its_own_budget() {
+    let router = app(false);
+    let (ada, bob) = (Some([10, 0, 0, 1]), Some([10, 0, 0, 2]));
+    for _ in 0..2 {
+        let (_, _, body) = post_as(&router, PLACE_ORDER, no_arguments(0), None, ada).await;
+        assert!(body.contains(r#""ok""#), "{body}");
+    }
+    let (status, headers, body) = post_as(&router, PLACE_ORDER, no_arguments(0), None, ada).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""err""#) && body.contains(r#""code":"too_many_requests""#) && body.contains(r#""v":"429""#), "{body}");
+    assert!(headers.contains_key(header::RETRY_AFTER), "{headers:?}");
+    // Another client's budget is its own.
+    let (_, _, body) = post_as(&router, PLACE_ORDER, no_arguments(0), None, bob).await;
+    assert!(body.contains(r#""ok""#), "{body}");
 }
 
 #[tokio::test]

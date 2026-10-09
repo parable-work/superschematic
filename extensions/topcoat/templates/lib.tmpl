@@ -5,16 +5,17 @@
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
 {{- if .Records }}
-//! `records` mirrors each type an operation returns as a record a page
-//! can hand the browser.
+//! `records` mirrors each type a call in `operations` returns as a record a
+//! page can hand the browser; the result of an operation without a call, a
+//! webhook's, has none.
 {{- end }}
 {{- if .Forms }}
-//! `forms` reads and renders a form per input type whose fields a form
-//! holds.
+//! `forms` reads and renders a form per input type a call in `operations`
+//! takes whose fields a form holds.
 {{- end }}
 {{- if .Procedures }}
-//! `procedures` lets browser code call each operation, its arguments and
-//! result records; the app's `.discover()` registers them.
+//! `procedures` lets browser code call each operation a browser may, its
+//! arguments and result records; the app's `.discover()` registers them.
 {{- end }}
 {{- if .ControlledProcedures }}
 //! `{{ .SetupMethod }}` puts each route's traffic controls in front of its

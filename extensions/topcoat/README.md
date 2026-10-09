@@ -21,8 +21,8 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
   nests, as a Topcoat record a page can hand the browser.
-- reads and renders a form per input type whose fields a form holds, by
-  the input type's rules ([Forms](#forms)).
+- reads and renders a form per input type an operation a page calls takes
+  whose fields a form holds, by the input type's rules ([Forms](#forms)).
 - lets browser code call each operation through a Topcoat procedure, its
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
@@ -144,9 +144,9 @@ record from the API's value.
 
 ## Forms
 
-An operation's input type whose fields a form holds (a string, a number,
-a boolean or an enum, each alone, declared by the service itself) gets a
-form in `forms`:
+The input type of an operation with an in-process call whose fields a
+form holds (a string, a number, a boolean or an enum, each alone, declared
+by the service itself) gets a form in `forms`:
 
 - **`<Input>Form`** holds each field as the browser sends it
   (`Option<String>`), so it deserializes from Topcoat's `Form<T>`, and a
@@ -187,7 +187,10 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 ```
 
 An input type with a list, a map, an object, a union or any JSON value
-gets no form, and the build log says why. `forms: false` in
+gets no form, and the build log says why. A form submits through the
+operation's in-process call, so the input of an operation without one, a
+webhook's or one the service mounts itself, gets none either
+([what has no procedure](#what-has-no-procedure)). `forms: false` in
 `outputs.topcoat` leaves out the module.
 
 ## Procedures
@@ -234,7 +237,8 @@ so it exists only where a browser's request can meet the route's rules:
 
 The doc of the operation's call, or of its guard, says why, and so does
 the build log. The result of an operation without a call gets no record,
-nor does a type that only a left-out procedure's arguments name.
+and its input no form. A type that only a left-out procedure's arguments
+name gets no record either.
 
 ### Route controls
 
