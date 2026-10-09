@@ -224,3 +224,40 @@ func TestUserRoutesSDKCompiles(t *testing.T) {
 	}
 	requireToolsBuilt(t, sdkDir)
 }
+
+// TestUserRoutesSDKCookieSessions: the SDK of an API that serves the user
+// model takes the fetch credentials mode for a cookie session (D50), passes
+// it to fetch, and sends no stored token in its place; an SDK of an API
+// without the user model is unchanged.
+func TestUserRoutesSDKCookieSessions(t *testing.T) {
+	_, apiOutput, parseable := loadUserRoutesAPI(t)
+	outDir := t.TempDir()
+	sdkOutput := writeUserRoutesSDK(t, apiOutput, parseable, outDir)
+	if !sdkOutput.CookieSessions || sdkOutput.LoginNamespace != "account" {
+		t.Errorf("cookie sessions %v, login namespace %q", sdkOutput.CookieSessions, sdkOutput.LoginNamespace)
+	}
+	for file, wants := range map[string][]string{
+		"types.ts":  {"credentials?: RequestCredentials;"},
+		"client.ts": {"{ credentials: this.config.credentials }", "if (this.config.credentials !== undefined && !this.config.auth) {"},
+		"README.md": {"### Sessions", "credentials: 'include',", "session: SessionTransport.Cookie"},
+	} {
+		source, err := os.ReadFile(filepath.Join(outDir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(source), want) {
+				t.Errorf("%s has no %s", file, want)
+			}
+		}
+	}
+
+	_, plainAPI, plainParseable := loadFixtureAPI(t)
+	plain, err := Generate(plainAPI, plainParseable, nestedArraysClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.CookieSessions || plain.LoginNamespace != "" {
+		t.Errorf("fixture-api: cookie sessions %v, login namespace %q", plain.CookieSessions, plain.LoginNamespace)
+	}
+}

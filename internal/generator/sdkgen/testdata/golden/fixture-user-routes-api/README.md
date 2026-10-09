@@ -87,6 +87,41 @@ sdk.setToken('new-jwt-token');
 sdk.clearToken();
 ```
 
+### Sessions
+
+A user signs in with the user model's login (D50), and the login chooses
+how the session travels. This API's login is
+`sdk.account.login`.
+
+A bearer session's login answers its token, which the client sends once it
+is set (or passed as `auth.token`):
+
+```typescript
+const { token } = await sdk.account.login({ login: 'ada@example.com', password });
+sdk.setToken(token!);
+```
+
+A browser app takes a cookie session: with `credentials: 'include'` the
+client passes the credentials mode to `fetch`, so the browser sends and
+receives the session cookie, across origins too, and a login with session
+`cookie` answers no token. Without `auth`, the client sends no
+`Authorization`, which the server would read before the cookie:
+
+```typescript
+import { SessionTransport } from '@schemas/fixture-user-routes-api-types';
+
+const sdk = new FixtureUserRoutesApiSDK({
+  baseUrl: 'https://api.example.com',
+  credentials: 'include',
+});
+await sdk.account.login({ login: 'ada@example.com', password, session: SessionTransport.Cookie });
+```
+
+A cross-origin app's origin is one of the identity config's
+`trustedOrigins`: the server refuses a cookie login, and every cookie
+request but `GET`, `HEAD` and `OPTIONS`, from another origin, with 403
+`cross_origin`. A session has no refresh: after a 401, sign in again.
+
 ### Making API Calls
 
 #### AccountNamespace

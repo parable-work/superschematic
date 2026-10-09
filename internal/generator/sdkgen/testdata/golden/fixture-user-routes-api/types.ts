@@ -18,6 +18,15 @@ export interface SDKConfig {
   /** Authentication configuration (only for authenticated APIs) */
   auth?: AuthConfig;
 
+  /**
+   * The fetch credentials mode (RequestInit.credentials). 'include' for a
+   * cookie session (D50): a login with session 'cookie' sets the session
+   * cookie, which no script reads and the browser sends with every call,
+   * across origins too, and answers no token. With credentials and no auth,
+   * the client sends no Authorization, so the cookie carries the session.
+   */
+  credentials?: RequestCredentials;
+
   /** The calling service's credential, sent on every request (D37) */
   serviceCredential?: ServiceCredentialConfig;
 

@@ -574,6 +574,22 @@ func (r run) generateTypeScriptAPI() error {
 	return nil
 }
 
+// authDBSchema loads the schema the API's config names as its authDb, or
+// returns nil when it names none. A TypeScript server and SDK read it for
+// its User table (D50): with one, the server authenticates with the identity
+// runtime and the SDK takes a cookie session's credentials.
+func (r run) authDBSchema() (*ir.Schema, error) {
+	name := r.Config.AuthDB
+	if name == "" || name == r.Config.Name {
+		return nil, nil
+	}
+	authDB, err := r.LoadDependency(name)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load the authDb %s of %s, whose User table its TypeScript server and SDK read (D50): %w", name, r.Config.Name, err)
+	}
+	return authDB, nil
+}
+
 // resolveUpstreamAuth determines the DB schema backing authentication for a
 // public API: the authDb config value when set, otherwise the single DB-kind
 // dependency. Non-public schemas carry no upstream auth.
@@ -1097,6 +1113,16 @@ func (r run) generateTypeScriptSDK() error {
 		return err
 	}); err != nil {
 		return fmt.Errorf("generator: typescript sdk for %s: %w", r.Config.Name, err)
+	}
+	// An API whose authDb has a User table verifies the session cookie
+	// another API's login set, so its SDK takes the credentials mode too
+	// (D50).
+	if sdkOutput != nil && !sdkOutput.CookieSessions {
+		authDB, err := r.authDBSchema()
+		if err != nil {
+			return err
+		}
+		sdkOutput.CookieSessions = authDB != nil && authDB.UserTable() != nil
 	}
 
 	dir := SDKDir(r.Options.OutputRoot, "typescript", r.Config.Name)
