@@ -98,6 +98,22 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 }
 
+// A field may say it is volatile: it moves at a read, with no event of
+// its own instance. The registered field carries the flag, and a field
+// that does not say so is not.
+func TestRegisterBehaviorVolatileField(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Tally", map[string]any{
+		"fields": []any{map[string]any{"name": "total", "volatile": true}, map[string]any{"name": "lastAt"}},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	tally, _ := reg.Behavior("acme.Tally")
+	if want := []BehaviorField{{Name: "total", Volatile: true}, {Name: "lastAt"}}; !slices.Equal(tally.Fields, want) {
+		t.Fatalf("acme.Tally fields = %+v, want %+v", tally.Fields, want)
+	}
+}
+
 // A declaration may give the schema of the precondition a caller sends
 // for the behavior, held to a paramsSchema's rule, and the codes its
 // vetoes carry, each lowercase snake case and listed once, beside the
@@ -201,6 +217,7 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"create params open by true", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "object", "additionalProperties": true}}), `createParamsSchema must set "additionalProperties": false or a schema`},
 		{"field name", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "rating count"}}}), `behavior acme.Rating field name "rating count" is not an identifier`},
 		{"field twice", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars"}, map[string]any{"name": "stars"}}}), `behavior acme.Rating declares field "stars" twice`},
+		{"field volatile not a boolean", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars", "volatile": "yes"}}}), "behavior declaration of extension acme: "},
 		{"operation not camelCase", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("Rate", nil)}}), `behavior acme.Rating operation name "Rate" is not camelCase`},
 		{"operation snake_case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate_item", nil)}}), `operation name "rate_item" is not camelCase`},
 		{"operation twice", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", nil), operation("rate", nil)}}), `behavior acme.Rating declares operation "rate" twice`},

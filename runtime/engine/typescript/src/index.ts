@@ -115,6 +115,7 @@ export type {
   BehaviorSchedule,
   BehaviorScope,
   ColumnSpec,
+  ConfigBehaviorField,
   ConfigChange,
   Columns,
   ConfigSchema,

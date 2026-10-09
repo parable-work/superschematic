@@ -112,6 +112,7 @@ describe('behavior registration refuses', () => {
       [(d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'), /operation increment scope "type" is not "instance" or "schema"/],
       [(d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
       [(d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],
+      [(d) => ((d.fields as Array<Record<string, unknown>>)[0].volatile = 'yes'), /fields\[0\]\.volatile is a boolean/],
       [(d) => (d.requires = ['test.Counter']), /requires names the behavior itself/],
       [(d) => ((d.requires = ['test.Flag']), (d.conflicts = ['test.Flag'])), /it both requires and conflicts with test\.Flag/],
       [(d) => (d.configSchema = { type: 'object', properties: { start: { type: 'nonsense' } } }), /configSchema does not compile/],

@@ -53,6 +53,7 @@ export type {
   NumberingScope,
   PresenceConfig,
   PresenceTransition,
+  ReactionChanges,
   ReactionRule,
   ReactionSource,
   ReactionThen,

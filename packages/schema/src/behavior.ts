@@ -226,11 +226,20 @@ export interface ReactionRule {
   readonly then: ReactionThen;
 }
 
-/** What sets a rule off: one of enters, allTerminal, anyTerminal, holds and revised. */
+/** What sets a rule off: one of enters, changes, allTerminal, anyTerminal, holds and revised. */
 export type ReactionWhen =
   | {
       /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
       readonly enters: string;
+    }
+  | {
+      /**
+       * The rule fires when a create, an update or an operation of the
+       * instance moves the value of field: to to when it is given, from
+       * from when it is given. A create moves a field from absent; a delete
+       * sets nothing off.
+       */
+      readonly changes: ReactionChanges;
     }
   | {
       /**
@@ -268,6 +277,22 @@ export type ReactionWhen =
        */
       readonly revised: { readonly link: string };
     };
+
+/** The field a changes rule hears, and the values it moves between. */
+export interface ReactionChanges {
+  /**
+   * An own field of the type, by its JSON key, or a field of a behavior
+   * the type lists, by qualified name ("Workflow.status"), a member path
+   * after it allowed ("Lease.ended.reason"). A volatile field, which moves
+   * at a read with no event, and "Workflow.enteredAt", which moves with
+   * the status, are refused.
+   */
+  readonly field: string;
+  /** The value the field moves to; any value when absent. */
+  readonly to?: unknown;
+  /** The value the field moves from; any value when absent. A create moves a field from absent, which from never names. */
+  readonly from?: unknown;
+}
 
 /** The instances an allTerminal or anyTerminal rule hears. */
 export interface ReactionSource {

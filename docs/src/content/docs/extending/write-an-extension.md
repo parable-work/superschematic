@@ -697,7 +697,9 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `behaviors["acme.Rating"].ratingCount`, apart from the type's own
   fields and every other behavior's, so none collides, and a filter or a
   display names one by its qualified name, `acme.Rating.ratingCount`.
-  A config never renames a field.
+  A config never renames a field. A field the engine computes at a read
+  from other instances, the clock or the config says `"volatile": true`,
+  since no event of its instance records its moves.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an

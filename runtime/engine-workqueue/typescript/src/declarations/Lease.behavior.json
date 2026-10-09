@@ -180,7 +180,8 @@
     },
     {
       "name": "active",
-      "description": "Whether a lease is held and has not expired."
+      "description": "Whether a lease is held and has not expired.",
+      "volatile": true
     },
     {
       "name": "expiries",

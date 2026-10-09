@@ -27,6 +27,8 @@ export type ProjectBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: ProjectState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Rollups: {
     /** Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
@@ -155,6 +157,8 @@ export type SpecBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: SpecState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */
@@ -709,6 +713,8 @@ export type TaskBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: TaskState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Comments: {
     /** How many comments the instance has. */

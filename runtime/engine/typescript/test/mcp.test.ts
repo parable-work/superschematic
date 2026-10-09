@@ -761,11 +761,11 @@ describe("the core's behaviors", () => {
       data: { title: 'Build' },
       behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
     });
-    const instance = created.structuredContent as { seq: number; data: unknown; behaviors: unknown };
+    const instance = created.structuredContent as { seq: number; data: unknown; behaviors: unknown; createdAt: number };
     assert.deepEqual([instance.data, instance.behaviors], [
       { title: 'Build' },
       {
-        Workflow: { status: 'todo' },
+        Workflow: { status: 'todo', enteredAt: instance.createdAt },
         Dependencies: { blocked: true },
         Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
       },

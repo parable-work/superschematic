@@ -130,7 +130,7 @@ for (const driver of drivers) {
       // Entering the state consumed its sign-offs, in the transition's event.
       assert.equal(statusOf(engine), 'approved');
       assert.deepEqual(gatesOf(engine), {});
-      assert.deepEqual(lastPatch(engine), { behaviors: { Workflow: { status: 'approved' }, Approvals: { gates: { approved: null } } } });
+      assert.deepEqual(lastPatch(engine), { behaviors: { Workflow: { status: 'approved', enteredAt: 400 }, Approvals: { gates: { approved: null } } } });
       assert.deepEqual(signOffs(engine).items, [
         { state: 'approved', subject: 'ann', note: 'Reads well.', at: 200, consumedAt: 400 },
         { state: 'approved', subject: 'bob', at: 300, consumedAt: 400 },
@@ -351,11 +351,13 @@ for (const driver of drivers) {
       reacting.runner.runDue();
       assert.deepEqual([statusOf(reacting), gatesOf(reacting)], ['approved', {}]);
       const moved = reacting.events.read(alice, { schema: 'Doc', instanceId: 'd1' }).events.at(-1);
-      assert.deepEqual([moved?.actor, moved?.cause?.behavior, (moved?.change as { patch: unknown }).patch], [
-        'runner',
-        'Reactions',
-        { behaviors: { Workflow: { status: 'approved' }, Approvals: { gates: { approved: null } } } },
-      ]);
+      // The move's patch carries the status and the consumed gate; its
+      // enteredAt only when the clock moved since the transition before.
+      const patch = (moved?.change as { patch: { behaviors: { Workflow: { status: string }; Approvals: unknown } } }).patch;
+      assert.deepEqual(
+        [moved?.actor, moved?.cause?.behavior, patch.behaviors.Workflow.status, patch.behaviors.Approvals],
+        ['runner', 'Reactions', 'approved', { gates: { approved: null } }]
+      );
       // d2 had no sign-off: the gate vetoed the runner's move, and it stays.
       assert.equal(statusOf(reacting, 'd2'), 'review');
     });

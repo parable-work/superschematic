@@ -137,7 +137,7 @@ for (const driver of drivers) {
       assert.equal(every(engine, { where: {} }).ids.length, 8);
       // valueRefs and the rest of a read work as an unfiltered list's.
       const page = engine.instances.list(alice, 'Job', { where: { 'Workflow.status': 'doing' }, valueRefs: true });
-      assert.deepEqual([page.items[0].data, page.items[0].behaviors], [{ slug: 'org/job-1', kind: 'test', rank: 1, urgent: true }, { Workflow: { status: 'doing' } }]);
+      assert.deepEqual([page.items[0].data, page.items[0].behaviors.Workflow.status], [{ slug: 'org/job-1', kind: 'test', rank: 1, urgent: true }, 'doing']);
     });
 
     test('pages keep creation order across the cursor, a list of values merged', () => {
