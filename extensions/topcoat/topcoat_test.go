@@ -5,6 +5,7 @@ import (
 	"flag"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,11 @@ const fixtures = "../../internal/loader/tsreader/testdata/services"
 // every kind a form field takes, and one a form cannot hold.
 const formsService = "fixture-forms-api"
 
+// controlsService is the extension's own fixture whose routes do more than
+// admit an end user: a signed webhook, @requireService, @allowService, and
+// @rateLimit, @bodyLimit and @timeout.
+const controlsService = "fixture-controls-api"
+
 // viewsService is the extension's own fixture whose result type has a
 // field of every kind a display component renders, and a @display.
 const viewsService = "fixture-views-api"
@@ -34,7 +40,7 @@ const viewsService = "fixture-views-api"
 // serviceDir is a fixture's directory: the extension's own, or the
 // loader's.
 func serviceDir(name string) string {
-	if name == formsService || name == viewsService {
+	if name == formsService || name == controlsService || name == viewsService {
 		return filepath.Join("testdata", "services", name)
 	}
 	return filepath.Join(fixtures, name)
@@ -62,11 +68,12 @@ func build(t *testing.T, outputRoot string, outputs map[string]any) (*registry.R
 // step.
 func buildService(t *testing.T, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
 	t.Helper()
-	return buildWithNaming(t, registry.DefaultNaming(), name, outputRoot, outputs)
+	return buildWithNaming(t, registry.DefaultNaming(), name, outputRoot, outputs, nil)
 }
 
-// buildWithNaming is buildService under names, a superschematic.toml.
-func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any) (*registry.Result, error) {
+// buildWithNaming is buildService under names, a superschematic.toml,
+// writing the build's log to log when it is not nil.
+func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
 	t.Helper()
 	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
@@ -93,6 +100,7 @@ func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot strin
 		Paths:       testpaths.Local(t),
 		Naming:      names,
 		Registry:    reg,
+		Log:         log,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
 		},
@@ -153,7 +161,7 @@ func TestTheNamingFileListsServices(t *testing.T) {
 	outputs := rustOutputs()
 	delete(outputs, "topcoat")
 	root := testpaths.TempDir(t)
-	result, err := buildWithNaming(t, names, "fixture-api", root, outputs)
+	result, err := buildWithNaming(t, names, "fixture-api", root, outputs, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -165,7 +173,7 @@ func TestTheNamingFileListsServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseNaming: %v", err)
 	}
-	if result, err = buildWithNaming(t, unlisted, "fixture-api", testpaths.TempDir(t), outputs); err != nil || result.Outputs[topcoat.OutputKey] != "" {
+	if result, err = buildWithNaming(t, unlisted, "fixture-api", testpaths.TempDir(t), outputs, nil); err != nil || result.Outputs[topcoat.OutputKey] != "" {
 		t.Errorf("an unlisted service wrote a crate: %v, %v", err, result.Outputs)
 	}
 
@@ -192,11 +200,13 @@ func skipped(result *registry.Result, reason string) bool {
 // TestGolden compares the crates written for fixture-api, whose
 // operations need a caller, fixture-nested-arrays-api, whose operations
 // need none and whose result nests records in lists of lists,
-// fixture-forms-api, whose input types make forms, and fixture-views-api,
-// whose result's fields are of every kind a display component renders,
-// with testdata/golden/<service>; -update rewrites them.
+// fixture-forms-api, whose input types make forms, fixture-controls-api,
+// whose routes have a webhook's signature check, service clauses and
+// traffic controls, and fixture-views-api, whose result's fields are of
+// every kind a display component renders, with
+// testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, viewsService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -415,10 +425,86 @@ func TestViewsOff(t *testing.T) {
 	}
 }
 
+// TestWhatHasNoProcedure builds fixture-controls-api. Its signed webhook
+// has a guard and neither an in-process call nor a procedure, and its
+// result, which no other operation returns, no record. Its @requireService
+// operation keeps its in-process call, whose doc says it applies the
+// end-user step alone, and has no procedure; its @allowService one has
+// both. A procedure whose route has traffic controls gets a layer with
+// them, and the build log says why each item is left out.
+func TestWhatHasNoProcedure(t *testing.T) {
+	root := testpaths.TempDir(t)
+	var log bytes.Buffer
+	if _, err := buildWithNaming(t, registry.DefaultNaming(), controlsService, root, rustOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, controlsService), "src", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	operations, procedures, records := read("operations.rs"), read("procedures.rs"), read("records.rs")
+	for _, want := range []string{
+		"pub async fn can_hook_receive_payment(",
+		"/// It has no in-process call: a third party calls it (@webhook), and its route\n/// checks the third party's signature first (@hmacVerified).",
+		"pub async fn stock_reindex_stock(",
+		"/// It has no procedure: a browser holds no service credential\n/// (@requireService).",
+		"This call applies\n/// the end-user step alone",
+		"pub async fn stock_release_reservation(",
+	} {
+		if !strings.Contains(operations, want) {
+			t.Errorf("operations.rs lacks %q", want)
+		}
+	}
+	if strings.Contains(operations, "pub async fn hook_receive_payment(") {
+		t.Error("operations.rs has an in-process call for the webhook")
+	}
+	for _, path := range []string{"hook/receive-payment", "stock/reindex-stock"} {
+		if strings.Contains(procedures, path) {
+			t.Errorf("procedures.rs has a procedure on %s", path)
+		}
+	}
+	for _, want := range []string{
+		`#[procedure("/_superschematic/fixture-controls-api/stock/release-reservation")]`,
+		`ProcedureControls::new("/_superschematic/fixture-controls-api/order/place-order", refusal::<OrderViewRecord>)
+                .rate_limit(2)
+                .body_limit_megabytes(3)
+                .timeout_seconds(1),`,
+	} {
+		if !strings.Contains(procedures, want) {
+			t.Errorf("procedures.rs lacks %q", want)
+		}
+	}
+	if strings.Contains(records, "ReceiptRecord") {
+		t.Error("records.rs mirrors the webhook's result, which no page receives")
+	}
+	for _, want := range []string{
+		"no in-process call for hook.receivePayment: a third party calls it (@webhook)",
+		"no procedure for stock.reindexStock: a browser holds no service credential (@requireService)",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
+// TestProceduresKeepTheirRoutesRules does what TestTheCrateServesATopcoatApp
+// does for fixture-controls-api with controlsAppTest: the webhook and the
+// @requireService operation have no procedure path, the @allowService one
+// has, a procedure answers its route's rate limit, body limit and timeout
+// as a ProblemRecord, and the mounted JSON API's rate limit counts each
+// client by the address Topcoat records for it.
+func TestProceduresKeepTheirRoutesRules(t *testing.T) {
+	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
+}
+
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
-// test as tests/app.rs of the Topcoat crate, and runs cargo clippy with
-// warnings denied, then cargo test, on it.
-func cargoTestCrate(t *testing.T, service, test string) {
+// test as tests/app.rs of the Topcoat crate, with devDeps beside the
+// dev-dependencies every test has, and runs cargo clippy with warnings
+// denied, then cargo test, on it.
+func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -442,6 +528,9 @@ async-trait = "0.1.89"
 http = "1"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 `)...)
+	for _, dep := range devDeps {
+		manifest = append(manifest, dep+"\n"...)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1076,5 +1165,230 @@ async fn a_record_that_nests_itself_renders_each_level() {
 fn an_enum_value_is_labeled_by_its_member() {
     assert_eq!(order_status_label("on_hold"), "On hold");
     assert_eq!(order_status_label("lost"), "lost");
+}
+`
+
+// controlsAppTest is tests/app.rs of fixture-controls-api's Topcoat crate.
+const controlsAppTest = `use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use http::request::Parts;
+use schemas_fixture_controls_api_topcoat::api::runtime::{
+    ApiError, Authenticator, Principal, RequestContext, ServiceAuthenticator, ServiceCaller,
+};
+use schemas_fixture_controls_api_topcoat::api::{
+    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderImplementation, StockImplementation,
+    StockReleaseReservationArgs, WebhookVerifier,
+};
+use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{header, page, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::view::{view, View};
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+struct NoServices;
+
+#[async_trait]
+impl ServiceAuthenticator for NoServices {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<ServiceCaller>, ApiError> {
+        Ok(None)
+    }
+}
+
+// The provider's signature check, which no request here passes.
+struct Unsigned;
+
+#[async_trait]
+impl WebhookVerifier for Unsigned {
+    async fn verify(&self, _request: Request, _next: Next) -> Response {
+        (StatusCode::UNAUTHORIZED, "unsigned").into_response()
+    }
+}
+
+struct Caller;
+
+#[async_trait]
+impl PageAuthenticator for Caller {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(Some(Principal::new("ada", ["stock"])))
+    }
+}
+
+// A shop whose orders take longer than their route allows when slow.
+struct Shop {
+    slow: bool,
+}
+
+#[async_trait]
+impl HookImplementation for Shop {
+    async fn receive_payment(&self, _ctx: RequestContext, args: HookReceivePaymentArgs) -> Result<types::Receipt, ApiError> {
+        Ok(types::Receipt { event_id: args.event_id })
+    }
+}
+
+#[async_trait]
+impl StockImplementation for Shop {
+    async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+        Ok(types::StockRun { done: true })
+    }
+    async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: args.id, held: false })
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn place_order(&self, _ctx: RequestContext) -> Result<types::OrderView, ApiError> {
+        if self.slow {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+        Ok(types::OrderView { id: "1".to_string() })
+    }
+}
+
+fn app(slow: bool) -> Router {
+    let shop = Arc::new(Shop { slow });
+    let verifier: Arc<dyn WebhookVerifier> = Arc::new(Unsigned);
+    let implementations = Implementations {
+        hook: shop.clone(),
+        order: shop.clone(),
+        stock: shop,
+        authenticator: Arc::new(NoRequests),
+        service_authenticator: Arc::new(NoServices),
+        webhook_verifiers: HashMap::from([("stripe".to_string(), verifier)]),
+    };
+    Router::builder().discover().fixture_controls_api(implementations, Caller).build()
+}
+
+async fn post(router: &Router, uri: &str, body: String, length: Option<usize>) -> (StatusCode, http::HeaderMap, String) {
+    let mut request = http::Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json");
+    if let Some(length) = length {
+        request = request.header(header::CONTENT_LENGTH, length);
+    }
+    let response = router.handle(request.body(Body::from(body)).unwrap()).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+// The webhook keeps its guard, and the @requireService operation its
+// in-process call, which applies the end-user step alone (D37, amended).
+#[page("/guards")]
+async fn guards(cx: &Cx) -> topcoat::Result<impl View> {
+    let hook = operations::can_hook_receive_payment(cx).await.is_ok();
+    let run = operations::stock_reindex_stock(cx).await?;
+    let said = format!("webhook guard {hook}, reindexed {}", run.done);
+    Ok(view! { <p>(said)</p> })
+}
+
+const PLACE_ORDER: &str = "/_superschematic/fixture-controls-api/order/place-order";
+
+// A procedure's arguments, none, with as much space between them as given.
+fn no_arguments(spaces: usize) -> String {
+    format!("[{}]", " ".repeat(spaces))
+}
+
+#[tokio::test]
+async fn a_webhook_has_no_procedure_and_its_route_checks_the_signature() {
+    let router = app(false);
+    let (status, _, _) = post(&router, "/_superschematic/fixture-controls-api/hook/receive-payment", no_arguments(0), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, body) = post(&router, "/api/hooks/payment", r#"{"eventId":"1"}"#.to_string(), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body, "unsigned");
+    let request = http::Request::builder().uri("/guards").body(Body::empty()).unwrap();
+    let response = router.handle(request).await;
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(body.contains("webhook guard true, reindexed true"), "{body}");
+}
+
+#[tokio::test]
+async fn an_operation_only_services_call_has_no_procedure() {
+    let router = app(false);
+    let (status, _, _) = post(&router, "/_superschematic/fixture-controls-api/stock/reindex-stock", no_arguments(0), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // @allowService admits an end user, so its procedure is registered: it
+    // refuses a body that is not its JSON rather than answering 404.
+    let (status, _, _) = post(&router, "/_superschematic/fixture-controls-api/stock/release-reservation", "{".to_string(), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_procedure_answers_its_routes_rate_limit_as_a_problem() {
+    let router = app(false);
+    for _ in 0..2 {
+        let (status, _, body) = post(&router, PLACE_ORDER, no_arguments(0), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(r#""ok""#), "{body}");
+    }
+    let (status, headers, body) = post(&router, PLACE_ORDER, no_arguments(0), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""err""#) && body.contains(r#""code":"too_many_requests""#) && body.contains(r#""v":"429""#), "{body}");
+    assert!(headers.contains_key(header::RETRY_AFTER), "{headers:?}");
+}
+
+#[tokio::test]
+async fn a_procedure_answers_its_routes_body_limit_as_a_problem() {
+    const MEBIBYTE: usize = 1024 * 1024;
+    // Past Topcoat's own 2 MiB and within the route's 3: the arguments are
+    // read and the order placed.
+    let (_, _, body) = post(&app(false), PLACE_ORDER, no_arguments(5 * MEBIBYTE / 2), None).await;
+    assert!(body.contains(r#""ok""#), "{body}");
+    // Past the route's 3, sent or declared.
+    let (status, _, body) = post(&app(false), PLACE_ORDER, no_arguments(3 * MEBIBYTE), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""err""#) && body.contains(r#""code":"payload_too_large""#) && body.contains(r#""v":"413""#), "{body}");
+    let (_, _, body) = post(&app(false), PLACE_ORDER, no_arguments(0), Some(4 * MEBIBYTE)).await;
+    assert!(body.contains(r#""code":"payload_too_large""#), "{body}");
+}
+
+// A post to the JSON API from a client at ip, as Topcoat's server records
+// the connection's address; none when ip is.
+async fn post_from(router: &Router, uri: &str, ip: Option<[u8; 4]>) -> StatusCode {
+    let mut request = http::Request::builder().method("POST").uri(uri);
+    if let Some(ip) = ip {
+        request = request.extension(RemoteAddr(SocketAddr::from((ip, 40000))));
+    }
+    router.handle(request.body(Body::empty()).unwrap()).await.status()
+}
+
+#[tokio::test]
+async fn each_client_of_a_json_api_route_has_its_own_budget() {
+    let router = app(false);
+    let (ada, bob) = (Some([10, 0, 0, 1]), Some([10, 0, 0, 2]));
+    for _ in 0..2 {
+        assert_eq!(post_from(&router, "/api/orders", ada).await, StatusCode::OK);
+    }
+    assert_eq!(post_from(&router, "/api/orders", ada).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(post_from(&router, "/api/orders", bob).await, StatusCode::OK);
+    // Clients Topcoat has no address for share the runtime's fallback
+    // bucket, apart from the clients it knows.
+    for _ in 0..2 {
+        assert_eq!(post_from(&router, "/api/orders", None).await, StatusCode::OK);
+    }
+    assert_eq!(post_from(&router, "/api/orders", None).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(post_from(&router, "/api/orders", bob).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_procedure_answers_its_routes_timeout_as_a_problem() {
+    let (status, _, body) = post(&app(true), PLACE_ORDER, no_arguments(0), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""err""#) && body.contains(r#""code":"gateway_timeout""#) && body.contains(r#""v":"504""#), "{body}");
 }
 `

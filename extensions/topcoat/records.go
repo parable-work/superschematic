@@ -76,15 +76,14 @@ func newRecordBuilder(schemas schemaSet) *recordBuilder {
 	return &recordBuilder{schemaSet: schemas, records: map[string]*record{}}
 }
 
-// addResults adds a record per object type an operation of the service
-// returns, and per object type such a type nests.
-func (b *recordBuilder) addResults() error {
-	for _, set := range b.schemaSet[0].OperationSets {
-		for _, op := range set.Operations {
-			if b.objectType(op.TypeRef.Name) != nil {
-				if err := b.add(op.TypeRef.Name); err != nil {
-					return err
-				}
+// addResults adds a record per object type one of ops returns, and per
+// object type such a type nests. ops are the operations a page calls
+// in-process: the result of one without the call reaches no page.
+func (b *recordBuilder) addResults(ops []declared) error {
+	for _, d := range ops {
+		if b.objectType(d.op.TypeRef.Name) != nil {
+			if err := b.add(d.op.TypeRef.Name); err != nil {
+				return err
 			}
 		}
 	}

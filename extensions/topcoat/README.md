@@ -6,15 +6,21 @@ is Rust, `outputs.topcoat` writes a crate that a
 beside the API crate, at `<out>/topcoat/<service>`, and is named
 `<rust_crate_prefix><service>-topcoat`. The crate:
 
-- mounts the service's JSON API in the app's router, at `/api/{*rest}`;
+- mounts the service's JSON API in the app's router, at `/api/{*rest}`,
+  giving its routes the client's address as Topcoat reads it, by which
+  their rate limits count clients;
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
-  implementation ([D43](../../docs/DECISIONS.md));
+  implementation ([D43](../../docs/DECISIONS.md)). An operation whose
+  route does something first that a call cannot has no call: a webhook
+  (`@webhook`, `@hmacVerified`), which a third party calls and whose route
+  checks its signature, and an operation the service mounts itself
+  (`@manualRouteRegistration`);
 - offers a guard per operation, `can_<operation>`, which admits the caller
-  alone;
-- mirrors each type an operation returns, and the types it nests, as a
-  Topcoat record a page can hand the browser.
+  alone, and whose doc says why an operation has no call;
+- mirrors each type an operation a page calls returns, and the types it
+  nests, as a Topcoat record a page can hand the browser.
 - reads and renders a form per input type whose fields a form holds, by
   the input type's rules ([Forms](#forms)).
 - lets browser code call each operation through a Topcoat procedure, its
@@ -186,8 +192,9 @@ gets no form, and the build log says why. `forms: false` in
 
 ## Procedures
 
-Each mounted operation is a Topcoat procedure in `procedures`, on a stable
-path: `/_superschematic/<service>/<namespace>/<operation>`. The app's
+Each operation a browser may call is a Topcoat procedure in `procedures`
+([what has none](#what-has-no-procedure)), on a stable path:
+`/_superschematic/<service>/<namespace>/<operation>`. The app's
 `.discover()` registers them; registering one again with `.route` panics.
 
 - **Arguments.** The procedure takes the operation's arguments as a
@@ -209,6 +216,50 @@ inside an event handler; see Topcoat's procedures.
 
 Records are the arguments' and results' carriers, so `records: false`
 leaves out the procedures too; `procedures: false` leaves out only them.
+
+### What has no procedure
+
+A procedure is a second route to its operation, one any browser reaches,
+so it exists only where a browser's request can meet the route's rules:
+
+- An operation without an in-process call has none: a webhook, signed or
+  not, and an operation the service mounts itself.
+- An operation whose route admits only a service caller
+  (`@requireService`, [D37](../../docs/DECISIONS.md)) has none, since a
+  browser holds no service credential. Its in-process call stays and
+  applies the end-user step alone; whether it should refuse is still
+  open.
+  An `@allowService` operation keeps its procedure, since its route
+  admits an end user too.
+
+The doc of the operation's call, or of its guard, says why, and so does
+the build log. The result of an operation without a call gets no record,
+nor does a type that only a left-out procedure's arguments name.
+
+### Route controls
+
+A procedure meets its route's `@rateLimit`, `@bodyLimit` and `@timeout`
+as the route's request does, in the route's order, and answers each
+refusal as the route does, as a `ProblemRecord`: 429 `too_many_requests`
+(with `Retry-After`), 413 `payload_too_large`, 504 `gateway_timeout`.
+`<service>(...)` puts a `ProcedureControls` layer on the path of each
+such procedure:
+
+- **Rate limit.** The procedure has its own limiter at the route's rate,
+  which counts each client by its IP address as Topcoat reads it
+  (`client_ip`: the peer's, or the one a trusted proxy names). The JSON
+  API's route keeps its own, so a client gets the rate on each, as it
+  would on two replicas; `<service>(...)` gives the JSON API's routes the
+  same address, so both count the same clients.
+- **Body limit.** The procedure's request body is read up to the limit
+  before its arguments are decoded, and Topcoat's own limit is raised to
+  it for that procedure.
+- **Timeout.** It covers the arguments' decoding and the call.
+
+A control a procedure could not apply as its route does would leave the
+procedure out, with the reason, rather than be skipped; all three apply.
+An in-process call from the app's own page applies none of them: the
+page is a route of the app, and its controls are the app's to set.
 
 ## Display components
 
