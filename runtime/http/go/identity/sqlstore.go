@@ -435,43 +435,62 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 
 // CreateUser implements Store.
 func (s *SQLStore) CreateUser(ctx context.Context, nu NewUser) (User, error) {
-	login, err := s.parseLogin(nu.Login)
+	login, name, err := s.userValues(nu)
 	if err != nil {
 		return User{}, err
 	}
-	name := nu.Name
+	var user User
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		user, _, err = s.insertUser(ctx, tx, login, name, nu)
+		return err
+	})
+	return user, err
+}
+
+// userValues are the login and the display name a new user is written
+// with: the login as the login scalar parses it, and the name as the name
+// scalar parses it, or the login when the name is empty or is the login's
+// column.
+func (s *SQLStore) userValues(nu NewUser) (login, name string, err error) {
+	if login, err = s.parseLogin(nu.Login); err != nil {
+		return "", "", err
+	}
+	name = nu.Name
 	if name == "" || s.nameIsLogin {
-		name = login
-	} else if superscalar.KnownScalar(s.nameScalar) {
+		return login, login, nil
+	}
+	if superscalar.KnownScalar(s.nameScalar) {
 		// The name column has its scalar's bounds; a name outside them is
 		// the caller's, not a failed write.
 		if name, err = superscalar.Parse(s.nameScalar, name); err != nil {
-			return User{}, &InvalidNameError{Scalar: s.nameScalar, Err: err}
+			return "", "", &InvalidNameError{Scalar: s.nameScalar, Err: err}
 		}
 	}
+	return login, name, nil
+}
+
+// insertUser writes a user, with userValues' login and name, and their
+// credential in tx. It returns the user and their database key.
+func (s *SQLStore) insertUser(ctx context.Context, tx *sql.Tx, login, name string, nu NewUser) (User, string, error) {
 	t := s.t
 	columns, values, args := t.userLogin, "?", []any{login}
 	if !s.nameIsLogin {
 		columns, values, args = columns+", "+t.userName, values+", ?", append(args, name)
 	}
-	var user User
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		var key string
-		err := tx.QueryRowContext(ctx, s.bind("INSERT INTO "+t.user+" ("+columns+") VALUES ("+values+") ON CONFLICT ("+t.userLogin+") DO NOTHING RETURNING "+t.userKey), args...).Scan(&key)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrLoginTaken
-		}
-		if err != nil {
-			return fmt.Errorf("identity: create a user: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.credential+" ("+t.credentialUser+", "+t.passwordHash+", "+t.passwordChangedAt+") VALUES (?, ?, ?)"),
-			key, nu.PasswordHash, s.timeArg(nu.At)); err != nil {
-			return fmt.Errorf("identity: create a credential: %w", err)
-		}
-		user = User{ID: s.userKey.toWire(key), Login: login, Name: name, Roles: []Role{}}
-		return nil
-	})
-	return user, err
+	var key string
+	err := tx.QueryRowContext(ctx, s.bind("INSERT INTO "+t.user+" ("+columns+") VALUES ("+values+") ON CONFLICT ("+t.userLogin+") DO NOTHING RETURNING "+t.userKey), args...).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, "", ErrLoginTaken
+	}
+	if err != nil {
+		return User{}, "", fmt.Errorf("identity: create a user: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.credential+" ("+t.credentialUser+", "+t.passwordHash+", "+t.passwordChangedAt+") VALUES (?, ?, ?)"),
+		key, nu.PasswordHash, s.timeArg(nu.At)); err != nil {
+		return User{}, "", fmt.Errorf("identity: create a credential: %w", err)
+	}
+	return User{ID: s.userKey.toWire(key), Login: login, Name: name, Roles: []Role{}}, key, nil
 }
 
 // SetPassword implements Store.
@@ -765,17 +784,23 @@ func (s *SQLStore) CreateRole(ctx context.Context, name string, permissions []st
 	if !s.HasRoles() {
 		return Role{}, ErrNoRoles
 	}
+	role, _, err := s.insertRole(ctx, s.db, name, permissions)
+	return role, err
+}
+
+// insertRole writes a role, and returns it and its database key.
+func (s *SQLStore) insertRole(ctx context.Context, q querier, name string, permissions []string) (Role, string, error) {
 	t := s.t
 	var key string
-	err := s.db.QueryRowContext(ctx, s.bind("INSERT INTO "+t.role+" ("+t.roleName+", "+t.rolePermissions+") VALUES (?, "+s.permissionsWrite()+") ON CONFLICT ("+t.roleName+") DO NOTHING RETURNING "+t.roleKey),
+	err := q.QueryRowContext(ctx, s.bind("INSERT INTO "+t.role+" ("+t.roleName+", "+t.rolePermissions+") VALUES (?, "+s.permissionsWrite()+") ON CONFLICT ("+t.roleName+") DO NOTHING RETURNING "+t.roleKey),
 		name, permissionsJSON(permissions)).Scan(&key)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Role{}, ErrRoleNameTaken
+		return Role{}, "", ErrRoleNameTaken
 	}
 	if err != nil {
-		return Role{}, fmt.Errorf("identity: create a role: %w", err)
+		return Role{}, "", fmt.Errorf("identity: create a role: %w", err)
 	}
-	return Role{ID: s.roleKey.toWire(key), Name: name, Permissions: slices.Clone(permissions)}, nil
+	return Role{ID: s.roleKey.toWire(key), Name: name, Permissions: slices.Clone(permissions)}, key, nil
 }
 
 // UpdateRole implements Store.
@@ -886,6 +911,57 @@ func (s *SQLStore) changeGrant(ctx context.Context, userID, roleID string, chang
 		}
 		return change(tx, user, role)
 	})
+}
+
+// Bootstrap implements Store.
+func (s *SQLStore) Bootstrap(ctx context.Context, b NewBootstrap) (Role, User, error) {
+	if !s.HasRoles() {
+		return Role{}, User{}, ErrNoRoles
+	}
+	login, name, err := s.userValues(b.User)
+	if err != nil {
+		return Role{}, User{}, err
+	}
+	t := s.t
+	var role Role
+	var user User
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		// Two bootstraps at once create one administrator. On Postgres the
+		// lock conflicts with itself and with every write to the grants, so
+		// a second bootstrap waits for the first to commit and then finds
+		// its grant. SQLite lets one transaction write at a time, and the
+		// second's write fails once the first has written.
+		if s.dialect == Postgres {
+			if _, err := tx.ExecContext(ctx, "LOCK TABLE "+t.grant+" IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+				return fmt.Errorf("identity: lock the role grants: %w", err)
+			}
+		}
+		var one int
+		switch err := tx.QueryRowContext(ctx, "SELECT 1 FROM "+t.grant+" LIMIT 1").Scan(&one); {
+		case err == nil:
+			return ErrGrantExists
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("identity: look up the role grants: %w", err)
+		}
+		var roleKey, userKey string
+		var err error
+		if role, roleKey, err = s.insertRole(ctx, tx, b.Role, b.Permissions); err != nil {
+			return err
+		}
+		if user, userKey, err = s.insertUser(ctx, tx, login, name, b.User); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.grant+" ("+t.grantUser+", "+t.grantRole+", "+t.grantedAt+") VALUES (?, ?, ?)"),
+			userKey, roleKey, s.timeArg(b.User.At)); err != nil {
+			return fmt.Errorf("identity: grant a role: %w", err)
+		}
+		user.Roles = []Role{role}
+		return nil
+	})
+	if err != nil {
+		return Role{}, User{}, err
+	}
+	return role, user, nil
 }
 
 // orNotFound is err, or ErrNotFound when err is nil.

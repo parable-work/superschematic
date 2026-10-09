@@ -515,6 +515,114 @@ func TestStoreWithoutRoles(t *testing.T) {
 	if err := s.GrantRole(ctx, alice.ID, alice.ID, at(0)); !errors.Is(err, identity.ErrNoRoles) {
 		t.Errorf("GrantRole: %v, want ErrNoRoles", err)
 	}
+	if _, _, err := s.Bootstrap(ctx, newBootstrap("admin", "bob@example.com")); !errors.Is(err, identity.ErrNoRoles) {
+		t.Errorf("Bootstrap: %v, want ErrNoRoles", err)
+	}
+}
+
+// newBootstrap is a first administrator named login who holds role, with
+// the identity permissions.
+func newBootstrap(role, login string) identity.NewBootstrap {
+	return identity.NewBootstrap{
+		Role:        role,
+		Permissions: []string{"identity", "orders.read"},
+		User:        identity.NewUser{Login: login, Name: "Admin", PasswordHash: "hash-of-" + login, At: at(0)},
+	}
+}
+
+// TestStoreBootstrap: the first administrator's role, user and grant are
+// written together, once. A taken role name, a taken login or a login the
+// scalar refuses writes none of them, and once a grant exists a second
+// bootstrap writes nothing.
+func TestStoreBootstrap(t *testing.T) {
+	eachDatabase(t, func(t *testing.T, db testDB, s *identity.SQLStore) {
+		ctx := context.Background()
+		if _, err := s.CreateRole(ctx, "taken", nil); err != nil {
+			t.Fatal(err)
+		}
+		bob := mustCreateUser(t, s, "bob@example.com", "Bob")
+
+		if _, _, err := s.Bootstrap(ctx, newBootstrap("taken", "alice@example.com")); !errors.Is(err, identity.ErrRoleNameTaken) {
+			t.Errorf("a taken role name: %v, want ErrRoleNameTaken", err)
+		}
+		if _, err := s.FindLogin(ctx, "alice@example.com"); !errors.Is(err, identity.ErrNotFound) {
+			t.Errorf("a refused bootstrap left its user behind: %v", err)
+		}
+		if _, _, err := s.Bootstrap(ctx, newBootstrap("admin", "BOB@example.com")); !errors.Is(err, identity.ErrLoginTaken) {
+			t.Errorf("a taken login: %v, want ErrLoginTaken", err)
+		}
+		var invalid *identity.InvalidLoginError
+		if _, _, err := s.Bootstrap(ctx, newBootstrap("admin", "not an email")); !errors.As(err, &invalid) {
+			t.Errorf("a login the scalar refuses: %v, want an InvalidLoginError", err)
+		}
+		if roles, err := s.ListRoles(ctx); err != nil || len(roles) != 1 || roles[0].Name != "taken" {
+			t.Fatalf("refused bootstraps left the roles %+v, %v; want taken alone", roles, err)
+		}
+
+		role, user, err := s.Bootstrap(ctx, newBootstrap("admin", " Alice@Example.com "))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if role.ID == "" || role.Name != "admin" || strings.Join(role.Permissions, ",") != "identity,orders.read" {
+			t.Errorf("the bootstrap's role is %+v", role)
+		}
+		if user.ID == "" || user.Login != "alice@example.com" || user.Name != "Admin" || len(user.Roles) != 1 || user.Roles[0].ID != role.ID {
+			t.Errorf("the bootstrap's user is %+v", user)
+		}
+		rec, err := s.FindLogin(ctx, "alice@example.com")
+		if err != nil || rec.User.ID != user.ID || rec.PasswordHash != "hash-of- Alice@Example.com " || rec.User.Disabled {
+			t.Fatalf("the bootstrap's user reads %+v, %v", rec, err)
+		}
+		held, err := s.UserRoles(ctx, user.ID)
+		if err != nil || len(held) != 1 || held[0].ID != role.ID || strings.Join(held[0].Permissions, ",") != "identity,orders.read" {
+			t.Errorf("the bootstrap's user holds %+v, %v", held, err)
+		}
+
+		if _, _, err := s.Bootstrap(ctx, newBootstrap("second", "carol@example.com")); !errors.Is(err, identity.ErrGrantExists) {
+			t.Errorf("a second bootstrap: %v, want ErrGrantExists", err)
+		}
+		if _, err := s.FindLogin(ctx, "carol@example.com"); !errors.Is(err, identity.ErrNotFound) {
+			t.Errorf("a second bootstrap created its user: %v", err)
+		}
+		if roles, _ := s.ListRoles(ctx); len(roles) != 2 {
+			t.Errorf("after a second bootstrap the roles are %+v; want admin and taken", roles)
+		}
+		if held, _ := s.UserRoles(ctx, bob.ID); len(held) != 0 {
+			t.Errorf("bob holds %+v", held)
+		}
+	})
+}
+
+// TestStoreBootstrapOnce: of bootstraps run at once, each with its own
+// role and login, one creates its administrator and the others none.
+func TestStoreBootstrapOnce(t *testing.T) {
+	eachDatabase(t, func(t *testing.T, db testDB, s *identity.SQLStore) {
+		const runs = 4
+		errs := make(chan error, runs)
+		for i := range runs {
+			go func() {
+				_, _, err := s.Bootstrap(context.Background(), newBootstrap(fmt.Sprintf("admin-%d", i), fmt.Sprintf("admin-%d@example.com", i)))
+				errs <- err
+			}()
+		}
+		created := 0
+		for range runs {
+			if err := <-errs; err == nil {
+				created++
+			}
+		}
+		roles, err := s.ListRoles(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		users, err := s.ListUsers(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if created != 1 || len(roles) != 1 || len(users) != 1 {
+			t.Errorf("%d bootstraps at once created %d administrators, %d roles and %d users; want one of each", runs, created, len(roles), len(users))
+		}
+	})
 }
 
 // TestNewSQLStoreRefuses: a store is not built over a descriptor it cannot
