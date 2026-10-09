@@ -1,8 +1,10 @@
 # The database of the identity fixture: its User table and UserRole table
 # are the user model's (D50), and the loader adds Session, UserCredential
-# and UserRoleGrant beside them.
+# and UserRoleGrant beside them. Its TypeScript types export the identity
+# descriptor a TypeScript server's identity store reads.
 name: users-db
 kind: DB
 outputs:
   types:
     go: { enabled: true }
+    typescript: { enabled: true }

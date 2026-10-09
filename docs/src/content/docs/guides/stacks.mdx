@@ -531,11 +531,12 @@ until you implement it. Where the API's generated `Config` takes them, it
 also writes `AuthMiddleware(deps)`, which refuses every request with 401
 until it verifies your end users, and `PayloadDecryptor(deps)`, which
 refuses every encrypted payload. An API over the user model takes the
-identity service instead of an auth middleware, which the entrypoint
-builds over its database and its identity config field, `<API>_IDENTITY`;
-a job's entrypoint builds none. When no `go.mod` holds the package, it
-writes one beside it. It never writes into a directory that holds a Go
-file, so the package is yours from then on. Outside a stack,
+identity service instead of an auth middleware, or a TypeScript
+implementation's `authenticate`, which the entrypoint builds over its
+database and its identity config field, `<API>_IDENTITY`; a job's
+entrypoint builds none. When no `go.mod` holds the package, it writes
+one beside it. It never writes into a directory that holds a Go file, so
+the package is yours from then on. Outside a stack,
 `build --scaffold` writes the same scaffold for each Go API built. This
 is a different stub from `outputs.api.scaffoldsOutputDir`
 ([API routes](/superschematic/guides/api-routes/#operation-sets)), which

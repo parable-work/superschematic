@@ -1865,8 +1865,9 @@ as they are, with no build step (D51). The pieces mirror Go's:
   pass that writes the Go ones (section 8.1): `package.json`
   (`<npm_scope>/<stack>-<server>-server`, a workspace member that depends
   with `workspace:*` on each served API package, each implementation by
-  the name its `package.json` gives it, and each callee's SDK, and on the
-  runtime, Hono and, with a database, `pg`), `tsconfig.json` and
+  the name its `package.json` gives it, each callee's SDK and the types
+  package of each database an identity store reads, and on the runtime,
+  Hono and, with a database, `pg`), `tsconfig.json` and
   `main.ts`. `main.ts` does what Go's `main` does:
   - reads `$PORT`, 8080 when unset, and logs JSON lines through the HTTP
     runtime's `createLogger`, bound to the stack and the server;
@@ -1878,8 +1879,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
   - builds one SDK client per API called, with the endpoint's URL and
     `serviceCredentialFor` its credential, and calls each implementation's
     `create(deps)`, and its `authenticate(deps)` where a route needs an end
-    user. The end user travels per call, `{ forward: ctx }` (D37), so no
-    handler captures it as Go's `CaptureAuthorization` does;
+    user. An API whose server authenticates with the identity runtime
+    (D50) has no `authenticate`: `main.ts` builds one identity store per
+    database such an API reads, `postgresIdentityStore` over its pool and
+    the `identityDescriptor` the database's TypeScript types export, and
+    the API's service with its generated `identityService()`, from the
+    config `identityConfig` reads from the API's identity config field
+    with `parseIdentityConfigJSON`, the runtime's defaults when unset; a
+    refused config stops the server. The router takes it as `identity`.
+    The end user travels per call, `{ forward: ctx }` (D37), so no handler
+    captures it as Go's `CaptureAuthorization` does;
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
     an API with a service clause, then the runtime's `notFoundHandler` and

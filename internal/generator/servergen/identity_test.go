@@ -31,7 +31,9 @@ const (
 	// the user model; users-api, public, serves the session routes and a
 	// route of its own over it, and declares a job, PurgeSessions;
 	// users-admin, not public, the administration routes; and users-stack
-	// serves both from one server, Accounts, on the local target.
+	// serves both from one server, Accounts, on the local target. Beside
+	// them, users-ts-api serves the session routes and its own route on a
+	// TypeScript server (D51), its default one in users-ts-stack.
 	identityRoot = "testdata/identity"
 
 	// identityStack is the fixture's stack and identityServer its server;
@@ -40,13 +42,22 @@ const (
 	identityServer = "Accounts"
 	identityJob    = "users-api-purge-sessions"
 
+	// identityTSStack is the stack of the TypeScript server, identityTSAPI,
+	// named after the API it serves.
+	identityTSStack = "users-ts-stack"
+	identityTSAPI   = "users-ts-api"
+
 	// identityDatabaseEnv names the Postgres the entrypoint also serves
 	// on, as the identity runtime's store tests read it.
 	identityDatabaseEnv = "SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL"
 )
 
-// identityOrder is the order a build-all builds the identity fixture in.
-var identityOrder = []string{"users-db", "users-api", "users-admin", identityStack}
+// identityOrder is the order a build-all builds the identity fixture's Go
+// stack in, and identityTSOrder its TypeScript stack.
+var (
+	identityOrder   = []string{"users-db", "users-api", "users-admin", identityStack}
+	identityTSOrder = []string{"users-db", identityTSAPI, identityTSStack}
+)
 
 // loadIdentityFixture loads the identity fixture with the core registry,
 // whose local target the stack's environment runs on.
@@ -57,7 +68,7 @@ func loadIdentityFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range identityOrder {
+	for _, name := range append(slices.Clone(identityOrder), identityTSOrder[1:]...) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(identityRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -392,5 +403,228 @@ func run(command, base, schema string, rest []string) error {
 	}
 	fmt.Println(u.String())
 	return nil
+}
+`
+
+// TestTypeScriptIdentityEntrypointGolden: a TypeScript server whose API
+// authenticates with the identity runtime (D50, D51) builds an identity
+// store over its database's pool, from the descriptor the database's
+// TypeScript types export, and the API's identity service from its
+// identity config field, which it passes buildRouter in place of an
+// authenticator. Neither the API's Deps nor its scaffolded implementation
+// has an authenticate. The local environment binds the identity config
+// field to the local platform's config. Regenerate with:
+//
+//	go test ./internal/generator/servergen -run TestTypeScriptIdentityEntrypointGolden -update
+func TestTypeScriptIdentityEntrypointGolden(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadIdentityFixture(t)
+	f.build(t, repoRoot, tsFakePaths(repoRoot), identityTSOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	dir := servergen.ServerDir(out, identityTSStack, identityTSAPI)
+	impl := naming.Default().TypeScriptImplementationDir(repoRoot, identityTSAPI)
+	files := map[string]string{
+		filepath.Join("typescript", "server", identityTSStack, identityTSAPI, servergen.TypeScriptMainFile):    filepath.Join(dir, servergen.TypeScriptMainFile),
+		filepath.Join("typescript", "server", identityTSStack, identityTSAPI, servergen.TypeScriptPackageFile): filepath.Join(dir, servergen.TypeScriptPackageFile),
+		filepath.Join("typescript", identityTSAPI, "index.ts"):                                                 filepath.Join(impl, "index.ts"),
+	}
+	compareGoldens(t, filepath.Join(goldenRoot, "identity"), files)
+
+	deps, err := os.ReadFile(filepath.Join(generator.APIDir(out, identityTSAPI), "deps.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scaffold, err := os.ReadFile(files[filepath.Join("typescript", identityTSAPI, "index.ts")])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, code := range map[string][]byte{"deps.ts": deps, "the scaffold": scaffold} {
+		if strings.Contains(string(code), "authenticate") || strings.Contains(string(code), "AuthenticatorFactory") {
+			t.Errorf("%s of %s has an authenticator:\n%s", name, identityTSAPI, code)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(out, "stack", identityTSStack, "Local", "environment.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env ir.ResolvedEnvironment
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatal(err)
+	}
+	var binding *ir.Binding
+	for _, d := range env.Deployables {
+		for _, b := range d.Bindings {
+			if d.Name == identityTSAPI && b.Field == ir.IdentityConfigField(identityTSAPI) {
+				binding = b
+			}
+		}
+	}
+	if binding == nil || binding.IdentityOf != identityTSAPI || binding.Source != ir.BindingLiteral || binding.Value != `{"cookie":{"secure":false}}` {
+		t.Errorf("%s binds %s as %+v, want the local platform's identity config", identityTSAPI, ir.IdentityConfigField(identityTSAPI), binding)
+	}
+}
+
+// TestATypeScriptIdentityServerNeedsItsAuthDbTypes: a TypeScript server's
+// identity store reads the descriptor the authDb's TypeScript types
+// export, so the stack's build refuses one whose authDb generates none,
+// saying what to enable.
+func TestATypeScriptIdentityServerNeedsItsAuthDbTypes(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadIdentityFixture(t)
+	cfg := *f.configs["users-db"]
+	cfg.Outputs = map[string]any{"types": map[string]any{"go": map[string]any{"enabled": true}}}
+	f.configs["users-db"] = &cfg
+	options := f.options(repoRoot, tsFakePaths(repoRoot))
+	for _, name := range identityTSOrder {
+		_, err := generator.Run(f.schemas[name], f.configs[name], options)
+		if name != identityTSStack {
+			if err != nil {
+				t.Fatalf("build %s: %v", name, err)
+			}
+			continue
+		}
+		if want := "enable outputs.types.typescript in users-db's config"; err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build %s = %v, want it refused saying %q", name, err, want)
+		}
+	}
+}
+
+// TestTypeScriptIdentityEntrypointServes: the TypeScript server's package
+// installs in the output root's workspace, main.ts type-checks, and Bun
+// runs it with no database up: a protected route refuses a request
+// without a session, a trusted origin's preflight is answered, and an
+// identity config the runtime refuses stops the server, naming the field.
+// With the Postgres identityDatabaseEnv names, it serves users-db's user
+// model: a user registers and signs in, the session authenticates the
+// project's route, which the scaffold answers, and me, and logout ends it.
+func TestTypeScriptIdentityEntrypointServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	paths := testpaths.Local(t)
+	installTypeScriptRuntime(t, bun, paths)
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := loadIdentityFixture(t)
+	f.build(t, repoRoot, paths, identityTSOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	install := exec.Command(bun, "install")
+	install.Dir = out
+	if output, err := install.CombinedOutput(); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
+	}
+	dir := servergen.ServerDir(out, identityTSStack, identityTSAPI)
+	tsc := filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc")
+	for _, pkg := range []string{dir, naming.Default().TypeScriptImplementationDir(repoRoot, identityTSAPI)} {
+		cmd := exec.Command(tsc, "--noEmit", "-p", "tsconfig.json")
+		cmd.Dir = pkg
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("tsc in %s: %v\n%s", pkg, err, output)
+		}
+	}
+
+	field := ir.IdentityConfigField(identityTSAPI)
+	identityConfig := field + `={"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
+	unreachable := "USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable"
+	offline := bunServer(t, bun, dir, unreachable, identityConfig)
+	offline.expect(t, http.MethodGet, "/api/greeting", http.StatusUnauthorized)
+	offline.expectPreflight(t, "/api/auth/login", http.MethodPost)
+	offline.stop(t)
+
+	cmd := exec.Command(bun, servergen.TypeScriptMainFile)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PORT="+freePort(t), unreachable, field+`={"cookie": {"sameSite": "Loose"}}`)
+	if refused, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(refused), field+": identity: config: cookie.sameSite") {
+		t.Errorf("the server on a refused identity config = %v:\n%s", err, refused)
+	}
+
+	postgres := os.Getenv(identityDatabaseEnv)
+	if postgres == "" {
+		t.Logf("%s is unset: the entrypoint serves no database", identityDatabaseEnv)
+		return
+	}
+	databaseURL := identitySchemaTS(t, bun, dir, postgres, filepath.Join(generator.SQLDir(out, "users-db"), "create.sql"))
+	online := bunServer(t, bun, dir, "USERS_DB_DATABASE_URL="+databaseURL, identityConfig)
+	online.expect(t, http.MethodGet, "/readyz", http.StatusOK)
+	online.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
+	token := online.login(t, "ada@example.com", "ada's password")
+	online.authorized(t, token, http.MethodGet, "/api/greeting", http.StatusNotImplemented)
+	online.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusOK, `"login":"ada@example.com"`)
+	online.authorized(t, token, http.MethodPost, "/api/auth/logout", http.StatusOK, `"data":true`)
+	online.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusUnauthorized)
+	online.stop(t)
+}
+
+// identitySchemaTS is identitySchema through pg under Bun, from the
+// TypeScript server's package at dir, which depends on pg: it creates a
+// schema of its own in the Postgres at base, applies createSQL to it, drops
+// it when the test ends, and returns a connection string whose connections
+// find it first on their search path.
+func identitySchemaTS(t *testing.T, bun, dir, base, createSQL string) string {
+	t.Helper()
+	tool := filepath.Join(t.TempDir(), "identity-schema.ts")
+	if err := os.WriteFile(tool, []byte(identitySchemaScript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	schema := fmt.Sprintf("identity_ts_entrypoint_%d", time.Now().UnixNano())
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(bun, append([]string{"run", tool}, args...)...)
+		cmd.Dir = dir
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("identity-schema.ts %s: %v\n%s", strings.Join(args, " "), err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	databaseURL := run("create", base, schema, createSQL)
+	t.Cleanup(func() { run("drop", base, schema) })
+	return databaseURL
+}
+
+// identitySchemaScript creates or drops a schema of the identity fixture's
+// tables with pg, which it imports from the package it runs in: create
+// base schema create.sql prints a connection string whose search path
+// starts with the new schema; drop base schema drops it.
+const identitySchemaScript = `import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+
+const pg = createRequire(join(process.cwd(), 'package.json'))('pg');
+const [command, base, schema, ddl] = process.argv.slice(2);
+const admin = new pg.Client({ connectionString: base });
+await admin.connect();
+try {
+  if (command === 'drop') {
+    await admin.query('DROP SCHEMA ' + schema + ' CASCADE');
+  } else {
+    for (const extension of ['pgcrypto', 'citext']) {
+      try {
+        await admin.query('CREATE EXTENSION IF NOT EXISTS ' + extension + ' SCHEMA public');
+      } catch (error) {
+        if (error.code !== '23505') throw error;
+      }
+    }
+    await admin.query('CREATE SCHEMA ' + schema);
+    const url = new URL(base);
+    url.searchParams.set('options', '-c search_path=' + schema + ',public');
+    const client = new pg.Client({ connectionString: url.toString() });
+    await client.connect();
+    try {
+      await client.query(readFileSync(ddl, 'utf8'));
+    } finally {
+      await client.end();
+    }
+    console.log(url.toString());
+  }
+} finally {
+  await admin.end();
 }
 `

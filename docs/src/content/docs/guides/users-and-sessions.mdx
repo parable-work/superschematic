@@ -105,10 +105,10 @@ Each server takes the identity service, built over a store of the
 | Rust | `Implementations.authenticator`, an `Arc<IdentityAuthenticator>` | the crate's `identity::store(client)` and `identity::service(store, config)`, with its `identity-postgres` or `identity-sqlite` feature |
 
 [Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-go)
-shows the Go wiring in `shop-orders`. A stack's Go entrypoint builds it
-for you, reading each API's config as JSON from `<API>_IDENTITY`
-(`SHOP_API_IDENTITY`); a job, which serves no request, builds none. The
-config, which the three runtimes read alike:
+shows the Go wiring in `shop-orders`. A stack's Go and TypeScript
+entrypoints build it for you, reading each API's config as JSON from
+`<API>_IDENTITY` (`SHOP_API_IDENTITY`); a job, which serves no request,
+builds none. The config, which the three runtimes read alike:
 
 | Member | Default | Meaning |
 | --- | --- | --- |
