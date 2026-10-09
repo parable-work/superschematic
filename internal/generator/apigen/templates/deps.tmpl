@@ -9,16 +9,25 @@
 // the signature of the implementation's constructor of its jobs (section
 // 8.7).
 {{- end }}
+{{- if .HasWorkers }}
+//
+// It also defines Workers, a method per worker of {{ .SchemaName }}, and
+// WorkersConstructor, the signature of the implementation's constructor of
+// its workers (section 8.8).
+{{- end }}
 
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if .HasJobs }}
+{{- if .HasBackgroundWork }}
 	"context"
 
 {{ end }}
 {{- if .Deps.Database }}
 	orm "{{ .Deps.ORMModule }}"
+{{- end }}
+{{- if .HasWorkers }}
+	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
 {{- end }}
 {{- range .Deps.Calls }}
 	{{ .Alias }} "{{ .Module }}"
@@ -71,4 +80,27 @@ type Jobs interface {
 // with the API's Deps. The scaffolded implementation asserts it:
 // var _ {{ toPackageName .SchemaName }}.JobsConstructor = NewJobs.
 type JobsConstructor func(deps Deps) (Jobs, error)
+{{- end }}
+{{- if .HasWorkers }}
+
+// Workers are the workers of {{ .SchemaName }}, a method per @worker class,
+// each of which handles one message of its queue. A worker's entrypoint
+// calls its method once per message it claims, with a context that ends
+// when the worker stops and its grace is over. The message is done when
+// the method returns nil; an error, or a panic, fails it, and the queue
+// retries it after its backoff until its retries are spent. A message may
+// come again after a worker dies holding it, so a method is idempotent.
+type Workers interface {
+{{- range .Workers }}
+	// {{ .Method }} handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }}
+	// unless an environment changes the worker's concurrency.
+	{{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error
+{{- end }}
+}
+
+// WorkersConstructor is the signature of the implementation's constructor
+// of its workers, NewWorkers(deps Deps) (Workers, error), which a worker's
+// entrypoint calls with the API's Deps. The scaffolded implementation
+// asserts it: var _ {{ toPackageName .SchemaName }}.WorkersConstructor = NewWorkers.
+type WorkersConstructor func(deps Deps) (Workers, error)
 {{- end }}

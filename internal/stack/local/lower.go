@@ -54,6 +54,15 @@ const (
 	ReadinessPath = "/readyz"
 	HealthPath    = "/healthz"
 
+	// ReadinessStarted is the readiness of a process with no port, a
+	// worker's: ready once it starts (D53).
+	ReadinessStarted = "started"
+
+	// WorkerConcurrencyVariable is the environment variable a worker reads
+	// its concurrency from, which the local platform sets
+	// (runtime/http/go/worker.ConcurrencyVariable).
+	WorkerConcurrencyVariable = "WORKER_CONCURRENCY"
+
 	// ServerModuleDir is the directory, under the output root, of each
 	// server's entrypoint module: `server/<stack>/<server>`.
 	ServerModuleDir = "server"
@@ -336,6 +345,44 @@ func processEnv(d ir.ResolvedDeployable, claim func(string) error) ([]any, error
 		env = append(env, entry)
 	}
 	return env, nil
+}
+
+// lowerWorker lowers a worker to its process (D53): the entrypoint module
+// the build wrote at `server/<stack>/<worker>`, its environment as a
+// server's is, with WorkerConcurrencyVariable set to the concurrency the
+// environment gives it, no port, and a readiness of started. stack dev
+// runs one process for a worker whatever its instances, and none for one
+// the environment turns off.
+func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Worker == nil {
+		return registry.Lowered{}, fmt.Errorf("worker %s has no run", d.Name)
+	}
+	if d.Worker.Instances == 0 {
+		return registry.Lowered{}, nil
+	}
+	env, err := processEnv(d, func(name string) error {
+		if name == WorkerConcurrencyVariable {
+			return fmt.Errorf("config field %s is the variable the local platform sets to the worker's concurrency; set it with the worker's concurrency setting instead", WorkerConcurrencyVariable)
+		}
+		return nil
+	})
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	env = append(env, map[string]any{"name": WorkerConcurrencyVariable, "value": strconv.Itoa(d.Worker.Concurrency)})
+	return registry.Lowered{Resources: []*ir.Resource{{
+		ID:   processID(d.Name),
+		Type: TypeProcess,
+		Properties: map[string]any{
+			"name":      d.ResourceName,
+			"module":    ModulePath(ctx.Environment.Stack, d.Name),
+			"language":  strings.ToLower(d.Language),
+			"kind":      "worker",
+			"readiness": ReadinessStarted,
+			"env":       env,
+		},
+	}}}, nil
 }
 
 // jobID is the ID of a job's node.

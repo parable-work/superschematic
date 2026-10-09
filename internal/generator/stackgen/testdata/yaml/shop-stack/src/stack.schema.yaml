@@ -34,6 +34,8 @@ types:
         - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
           schedule: "0 * * * *"
           timeZone: America/New_York
+        - of: { service: { name: shop-orders, kind: API }, worker: FulfilOrders }
+          concurrency: 8
   Production:
     name: Production
     role: EmbeddedStruct
@@ -52,6 +54,9 @@ types:
           env: { FULFILLMENT_REGION: { value: us } }
         - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
           values: { cpu: "2" }
+        - of: { service: { name: shop-orders, kind: API }, worker: FulfilOrders }
+          instances: 3
+          values: { memory: 1Gi }
   Preview:
     name: Preview
     role: EmbeddedStruct

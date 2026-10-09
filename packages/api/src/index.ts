@@ -20,7 +20,8 @@ export {
   timeout,
   uiHidden,
   virtual,
-  webhook
+  webhook,
+  worker
 } from "./decorators";
 export type {
   BodyLimitConfig,
@@ -38,7 +39,8 @@ export type {
   RateLimitConfig,
   ServiceCallersConfig,
   ServiceHandleRef,
-  TimeoutConfig
+  TimeoutConfig,
+  WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";
 export type { EncryptedField, QueryParam } from "./wrappers";

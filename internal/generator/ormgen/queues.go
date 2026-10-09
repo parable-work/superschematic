@@ -1,0 +1,162 @@
+package ormgen
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
+)
+
+// Queue is a queue of the schema (docs/stack-model.md, section 8.8, D53):
+// its message type, its table, its arguments with their defaults, and the
+// message's fields, each a column of the table. The ORM enqueues a message
+// in the caller's transaction (EnqueueOrderPlaced) and claims, completes,
+// fails, extends and releases messages for a worker (OrderPlacedQueue), on
+// Postgres, the Go ORM's one dialect. A field reaches its column and comes
+// back as a table's field does through a repository: the same conversions,
+// the same JSON encoding of a JSON column, and the same scans.
+type Queue struct {
+	// Name is the @queue class, the message's type in the types package.
+	Name string
+
+	// DocLines are the lines of the class's comment, which the queue type's
+	// comment quotes after a blank line; none without one.
+	DocLines []string
+
+	// TableName is the queue's table, QuotedTableName quoted for SQL.
+	TableName       string
+	QuotedTableName string
+
+	// Retries, BackoffSeconds and LeaseSeconds are the queue's arguments
+	// with their defaults (registry.QueueSettingsOf).
+	Retries        int
+	BackoffSeconds int
+	LeaseSeconds   int
+
+	// Fields are the message's fields, in declaration order, each the
+	// column of its name.
+	Fields []Field
+}
+
+// queuesOf reads the schema's queues, sorted by name. It refuses a field
+// the queues do not hold yet: a union, and a list of Generic.JSON values in
+// a native array.
+func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool) ([]Queue, error) {
+	var queues []Queue
+	for _, td := range schema.Queues() {
+		if err := registry.CheckQueue(td.Queue); err != nil {
+			return nil, fmt.Errorf("queue %s: %w", td.Name, err)
+		}
+		settings := registry.QueueSettingsOf(td.Queue)
+		table := codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix
+		q := Queue{
+			Name:            td.Name,
+			DocLines:        docLines(codegen.DocText(td.Description, td.Comment)),
+			TableName:       table,
+			QuotedTableName: sqlutil.QuoteIdentifier(table),
+			Retries:         settings.Retries,
+			BackoffSeconds:  settings.BackoffSeconds,
+			LeaseSeconds:    settings.LeaseSeconds,
+		}
+		for _, f := range td.Fields {
+			if f == nil {
+				continue
+			}
+			field := extractField(f, schema, scalars, unionNames)
+			if enumNames[field.IRType] && field.IsRequired && !field.IsArray && f.Default != nil {
+				field.EnumDefault = *f.Default
+			}
+			switch {
+			case field.IsUnion:
+				return nil, fmt.Errorf("queue %s: field %s is a union, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name)
+			case field.NativeGenericJSONList():
+				return nil, fmt.Errorf("queue %s: field %s is a list of Generic.JSON values, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name)
+			}
+			q.Fields = append(q.Fields, field)
+		}
+		queues = append(queues, q)
+	}
+	return queues, nil
+}
+
+// docLines splits a comment into lines, after a blank one, or returns none
+// for an empty comment.
+func docLines(doc string) []string {
+	doc = strings.TrimSpace(doc)
+	if doc == "" {
+		return nil
+	}
+	lines := []string{""}
+	for _, line := range strings.Split(doc, "\n") {
+		lines = append(lines, strings.TrimSpace(line))
+	}
+	return lines
+}
+
+// ReturnedColumns are the message's columns a claim returns, of the row
+// aliased q, after the ID, the token and the attempt, in field order.
+func (q Queue) ReturnedColumns() string {
+	columns := make([]string, len(q.Fields))
+	for i, f := range q.Fields {
+		columns[i] = "q." + f.QuotedDBName
+	}
+	return strings.Join(columns, ", ")
+}
+
+// QueueScanTemp is the Go type of the variable a claim scans the field's
+// column into before it copies the value into the message, as a
+// repository scans a table's field, or "" when it scans into the message's
+// field itself.
+func (f Field) QueueScanTemp() string {
+	switch {
+	case f.IsJSONField:
+		return "[]byte"
+	case f.ScansElementPointers():
+		return "[]*" + f.GoType
+	case !f.IsArray && f.IsDateLike:
+		return "pgtype.Date"
+	case !f.IsRequired && !f.IsArray && f.GoType == "string":
+		return "sql.NullString"
+	case !f.IsRequired && !f.IsArray:
+		return "*" + f.GoType
+	}
+	return ""
+}
+
+// QueuesImportSQL, QueuesImportReflect and QueuesImportPgtype report
+// whether queues.go uses database/sql (an optional string field), reflect
+// (an optional field whose zero value is no nil) and pgtype (a date field).
+func (o *ORMOutput) QueuesImportSQL() bool {
+	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "sql.NullString" })
+}
+
+func (o *ORMOutput) QueuesImportReflect() bool {
+	return queuesNeed(o.Queues, func(f Field) bool { return (!f.IsRequired || f.IsAutoGenerated) && !f.OptionalNilCheck })
+}
+
+func (o *ORMOutput) QueuesImportPgtype() bool {
+	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "pgtype.Date" })
+}
+
+// needs reports whether a field of the queue matches.
+func (q Queue) needs(match func(Field) bool) bool {
+	for _, f := range q.Fields {
+		if match(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// queuesNeed reports whether a field of any queue matches.
+func queuesNeed(queues []Queue, match func(Field) bool) bool {
+	for _, q := range queues {
+		if q.needs(match) {
+			return true
+		}
+	}
+	return false
+}

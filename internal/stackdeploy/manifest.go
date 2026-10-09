@@ -238,7 +238,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	}
 	for _, d := range env.Deployables {
 		switch d.Kind {
-		case ir.DeployableServer, ir.DeployableJob:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 			if image, ok := prev.Images[d.Name]; ok {
 				m.setImage(d.Name, image, prev.Contexts[d.Name])
 			}

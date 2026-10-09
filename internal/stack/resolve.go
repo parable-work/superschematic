@@ -139,9 +139,11 @@ type resolver struct {
 
 	deployables map[string]*deployable
 	// byService maps a member service to the deployable that hosts or
-	// serves it; byJob maps a job, `<api>/<job>`, to its deployable.
+	// serves it; byJob maps a job, `<api>/<job>`, to its deployable, and
+	// byWorker a worker, `<api>/<worker>` (D53).
 	byService map[string]string
 	byJob     map[string]string
+	byWorker  map[string]string
 	edges     map[string]*edge
 
 	// produced are the resources producers returned, in order.
@@ -165,6 +167,8 @@ type deployable struct {
 	fields map[string]*field
 	// job is a job's declaration, nil for every other kind.
 	job *ir.Job
+	// worker is a worker's declaration, nil for every other kind (D53).
+	worker *ir.Worker
 }
 
 // settings are a deployable's settings merged over the environment chain.
@@ -184,6 +188,12 @@ type settings struct {
 	schedule, timeZone string
 	enabled            *bool
 	scheduleFrom       map[string]string
+
+	// instances and concurrency are a worker's, with enabled: what the
+	// environment chain sets, the later over the earlier. workerFrom names
+	// the environment that set each (D53).
+	instances, concurrency *int
+	workerFrom             map[string]string
 }
 
 // effectiveEnv is an environment with its parents' values merged in.
@@ -215,12 +225,14 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.collectMembers()
 	r.declareDeployables()
 	r.defaultDeployables()
+	r.defaultWorkers()
 	r.applySettings()
 	r.place()
 	r.expose()
 	r.resolveCalls()
 	r.checkCalls()
 	r.scheduleJobs()
+	r.runWorkers()
 	if r.failed() {
 		return nil
 	}
@@ -602,6 +614,8 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 	case ref.Service != nil && ref.Deployable != "":
 		r.fail(CodeInvalidStack, "%s names both service %s and deployable %s", where, ref.Service.Name, ref.Deployable)
 		return nil, false
+	case ref.Worker != "":
+		return r.resolveWorkerRef(where, ref)
 	case ref.Job != "" && ref.Service == nil:
 		r.fail(CodeInvalidStack, "%s names job %s but no API service; a job is named beside its API's handle", where, ref.Job)
 		return nil, false
@@ -687,6 +701,9 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
+			if r.applyWorkerSettings(where, env.Name, d, entry) {
+				continue
+			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil {
 				continue
 			}
@@ -722,14 +739,21 @@ func (r *resolver) applySettings() {
 // the job's own (D52): a job's config is its API's, so a value a person
 // sets on the server reaches the job too. A key the server takes for
 // another API it serves is left out of the job's fields when they are
-// bound, not refused.
+// bound, not refused. A worker takes its API's server's env as a job does
+// (D53).
 func (r *resolver) inheritServerEnv() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if d.res.Kind != ir.DeployableJob {
+		var api string
+		switch {
+		case d.res.Kind == ir.DeployableJob && d.res.Job != nil:
+			api = d.res.Job.API
+		case d.res.Kind == ir.DeployableWorker && d.res.Worker != nil:
+			api = d.res.Worker.API
+		default:
 			continue
 		}
-		server, ok := r.deployables[r.byService[d.res.Job.API]]
+		server, ok := r.deployables[r.byService[api]]
 		if !ok {
 			continue
 		}
@@ -828,7 +852,7 @@ func (r *resolver) place() {
 		res.Platform = platformName
 		d.platform = platform
 		switch res.Kind {
-		case ir.DeployableServer, ir.DeployableJob:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 			r.placeServer(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
@@ -1065,6 +1089,10 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	if d.Job != nil {
 		job := *d.Job
 		c.Job = &job
+	}
+	if d.Worker != nil {
+		worker := *d.Worker
+		c.Worker = &worker
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))

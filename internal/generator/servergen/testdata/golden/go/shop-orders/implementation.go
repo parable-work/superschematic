@@ -3,7 +3,8 @@
 // superschematic wrote this package once, as a scaffold, because it was
 // missing. It never writes it again: the package is yours. Each method
 // answers 501 Not Implemented until you implement it. Each job fails
-// until you implement it.
+// until you implement it. Each worker fails
+// every message until you implement it.
 package shoporders
 
 import (
@@ -13,6 +14,7 @@ import (
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 
 	api "example.com/schemas/api/shop-orders"
+	shopdb "example.com/schemas/types/go/shop-db"
 	types "example.com/schemas/types/go/shop-orders"
 )
 
@@ -42,6 +44,24 @@ type jobs struct {
 // ExpireOrders runs the job ExpireOrders.
 func (j *jobs) ExpireOrders(ctx context.Context) error {
 	return api.NotImplementedError("job ExpireOrders")
+}
+
+// NewWorkers builds the workers of shop-orders from the API's dependencies.
+// Its signature is the generated one, api.WorkersConstructor.
+func NewWorkers(deps api.Deps) (api.Workers, error) {
+	return &workers{deps: deps}, nil
+}
+
+var _ api.WorkersConstructor = NewWorkers
+
+// workers implements api.Workers.
+type workers struct {
+	deps api.Deps
+}
+
+// FulfilOrders handles a message of the queue OrderPlaced.
+func (w *workers) FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced) error {
+	return api.NotImplementedError("worker FulfilOrders")
 }
 
 // PayloadDecryptor decrypts the request bodies of the encrypted operations

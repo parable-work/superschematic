@@ -125,6 +125,11 @@ type Schema struct {
 	// hold it.
 	Jobs []*Job `json:"jobs,omitempty" yaml:"jobs,omitempty"`
 
+	// Workers lists the workers an API service declares with `@worker`, in
+	// declaration order (D53). A worker's class is no type, so Types does
+	// not hold it.
+	Workers []*Worker `json:"workers,omitempty" yaml:"workers,omitempty"`
+
 	// Documents holds the loaded sidecar documents keyed by document name
 	// (the registered DocumentSpec.Name), each in canonical JSON (see
 	// [CanonicalJSON]). The registering extension owns the codec; typed

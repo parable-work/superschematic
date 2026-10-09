@@ -42,6 +42,10 @@ const (
 	DatabasePlatform = "local.postgres"
 	JobPlatform      = "local.job"
 
+	// WorkerPlatform runs a worker as a process with no port, ready once it
+	// starts, beside the servers (D53).
+	WorkerPlatform = "local.worker"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -50,6 +54,11 @@ const (
 	HTTPConnector    = "local.process-process"
 	JobSQLConnector  = "local.job-postgres"
 	JobHTTPConnector = "local.job-process"
+
+	// WorkerSQLConnector and WorkerHTTPConnector connect a worker, whose
+	// edges are its API's, as a job's connectors do.
+	WorkerSQLConnector  = "local.worker-postgres"
+	WorkerHTTPConnector = "local.worker-process"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -83,8 +92,10 @@ const (
 	// references.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
-	// TypeProcess is a server process run from its entrypoint: built from
-	// its module, or run by Bun.
+	// TypeProcess is a process run from its entrypoint: built from its
+	// module, or run by Bun. A server's listens on its port and is ready
+	// once its readiness path answers; a worker's has no port and is ready
+	// once it starts (ReadinessStarted, D53).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -104,7 +115,7 @@ const (
 	LanguageTypeScript = "typescript"
 )
 
-// Register adds the local target, its three platforms and four connectors,
+// Register adds the local target, its four platforms and six connectors,
 // the schema of each resource type they emit, and its provisioner. The
 // provisioner is a new Provisioner with its defaults.
 func Register(r *registry.Registry) error {
@@ -127,6 +138,14 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      WorkerPlatform,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageGo},
+			NameOf:    processName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerWorker,
+		},
+		{
 			Name:      DatabasePlatform,
 			Kind:      ir.DeployableDatabase,
 			Dialects:  []string{registry.SQLDialectPostgres},
@@ -144,6 +163,8 @@ func Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: WorkerSQLConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -162,6 +183,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableServer:   ServerPlatform,
 			ir.DeployableDatabase: DatabasePlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableWorker:   WorkerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -247,13 +269,14 @@ var resourceTypes = map[string]string{
 	}`,
 	TypeProcess: `{
 	  "type": "object",
-	  "required": ["name", "module", "language", "port", "readiness"],
+	  "required": ["name", "module", "language", "readiness"],
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript"]},
+	    "kind": {"enum": ["worker"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-	    "readiness": {"type": "string", "pattern": "^/"},
+	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
 	    "env": {"type": "array", "items": {
 	      "type": "object",
 	      "required": ["name"],

@@ -323,7 +323,7 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 			name: "a literal for a secret, which tsc refuses",
 			from: `env: { LOG_LEVEL: "warn" }`,
 			to:   `env: { LOG_LEVEL: "warn", STRIPE_KEY: "sk_live" }`,
-			want: []string{"stack.schema.ts:35:63:", "Type 'string' is not assignable to type 'never'"},
+			want: []string{"stack.schema.ts:37:63:", "Type 'string' is not assignable to type 'never'"},
 		},
 		{
 			name: "settings of a class that is no deployable",

@@ -452,13 +452,17 @@ func (prog *Program) outputs() map[string]map[string]any {
 		out[db.ID] = map[string]any{"name": db.Name, "url": db.URL}
 	}
 	for _, s := range prog.Servers {
+		if s.URL == "" {
+			continue // a worker's process: no port, no URL (D53)
+		}
 		out[s.ID] = map[string]any{"url": s.URL, "port": s.Port}
 	}
 	return out
 }
 
-// Wait blocks until ctx is done, and returns nil, or until a server of the
-// environment exits, and returns an error that names it. Meanwhile it runs
+// Wait blocks until ctx is done, and returns nil, or until a server or a
+// worker (D53) of the environment exits, and returns an error that names
+// it. Meanwhile it runs
 // each job the rollout built on its schedule (jobs.go): a job's run that
 // ends, however it ends, never stops the environment. Before it returns,
 // it stops the runs going.
@@ -493,7 +497,7 @@ func (p *Provisioner) Wait(ctx context.Context, req registry.ProvisionRequest) e
 	case <-ctx.Done():
 		return nil
 	case rs := <-exited:
-		return fmt.Errorf("local: server %s exited: %v", rs.server.Deployable, exitReason(rs.proc.Err()))
+		return fmt.Errorf("local: %s %s exited: %v", rs.server.what(), rs.server.Deployable, exitReason(rs.proc.Err()))
 	}
 }
 
@@ -777,7 +781,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		if err := p.stopServer(k, b.server.ID); err != nil {
 			return err
 		}
-		if p.runner().PortInUse(b.server.Port) {
+		if b.server.Port != 0 && p.runner().PortInUse(b.server.Port) {
 			return fmt.Errorf("local: server %s: port %d is in use, by another program or a server an earlier run left behind; stop it, or give %s another port with its port setting", b.server.Deployable, b.server.Port, b.server.Deployable)
 		}
 		c := p.out()
@@ -794,11 +798,19 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		p.running[k] = append(p.running[k], &runningServer{server: b.server, proc: proc, output: []*prefixWriter{stdout, stderr}})
 		p.mu.Unlock()
+		if b.server.URL == "" {
+			p.printf("start %s %s", b.server.what(), b.server.Deployable)
+			continue
+		}
 		p.printf("start %s on %s", b.server.Deployable, b.server.URL)
 	}
 	for _, b := range builds {
 		if err := p.waitReady(ctx, k, b.server); err != nil {
 			return err
+		}
+		if b.server.URL == "" {
+			p.printf("%s %s is running", b.server.what(), b.server.Deployable)
+			continue
 		}
 		p.printf("%s is ready at %s", b.server.Deployable, b.server.URL)
 	}
@@ -881,11 +893,21 @@ func buildEnv() []string {
 	return append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
 }
 
-// waitReady probes a server's readiness path until it answers 200.
+// waitReady probes a server's readiness path until it answers 200. A
+// process ready once it starts, a worker's (D53), is ready unless it has
+// exited already.
 func (p *Provisioner) waitReady(ctx context.Context, k string, s *Server) error {
 	rs := p.find(k, s.ID)
 	if rs == nil {
-		return fmt.Errorf("local: server %s is not running", s.Deployable)
+		return fmt.Errorf("local: %s %s is not running", s.what(), s.Deployable)
+	}
+	if s.Readiness == ReadinessStarted {
+		select {
+		case <-rs.proc.Done():
+			return fmt.Errorf("local: %s %s exited as it started: %s", s.what(), s.Deployable, exitReason(rs.proc.Err()))
+		default:
+			return nil
+		}
 	}
 	url := s.URL + s.Readiness
 	deadline := time.Now().Add(p.readyTimeout())
@@ -1043,6 +1065,9 @@ func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]
 	env, err := processEnviron(s.Env, secrets, params, outputs)
 	if err != nil {
 		return nil, err
+	}
+	if s.Port == 0 {
+		return env, nil // a worker's process listens on no port (D53)
 	}
 	return append(env, PortVariable+"="+strconv.Itoa(s.Port)), nil
 }

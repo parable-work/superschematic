@@ -165,6 +165,12 @@ type TypeDef struct {
 	// other role. See [ProjectionDef].
 	Projection *ProjectionDef `json:"projection,omitempty" yaml:"projection,omitempty"`
 
+	// Queue is the @queue declaration of a DB schema's message class: the
+	// class is the queue's message, and sqlgen writes the queue's table
+	// (D53). Its role is RoleEmbeddedStruct. Nil for every other type. See
+	// [QueueDef].
+	Queue *QueueDef `json:"queue,omitempty" yaml:"queue,omitempty"`
+
 	// Stack, Server, Database and Environment are the declarations of a
 	// Stack schema's classes: @stack, @server, @database and @environment
 	// (docs/stack-model.md, section 4.1). A class has one of them, and every

@@ -41,6 +41,10 @@ const (
 	// Run jobs with a scheduler for its schedule (D52).
 	JobPlatform = "fake.job"
 
+	// WorkerPlatform runs Go workers, as gcp runs a worker on a Cloud Run
+	// worker pool (D53).
+	WorkerPlatform = "fake.worker"
+
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
 
@@ -48,6 +52,11 @@ const (
 	// its API's, as the server's connectors do.
 	JobSQLConnector  = "fake.job-sql"
 	JobHTTPConnector = "fake.job-run"
+
+	// WorkerSQLConnector and WorkerHTTPConnector connect a worker, whose
+	// edges are its API's, as a job's connectors do.
+	WorkerSQLConnector  = "fake.worker-sql"
+	WorkerHTTPConnector = "fake.worker-run"
 
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
@@ -72,6 +81,7 @@ const (
 	TypeRecord   = "fake:dns/record:Record"
 	TypeJob      = "fake:run/job:Job"
 	TypeSchedule = "fake:scheduler/job:Job"
+	TypePool     = "fake:run/pool:Pool"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -175,6 +185,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerJob,
 		},
+		{
+			Name:      WorkerPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageGo},
+			Settings:  json.RawMessage(workerSettings),
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerWorker,
+		},
 	} {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
@@ -185,6 +205,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: RunPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: JobPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: RunPlatform, Connect: connectHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -211,6 +233,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   RunPlatform,
 			ir.DeployableDatabase: SQLPlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableWorker:   WorkerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -255,6 +278,14 @@ const jobSettings = `{
   "type": "object",
   "properties": {
     "cpu": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}`
+
+const workerSettings = `{
+  "type": "object",
+  "properties": {
+    "memory": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }`
@@ -313,6 +344,16 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string"}, "schedule": {"type": "string"}, "timeZone": {"type": "string"},
 	    "job": {"type": "string"}, "account": {"type": "string"}
+	  },
+	  "additionalProperties": false}`,
+	TypePool: `{"type": "object", "required": ["name", "image", "account", "language", "instances", "concurrency"],
+	  "properties": {
+	    "name": {"type": "string"}, "image": {"type": "string"}, "account": {"type": "string"},
+	    "language": {"type": "string"}, "instances": {"type": "integer", "minimum": 0},
+	    "concurrency": {"type": "integer", "minimum": 1}, "memory": {"type": "string"},
+	    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
+	      "properties": {"name": {"type": "string"}, "value": {}, "secret": {"type": "string"}},
+	      "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
 }
@@ -458,6 +499,37 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"account":  member,
 		}})
 	}
+	return out, nil
+}
+
+// lowerWorker lowers a worker (D53) to an account and the secrets it
+// reads, as a server's, and a pool that runs its image with its
+// environment, as many instances as its run takes, none when the
+// environment turns it off, each handling its concurrency of messages.
+func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Worker == nil {
+		return registry.Lowered{}, fmt.Errorf("worker %s has no run", d.Name)
+	}
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	pool := map[string]any{
+		"name":        d.ResourceName,
+		"image":       kebab(d.Name),
+		"account":     member,
+		"language":    strings.ToLower(d.Language),
+		"instances":   d.Worker.Instances,
+		"concurrency": d.Worker.Concurrency,
+	}
+	if memory, ok := d.Settings["memory"]; ok {
+		pool["memory"] = memory
+	}
+	if len(env) > 0 {
+		pool["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
 	return out, nil
 }
 

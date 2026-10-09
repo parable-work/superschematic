@@ -70,6 +70,14 @@ type Service struct {
 	// Jobs are an API service's jobs, its `@job` classes (D52), as
 	// ir.Schema.Jobs holds them. Each is a deployable of the stack.
 	Jobs []ir.Job
+
+	// Workers are an API service's workers, its `@worker` classes (D53), as
+	// ir.Schema.Workers holds them. Each is a deployable of the stack.
+	Workers []ir.Worker
+
+	// Queues are the names of a DB service's queues, its `@queue` classes
+	// (D53), sorted. A worker's queue is one of its API's database.
+	Queues []string
 }
 
 // Operation is what admits a caller to one operation of an API service.

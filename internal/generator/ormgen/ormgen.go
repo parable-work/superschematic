@@ -115,6 +115,10 @@ type ORMOutput struct {
 	// Pins are the runtime modules go.mod takes from the module proxy, at
 	// the release that generates it (SetReleasePins).
 	Pins naming.Pins
+
+	// Queues are the schema's queues, sorted by name (D53). Any writes
+	// queues.go, which enqueues and claims their messages.
+	Queues []Queue
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -430,7 +434,7 @@ type Options struct {
 }
 
 // Generate generates the Go ORM from a v2 IR schema. Returns nil when the
-// schema declares no database tables.
+// schema declares no database tables and no queues.
 func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
@@ -438,7 +442,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	opts.Naming = opts.Naming.OrDefault()
 
 	tableTypes := tableTypeDefs(schema)
-	if len(tableTypes) == 0 {
+	if len(tableTypes) == 0 && len(schema.Queues()) == 0 {
 		return nil, nil
 	}
 
@@ -466,6 +470,16 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames)
+	if err != nil {
+		return nil, err
+	}
+	// A queue's field reads and writes its column as a table's does, with
+	// the same helpers.
+	queueRepositories := make([]Repository, len(queues))
+	for i, q := range queues {
+		queueRepositories[i] = Repository{Fields: q.Fields}
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -477,7 +491,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasJSONListFields := false
 	hasGenericJSONLists := false
 	hasElementPointerLists := false
-	for _, repo := range repositories {
+	for _, repo := range append(slices.Clone(repositories), queueRepositories...) {
 		if repo.HasSoftDelete {
 			hasSoftDeletes = true
 		}
@@ -534,6 +548,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
 		VersionGraphs:            graphs,
+		Queues:                   queues,
 	}
 
 	return output, nil

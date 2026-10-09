@@ -204,6 +204,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)
+	checkQueues(schema, r)
+	checkWorkers(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)

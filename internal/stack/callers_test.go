@@ -34,27 +34,34 @@ func jsonOf(t *testing.T, v any) string {
 // from its API (D52).
 const jobEdge = "http:" + stacktest.ShipOrdersJob + "->shop-api"
 
+// workerEdge is the edge from shop-orders' worker to shop-api, which it
+// takes from its API as a job does (D53).
+const workerEdge = "http:" + stacktest.FulfilOrdersWorker + "->shop-api"
+
 // TestCallersField: shop-api has a service clause, so its server gets
 // SHOP_API_CALLERS, derived from the edges from Orders and from
-// shop-orders' job, which takes its API's edges (D52): the fake issuer
-// with each one's account as a caller that serves shop-orders, so a
-// route's from: [ShopOrders] admits both. Orders, whose API has no clause,
-// gets no callers field, and the job, which serves no request, gets none.
+// shop-orders' job and worker, which take their API's edges (D52, D53):
+// the fake issuer with each one's account as a caller that serves
+// shop-orders, so a route's from: [ShopOrders] admits all three. Orders,
+// whose API has no clause, gets no callers field, and the job and the
+// worker, which serve no request, get none.
 func TestCallersField(t *testing.T) {
 	env := mustResolve(t, assemble(t), stacktest.Shop(), stacktest.RequireServiceShop(), "Staging")
 	b := callersOf(env, "shop-api", "shop-api")
 	if b == nil {
 		t.Fatal("shop-api has no callers field")
 	}
-	if want := "http:Orders->shop-api," + jobEdge; b.Field != "SHOP_API_CALLERS" || b.Source != ir.BindingDerived || strings.Join(b.Edges, ",") != want {
+	if want := "http:Orders->shop-api," + workerEdge + "," + jobEdge; b.Field != "SHOP_API_CALLERS" || b.Source != ir.BindingDerived || strings.Join(b.Edges, ",") != want {
 		t.Errorf("binding = %+v, want SHOP_API_CALLERS derived from %s", b, want)
 	}
-	if got, want := jsonOf(t, b.Value), `{"issuers":[{"algorithms":["RS256"],"audience":"shop-api","callers":[{"deployable":"Orders","serves":["shop-orders"],"subject":{"$output":{"resource":"Orders.account","name":"email"}}},{"deployable":"shop-orders-ship-orders","serves":["shop-orders"],"subject":{"$output":{"resource":"shop-orders-ship-orders.account","name":"email"}}}],"issuer":"https://issuer.fake.test","jwksUrl":"https://issuer.fake.test/keys","subjectClaim":"email"}]}`; got != want {
+	if got, want := jsonOf(t, b.Value), `{"issuers":[{"algorithms":["RS256"],"audience":"shop-api","callers":[{"deployable":"Orders","serves":["shop-orders"],"subject":{"$output":{"resource":"Orders.account","name":"email"}}},{"deployable":"shop-orders-fulfil-orders","serves":["shop-orders"],"subject":{"$output":{"resource":"shop-orders-fulfil-orders.account","name":"email"}}},{"deployable":"shop-orders-ship-orders","serves":["shop-orders"],"subject":{"$output":{"resource":"shop-orders-ship-orders.account","name":"email"}}}],"issuer":"https://issuer.fake.test","jwksUrl":"https://issuer.fake.test/keys","subjectClaim":"email"}]}`; got != want {
 		t.Errorf("SHOP_API_CALLERS =\n  %s\nwant\n  %s", got, want)
 	}
-	for _, b := range env.Deployable(stacktest.ShipOrdersJob).Bindings {
-		if b.CallersOf != "" {
-			t.Errorf("the job has callers field %s", b.Field)
+	for _, name := range []string{stacktest.ShipOrdersJob, stacktest.FulfilOrdersWorker} {
+		for _, b := range env.Deployable(name).Bindings {
+			if b.CallersOf != "" {
+				t.Errorf("%s has callers field %s", name, b.Field)
+			}
 		}
 	}
 	if callersOf(env, "Orders", "shop-orders") != nil {
@@ -74,7 +81,7 @@ func TestCallersMergeByIssuer(t *testing.T) {
 	})
 	env := mustResolve(t, assemble(t), s, services, "Staging")
 	b := callersOf(env, "shop-api", "shop-api")
-	if got := strings.Join(b.Edges, ","); got != "http:Orders->shop-api,http:billing-api->shop-api,"+jobEdge {
+	if got := strings.Join(b.Edges, ","); got != "http:Orders->shop-api,http:billing-api->shop-api,"+workerEdge+","+jobEdge {
 		t.Errorf("edges = %s", got)
 	}
 	issuers := b.Value.(map[string]any)["issuers"].([]any)
@@ -85,8 +92,8 @@ func TestCallersMergeByIssuer(t *testing.T) {
 	for _, c := range issuers[0].(map[string]any)["callers"].([]any) {
 		deployables = append(deployables, c.(map[string]any)["deployable"].(string))
 	}
-	if got := strings.Join(deployables, ","); got != "Orders,billing-api,"+stacktest.ShipOrdersJob {
-		t.Errorf("callers = %s, want Orders, billing-api and %s", got, stacktest.ShipOrdersJob)
+	if got := strings.Join(deployables, ","); got != "Orders,billing-api,"+stacktest.FulfilOrdersWorker+","+stacktest.ShipOrdersJob {
+		t.Errorf("callers = %s, want Orders, billing-api, %s and %s", got, stacktest.FulfilOrdersWorker, stacktest.ShipOrdersJob)
 	}
 }
 
@@ -101,20 +108,21 @@ func TestCallersWithoutAnEdge(t *testing.T) {
 		t.Errorf("Orders's callers field = %+v, want SHOP_ORDERS_CALLERS with no edges and no issuers", b)
 	}
 
-	s := stacktest.WithoutJobSettings(stacktest.Shop())
+	s := stacktest.WithoutWorkerSettings(stacktest.WithoutJobSettings(stacktest.Shop()))
 	s.Deployables = []*ir.DeployableDecl{{Name: "Backend", Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopAPI, stacktest.ShopOrders}}}
 	s.Expose = []ir.DeployableRef{{Deployable: "Backend"}}
 	s.Environments[0].Settings = []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}}}
-	env = mustResolve(t, assemble(t), s, stacktest.WithoutJobs(stacktest.RequireServiceShop()), "Staging")
+	env = mustResolve(t, assemble(t), s, stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.RequireServiceShop())), "Staging")
 	if b := callersOf(env, "Backend", "shop-api"); b == nil || len(b.Edges) != 0 || jsonOf(t, b.Value) != `{"issuers":[]}` {
 		t.Errorf("Backend's SHOP_API_CALLERS = %+v, want no issuers: its call to shop-api carries no credential", b)
 	}
 
-	// shop-orders' job is a process of its own, so its call to shop-api on
-	// Backend carries a credential and makes it a caller (D52).
+	// shop-orders' job and worker are processes of their own, so their
+	// calls to shop-api on Backend carry a credential and make each a
+	// caller (D52, D53).
 	env = mustResolve(t, assemble(t), s, stacktest.RequireServiceShop(), "Staging")
-	if b := callersOf(env, "Backend", "shop-api"); b == nil || strings.Join(b.Edges, ",") != jobEdge {
-		t.Errorf("Backend's SHOP_API_CALLERS = %+v, want the job's edge", b)
+	if b := callersOf(env, "Backend", "shop-api"); b == nil || strings.Join(b.Edges, ",") != workerEdge+","+jobEdge {
+		t.Errorf("Backend's SHOP_API_CALLERS = %+v, want the worker's and the job's edges", b)
 	}
 }
 

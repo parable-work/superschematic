@@ -242,6 +242,31 @@ export function job(_options?: JobOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of a worker: the queue it handles, and how. */
+export type WorkerOptions = {
+  /** The `@queue` class whose messages the worker handles, imported from the API's database. */
+  readonly queue: abstract new (...args: never[]) => unknown;
+  /** How many messages an instance handles at a time; one unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How long a stopping worker lets its running handlers finish before it gives their messages back, a duration of whole seconds; eight seconds unless set. */
+  readonly grace?: string;
+};
+
+/**
+ * Declares a worker of the API service: a deployable that claims the
+ * messages of a queue of the API's database and handles each with the API's
+ * Deps (docs/stack-model.md, section 8.8). The class's name is the
+ * worker's, and the class holds nothing:
+ *
+ * ```ts
+ * @worker({ queue: OrderPlaced, concurrency: 4 })
+ * export abstract class FulfilOrders {}
+ * ```
+ */
+export function worker(_options: WorkerOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 export const manualRouteRegistration: MethodDecorator = noopMethodDecorator;

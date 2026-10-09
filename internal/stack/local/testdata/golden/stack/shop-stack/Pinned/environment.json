@@ -131,6 +131,79 @@
       "address": "127.0.0.1:55432"
     },
     {
+      "name": "shop-orders-fulfil-orders",
+      "kind": "worker",
+      "platform": "local.worker",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "worker": {
+        "api": "shop-orders",
+        "name": "FulfilOrders",
+        "queue": "OrderPlaced",
+        "database": "shop-db",
+        "instances": 1,
+        "concurrency": 2,
+        "graceSeconds": 8
+      },
+      "resourceName": "shop-orders-fulfil-orders",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "eu"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-api",
+              "issuer": "shop-orders-fulfil-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders-fulfil-orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:8080"
+          },
+          "edge": "http:shop-orders-fulfil-orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-orders-fulfil-orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
       "name": "shop-orders-ship-orders",
       "kind": "job",
       "platform": "local.job",
@@ -217,6 +290,18 @@
       "field": "SHOP_API_SERVICE"
     },
     {
+      "id": "http:shop-orders-fulfil-orders->shop-api",
+      "kind": "http",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.worker-process",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
       "id": "http:shop-orders-ship-orders->shop-api",
       "kind": "http",
       "from": "shop-orders-ship-orders",
@@ -253,6 +338,18 @@
       "field": "SHOP_DB_DATABASE"
     },
     {
+      "id": "sql:shop-orders-fulfil-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.worker-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
       "id": "sql:shop-orders-ship-orders->shop-db",
       "kind": "sql",
       "from": "shop-orders-ship-orders",
@@ -273,6 +370,7 @@
       "readers": [
         "Orders",
         "shop-api",
+        "shop-orders-fulfil-orders",
         "shop-orders-ship-orders"
       ]
     }
@@ -434,6 +532,84 @@
         ]
       },
       {
+        "id": "shop-orders-fulfil-orders.calls.shop-api.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-api",
+          "caller": "shop-orders-fulfil-orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders-fulfil-orders->shop-api"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "FULFILLMENT_REGION",
+              "value": "eu"
+            },
+            {
+              "name": "MAX_LINE_ITEMS",
+              "value": "50"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-api"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-orders-fulfil-orders"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-fulfil-orders.calls.shop-api.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": "http://127.0.0.1:8080"
+            },
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:55432/shop_db?sslmode=disable"
+            },
+            {
+              "name": "STRIPE_KEY",
+              "secret": "PaymentsSecrets.STRIPE_KEY"
+            },
+            {
+              "name": "WORKER_CONCURRENCY",
+              "value": "2"
+            }
+          ],
+          "kind": "worker",
+          "language": "go",
+          "module": "server/shop-stack/shop-orders-fulfil-orders",
+          "name": "shop-orders-fulfil-orders",
+          "readiness": "started"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.calls.shop-api.key"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-fulfil-orders"
+        ]
+      },
+      {
         "id": "shop-orders-ship-orders.calls.shop-api.key",
         "type": "local:serviceauth/keyPair:KeyPair",
         "properties": {
@@ -520,6 +696,7 @@
         "Orders.calls.shop-api.key",
         "postgres.container",
         "shop-db.database.shop-db",
+        "shop-orders-fulfil-orders.calls.shop-api.key",
         "shop-orders-ship-orders.calls.shop-api.key"
       ]
     },
@@ -545,10 +722,12 @@
       "wave": 2,
       "deployables": [
         "Orders",
+        "shop-orders-fulfil-orders",
         "shop-orders-ship-orders"
       ],
       "resources": [
         "Orders.process",
+        "shop-orders-fulfil-orders.process",
         "shop-orders-ship-orders.job"
       ]
     },

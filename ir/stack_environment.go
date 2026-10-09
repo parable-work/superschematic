@@ -86,15 +86,16 @@ type ResolvedDeployable struct {
 	Platform string `json:"platform"`
 
 	// Services are the DB services a database hosts or the API services a
-	// server serves, sorted by name. A job's is its API, which it serves
-	// in a callee's callers field (D52).
+	// server serves, sorted by name. A job's or a worker's is its API,
+	// which it serves in a callee's callers field (D52, D53).
 	Services []ServiceRef `json:"services"`
 
 	// Calls are the API services a server calls: the union of the `calls`
-	// of the APIs it serves, sorted by name. A job's are its API's.
+	// of the APIs it serves, sorted by name. A job's or a worker's are its
+	// API's.
 	Calls []ServiceRef `json:"calls,omitempty"`
 
-	// Language is a server's or a job's language; Dialect is the SQL
+	// Language is a server's, a job's or a worker's language; Dialect is the SQL
 	// dialect a database runs, the first of its platform's dialects every
 	// hosted schema supports.
 	Language string `json:"language,omitempty"`
@@ -102,6 +103,10 @@ type ResolvedDeployable struct {
 
 	// Job is what a job runs and when; nil for every other kind.
 	Job *ResolvedJob `json:"job,omitempty"`
+
+	// Worker is what a worker handles and how many of it run; nil for
+	// every other kind (D53).
+	Worker *ResolvedWorker `json:"worker,omitempty"`
 
 	// Exposed is true for a server reachable from outside the environment.
 	Exposed bool `json:"exposed,omitempty"`
@@ -144,6 +149,33 @@ type ResolvedJob struct {
 	// run is run again.
 	TimeoutSeconds int `json:"timeoutSeconds"`
 	Retries        int `json:"retries,omitempty"`
+}
+
+// ResolvedWorker is a worker's run in one environment (D53): the method of
+// its API's Workers interface that handles a message, the queue it claims
+// from, and how many instances run, each handling how many messages at a
+// time.
+type ResolvedWorker struct {
+	// API is the API service that declares the worker; Name is its
+	// `@worker` class's name.
+	API  string `json:"api"`
+	Name string `json:"name"`
+
+	// Queue is the `@queue` class whose messages the worker handles, and
+	// Database the DB service that declares it: the database its API
+	// connects to.
+	Queue    string `json:"queue"`
+	Database string `json:"database"`
+
+	// Instances is how many instances the environment runs: zero when its
+	// settings turn the worker off. Concurrency is how many messages each
+	// handles at a time.
+	Instances   int `json:"instances"`
+	Concurrency int `json:"concurrency"`
+
+	// GraceSeconds is how long a stopping instance lets its running
+	// handlers finish before it gives their messages back.
+	GraceSeconds int `json:"graceSeconds"`
 }
 
 // UnmarshalJSON decodes a deployable and turns the references in its name

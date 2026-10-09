@@ -101,6 +101,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// An API service's jobs, a class each (core_jobs.go, D52).
 	specs = append(specs, jobDecorator())
 
+	// A DB service's queues, a message class each, and an API service's
+	// workers, which handle them (core_queues.go, D53).
+	specs = append(specs, queueDecorator(), workerDecorator())
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })

@@ -13,6 +13,7 @@ declare module "../src/index" {
       server: { minInstances?: number };
       database: { tier?: string; highAvailability?: boolean };
       job: { cpu?: string };
+      worker: { memory?: string };
     };
   }
 }
@@ -42,6 +43,9 @@ const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
 // An API with @job classes, whose names the sentinel writes as the third
 // type argument.
 const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
+// An API with @worker classes and no @job class, whose workers the
+// sentinel writes as the fourth type argument, with the jobs never.
+const ShopFulfilment = service<"API", ShopApiConfig, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
 
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
@@ -260,3 +264,66 @@ export abstract class EnabledString {}
   settings: [{ of: ShopCart, job: "ExpireCarts", port: 8080 }],
 })
 export abstract class LocalJobPort {}
+
+// A worker's element names its API's handle and the worker's class; it
+// sets how many instances run and how many messages each handles, takes
+// the target's worker settings, and an env of its API's config (D53).
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [
+    { of: ShopFulfilment, worker: "FulfilOrders", instances: 3, concurrency: 8, memory: "1Gi", env: { LOG_LEVEL: "warn" } },
+    // A handle with no workers type takes any worker name, which the
+    // loader checks.
+    { of: ShopOrders, worker: "Anything", enabled: false },
+  ],
+})
+export abstract class WorkerSettings {}
+
+@environment({
+  target: "local",
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", concurrency: 2 }],
+})
+export abstract class LocalWorker {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a worker the API does not declare
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrder" }],
+})
+export abstract class UnknownWorker {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an API with workers and no jobs names no job
+  settings: [{ of: ShopFulfilment, job: "FulfilOrders" }],
+})
+export abstract class WorkerAsJob {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error instances are a worker's setting
+  settings: [{ of: ShopApi, instances: 2 }],
+})
+export abstract class InstancesOnServer {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a schedule is a job's setting, not a worker's
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", schedule: "0 * * * *" }],
+})
+export abstract class ScheduleOnWorker {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a DB service declares no worker
+  settings: [{ of: ShopDb, worker: "FulfilOrders" }],
+})
+export abstract class WorkerOfDatabase {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local worker takes no settings
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", memory: "1Gi" }],
+})
+export abstract class LocalWorkerMemory {}

@@ -21,7 +21,9 @@ import (
 //     the API (D37);
 //   - an API's @envVars type, read as the env loaders read it
 //     (envgen), with each field's Secret, Default and InheritedFrom;
-//   - an API's jobs, each a deployable of the stack (D52).
+//   - an API's jobs, each a deployable of the stack (D52);
+//   - an API's workers, each a deployable of the stack, and a DB's
+//     queues, which a worker's queue is one of (D53).
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -53,8 +55,18 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 				svc.Jobs = append(svc.Jobs, fact)
 			}
 		}
+		for _, worker := range schema.Workers {
+			if worker != nil {
+				fact := *worker
+				fact.Comment = ""
+				svc.Workers = append(svc.Workers, fact)
+			}
+		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
+		for _, td := range schema.Queues() {
+			svc.Queues = append(svc.Queues, td.Name)
+		}
 	}
 	return svc, nil
 }

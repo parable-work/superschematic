@@ -338,8 +338,12 @@ func TestApplyFromNothing(t *testing.T) {
 		"/bin/superschematic-migrate apply --plan DIR/migrations/shop-db.plan.json --phase all --database-url " + url,
 		"/bin/go build -o DIR/bin/shop-api .",
 		"DIR/bin/shop-api",
+		// shop-orders' worker builds and starts with Orders, in the
+		// rollout after its callee, a process with no port (D53).
 		"/bin/go build -o DIR/bin/orders .",
+		"/bin/go build -o DIR/bin/shop-orders-fulfil-orders .",
 		"DIR/bin/orders",
+		"DIR/bin/shop-orders-fulfil-orders",
 		// shop-orders' job builds in the rollout after its callee, and
 		// runs only on its schedule (D52).
 		"/bin/go build -o DIR/bin/shop-orders-ship-orders .",
@@ -373,10 +377,24 @@ func TestApplyFromNothing(t *testing.T) {
 			}
 		}
 	}
-	if len(f.runner.started) != 2 {
-		t.Fatalf("started %d processes, want 2", len(f.runner.started))
+	if len(f.runner.started) != 3 {
+		t.Fatalf("started %d processes, want 3", len(f.runner.started))
 	}
-	api, orders := f.runner.started[0].cmd.Env, f.runner.started[1].cmd.Env
+	api, orders, worker := f.runner.started[0].cmd.Env, f.runner.started[1].cmd.Env, f.runner.started[2].cmd.Env
+	// The worker takes its API's config and its own edges, and the
+	// concurrency its platform sets, and listens on no port (D53).
+	for name, want := range map[string]string{
+		"PORT":                 "",
+		"WORKER_CONCURRENCY":   "4",
+		"FULFILLMENT_REGION":   "us",
+		"STRIPE_KEY":           "sk_test_123",
+		"SHOP_DB_DATABASE_URL": url,
+		"SHOP_API_SERVICE_URL": local.ServerURL(f.apiPort),
+	} {
+		if got := envValue(worker, name); got != want {
+			t.Errorf("the worker's %s = %q, want %q", name, got, want)
+		}
+	}
 	for name, want := range map[string]string{
 		"PORT":                 fmt.Sprint(f.apiPort),
 		"LOG_LEVEL":            "info",
@@ -412,6 +430,8 @@ func TestApplyFromNothing(t *testing.T) {
 		"[migrate shop-db] applied 2 steps\n",
 		"migrate contract: shop-db ran its contract steps with its expand steps",
 		"Orders is ready at " + local.ServerURL(f.ordPort),
+		"start worker shop-orders-fulfil-orders",
+		"worker shop-orders-fulfil-orders is running",
 	} {
 		if !strings.Contains(f.out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, f.out)
@@ -433,8 +453,11 @@ func TestApplyFromNothing(t *testing.T) {
 	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
 		t.Fatal(err)
 	}
-	if !f.runner.started[0].stopped || !f.runner.started[1].stopped {
-		t.Error("Destroy left a server running")
+	if !f.runner.started[0].stopped || !f.runner.started[1].stopped || !f.runner.started[2].stopped {
+		t.Error("Destroy left a server or the worker running")
+	}
+	if _, ok := outputs["shop-orders-fulfil-orders.process"]; ok {
+		t.Error("the worker's process has outputs; it has no port and no URL")
 	}
 	if got := f.runner.lines(dir); len(got) != 2 || got[1] != "/bin/docker stop superschematic-shop-stack-dev-postgres" {
 		t.Errorf("Destroy ran %v", got)
@@ -612,7 +635,7 @@ func TestApplyAgain(t *testing.T) {
 	if err := f.prov.Apply(context.Background(), f.req, *rollout); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.runner.started) != 3 || !f.runner.started[0].stopped {
+	if len(f.runner.started) != 4 || !f.runner.started[0].stopped {
 		t.Errorf("applying wave 1 again did not restart shop-api")
 	}
 	if err := f.prov.Purge(context.Background(), f.req); err != nil {
@@ -641,9 +664,11 @@ func TestPlan(t *testing.T) {
 		"create shop-db.database.shop-db",
 		"migrate shop-db.database.shop-db",
 		"create Orders.calls.shop-api.key",
+		"create shop-orders-fulfil-orders.calls.shop-api.key",
 		"create shop-orders-ship-orders.calls.shop-api.key",
 		"start shop-api.process",
 		"start Orders.process",
+		"start shop-orders-fulfil-orders.process",
 		"build shop-orders-ship-orders.job",
 	}
 	if !slices.Equal(got, want) {

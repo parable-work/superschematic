@@ -178,12 +178,25 @@ type Input struct {
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
+	// Worker, when set, plans the entrypoint of a worker of the one API in
+	// APIs (D53): Server is then the worker's deployable.
+	Worker *WorkerInput
 }
 
 // JobInput is the job a job's entrypoint runs.
 type JobInput struct {
 	// Name is the job's @job class.
 	Name string
+}
+
+// WorkerInput is the worker a worker's entrypoint runs.
+type WorkerInput struct {
+	// Name is the worker's @worker class.
+	Name string
+
+	// GraceSeconds is how long the worker lets its running handlers finish
+	// once it is told to stop.
+	GraceSeconds int
 }
 
 // ServerDir is where the entrypoint of server in stack is written; a job's
@@ -217,6 +230,10 @@ type Server struct {
 
 	// Job is what a job's entrypoint runs, nil for a server.
 	Job *Job
+
+	// Worker is what a worker's entrypoint runs, nil for a server and a
+	// job (D53).
+	Worker *Worker
 
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
@@ -256,6 +273,26 @@ func (s *Server) Pinned() bool {
 type Job struct {
 	Name   string
 	Method string
+}
+
+// Worker is the worker a worker's entrypoint runs (D53): its @worker class,
+// the method of the API's Workers interface that handles a message, the
+// queue it claims from, a class of Database, the API's database, its
+// concurrency unless the environment sets one, and its grace.
+type Worker struct {
+	Name         string
+	Method       string
+	Queue        string
+	Database     *Database
+	Concurrency  int
+	GraceSeconds int
+}
+
+// Background reports whether the entrypoint is a job's or a worker's,
+// which serves no request: it mounts no routes, listens on no port,
+// verifies no end user or caller, and decrypts no payload.
+func (s *Server) Background() bool {
+	return s.Job != nil || s.Worker != nil
 }
 
 // Require is a go.mod require line.
@@ -393,6 +430,7 @@ var reserved = []string{
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
 	"jobs", "started",
+	"workers", "worker", "queue", "concurrency",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -468,6 +506,24 @@ func Plan(in Input) (*Server, error) {
 		}
 		s.Kind, s.Binary = "job", "job"
 		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method}
+	case in.Worker != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: worker %s runs a worker of %d APIs; a worker belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		i := slices.IndexFunc(o.Workers, func(w apigen.WorkerInfo) bool { return w.Name == in.Worker.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, which declares no such worker", in.Stack, in.Server, in.Worker.Name, o.SchemaName)
+		}
+		if o.Deps.Database == "" {
+			return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s, and %s connects to no database", in.Stack, in.Server, o.SchemaName, o.Workers[i].Queue, o.SchemaName)
+		}
+		grace := in.Worker.GraceSeconds
+		if grace <= 0 {
+			grace = ir.DefaultWorkerGraceSeconds
+		}
+		s.Kind, s.Binary = "worker", "worker"
+		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -490,9 +546,9 @@ func Plan(in Input) (*Server, error) {
 			Import:  a.Implementation.Import,
 			Config:  o.HasEnvConfig(),
 		}
-		if s.Job == nil {
-			// A job serves no request: it mounts no routes, verifies no end
-			// user or caller, and decrypts no payload.
+		if !s.Background() {
+			// A job or a worker serves no request: it mounts no routes,
+			// verifies no end user or caller, and decrypts no payload.
 			apis[i].Public = o.IsPublic
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
@@ -561,6 +617,9 @@ func Plan(in Input) (*Server, error) {
 		}
 	}
 	s.APIs = apis
+	if s.Worker != nil {
+		s.Worker.Database = apis[0].Database
+	}
 	slices.Sort(s.CloudSQL)
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
@@ -580,7 +639,7 @@ func Plan(in Input) (*Server, error) {
 // cloudsql.go import, then in.Modules, each replaced by its directory.
 func (s *Server) planModule(in Input, dir string) error {
 	direct := []Require{{"go.uber.org/zap", zapVersion}}
-	if s.Job == nil {
+	if !s.Background() {
 		direct = append(direct, Require{"github.com/go-chi/chi/v5", chiVersion})
 	}
 	if len(s.Databases) > 0 {
@@ -775,15 +834,19 @@ func checkRoutes(in Input) error {
 // planned.
 //
 // A job's module holds the same files but serviceauth.go, and its main.go
-// runs the job (job.go.tmpl). Both main.go templates take the wiring they
+// runs the job (job.go.tmpl); a worker's runs the worker's claim loop
+// (worker.go.tmpl, D53). Every main.go template takes the wiring they
 // share from wiring.tmpl.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
 	}
 	main := "main.go.tmpl"
-	if s.Job != nil {
+	switch {
+	case s.Job != nil:
 		main = "job.go.tmpl"
+	case s.Worker != nil:
+		main = "worker.go.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, MainFile},

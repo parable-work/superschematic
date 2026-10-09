@@ -54,7 +54,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 		}
 		e.emitClass(def)
 	case ir.RoleEmbeddedStruct:
-		if e.doc.Kind == ir.SchemaKindDB {
+		if e.doc.Kind == ir.SchemaKindDB && def.Queue == nil {
 			e.emitTypeAlias(def)
 			return
 		}
@@ -171,6 +171,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	if def.Optimistic {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("optimistic"))
+	}
+	if def.Queue != nil {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("queue"), queueArgs(def.Queue))
 	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))

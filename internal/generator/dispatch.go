@@ -938,6 +938,16 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		if db != output.UpstreamSchema {
 			roots = append(roots, schema)
 		}
+		if len(r.Schema.Workers) > 0 {
+			if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
+				return deps, nil, err
+			}
+			deps.DatabaseTypes = r.Options.Naming.GoTypesModule(db)
+			deps.DatabaseTypesAlias = toGoPackageName(db)
+			output.AddIndirectModules([]string{deps.DatabaseTypes})
+		}
+	} else if len(r.Schema.Workers) > 0 {
+		return deps, nil, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
 	}
 	for _, call := range r.Schema.Calls {
 		if err := needs(call.Name, "a client of "+call.Name, "sdk", func(o *registry.Outputs) bool { return o.SDKEnabled(LangGo) }); err != nil {
@@ -957,6 +967,30 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		})
 	}
 	return deps, roots, nil
+}
+
+// checkWorkerQueues refuses a worker of api whose queue is no @queue class
+// of db, the database the API connects to, whose schema is dbSchema (D53):
+// a worker claims through its API's connection, so its queue lives there.
+func checkWorkerQueues(api *ir.Schema, db string, dbSchema *ir.Schema) error {
+	for _, worker := range api.Workers {
+		if worker == nil {
+			continue
+		}
+		if td := dbSchema.Types[worker.Queue]; td == nil || td.Queue == nil {
+			var queues []string
+			for _, q := range dbSchema.Queues() {
+				queues = append(queues, q.Name)
+			}
+			declared := "none"
+			if len(queues) > 0 {
+				declared = strings.Join(queues, ", ")
+			}
+			return fmt.Errorf("generator: worker %s of %s handles %s, which is no @queue class of %s, the database %s connects to (its queues: %s); a worker's queue is a queue of its API's authDb, or of its one DB dependency (D53)",
+				worker.Name, api.Name, worker.Queue, db, api.Name, declared)
+		}
+	}
+	return nil
 }
 
 // scaffoldGoImplementation writes the scaffold of the API's Go

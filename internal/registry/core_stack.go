@@ -70,9 +70,11 @@ var (
 	// Every key of @environment's argument other than those named here
 	// holds the values of the target the environment names, under the
 	// target's name (`gcp: { project, region }`). A settings element's keys
-	// other than of, job, platform, env, schedule, timeZone and enabled are
-	// the platform settings. job names a job of the API of; schedule,
-	// timeZone and enabled change that job's schedule (D52).
+	// other than of, job, worker, platform, env, schedule, timeZone,
+	// enabled, instances and concurrency are the platform settings. job
+	// names a job of the API of; schedule, timeZone and enabled change that
+	// job's schedule (D52). worker names a worker of the API of; enabled,
+	// instances and concurrency change how it runs (D53).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -87,6 +89,9 @@ var (
 				"properties": {
 					"of": ` + stackRefSchema + `,
 					"job": {"type": "string", "minLength": 1},
+					"worker": {"type": "string", "minLength": 1},
+					"instances": {"type": "integer", "minimum": 0},
+					"concurrency": {"type": "integer", "minimum": 1},
 					"schedule": {"type": "string", "minLength": 1},
 					"timeZone": {"type": "string", "minLength": 1},
 					"enabled": {"type": "boolean"},
@@ -227,12 +232,13 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 	return nil
 }
 
-// deployableSettings reads one settings element: of, job, platform, env,
-// and a job's schedule, timeZone and enabled, and the platform settings in
-// every other key.
+// deployableSettings reads one settings element: of, job, worker,
+// platform, env, a job's schedule, timeZone and enabled, a worker's
+// enabled, instances and concurrency, and the platform settings in every
+// other key.
 func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) {
 	settings := &ir.DeployableSettings{}
-	var job string
+	var job, worker string
 	for _, key := range sortedKeys(element) {
 		value := element[key]
 		switch key {
@@ -244,6 +250,16 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 			settings.Of = ref
 		case "job":
 			job, _ = value.(string)
+		case "worker":
+			worker, _ = value.(string)
+		case "instances":
+			n, _ := value.(float64)
+			instances := int(n)
+			settings.Instances = &instances
+		case "concurrency":
+			n, _ := value.(float64)
+			concurrency := int(n)
+			settings.Concurrency = &concurrency
 		case "schedule":
 			settings.Schedule, _ = value.(string)
 		case "timeZone":
@@ -277,6 +293,12 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 			return nil, fmt.Errorf("job %s names a job of the API service of names, but of names no service; write `of: <API handle>, job: %q`", job, job)
 		}
 		settings.Of.Job = job
+	}
+	if worker != "" {
+		if settings.Of.Service == nil {
+			return nil, fmt.Errorf("worker %s names a worker of the API service of names, but of names no service; write `of: <API handle>, worker: %q`", worker, worker)
+		}
+		settings.Of.Worker = worker
 	}
 	return settings, nil
 }
@@ -376,6 +398,12 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if ref.Job != "" {
 					r.Errorf(td.Owner, "%s names job %s of deployable %s; a job belongs to an API service, so name the API's handle", where, ref.Job, ref.Deployable)
 				}
+				if ref.Worker != "" {
+					r.Errorf(td.Owner, "%s names worker %s of deployable %s; a worker belongs to an API service, so name the API's handle", where, ref.Worker, ref.Deployable)
+				}
+			}
+			if ref.Job != "" && ref.Worker != "" {
+				r.Errorf(td.Owner, "%s names both job %s and worker %s; an element names one", where, ref.Job, ref.Worker)
 			}
 		}
 		if td.Stack != nil {
@@ -385,6 +413,9 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if ref.Job != "" {
 					r.Errorf(td.Owner, "%s names job %s; only a server is exposed", where, ref.Job)
 				}
+				if ref.Worker != "" {
+					r.Errorf(td.Owner, "%s names worker %s; only a server is exposed", where, ref.Worker)
+				}
 			}
 		}
 		if td.Environment != nil {
@@ -393,6 +424,7 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 					where := fmt.Sprintf("@environment class %s settings[%d]", name, i)
 					checkRef(where+" of", settings.Of)
 					checkJobSettings(where, td.Owner, settings, r)
+					checkWorkerSettings(where, td.Owner, settings, r)
 				}
 			}
 			switch order := td.Environment.Order; {
@@ -428,7 +460,7 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if settings.TimeZone != "" {
 			keys = append(keys, "timeZone")
 		}
-		if settings.Enabled != nil {
+		if settings.Enabled != nil && settings.Of.Worker == "" {
 			keys = append(keys, "enabled")
 		}
 		if len(keys) > 0 {
@@ -445,5 +477,34 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if err := CheckTimeZone(settings.TimeZone); err != nil {
 			r.Errorf(owner, "%s timeZone: %v", where, err)
 		}
+	}
+}
+
+// checkWorkerSettings checks a settings element's worker settings (D53):
+// only an element whose of names a worker sets instances or concurrency,
+// instances are zero or more and a concurrency one or more. Whether the
+// API declares the worker is resolution's to check.
+func checkWorkerSettings(where, owner string, settings *ir.DeployableSettings, r VerifyReporter) {
+	if settings.Of.Worker == "" {
+		var keys []string
+		if settings.Instances != nil {
+			keys = append(keys, "instances")
+		}
+		if settings.Concurrency != nil {
+			keys = append(keys, "concurrency")
+		}
+		if len(keys) > 0 {
+			r.Errorf(owner, "%s sets %s, which only a worker takes; name the worker beside its API's handle, `of: <API handle>, worker: \"<worker class>\"`", where, strings.Join(keys, " and "))
+		}
+		return
+	}
+	if settings.Schedule != "" || settings.TimeZone != "" {
+		r.Errorf(owner, "%s sets a schedule or a time zone on worker %s, which runs until it is stopped; only a job takes them", where, settings.Of.Worker)
+	}
+	if settings.Instances != nil && *settings.Instances < 0 {
+		r.Errorf(owner, "%s instances is %d; it is zero or more", where, *settings.Instances)
+	}
+	if settings.Concurrency != nil && *settings.Concurrency < 1 {
+		r.Errorf(owner, "%s concurrency is %d; it is one or more", where, *settings.Concurrency)
 	}
 }

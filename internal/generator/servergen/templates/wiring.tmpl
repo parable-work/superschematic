@@ -16,6 +16,9 @@ exactly as a server does.
 {{- if or .Databases .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
+{{- if .Worker }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/worker"
+{{- end }}
 	"go.uber.org/zap"
 {{ range .APIs }}
 	{{ .Package }} "{{ .Module }}"
@@ -43,7 +46,7 @@ exactly as a server does.
 
 	// One pool per database, shared by every API on it. A pool connects when
 	// it is first used, so the {{ .Kind }} starts while its database is not up yet
-{{- if .Job }}.
+{{- if .Background }}.
 {{- else }}
 	// and /readyz reports it.
 {{- end }}
@@ -123,7 +126,7 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // at endpoint, the field its edge derives. The client sends the service
 // credential the edge's connector chose, and forwards the end user of the
 // request on each call's context (docs/stack-model.md, sections 9.4 and
-// 9.6){{ if $.Job }}: a job serves no request, so it forwards none{{ end }}.
+// 9.6){{ if $.Background }}: a {{ $.Kind }} serves no request, so it forwards none{{ end }}.
 func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type }}, error) {
 	cfg := {{ .Package }}.SDKConfig{
 		BaseURL: endpoint.URL,

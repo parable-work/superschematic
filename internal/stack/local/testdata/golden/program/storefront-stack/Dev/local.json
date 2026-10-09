@@ -38,6 +38,11 @@
       "callee": "shop-api"
     },
     {
+      "id": "shop-orders-fulfil-orders.calls.shop-api.key",
+      "caller": "shop-orders-fulfil-orders",
+      "callee": "shop-api"
+    },
+    {
       "id": "shop-orders-ship-orders.calls.shop-api.key",
       "caller": "shop-orders-ship-orders",
       "callee": "shop-api"
@@ -143,6 +148,64 @@
         {
           "name": "STRIPE_KEY",
           "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "id": "shop-orders-fulfil-orders.process",
+      "deployable": "shop-orders-fulfil-orders",
+      "name": "shop-orders-fulfil-orders",
+      "kind": "worker",
+      "wave": 2,
+      "language": "go",
+      "module": "server/storefront-stack/shop-orders-fulfil-orders",
+      "binary": "bin/shop-orders-fulfil-orders",
+      "readiness": "started",
+      "env": [
+        {
+          "name": "FULFILLMENT_REGION",
+          "value": "us"
+        },
+        {
+          "name": "MAX_LINE_ITEMS",
+          "value": "50"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+          "value": "shop-api"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+          "value": "shop-orders-fulfil-orders"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+          "value": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.calls.shop-api.key",
+              "name": "privateJwk"
+            }
+          }
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+          "value": "signed-token"
+        },
+        {
+          "name": "SHOP_API_SERVICE_URL",
+          "value": "http://127.0.0.1:20520"
+        },
+        {
+          "name": "SHOP_DB_DATABASE_URL",
+          "value": "postgres://postgres@127.0.0.1:31939/shop_db?sslmode=disable"
+        },
+        {
+          "name": "STRIPE_KEY",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        },
+        {
+          "name": "WORKER_CONCURRENCY",
+          "value": "4"
         }
       ]
     }
