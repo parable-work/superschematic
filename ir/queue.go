@@ -60,6 +60,12 @@ const (
 	DefaultWorkerInstances = 1
 )
 
+// WorkerConcurrencyVariable is the environment variable a worker platform
+// sets on each instance of a worker to the concurrency its environment
+// gives it (ResolvedWorker.Concurrency), which the worker's entrypoint
+// reads (runtime/http/go/worker.ConcurrencyVariable).
+const WorkerConcurrencyVariable = "WORKER_CONCURRENCY"
+
 // The states of a queue's message, in its table's state column.
 const (
 	// QueueStateReady is a message that is due at its due time.

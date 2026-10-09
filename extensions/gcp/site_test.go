@@ -26,7 +26,7 @@ var siteHex = strings.TrimPrefix(siteDigest, "sha256:")
 // siteShop is the shop with shop-web (D55), and the services it resolves
 // over, with shop-web's fallback as fallback gives it.
 func siteShop(fallback string) (*ir.Stack, []stack.Service) {
-	services := stacktest.WithoutWorkers(stacktest.SiteShop())
+	services := stacktest.SiteShop()
 	for i, svc := range services {
 		if svc.Site != nil {
 			site := *svc.Site

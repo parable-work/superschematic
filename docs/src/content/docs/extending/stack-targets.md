@@ -139,8 +139,10 @@ stops. It sets `WORKER_CONCURRENCY` on the process to the concurrency,
 which the worker's entrypoint reads. A worker has a server's bindings,
 from its API's config and its own edges, and no callers field.
 `stack/stacktest`'s `fake.worker` lowers one to a pool with its own
-account, and the local target's `local.worker` to a process with no port,
-ready once it starts.
+account, the local target's `local.worker` to a process with no port,
+ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker
+pool scaled by hand to the instances, sharing the Cloud Run service's
+lowering of the account, secrets, config, Cloud SQL volume and egress.
 
 ## A connector
 

@@ -64,12 +64,12 @@ func (f *deployFixture) ready(t *testing.T) {
 }
 
 // shopSources writes a repository with the Dockerfile the shop's build
-// writes for each of its servers and its job.
+// writes for each of its servers, its job and its worker.
 func shopSources(t *testing.T) *stack.Sources {
 	t.Helper()
 	root := t.TempDir()
 	src := &stack.Sources{OutputRoot: filepath.Join(root, "schemas", "dist"), RepositoryRoot: root}
-	for _, server := range []string{"shop-api", "Orders", "shop-orders-ship-orders"} {
+	for _, server := range []string{"shop-api", "Orders", "shop-orders-ship-orders", "shop-orders-fulfil-orders"} {
 		dockerfile := src.Dockerfile("Shop", server)
 		for path, content := range map[string]string{
 			dockerfile:                   "FROM scratch\n",
@@ -169,7 +169,7 @@ func (f *deployFixture) jobDocument(t *testing.T, args []string) (string, map[st
 func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	ctx := context.Background()
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -183,8 +183,9 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	want := []string{
 		"cloud build " + shopRepo + "orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
+		"cloud build " + shopRepo + "shop-orders-fulfil-orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
-		"render 48 nodes",
+		"render 56 nodes",
 		"apply infrastructure",
 		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
@@ -231,8 +232,15 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		t.Errorf("shop-orders-ship-orders.job runs %v, want the image built, %s", got, job)
 	}
 
+	// The worker's image, pinned in its worker pool (D53).
+	worker := m.Images["shop-orders-fulfil-orders"]
+	pool := f.prov.Rendered().Resources.Resource("shop-orders-fulfil-orders.worker-pool").Properties["template"].(map[string]any)
+	if got := pool["containers"].([]any)[0].(map[string]any)["image"]; !strings.HasPrefix(worker, shopRepo+"shop-orders-fulfil-orders@sha256:") || got != worker {
+		t.Errorf("shop-orders-fulfil-orders.worker-pool runs %v, want the image built, %s", got, worker)
+	}
+
 	// The runner's image, from the release's module.
-	runner := f.cloud.builds[3]
+	runner := f.cloud.builds[4]
 	if runner.Image != migrateRepo+":1.2.3" || runner.Dockerfile != "Dockerfile" || runner.Object != "superschematic/builds/shop/superschematic-migrate/1.2.3.tar.gz" {
 		t.Errorf("the runner's build: %+v", runner)
 	}
@@ -297,7 +305,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	ctx := context.Background()
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -329,7 +337,7 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	if name, _ := f.jobDocument(t, f.cloud.runs[n]); !strings.Contains(name, "/shop-db/expand-") {
 		t.Errorf("the next deploy ran %s first", name)
 	}
-	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api", "shop-orders-ship-orders"}) {
+	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api", "shop-orders-fulfil-orders", "shop-orders-ship-orders"}) {
 		t.Errorf("the manifest records servers %v", got)
 	}
 
@@ -352,7 +360,7 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	}
 	_, doc := f.jobDocument(t, f.cloud.runs[n])
 	got, _ := json.Marshal(doc["databases"])
-	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam","shop-orders-ship-orders@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
+	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam","shop-orders-fulfil-orders@acme-staging.iam","shop-orders-ship-orders@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
 		t.Errorf("the job's databases: %s\nwant %s", got, want)
 	}
 }
@@ -423,7 +431,7 @@ func TestMigrationJobReportsTheRunnerError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 			f.ready(t)
-			env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+			env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 			ctx := context.Background()
 			o := stack.DeployOptions{
 				Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -466,7 +474,7 @@ func TestMigrationJobReportsTheRunnerError(t *testing.T) {
 func TestMigrationJobOfAMember(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Preview")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
 	_, err := stack.Deploy(context.Background(), stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env, Parameters: map[string]string{"pr": "7"}}, Dir: t.TempDir()},
 		Images:  shopImages("acme-staging", 1),
@@ -488,7 +496,7 @@ func TestMigrationJobOfAMember(t *testing.T) {
 	got, _ := json.Marshal(map[string]any{"cloudSql": doc["cloudSql"], "privileges": doc["databases"].([]any)[0].(map[string]any)["privileges"],
 		"database": doc["databases"].([]any)[0].(map[string]any)["database"]})
 	want := `{"cloudSql":{"instance":"acme-staging:us-east1:shop-db","user":"shop-migrator@acme-staging.iam"},"database":"shop_db_pr7",` +
-		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam","shop-orders-ship-orders-pr7@acme-staging.iam"]}}`
+		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam","shop-orders-fulfil-orders-pr7@acme-staging.iam","shop-orders-ship-orders-pr7@acme-staging.iam"]}}`
 	if string(got) != want {
 		t.Errorf("the member's job: %s\nwant %s", got, want)
 	}
@@ -500,7 +508,7 @@ func TestMigrationJobOfAMember(t *testing.T) {
 func TestMigrationJobNeedsARelease(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	_, err := stack.Deploy(context.Background(), stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
 		Images:  shopImages("acme-staging", 1),
@@ -526,7 +534,7 @@ func TestMigrationJobNeedsARelease(t *testing.T) {
 func TestBuilder(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	src := shopSources(t)
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -537,12 +545,12 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 3 {
+	if len(f.cloud.builds) != 4 {
 		t.Fatalf("stack build ran %d builds", len(f.cloud.builds))
 	}
 	f.cloud.failBuild[migrateRepo+":1.2.3"] = "step 0 exited 1"
 	_, err = stack.Deploy(context.Background(), o)
-	if len(f.cloud.builds) != 4 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
+	if len(f.cloud.builds) != 5 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
 		t.Fatalf("deploy = %v after %d builds", err, len(f.cloud.builds))
 	}
 	data, rerr := f.cloud.ReadObject(context.Background(), stateBucket, "superschematic/manifests/shop/Staging.json")
@@ -561,7 +569,7 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 5 || m2.Images["Orders"] != built.Images["Orders"] {
+	if len(f.cloud.builds) != 6 || m2.Images["Orders"] != built.Images["Orders"] {
 		t.Errorf("the next deploy ran %d builds in all and runs Orders at %s, want stack build's %s", len(f.cloud.builds), m2.Images["Orders"], built.Images["Orders"])
 	}
 

@@ -274,6 +274,91 @@
       }
     },
     {
+      "name": "shop-orders-fulfil-orders",
+      "kind": "worker",
+      "platform": "gcp.cloudrunworker",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "worker": {
+        "api": "shop-orders",
+        "name": "FulfilOrders",
+        "queue": "OrderPlaced",
+        "database": "shop-db",
+        "instances": 1,
+        "concurrency": 4,
+        "graceSeconds": 8
+      },
+      "resourceName": "shop-orders-fulfil-orders",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api",
+              "source": "google-id-token"
+            },
+            "url": {
+              "$output": {
+                "resource": "shop-api.service",
+                "name": "uri"
+              }
+            }
+          },
+          "edge": "http:shop-orders-fulfil-orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "shop-orders-fulfil-orders@acme-staging.iam"
+            }
+          },
+          "edge": "sql:shop-orders-fulfil-orders->shop-db"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
       "name": "shop-orders-ship-orders",
       "kind": "job",
       "platform": "gcp.cloudrunjob",
@@ -421,6 +506,18 @@
       "field": "SHOP_API_SERVICE"
     },
     {
+      "id": "http:shop-orders-fulfil-orders->shop-api",
+      "kind": "http",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "gcp.cloudrunworker-cloudrun",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
       "id": "http:shop-orders-ship-orders->shop-api",
       "kind": "http",
       "from": "shop-orders-ship-orders",
@@ -469,6 +566,18 @@
       "field": "SHOP_DB_DATABASE"
     },
     {
+      "id": "sql:shop-orders-fulfil-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrunworker-cloudsql",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
       "id": "sql:shop-orders-ship-orders->shop-db",
       "kind": "sql",
       "from": "shop-orders-ship-orders",
@@ -489,6 +598,7 @@
       "readers": [
         "Orders",
         "shop-api",
+        "shop-orders-fulfil-orders",
         "shop-orders-ship-orders"
       ]
     }
@@ -947,6 +1057,7 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
       },
@@ -972,6 +1083,7 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
       },
@@ -995,6 +1107,7 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
       },
@@ -1020,6 +1133,7 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
       },
@@ -1037,6 +1151,7 @@
         "owners": [
           "Orders",
           "shop-api",
+          "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
       },
@@ -1715,6 +1830,324 @@
         "phase": "infrastructure",
         "owners": [
           "shop-media"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-orders-fulfil-orders",
+          "displayName": "Shop Staging worker shop-orders-fulfil-orders",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-fulfil-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.cloudsql-client.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-fulfil-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.cloudsql-login.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-fulfil-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.database-user.shop-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-orders-fulfil-orders@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance",
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-fulfil-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-fulfil-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.run-invoker.shop-api",
+        "type": "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "name": {
+            "$output": {
+              "resource": "shop-api.service",
+              "name": "name"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/run.invoker"
+        },
+        "dependsOn": [
+          "shop-api.service",
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "http:shop-orders-fulfil-orders->shop-api"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.trace-agent",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudtrace.agent"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-fulfil-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.worker-pool",
+        "type": "gcp:cloudrunv2/workerPool:WorkerPool",
+        "properties": {
+          "deletionProtection": false,
+          "location": "us-east1",
+          "name": "shop-orders-fulfil-orders",
+          "project": "acme-staging",
+          "scaling": {
+            "manualInstanceCount": 1,
+            "scalingMode": "MANUAL"
+          },
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "FULFILLMENT_REGION",
+                    "value": "us"
+                  },
+                  {
+                    "name": "MAX_LINE_ITEMS",
+                    "value": "50"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+                    "value": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+                    "value": "google-id-token"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_URL",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-api.service",
+                        "name": "uri"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.database.shop-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "shop-orders-fulfil-orders@acme-staging.iam"
+                  },
+                  {
+                    "name": "STRIPE_KEY",
+                    "valueSource": {
+                      "secretKeyRef": {
+                        "secret": {
+                          "$output": {
+                            "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+                            "name": "secretId"
+                          }
+                        },
+                        "version": "latest"
+                      }
+                    }
+                  },
+                  {
+                    "name": "WORKER_CONCURRENCY",
+                    "value": "4"
+                  }
+                ],
+                "image": "us-east1-docker.pkg.dev/acme-staging/shop/shop-orders-fulfil-orders",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "shop-orders-fulfil-orders.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ],
+            "vpcAccess": {
+              "egress": "ALL_TRAFFIC",
+              "networkInterfaces": [
+                {
+                  "network": {
+                    "$output": {
+                      "resource": "network",
+                      "name": "name"
+                    }
+                  },
+                  "subnetwork": {
+                    "$output": {
+                      "resource": "network.subnet",
+                      "name": "name"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "dependsOn": [
+          "network",
+          "network.subnet",
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.service",
+          "shop-db.database.shop-db",
+          "shop-db.instance",
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-fulfil-orders"
         ]
       },
       {
@@ -2486,6 +2919,12 @@
         "shop-db.instance",
         "shop-db.migrator",
         "shop-media.bucket",
+        "shop-orders-fulfil-orders.account",
+        "shop-orders-fulfil-orders.cloudsql-client.shop-db",
+        "shop-orders-fulfil-orders.cloudsql-login.shop-db",
+        "shop-orders-fulfil-orders.database-user.shop-db",
+        "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-orders-fulfil-orders.trace-agent",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.cloudsql-client.shop-db",
         "shop-orders-ship-orders.cloudsql-login.shop-db",
@@ -2515,6 +2954,7 @@
       "resources": [
         "Orders.run-invoker.shop-api",
         "shop-api.service",
+        "shop-orders-fulfil-orders.run-invoker.shop-api",
         "shop-orders-ship-orders.run-invoker.shop-api"
       ]
     },
@@ -2523,11 +2963,13 @@
       "wave": 2,
       "deployables": [
         "Orders",
+        "shop-orders-fulfil-orders",
         "shop-orders-ship-orders",
         "shop-web"
       ],
       "resources": [
         "Orders.service",
+        "shop-orders-fulfil-orders.worker-pool",
         "shop-orders-ship-orders.job",
         "shop-orders-ship-orders.schedule",
         "shop-orders-ship-orders.schedule-invoker",

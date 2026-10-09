@@ -1,12 +1,12 @@
 // Package gcp is the gcp target of the stack model (docs/stack-model.md,
 // section 7): Cloud Run servers, Cloud Run jobs and their Cloud Scheduler
-// schedules, Cloud SQL Postgres databases, Cloud Storage buckets (D54),
-// Secret Manager secrets, a global external Application Load Balancer for
-// exposed servers, static sites in Cloud Storage behind a load balancer
-// with Cloud CDN (D55), and Cloud DNS for their records. It registers
-// through the public registry package alone, as any extension does (D10),
-// in a Go module of its own (D1), so the GCP vocabulary stays out of the
-// core.
+// schedules, Cloud Run worker pools (D53), Cloud SQL Postgres databases,
+// Cloud Storage buckets (D54), Secret Manager secrets, a global external
+// Application Load Balancer for exposed servers, static sites in Cloud
+// Storage behind a load balancer with Cloud CDN (D55), and Cloud DNS for
+// their records. It registers through the public registry package alone,
+// as any extension does (D10), in a Go module of its own (D1), so the GCP
+// vocabulary stays out of the core.
 //
 // Every platform, connector and DNS platform here is a pure function to
 // resource graph nodes typed by the Pulumi `gcp` provider, whose schemas
@@ -35,10 +35,12 @@ const (
 
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
+	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
 	// CloudSQL runs Postgres databases on Cloud SQL instances.
-	CloudRun    = "gcp.cloudrun"
-	CloudRunJob = "gcp.cloudrunjob"
-	CloudSQL    = "gcp.cloudsql"
+	CloudRun       = "gcp.cloudrun"
+	CloudRunJob    = "gcp.cloudrunjob"
+	CloudRunWorker = "gcp.cloudrunworker"
+	CloudSQL       = "gcp.cloudsql"
 
 	// Site serves a static site's files from a Cloud Storage bucket,
 	// through a load balancer with Cloud CDN (D55).
@@ -70,6 +72,13 @@ const (
 	// and a Cloud Run job to a bucket its API lists (D54).
 	BucketConnector    = "gcp.cloudrun-storage"
 	JobBucketConnector = "gcp.cloudrunjob-storage"
+
+	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
+	// connect a Cloud Run worker pool, whose edges are its API's, as the
+	// server's connectors do (D53).
+	WorkerSQLConnector    = "gcp.cloudrunworker-cloudsql"
+	WorkerHTTPConnector   = "gcp.cloudrunworker-cloudrun"
+	WorkerBucketConnector = "gcp.cloudrunworker-storage"
 
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
@@ -156,6 +165,16 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      CloudRunWorker,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageGo},
+			Settings:  json.RawMessage(cloudRunWorkerSettings),
+			NameOf:    serviceName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerWorker,
+		},
+		{
 			Name:      CloudSQL,
 			Extension: Name,
 			Kind:      ir.DeployableDatabase,
@@ -197,6 +216,9 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: Site, To: CloudRun, Connect: connectSite},
 		{Name: BucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRun, To: Storage, Connect: connectBucket},
 		{Name: JobBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunJob, To: Storage, Connect: connectBucket},
+		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunWorker, To: CloudSQL, Connect: connectSQL},
+		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunWorker, To: CloudRun, Connect: connectHTTP},
+		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunWorker, To: Storage, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -220,6 +242,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableJob:      CloudRunJob,
 			ir.DeployableSite:     Site,
 			ir.DeployableBucket:   Storage,
+			ir.DeployableWorker:   CloudRunWorker,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,

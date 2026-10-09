@@ -39,7 +39,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server or job; a bucket on another provider |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, each worker's entrypoint and image, and `stack dev`'s worker processes | workers on gcp; a TypeScript or Rust worker; claims on SQLite and D1 |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | a TypeScript or Rust worker; claims on SQLite and D1 |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -336,6 +336,10 @@ declare module "@superschematic/stack" {
         versioning?: boolean;
         deleteAfterDays?: number;
       };
+      worker: {
+        cpu?: string;
+        memory?: string;
+      };
     };
   }
 }
@@ -553,7 +557,9 @@ settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 2, concurrency: 
 
 `instances` is one unless set, and `enabled: false` runs none. The
 queue must be a queue of the database the API connects to, which the
-environment runs on Postgres.
+environment runs on Postgres. On gcp a worker is a Cloud Run worker
+pool, scaled by hand to its instances ([Deploy to Google
+Cloud](#deploy-to-google-cloud)).
 
 ## Static sites
 
@@ -908,6 +914,7 @@ and the [generated CI](#generated-ci) signs in with.
 | server | a Cloud Run service with its own service account; its config in environment variables, a derived field as one variable per member |
 | job | a Cloud Run job with its own service account, named after the job (`shop-orders-ship-orders`), with its API's config, secrets and connections; one task, with the job's timeout for each try and its retries, at most 10 |
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
+| worker | a Cloud Run worker pool with its own service account, named after the worker (`shop-orders-fulfil-orders`), with its API's config, secrets and connections and `WORKER_CONCURRENCY`; no port and no URL, scaled by hand to the worker's `instances`, zero when it is off. A `grace` of ten seconds or more is refused, since Cloud Run stops an instance ten seconds after SIGTERM |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password. A Rust server's sql edge is refused |
@@ -929,6 +936,7 @@ Settings and their defaults:
 | `gcp.cloudrun` | `minInstances`, `maxInstances`, `concurrency` | Cloud Run's |
 | `gcp.cloudrun` | `cpuAlwaysAllocated` | false: CPU only while an instance handles a request |
 | `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
+| `gcp.cloudrunworker` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
 | `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
