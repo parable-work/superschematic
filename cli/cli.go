@@ -6,13 +6,15 @@
 // extension. Every command assembles its registry per invocation from the
 // naming file it resolves (registry.Assemble with the extensions given
 // here), so the same command tree serves a core-only binary and one that
-// carries extensions.
+// carries extensions. A binary hands the error Execute returns to Exit.
 //
 // Design: docs/extension-model.md section 3.9.
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -56,8 +58,8 @@ type app struct {
 }
 
 // New builds the root command with build, build-all, migrate, json-schema,
-// format, behaviors and stack, plus the subcommands of any extension that
-// implements CommandProvider.
+// format, behaviors, stack and identity, plus the subcommands of any
+// extension that implements CommandProvider.
 func New(cfg Config, exts ...registry.Extension) *cobra.Command {
 	name := cfg.Name
 	if name == "" {
@@ -91,12 +93,41 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	root.AddCommand(newFormatCmd(a))
 	root.AddCommand(newBehaviorsCmd(a))
 	root.AddCommand(newStackCmd(a))
+	root.AddCommand(newIdentityCmd(a))
 	for _, ext := range exts {
 		if provider, ok := ext.(CommandProvider); ok {
 			root.AddCommand(provider.Commands()...)
 		}
 	}
 	return root
+}
+
+// ExitError is a failure the command already reported: a program it ran,
+// such as superschematic-identity, wrote why on standard error and exited
+// with Code. A binary exits with Code and prints nothing more, as Exit does.
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+
+func (e *ExitError) Unwrap() error { return e.Err }
+
+// Exit ends the process for err, the error Execute returned: an *ExitError
+// exits with its code, its program having said why, and any other error is
+// printed on standard error and exits 1.
+//
+//	if err := cli.New(cli.Config{}).Execute(); err != nil {
+//		cli.Exit(err)
+//	}
+func Exit(err error) {
+	var exit *ExitError
+	if errors.As(err, &exit) {
+		os.Exit(exit.Code)
+	}
+	_, _ = fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
 }
 
 // resolveRegistry assembles the registry a command threads through the
