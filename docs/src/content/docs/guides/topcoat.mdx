@@ -120,6 +120,27 @@ browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
 procedure's body as a plain function, for Rust code and tests: Topcoat
 turns the procedure itself into a value Rust cannot call.
 
+A procedure is a second route to its operation, which any browser can
+reach, so an operation gets one only where a browser's request can meet
+its route's rules. A webhook (`@webhook`, `@hmacVerified`) has neither an
+in-process call nor a procedure: a third party calls it, and its route
+checks the signature before anything else. Nor has an operation the
+service mounts itself (`@manualRouteRegistration`). An operation only a
+service may call (`@requireService`) keeps its in-process call but has
+no procedure, since a browser holds no service credential; an
+`@allowService` one keeps both, since its route admits an end user too.
+Each guard's or call's doc says why, and so does the build log.
+
+A procedure keeps its route's traffic controls, in the route's order, and
+refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
+allows a client 60 calls a minute (429 with `Retry-After`), a body of a
+megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
+them on the procedure's path. Its limiter is its own, at the route's
+rate, and counts clients by the IP address Topcoat reads for them; the
+JSON API's route keeps its own. A page's in-process call applies none of
+them: the page is a route of the app, under the controls the app gives
+it.
+
 ## Keep the shop in SQLite
 
 `shop-db` lists `sqlite` beside `postgres`, so its build also writes the

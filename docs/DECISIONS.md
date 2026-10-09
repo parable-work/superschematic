@@ -4696,3 +4696,47 @@ through `pragma table_xinfo`, so a generated column, and whether it is
 `VIRTUAL`, is compared too.
 
 The rule is reversible until the first release.
+
+### D44, amended: a procedure keeps its route's rules, and an operation whose route a browser cannot meet has none
+
+D44's procedures gave every mounted operation a `#[procedure]` that
+`.discover()` registers without the app asking: a second route to the
+operation, which any browser reaches. Its body ran the operation
+in-process (D43), which applies the route's end-user step and argument
+checks and nothing else. A review found three gaps. A `@webhook`
+operation's route runs the provider's signature check (`@hmacVerified`)
+before anything else; its in-process call and its procedure skipped it,
+so anyone could run the handler unsigned. A `@requireService` route
+admits only a service caller (D37), but its procedure admitted an end
+user's session, or anyone when the operation has no user clause. And a
+procedure skipped its route's `@rateLimit`, `@bodyLimit` and `@timeout`,
+so `placeOrder` had an unlimited twin.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An operation has an in-process call unless a reason says it has none, and every such case is one reason, a clause the guard's doc gives on a line of its own ("It has no in-process call: …") and the build log repeats. The reasons are `@manualRouteRegistration` (the service mounts it) and `@webhook` or `@hmacVerified` (a third party calls it, and its route checks the signature first). The guard stays. Without a call there is no procedure, and the result of such an operation gets no record. | A flag per case in the templates, as `@manualRouteRegistration` had; checking the signature in-process, where there is no signed request to check |
+| An operation with a call has a procedure unless a second reason says otherwise, which the call's doc and the build log give. The one reason is a `@requireService` route, since a browser holds no service credential. An `@allowService` route admits an end user too, so its procedure stays. The `@requireService` operation's in-process call is unchanged and applies the end-user step alone; its doc and its guard's say so, and whether it should refuse stays open, as D37, amended, left it. | Keeping the procedure and refusing every call to it, a route that can never succeed |
+| A procedure meets its route's traffic controls in the route's order (D35) through `ProcedureControls`, a Topcoat layer on the procedure's path that `<service>(...)` adds: the rate limit, then the body limit, read before the procedure decodes its arguments with Topcoat's own limit raised to it, then the timeout around the decoding and the call. Each refusal is the route's 429 (with `Retry-After`), 413 or 504, answered as the procedure answers one, as a `ProblemRecord`. | Topcoat's `BodyLimit` alone, whose refusal is a bare 413 the browser cannot read; the timeout inside `call_<operation>`, which would leave the decoding outside it and time a page's own call |
+| The procedure's rate limit is a limiter of its own at the route's rate, built with each router as `build_router` builds the route's, and keyed by the client's IP address as Topcoat reads it (`client_ip`: the peer's, or the one a proxy the app trusts names). The JSON API's route keeps its limiter, so a client gets the rate on each, as on two replicas. | Sharing the route's limiter, which `RouteControls` keeps private, at the cost of a change to every Rust server; no limit on the procedure |
+| A control a procedure cannot apply as its route does leaves the procedure out with the reason, rather than being skipped; all three apply today. A page's in-process call applies none of them: the page is a route of the app, under the controls the app gives it. | Applying a route's controls to in-process calls, which would spend an operation's budget on the pages that call it |
+
+Status: built. The extension's YAML fixture `fixture-controls-api` has a
+signed webhook, a `@requireService` and an `@allowService` operation, and
+an order whose route has all three controls. `TestWhatHasNoProcedure`
+reads its crate and build log. Its cargo test drives a Topcoat app
+through `Router::handle`: the webhook's and the `@requireService`
+operation's procedure paths are 404, the webhook's JSON route still
+refuses an unsigned request, the `@allowService` procedure is registered,
+and the webhook's guard and the `@requireService` call still answer a
+page. The order's procedure answers its third call in a minute, a body
+past the route's three megabytes, sent or declared, and a call past its
+second as the 429, 413 and 504 `ProblemRecord`s, and reads a body past
+Topcoat's own two. acme-shop's `placeOrder` and `cancelOrder` procedures
+carry their routes' controls.
+
+The JSON API mounted in a Topcoat app keys its routes' limiters by the
+runtime's `ClientIp` or axum's `ConnectInfo`, and a Topcoat request
+carries neither, so its clients share one bucket per route. That is the
+mounted API's, not a procedure's, and is left to a change of its own.
+
+The rule is reversible until the first release.
