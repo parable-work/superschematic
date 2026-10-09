@@ -176,6 +176,11 @@ type (
 	JobRunRequest    = registry.JobRunRequest
 	Credential       = registry.Credential
 
+	// A target's SitePublisher puts a site's files and its config for a
+	// run where the site's platform serves them (SitePublishRequest, D55).
+	SitePublisher      = registry.SitePublisher
+	SitePublishRequest = registry.SitePublishRequest
+
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
 	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack) and
 	// its CIEnvironments with the renderer's CIOptions, to CIFiles. A

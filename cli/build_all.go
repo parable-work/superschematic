@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -205,6 +206,9 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 				continue
 			}
 			if stackNeedsImplementationScaffold(task.service, services, repoRoot, activeNaming, reg) {
+				continue
+			}
+			if siteNeedsConfig(task.service, repoRoot, activeNaming) {
 				continue
 			}
 			ok, action := resolveBuildAllTask(task, cacheRoot, repoRoot, cmd.ErrOrStderr())
@@ -577,6 +581,18 @@ func needsImplementationScaffold(service buildplan.Service, repoRoot string, nam
 		return false
 	}
 	return err == nil && !exists
+}
+
+// siteNeedsConfig reports whether service is a site whose package, at the
+// [implementation_paths] site template under repoRoot, holds no typed
+// browser config: the site's build writes it there, and scaffolds the
+// package when it is missing, outside the outputs the cache stores (D55).
+func siteNeedsConfig(service buildplan.Service, repoRoot string, names naming.Naming) bool {
+	if service.Config.Kind != ir.SchemaKindSite {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(names.SiteImplementationDir(repoRoot, service.Name), sitegen.ConfigFile))
+	return err != nil
 }
 
 // stackNeedsImplementationScaffold reports whether service is a stack

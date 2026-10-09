@@ -161,7 +161,7 @@ export abstract class ServesDb {}
 @database({ hosts: [ShopApi] })
 export abstract class HostsApi {}
 
-// @ts-expect-error only API and DB services are deployed
+// @ts-expect-error only API, DB and Site services are deployed
 @stack({ deploy: [ShopCommon] })
 export abstract class DeploysGeneral {}
 
@@ -260,3 +260,27 @@ export abstract class EnabledString {}
   settings: [{ of: ShopCart, job: "ExpireCarts", port: 8080 }],
 })
 export abstract class LocalJobPort {}
+
+// A site (D55): a stack deploys it, may name it in expose, and gives it the
+// local target's site settings, its port, and no env.
+const ShopWeb = service({ name: "shop-web", kind: SchemaKind.Site });
+
+@stack({ deploy: [ShopApi, ShopWeb], expose: [ShopApi, ShopWeb] })
+export abstract class SiteShop {}
+
+@environment({ target: "local", settings: [{ of: ShopWeb, port: 8090 }] })
+export abstract class SiteDev {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a site reads no env
+  settings: [{ of: ShopWeb, env: { API_URL: "x" } }],
+})
+export abstract class SiteEnv {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a site takes a site's settings, not a database's
+  settings: [{ of: ShopWeb, tier: "large" }],
+})
+export abstract class DatabaseSettingOnSite {}

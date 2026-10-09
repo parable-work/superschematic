@@ -39,6 +39,15 @@ type Sources struct {
 	// the parent of the schemas root, or the naming file's [paths]
 	// build_context.
 	RepositoryRoot string
+
+	// ImplementationRoot is the root a site's package is relative to
+	// (ir.ResolvedSite.Dir): the parent of the schemas root, which the
+	// naming file's [implementation_paths] are relative to (D55).
+	ImplementationRoot string
+
+	// Run runs a site's build, and the frozen install of the workspace
+	// before it; nil runs them with os/exec.
+	Run RunCommand
 }
 
 // Dockerfile returns the path of a server's or a job's Dockerfile.
@@ -246,8 +255,13 @@ type BuildResult struct {
 	// by deployable: what `stack deploy --image` takes.
 	Images map[string]string `json:"images"`
 
+	// Sites holds the digest of each site's files, built and uploaded or
+	// unchanged, by site: what `stack deploy --site` takes (D55).
+	Sites map[string]string `json:"sites,omitempty"`
+
 	// Built are the deployables built; Unchanged those whose context is
-	// the one their deployed image was built from.
+	// the one their deployed image was built from, or a site whose files
+	// are the ones it serves.
 	Built     []string `json:"built,omitempty"`
 	Unchanged []string `json:"unchanged,omitempty"`
 }
@@ -263,15 +277,15 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.target.Builder == nil {
+	if s.target.Builder == nil && s.target.Sites == nil {
 		return nil, fmt.Errorf("target %s builds no images; give each server's and job's image with --image", s.target.Name)
 	}
 	if s.target.State == nil {
 		return nil, fmt.Errorf("target %s keeps no deploy state, so environment %s does not deploy", s.target.Name, s.env.Environment)
 	}
 	for _, name := range o.Deployables {
-		if d := s.env.Deployable(name); d == nil || !d.Kind.HasImage() {
-			return nil, fmt.Errorf("environment %s has no server or job %s", s.env.Environment, name)
+		if d := s.env.Deployable(name); d == nil || !d.Kind.RollsOut() {
+			return nil, fmt.Errorf("environment %s has no server, job or site %s", s.env.Environment, name)
 		}
 	}
 	prev, err := readManifest(ctx, s.target.State, s.run)
@@ -279,21 +293,64 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 		return nil, err
 	}
 	src := o.Sources
-	p, err := s.planImages(prev, nil, &src, o.Deployables, o.Force)
-	defer p.cleanup()
-	if err != nil {
-		return nil, err
+	out := &BuildResult{Run: s.run.Name(), Images: map[string]string{}}
+	if s.target.Builder != nil {
+		p, err := s.planImages(prev, nil, &src, o.Deployables, o.Force)
+		defer p.cleanup()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.runBuilds(ctx, p); err != nil {
+			return nil, err
+		}
+		out.Built, out.Unchanged = p.built, p.unchanged
+		for _, server := range append(slices.Clone(p.built), p.unchanged...) {
+			out.Images[server] = p.images[server]
+		}
 	}
-	if err := s.runBuilds(ctx, p); err != nil {
-		return nil, err
-	}
-	out := &BuildResult{Run: s.run.Name(), Images: map[string]string{}, Built: p.built, Unchanged: p.unchanged}
-	for _, server := range append(slices.Clone(p.built), p.unchanged...) {
-		out.Images[server] = p.images[server]
+	if s.target.Sites != nil {
+		// A site's files go up under their digest and serve nothing until
+		// a deploy takes the digest with --site, or builds the same files
+		// and finds them there (D55).
+		sites, err := s.planSites(ctx, prev, nil, &src, o.Deployables)
+		if err != nil {
+			return nil, err
+		}
+		upload := slices.Clone(sites.built)
+		if o.Force {
+			upload = append(upload, sites.unchanged...)
+		}
+		for _, site := range upload {
+			req := registry.SitePublishRequest{Run: s.run, Site: site, Digest: sites.digests[site], Dir: sites.files[site].Dir, Log: s.log}
+			if err := req.Check(); err != nil {
+				return nil, err
+			}
+			s.logf("upload site %s: files %s", site, shortDigest(req.Digest))
+			if err := s.target.Sites.Publish(ctx, req); err != nil {
+				return nil, fmt.Errorf("upload site %s: %w", site, err)
+			}
+		}
+		out.Built = append(out.Built, sites.built...)
+		out.Unchanged = append(out.Unchanged, sites.unchanged...)
+		for site, files := range sites.files {
+			if out.Sites == nil {
+				out.Sites = map[string]string{}
+			}
+			out.Sites[site] = files.Digest
+		}
 	}
 	slices.Sort(out.Built)
 	slices.Sort(out.Unchanged)
 	return out, nil
+}
+
+// SiteFlags returns the sites' digests as `--site` values, in site order.
+func (r *BuildResult) SiteFlags() []string {
+	var out []string
+	for _, site := range sortedKeys(r.Sites) {
+		out = append(out, site+"="+r.Sites[site])
+	}
+	return out
 }
 
 // ImageFlags returns the images as `--image` values, in server order.

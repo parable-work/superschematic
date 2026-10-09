@@ -16,7 +16,7 @@ func noopEdit(*ir.Schema, map[string]any) error { return nil }
 
 func finalizeWithCoreGenerators(t *testing.T, reg *Registry) {
 	t.Helper()
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

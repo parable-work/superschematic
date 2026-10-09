@@ -58,6 +58,16 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
+	// The APIs a site of the stack calls, whose servers answer CORS for
+	// the sites' origins (D55).
+	cors := map[string]bool{}
+	for _, svc := range services {
+		if svc.Kind == ir.SchemaKindSite {
+			for _, call := range svc.Calls {
+				cors[call.Name] = true
+			}
+		}
+	}
 
 	type planned struct {
 		server   *servergen.Server
@@ -70,7 +80,7 @@ func (r run) generateServers() error {
 	for _, s := range servers {
 		switch s.Language {
 		case APILanguageGo:
-			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
+			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name], cors)
 			if err != nil {
 				return err
 			}
@@ -79,7 +89,7 @@ func (r run) generateServers() error {
 				scaffolding[sc.output.SchemaName] = true
 			}
 		case APILanguageTypeScript:
-			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name])
+			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name], cors)
 			if err != nil {
 				return err
 			}
@@ -102,7 +112,7 @@ func (r run) generateServers() error {
 			continue
 		}
 		// The servers' plans scaffold the job's API, which a server serves.
-		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name])
+		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name], nil)
 		if err != nil {
 			return err
 		}
@@ -251,7 +261,7 @@ func (sc scaffold) write(r run) error {
 // implementation lives, and every module the build needs. cloudSQL are the
 // DB services some environment connects it to on Cloud SQL. It returns the
 // implementations that are missing, which the caller scaffolds.
-func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
+func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL []string, cors map[string]bool) (*servergen.Server, []scaffold, error) {
 	in := servergen.Input{
 		Stack:          stackName,
 		Server:         s.Name,
@@ -291,7 +301,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true
 		}
-		in.APIs = append(in.APIs, servergen.APIInput{Output: output, Implementation: impl})
+		in.APIs = append(in.APIs, servergen.APIInput{Output: output, Implementation: impl, CORS: cors[ref.Name]})
 		modules = append(modules, apiModules...)
 		modules = append(modules, servergen.Module{Path: impl.Module, Dir: impl.ModuleDir, Direct: true})
 	}
@@ -313,7 +323,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 // typescript template. cloudSQL are the DB services some environment
 // connects it to on Cloud SQL. It returns the APIs whose implementation is
 // missing, which the caller scaffolds.
-func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
+func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string, cors map[string]bool) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
 	out := r.Options.OutputRoot
 	in := servergen.TypeScriptInput{
 		Stack:              stackName,
@@ -366,6 +376,7 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			Routes:         routes,
 			Config:         config,
 			Implementation: servergen.TypeScriptImplementation{Dir: dir, Package: pkg},
+			CORS:           cors[ref.Name],
 		})
 		in.PackageDirs[output.PackageName] = APIDir(out, ref.Name)
 		in.PackageDirs[pkg] = dir

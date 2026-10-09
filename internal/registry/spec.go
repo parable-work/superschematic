@@ -368,7 +368,7 @@ type LoadContext struct {
 // GeneratorSpec describes one generator a kind's pipeline can name.
 type GeneratorSpec struct {
 	// Name is the pipeline identifier. Core: "types", "sql", "orm", "api",
-	// "sdks", "envConfig", "stack".
+	// "sdks", "envConfig", "stack", "site".
 	Name      string
 	Extension string
 	// Kinds lists kinds whose pipeline may include this generator, and

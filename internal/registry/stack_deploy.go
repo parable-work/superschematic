@@ -340,6 +340,71 @@ type JobRunner interface {
 	RunJob(ctx context.Context, req JobRunRequest) error
 }
 
+// SitePublishRequest is one publish of a site's files for a run
+// (docs/stack-model.md, section 8.10, D55): the files a site's build wrote,
+// named by their digest, and the site's config for the run.
+type SitePublishRequest struct {
+	Run Run
+
+	// Site is the site deployable.
+	Site string
+
+	// Digest names the files: `sha256:` and the hex SHA-256 of their tar
+	// stream, every file in path order at the epoch, as a build context is
+	// digested (D46). The platform writes where the site serves its files
+	// from into the graph with no digest, and the deploy pins it to Digest
+	// (stackdeploy.PinSites), so the switch to new files is the
+	// provisioner's apply of that node.
+	Digest string
+
+	// Dir is the directory the site's build wrote, whose files the
+	// publisher puts under Digest unless they are there already. Empty when
+	// the deploy builds nothing: the files are there from an earlier
+	// publish, as when a deploy is given the digest a previous deploy
+	// recorded, to roll the site back to it. Its files' names are
+	// slash-separated paths below it.
+	Dir string
+
+	// Config is the site's config for the run, the JSON document the site
+	// reads at ir.SiteConfigPath: each API it calls by name, with its
+	// public address. The publisher writes it beside the files of Digest
+	// and serves it uncached. Nil writes none, as `stack build` does,
+	// which uploads the files a deploy then takes by their digest.
+	Config []byte
+
+	// Log receives progress.
+	Log io.Writer
+}
+
+// Check refuses a request with no valid run, no site of the run's
+// environment, or a digest that is not sha256:<64 hex digits>.
+func (r SitePublishRequest) Check() error {
+	if err := r.Run.Check(); err != nil {
+		return err
+	}
+	d := r.Run.Environment.Deployable(r.Site)
+	switch {
+	case d == nil || d.Kind != ir.DeployableSite:
+		return fmt.Errorf("publish: environment %s has no site %q", r.Run.Environment.Environment, r.Site)
+	case !contextDigestPattern.MatchString(r.Digest):
+		return fmt.Errorf("publish %s: digest %q is not sha256:<64 hex digits>", r.Site, r.Digest)
+	}
+	return nil
+}
+
+// SitePublisher puts a site's files where its platform serves them from,
+// under their digest, and writes the site's config for a run there (D55).
+// It switches nothing: the deploy pins the digest into the site's nodes,
+// and the provisioner's apply of them serves the new files at once. It
+// keeps the files of every digest it published, so a deploy given an
+// earlier digest rolls the site back without a build.
+type SitePublisher interface {
+	// Publish uploads the files of req.Dir under req.Digest, unless they
+	// are there already, then writes req.Config. With no Dir, it refuses a
+	// digest whose files are not there.
+	Publish(ctx context.Context, req SitePublishRequest) error
+}
+
 // Credential is a secret a platform needs to write its resources, such
 // as the API token of the Cloudflare DNS platform (section 6.9): not an
 // application secret a server reads, but one the provisioner hands its
@@ -384,11 +449,17 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Jobs != nil {
 		named = append(named, "Jobs")
 	}
+	if spec.Sites != nil {
+		named = append(named, "Sites")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
 	if (spec.Bootstrap != nil || spec.Migrations != nil || spec.Builder != nil || spec.CI != nil || spec.Jobs != nil) && spec.State == nil {
 		return fmt.Errorf("registry: target %q has Bootstrap, Migrations, Builder, CI or Jobs but no State: a bootstrap creates the deploy state, a deploy records each migration and each build in it, a CI job plans and deploys from it, and a job's run on demand runs the image it records", spec.Name)
+	}
+	if spec.Sites != nil && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Sites but no State: a deploy records the digest of each site's files in it (D55)", spec.Name)
 	}
 	return nil
 }

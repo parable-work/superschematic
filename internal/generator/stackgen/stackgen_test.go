@@ -171,7 +171,7 @@ func TestTheTypeScriptStackIsStacktestsShop(t *testing.T) {
 	reg := assemble(t)
 	schema, _ := load(t, reg, filepath.Join(servicesRoot, "shop-stack"))
 	got := ir.StackOf(schema)
-	if want := stacktest.Shop(); !reflect.DeepEqual(got, want) {
+	if want := stacktest.WithSite(stacktest.Shop()); !reflect.DeepEqual(got, want) {
 		t.Errorf("StackOf =\n%s\nwant\n%s", dump(t, got), dump(t, want))
 	}
 }
@@ -214,7 +214,7 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 	reg := assemble(t)
 	c := registry.GenerateContext{Options: options(reg, t.TempDir()), Registry: reg}
 	c.LoadDependency = c.Options.LoadDependency
-	services, err := stackgen.Services(c, stacktest.Shop())
+	services, err := stackgen.Services(c, stacktest.WithSite(stacktest.Shop()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,14 +222,14 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 	for _, svc := range services {
 		got[svc.Name] = svc
 	}
-	if len(got) != 3 {
-		t.Errorf("services = %v, want shop-api, shop-orders and shop-db", keys(got))
+	if len(got) != 4 {
+		t.Errorf("services = %v, want shop-api, shop-orders, shop-db and shop-web", keys(got))
 	}
 	operations := map[string][]stack.Operation{
 		"shop-api":    {{Name: "ProductQueries.getProduct"}},
 		"shop-orders": {{Name: "OrderQueries.getOrder"}},
 	}
-	for _, want := range stacktest.AcmeShop() {
+	for _, want := range stacktest.SiteShop() {
 		svc, ok := got[want.Name]
 		if !ok {
 			continue
@@ -401,6 +401,7 @@ func TestAStacksReferencesAreTheServicesItNames(t *testing.T) {
 		{Name: "shop-api", Kind: ir.SchemaKindAPI},
 		{Name: "shop-db", Kind: ir.SchemaKindDB},
 		{Name: "shop-orders", Kind: ir.SchemaKindAPI},
+		{Name: "shop-web", Kind: ir.SchemaKindSite},
 	}
 	for _, dir := range []string{filepath.Join(servicesRoot, "shop-stack"), yamlStack} {
 		schema, cfg := load(t, reg, dir)

@@ -42,6 +42,14 @@ const (
 	DatabasePlatform = "local.postgres"
 	JobPlatform      = "local.job"
 
+	// SitePlatform serves a site's built files and its config from a file
+	// server in the provisioner, on loopback (D55).
+	SitePlatform = "local.site"
+
+	// SiteConnector connects a site to a process whose API it calls: the
+	// process's loopback URL.
+	SiteConnector = "local.site-process"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -90,6 +98,11 @@ const (
 	// TypeJob is a job built from its entrypoint module, which the
 	// provisioner runs on its schedule while the environment runs (D52).
 	TypeJob = "local:process/job:Job"
+
+	// TypeSite is a site the provisioner builds once and serves from a
+	// file server of its own, with the site's config and its single-page
+	// fallback (D55).
+	TypeSite = "local:site/site:Site"
 )
 
 // The languages of a process, as its node's language property names them:
@@ -120,7 +133,19 @@ func Register(r *registry.Registry) error {
 			IdentityConfig: identityConfig,
 			NameOf:         processName,
 			AddressOf:      processAddress,
-			Lower:          lowerProcess,
+			// A browser on this machine reaches an exposed server where
+			// another server does (D55).
+			PublicAddressOf: processAddress,
+			Lower:           lowerProcess,
+		},
+		{
+			Name:            SitePlatform,
+			Kind:            ir.DeployableSite,
+			Settings:        json.RawMessage(serverSettings),
+			NameOf:          processName,
+			AddressOf:       siteAddress,
+			PublicAddressOf: siteAddress,
+			Lower:           lowerSite,
 		},
 		{
 			Name:      JobPlatform,
@@ -148,6 +173,7 @@ func Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: SiteConnector, Edge: ir.EdgeSite, From: SitePlatform, To: ServerPlatform, Connect: connectSite},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -166,6 +192,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableServer:   ServerPlatform,
 			ir.DeployableDatabase: DatabasePlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableSite:     SitePlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -270,6 +297,30 @@ var resourceTypes = map[string]string{
 	      "properties": {"name": {"type": "string", "minLength": 1}, "value": {}, "secret": {"type": "string", "minLength": 1}},
 	      "additionalProperties": false
 	    }}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeSite: `{
+	  "type": "object",
+	  "required": ["name", "dir", "build", "output", "port", "config"],
+	  "properties": {
+	    "name": {"type": "string", "minLength": 1},
+	    "dir": {"type": "string", "minLength": 1},
+	    "build": {"type": "string", "minLength": 1},
+	    "output": {"type": "string", "minLength": 1},
+	    "fallback": {"type": "string", "minLength": 1},
+	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "config": {
+	      "type": "object",
+	      "required": ["apis"],
+	      "properties": {"apis": {"type": "object", "additionalProperties": {
+	        "type": "object",
+	        "required": ["url"],
+	        "properties": {"url": {"type": "string", "minLength": 1}},
+	        "additionalProperties": false
+	      }}},
+	      "additionalProperties": false
+	    }
 	  },
 	  "additionalProperties": false
 	}`,

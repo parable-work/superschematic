@@ -37,6 +37,9 @@ import (
 {{- if anyPrivate .APIs }}
 	runtimemiddleware "{{ .Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
+{{- if anyCORS .APIs }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/cors"
+{{- end }}
 {{- template "imports" . }}
 )
 
@@ -138,6 +141,12 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of {{ .Service }}: %w", err)
 	}
+{{- if .CORS }}
+	{{ .Var }}CORS, err := corsPolicy({{ quote .Service }})
+	if err != nil {
+		return fmt.Errorf("CORS of {{ .Service }}: %w", err)
+	}
+{{- end }}
 {{- end }}
 
 	var draining atomic.Bool
@@ -154,6 +163,18 @@ func run(logger *zap.Logger) error {
 	// A client forwards the end user of the request a call is made for,
 	// whose token this keeps on the request's context (section 9.4).
 	handler = serviceauth.CaptureAuthorization(handler)
+{{- end }}
+{{- if anyCORS .APIs }}
+	// A site's browser calls an API here from the site's origin: each API a
+	// site calls answers CORS for the origins its CORS field lists, and no
+	// other (section 8.10).
+	handler = cors.Handler(handler, []cors.API{
+{{- range .APIs }}
+{{- if .CORS }}
+		{Policy: {{ .Var }}CORS, Match: corsRoutes({{ .Var }}Router)},
+{{- end }}
+{{- end }}
+	})
 {{- end }}
 	return serve(ctx, stop, logger, &draining, handler)
 }

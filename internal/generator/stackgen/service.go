@@ -55,6 +55,9 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
+	case ir.SchemaKindSite:
+		// Its calls are the APIs its code calls from the browser; where its
+		// code is, the stack's build reads with SiteOf (D55).
 	}
 	return svc, nil
 }

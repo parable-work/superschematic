@@ -1995,6 +1995,7 @@
             "Catalog",
             "DB",
             "General",
+            "Site",
             "Stack"
           ],
           "type": "string"
@@ -3550,6 +3551,7 @@
             "Catalog",
             "DB",
             "General",
+            "Site",
             "Stack"
           ],
           "type": "string"

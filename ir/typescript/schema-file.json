@@ -1916,6 +1916,7 @@
             "API",
             "DB",
             "General",
+            "Site",
             "Stack"
           ],
           "type": "string"
@@ -3397,6 +3398,7 @@
             "API",
             "DB",
             "General",
+            "Site",
             "Stack"
           ],
           "type": "string"

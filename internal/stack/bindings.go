@@ -68,6 +68,10 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 func (r *resolver) deriveEdges() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
+		if d.res.Kind == ir.DeployableSite {
+			r.deriveSiteEdges(d)
+			continue
+		}
 		if !d.res.Kind.HasImage() {
 			continue
 		}
@@ -79,6 +83,30 @@ func (r *resolver) deriveEdges() {
 		for _, callee := range d.res.Calls {
 			r.addEdge(ir.EdgeHTTP, d, callee.Name)
 		}
+	}
+}
+
+// deriveSiteEdges gives a site a site edge to the server of each API it
+// calls, which must be exposed: the browser reaches the API at its public
+// address (D55).
+func (r *resolver) deriveSiteEdges(d *deployable) {
+	for _, callee := range d.res.Calls {
+		server, ok := r.deployables[r.byService[callee.Name]]
+		if !ok {
+			continue // collectMembers reported it
+		}
+		if !server.res.Exposed {
+			r.fail(CodeSiteCallsUnexposed, "site %s calls %s, whose server %s the stack does not expose; a browser reaches only an exposed API, so add %s to @stack's expose", d.res.Name, callee.Name, server.res.Name, callee.Name)
+			continue
+		}
+		if server.res.PublicAddress == nil {
+			r.fail(CodeLowering, "site %s calls %s, and platform %s gives its server %s no public address to reach it at", d.res.Name, callee.Name, server.platform.Name, server.res.Name)
+			continue
+		}
+		r.addEdge(ir.EdgeSite, d, callee.Name)
+	}
+	if d.res.PublicAddress == nil {
+		r.fail(CodeLowering, "platform %s gives site %s no public address, which the CORS field of each API it calls lists", d.platform.Name, d.res.Name)
 	}
 }
 
@@ -130,6 +158,10 @@ func (r *resolver) edgesFrom(name string) []*edge {
 func (r *resolver) bindConfig() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
+		if d.res.Kind == ir.DeployableSite {
+			r.bindSite(d)
+			continue
+		}
 		if !d.res.Kind.HasImage() {
 			for _, key := range sortedKeys(d.settings.env) {
 				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which has no config", d.settings.envFrom[key], key, d.res.Kind, name)
@@ -149,7 +181,7 @@ func (r *resolver) bindConfig() {
 				}
 			}
 		}
-		var callers, identity map[string]string
+		var callers, identity, cors map[string]string
 		refused := map[string]bool{}
 		if d.res.Kind == ir.DeployableServer {
 			callers = r.callersFields(d)
@@ -158,6 +190,10 @@ func (r *resolver) bindConfig() {
 			// it reads no identity config field (D50, D52).
 			identity = r.identityFields(d)
 			r.checkIdentityFields(d, identity, callers, derived)
+			cors = r.corsFields(d)
+			for key := range r.checkCORSFields(d, cors, callers, identity, derived) {
+				refused[key] = true
+			}
 		}
 		for _, key := range sortedKeys(d.settings.env) {
 			if _, ok := d.fields[key]; ok || refused[key] || identity[key] != "" {
@@ -185,6 +221,7 @@ func (r *resolver) bindConfig() {
 		}
 		bindings = append(bindings, r.callersBindings(d, callers)...)
 		bindings = append(bindings, r.identityBindings(d, identity)...)
+		bindings = append(bindings, r.corsBindings(d, cors)...)
 		slices.SortFunc(bindings, func(a, b *ir.Binding) int { return strings.Compare(a.Field, b.Field) })
 		d.res.Bindings = bindings
 	}
@@ -279,8 +316,11 @@ func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 // contractOf names the derived value an edge of kind fills its field
 // with, for an error message.
 func contractOf(kind ir.EdgeKind) string {
-	if kind == ir.EdgeSQL {
+	switch kind {
+	case ir.EdgeSQL:
 		return "database connection (ir.DatabaseConnection)"
+	case ir.EdgeSite:
+		return "site endpoint (ir.SiteEndpoint)"
 	}
 	return "service endpoint (ir.ServiceEndpoint)"
 }
@@ -391,4 +431,5 @@ func (r *resolver) connectEdges() {
 		}
 	}
 	r.fillCallers(callees, ran)
+	r.fillCORS()
 }

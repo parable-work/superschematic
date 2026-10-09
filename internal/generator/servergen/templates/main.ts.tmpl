@@ -96,6 +96,10 @@ async function main(): Promise<void> {
 {{- if .Config }}
   const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.loadEnvConfig());
 {{- end }}
+{{- if .CORS }}
+  // The origins of the sites that call {{ .Service }}, which its CORS field lists (section 8.10).
+  const {{ .CORS }} = configure({{ tsQuote .Service }}, () => loadCors({{ tsQuote .CORSField }}));
+{{- end }}
 {{- end }}
 {{- if .Databases }}
 
@@ -179,13 +183,36 @@ async function main(): Promise<void> {
 {{- end }}
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
+{{- if .AnyCORS }}
+
+  // A site's browser calls an API here from the site's origin: each API a
+  // site calls answers CORS for the origins its CORS field lists, and no
+  // other, the API a request is by the operations that take it.
+  const handle = corsHandler(
+    [
+{{- range .APIs }}
+{{- if .CORS }}
+      {
+        policy: { origins: {{ .CORS }}, methods: corsMethods(Object.values({{ .Module }}.operationSpecs)) },
+        match: matchOperations(Object.values({{ .Module }}.operationSpecs)),
+      },
+{{- end }}
+{{- end }}
+    ],
+    (request: Request, srv: BunServer) => app.fetch(request, srv)
+  );
+{{- end }}
 
   const bun = (globalThis as unknown as { Bun: BunRuntime }).Bun;
   let server: BunServer;
   try {
     // Hono hands Bun's server to the routes as their bindings, from which
     // the runtime reads the peer's address.
+{{- if .AnyCORS }}
+    server = bun.serve({ port, development: false, fetch: (request, srv) => handle(request, srv) });
+{{- else }}
     server = bun.serve({ port, development: false, fetch: (request, srv) => app.fetch(request, srv) });
+{{- end }}
   } catch (error) {
     throw new Error(`listen on :${port}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }

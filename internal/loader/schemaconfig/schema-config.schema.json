@@ -77,7 +77,7 @@
           "type": "string"
         },
         "calls": {
-          "description": "The API services this API's implementation calls. Only an API service sets it, and each entry names an API service. Each callee is built before its caller.",
+          "description": "The API services this API's implementation calls, or this site's code calls from the browser. Only an API or a Site service sets it, and each entry names an API service. Each callee is built before its caller.",
           "items": {
             "$ref": "#/definitions/ServiceDependencyRef"
           },
@@ -96,26 +96,31 @@
           "type": "string"
         },
         "outputs": {
-          "$ref": "#/definitions/SchemaOutputsDocument"
+          "$ref": "#/definitions/SchemaOutputsDocument",
+          "description": "The generated outputs. A Site service has none, and may leave it out."
         },
         "public": {
           "type": "boolean"
+        },
+        "site": {
+          "$ref": "#/definitions/SiteConfig",
+          "description": "How a Site service builds and what it serves. Only a Site service sets it."
         }
       },
       "required": [
         "name",
-        "kind",
-        "outputs"
+        "kind"
       ],
       "type": "object"
     },
     "SchemaKind": {
-      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel.",
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55).",
       "enum": [
         "DB",
         "API",
         "General",
-        "Stack"
+        "Stack",
+        "Site"
       ],
       "type": "string"
     },
@@ -185,6 +190,25 @@
         "name",
         "kind"
       ],
+      "type": "object"
+    },
+    "SiteConfig": {
+      "additionalProperties": false,
+      "description": "How a Site service builds and what it serves (D55). Its code is the package at the naming file's [implementation_paths] site template, web/{service} unless set, a member of the Bun workspace.",
+      "properties": {
+        "build": {
+          "description": "The script of the site's package.json that builds it, which a deploy runs with bun run after a frozen install of the workspace. Unset is \"build\".",
+          "type": "string"
+        },
+        "fallback": {
+          "description": "The file, relative to output, served for a path that names no file: \"index.html\" for a single-page application, whose router reads the path. Unset answers such a path 404.",
+          "type": "string"
+        },
+        "output": {
+          "description": "The directory the build writes, relative to the site's directory and inside it. Unset is \"dist\".",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "SqlDialect": {

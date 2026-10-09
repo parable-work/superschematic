@@ -209,7 +209,7 @@ func TestValidateShapeChecksCalls(t *testing.T) {
 		cfg  *SchemaConfig
 		want string
 	}{
-		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Calls: []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}}, "schema config for shop-db sets calls, which only an API service may set (this service is kind DB)"},
+		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Calls: []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}}, "schema config for shop-db sets calls, which only an API or a Site service may set (this service is kind DB)"},
 		{"a DB handle", api(ServiceDependency{Name: "shop-db", Kind: ir.SchemaKindDB}), `schema config for shop-orders calls shop-db, a handle of kind "DB"; calls names API services only`},
 		{"no name", api(ServiceDependency{Kind: ir.SchemaKindAPI}), "schema config for shop-orders has a calls entry with no name"},
 		{"itself", api(ServiceDependency{Name: "shop-orders", Kind: ir.SchemaKindAPI}), "schema config for shop-orders calls itself"},

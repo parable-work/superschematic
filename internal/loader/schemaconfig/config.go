@@ -72,11 +72,17 @@ type SchemaConfig struct {
 	// system in the data forms to derive it from.
 	Dependencies []ServiceDependency `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 
-	// Calls lists the API services an API's implementation calls. It is
-	// valid on an API config only, and each entry names an API service.
-	// The build plan builds each callee before its caller
-	// (docs/stack-model.md, section 3.3).
+	// Calls lists the API services an API's implementation calls, or a
+	// site's code calls from the browser. It is valid on an API or a Site
+	// config only, and each entry names an API service. The build plan
+	// builds each callee before its caller (docs/stack-model.md, sections
+	// 3.3 and 8.10).
 	Calls []ServiceDependency `json:"calls,omitempty" yaml:"calls,omitempty"`
+
+	// Site is a Site service's build: its package.json script, the
+	// directory it writes and its single-page fallback (D55). It is valid
+	// on a Site config only.
+	Site *ir.SiteConfig `json:"site,omitempty" yaml:"site,omitempty"`
 
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
@@ -168,6 +174,11 @@ func decodeJSON(data []byte, source string, known KindSet) (*SchemaConfig, error
 	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
+	// Only a Site service, which generates nothing under the output root,
+	// leaves outputs out (D55); the schema cannot say so by kind.
+	if cfg.Outputs == nil && cfg.Kind != ir.SchemaKindSite {
+		return nil, fmt.Errorf("%s: schema config for %s has no outputs; only a %s service may leave them out", source, cfg.Name, ir.SchemaKindSite)
+	}
 	return ValidateShapeWith(cfg, known)
 }
 
@@ -196,17 +207,25 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	if err := validateCalls(cfg); err != nil {
 		return nil, err
 	}
+	if cfg.Site != nil && cfg.Kind != ir.SchemaKindSite {
+		return nil, fmt.Errorf("schema config for %s sets site, which only a %s service may set (this service is kind %s)", cfg.Name, ir.SchemaKindSite, cfg.Kind)
+	}
+	if cfg.Site != nil {
+		if err := cfg.Site.Check(); err != nil {
+			return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
+		}
+	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
 	}
 	return cfg, nil
 }
 
-// validateCalls checks calls on its own: an API config's list of other API
-// services, each named once.
+// validateCalls checks calls on its own: an API or a Site config's list of
+// other API services, each named once.
 func validateCalls(cfg *SchemaConfig) error {
-	if len(cfg.Calls) > 0 && cfg.Kind != ir.SchemaKindAPI {
-		return fmt.Errorf("schema config for %s sets calls, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	if len(cfg.Calls) > 0 && cfg.Kind != ir.SchemaKindAPI && cfg.Kind != ir.SchemaKindSite {
+		return fmt.Errorf("schema config for %s sets calls, which only an API or a Site service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
 	seen := make(map[string]bool, len(cfg.Calls))
 	for _, call := range cfg.Calls {
@@ -234,6 +253,10 @@ func (c *SchemaConfig) NewSchema() *ir.Schema {
 	schema.AuthDB = c.AuthDB
 	schema.Dependencies = serviceRefs(c.Dependencies)
 	schema.Calls = serviceRefs(c.Calls)
+	if c.Site != nil {
+		site := *c.Site
+		schema.Site = &site
+	}
 	return schema
 }
 

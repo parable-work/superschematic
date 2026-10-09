@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -101,7 +102,8 @@ type WorkspaceRoot struct {
 	OutputRoot string
 
 	// RepositoryRoot, when set, adds the TypeScript implementations under
-	// it, at the naming file's [implementation_paths] typescript template.
+	// it, at the naming file's [implementation_paths] typescript template,
+	// and the sites, at its site template (D55).
 	RepositoryRoot string
 
 	// Naming names the root and the runtime packages.
@@ -138,6 +140,11 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 			return "", fmt.Errorf("workspace root: %w", err)
 		}
 		manifest.Workspaces = append(manifest.Workspaces, path.Join(rel, n.TypeScriptImplementationGlob()))
+		// The sites sit in the workspace too, so a site imports the SDKs
+		// of the APIs it calls with workspace:* (D55).
+		if site := path.Join(rel, n.SiteImplementationGlob()); !slices.Contains(manifest.Workspaces, site) {
+			manifest.Workspaces = append(manifest.Workspaces, site)
+		}
 	}
 	for _, local := range []struct{ pkg, dir string }{
 		{n.ScalarNpmPackage, w.Paths.ScalarTypeScript},

@@ -19,7 +19,21 @@
       "exposed": true,
       "resourceName": "shop-api",
       "address": "http://127.0.0.1:22424",
+      "publicAddress": "http://127.0.0.1:22424",
       "bindings": [
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "http://127.0.0.1:22638"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
+        },
         {
           "field": "SHOP_API_IDENTITY",
           "source": "literal",
@@ -65,6 +79,7 @@
       "exposed": true,
       "resourceName": "shop-orders",
       "address": "http://127.0.0.1:21753",
+      "publicAddress": "http://127.0.0.1:21753",
       "bindings": [
         {
           "field": "SHOP_DB_DATABASE",
@@ -127,10 +142,60 @@
       "language": "TYPESCRIPT",
       "exposed": true,
       "resourceName": "shop-storefront",
-      "address": "http://127.0.0.1:22420"
+      "address": "http://127.0.0.1:22420",
+      "publicAddress": "http://127.0.0.1:22420"
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "local.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "address": "http://127.0.0.1:22638",
+      "publicAddress": "http://127.0.0.1:22638",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "http://127.0.0.1:22424"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
     }
   ],
   "edges": [
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.site-process",
+      "field": "shop-api"
+    },
     {
       "id": "sql:shop-api->shop-db",
       "kind": "sql",
@@ -204,6 +269,10 @@
         "type": "local:process/process:Process",
         "properties": {
           "env": [
+            {
+              "name": "SHOP_API_CORS_ORIGINS",
+              "value": "http://127.0.0.1:22638"
+            },
             {
               "name": "SHOP_API_IDENTITY",
               "value": "{\"cookie\":{\"secure\":false}}"
@@ -310,6 +379,29 @@
         "owners": [
           "shop-storefront"
         ]
+      },
+      {
+        "id": "shop-web.site",
+        "type": "local:site/site:Site",
+        "properties": {
+          "build": "build",
+          "config": {
+            "apis": {
+              "shop-api": {
+                "url": "http://127.0.0.1:22424"
+              }
+            }
+          },
+          "dir": "web/shop-web",
+          "fallback": "index.html",
+          "name": "shop-web",
+          "output": "dist",
+          "port": 22638
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
       }
     ]
   },
@@ -342,6 +434,16 @@
         "shop-orders-ship-orders.job",
         "shop-orders.process",
         "shop-storefront.process"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "shop-web"
+      ],
+      "resources": [
+        "shop-web.site"
       ]
     },
     {

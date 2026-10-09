@@ -1,0 +1,7 @@
+# A static site whose browser code calls ts-shop (D55): ts-shop's server
+# answers CORS for the site's origin, which its CORS field lists.
+name: ts-web
+kind: Site
+calls:
+  - { name: ts-shop, kind: API }
+site: { fallback: index.html }
