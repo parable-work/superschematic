@@ -3,15 +3,17 @@
 //! (`acme_shop_orders_topcoat`), by each route's rules: a shopper signs in
 //! with a Topcoat session, writes a review through the form the extension
 //! builds from `WriteReviewInput`, and lists their orders. The JSON API is
-//! mounted at `/api` beside the pages, on the same implementations.
+//! mounted at `/api` beside the pages, on the same implementations, which
+//! keep the shop in memory or in a SQLite file of shop-db's tables.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use acme_shop_orders_server::{Shop, implementations};
+use acme_shop_orders_server::implementations;
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
-    OrderListOrdersArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
+    OrderImplementation, OrderListOrdersArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
+    ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{FormErrors, WriteReviewInputForm, write_review_input_fields};
 use acme_shop_orders_topcoat::records::ReviewViewRecord;
@@ -33,6 +35,14 @@ pub fn product() -> types::IdentityUUID {
     PRODUCT.parse().expect("a UUID")
 }
 
+/// The demo shopper `POST /sign-in` signs in, who holds `orders`. In a
+/// SQLite shop they are a user, since a review's author must be one.
+pub const SHOPPER: &str = "00000000-0000-4000-8000-0000000000a1";
+
+pub fn shopper() -> types::IdentityUUID {
+    SHOPPER.parse().expect("a UUID")
+}
+
 /// The signed-in shoppers by session token hash. An app keeps them in its
 /// database, with their expiry.
 #[derive(Default)]
@@ -52,8 +62,10 @@ impl PageAuthenticator for SessionCaller {
 }
 
 /// The app: its pages, the session they sign in with, and shop-orders'
-/// JSON API and in-process operations over `shop`.
-pub fn app(shop: Arc<Shop>) -> Router {
+/// JSON API and in-process operations over `shop`, in memory
+/// (`acme_shop_orders_server::Shop`) or in SQLite
+/// (`acme_shop_orders_server::sqlite::SqliteShop`).
+pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>) -> Router {
     let sessions = Arc::new(Sessions::default());
     Router::builder()
         .discover()
@@ -70,10 +82,7 @@ pub fn app(shop: Arc<Shop>) -> Router {
 async fn sign_in(cx: &Cx) -> topcoat::Result<impl View> {
     let started = session::start(cx).await?;
     let sessions: &Arc<Sessions> = app_context(cx);
-    sessions.0.lock().unwrap().insert(
-        *started.token_hash,
-        Principal::new("00000000-0000-4000-8000-0000000000a1", ["orders"]),
-    );
+    sessions.0.lock().unwrap().insert(*started.token_hash, Principal::new(SHOPPER, ["orders"]));
     Err::<(), _>(see_other("/reviews").into())
 }
 

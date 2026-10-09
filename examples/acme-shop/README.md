@@ -12,7 +12,7 @@ kind, decorators and auth provider.
 | Path | What it is |
 |---|---|
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
-| `schemas/services/shop-db` | DB: users, sessions, products, stock, orders and reviews |
+| `schemas/services/shop-db` | DB: users, sessions, products, stock, orders and reviews, built for Postgres and SQLite |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs |
 | `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
@@ -22,8 +22,8 @@ kind, decorators and auth provider.
 | `typescript/` | implements `shop-storefront` and tests it through the TypeScript SDK; a `shop-orders` client; type tests |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
-| `rust-server/` | implements `shop-orders` on the generated Rust server, in memory; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`) |
+| `rust-server/` | implements `shop-orders` on the generated Rust server, in memory, and with its `sqlite` feature in a SQLite file of `shop-db`'s tables; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`); it keeps the shop in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `scripts/check.sh` | builds, compiles and tests all of it |
 
@@ -34,6 +34,24 @@ environment: Postgres in a container with `shop-db` migrated, and
 `shop-api` and `shop-orders` on their generated entrypoints. It needs
 Docker, Go and the migration runner, `superschematic-migrate`, on `PATH`;
 it derives every connection string, URL and port, and Ctrl-C stops it.
+
+### The Topcoat app on SQLite
+
+The Topcoat app keeps the shop in memory unless `DATABASE_URL` names a
+SQLite file of `shop-db`'s tables, where its reviews and orders outlive
+the process. Build the Topcoat crate, plan `shop-db`'s SQLite database
+from an empty one, apply the plan with the migration runner, and start
+the app on the file, from this directory:
+
+```sh
+superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
+superschematic migrate plan schemas/services/shop-db --dialect sqlite --out shop-db.sqlite.plan.json
+superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqlite:shop.db
+cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
+```
+
+It serves `http://127.0.0.1:3000`: sign in with `POST /sign-in`, then write
+a review at `/reviews`. The JSON API at `/api` takes `Bearer token-1`.
 
 ## Check it
 
@@ -50,7 +68,9 @@ Rust into `schemas/dist-rust` and the Rust server on it, runs the tests in
 all four languages (the Go tests run each language's client against the Go
 server and against the Rust server, and, when Docker runs, `stack dev` on
 `shop-stack`, calling each API over Postgres), builds `schemas/dist-rust`
-again with `superschematic-topcoat` and runs the Topcoat app's tests, and fails
+again with `superschematic-topcoat` and runs the Topcoat app's tests, in
+memory and on a SQLite file the migration runner migrates with `shop-db`'s
+SQLite plan, and fails
 when a file under `testdata/generated/` differs from the run. `make setup`
 stands up everything it uses, the Python schema runtime's uv environment
 included; the Rust client and server fetch their crates on their first

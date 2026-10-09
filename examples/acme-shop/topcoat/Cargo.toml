@@ -8,16 +8,19 @@ publish = false
 # ../schemas/dist-rust, which scripts/check.sh builds with
 # `superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust`
 # (superschematic.toml's [extension.topcoat] lists shop-orders), and the
-# in-memory implementations the Rust server serves.
+# implementations the Rust server serves, in memory, with the SQLite ones
+# its `sqlite` feature adds.
 [dependencies]
 acme-shop-orders-topcoat = { path = "../schemas/dist-rust/topcoat/shop-orders" }
-acme-shop-orders-server = { path = "../rust-server" }
+acme-shop-orders-server = { path = "../rust-server", features = ["sqlite"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 topcoat = "0.10"
 
 [dev-dependencies]
 http = "1"
+# The tests build a SQLite shop from shop-db's sqlite/create.sql.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

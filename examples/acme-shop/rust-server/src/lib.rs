@@ -1,6 +1,8 @@
 //! shop-orders' implementations over the generated Rust server, keeping
 //! orders and reviews in memory: the server in src/main.rs serves them over
-//! HTTP, and the Topcoat app in ../topcoat calls them from its pages.
+//! HTTP, and the Topcoat app in ../topcoat calls them from its pages. With
+//! the `sqlite` feature, `sqlite::SqliteShop` keeps them in a SQLite file
+//! of shop-db's tables instead.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,6 +18,9 @@ use axum::http::request::Parts;
 use superschematic_http_runtime::{
     bearer_token, ApiError, Authenticator, Principal, RequestContext,
 };
+
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
 /// The shopper go/orders_test.go signs in: token-1, holding `orders`, which
 /// covers orders.read and orders.write. Your identity provider verifies a
@@ -56,8 +61,9 @@ impl Shop {
 }
 
 /// The implementations the generated router and the Topcoat app run: the
-/// shop for both namespaces, and token-1 as the caller of a request.
-pub fn implementations(shop: Arc<Shop>) -> Implementations {
+/// shop for both namespaces, in memory or in SQLite, and token-1 as the
+/// caller of a request.
+pub fn implementations<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>) -> Implementations {
     Implementations {
         order: shop.clone(),
         product_reviews: shop,

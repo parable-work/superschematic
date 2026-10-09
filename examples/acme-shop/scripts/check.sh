@@ -32,7 +32,9 @@
 #      its SDK (milestone 1 of docs/stack-model.md);
 #   4a. the Topcoat app in topcoat/ passes its tests: its pages call
 #      shop-orders in-process through the crate the Topcoat extension
-#      writes into schemas/dist-rust, with the binary that links it;
+#      writes into schemas/dist-rust, with the binary that links it, over
+#      the shop in memory and in a SQLite file the migration runner
+#      migrated with shop-db's SQLite plan;
 #   5. the TypeScript app's tests call the generated TypeScript router
 #      through the generated TypeScript SDK;
 #   6. build-all with --cache skips every service on a second run and
@@ -194,12 +196,18 @@ echo "==> Topcoat: the app's pages call shop-orders in-process"
 (cd "$EXAMPLE_DIR" &&
   "$OUT/superschematic-topcoat" build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
 test -f "$SCHEMAS/dist-rust/topcoat/shop-orders/src/operations.rs"
-(cd "$EXAMPLE_DIR/topcoat" && cargo test --locked -q)
-
-echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
-# stack dev applies shop-db's migrations with the migration runner.
+# shop-db lists sqlite, so the app can keep the shop in a SQLite file: the
+# migration runner applies shop-db's SQLite plan to a new one, and the
+# tests copy it (ACME_SHOP_SQLITE). stack dev applies shop-db's Postgres
+# migrations with the same runner, below.
 (cd "$REPO_ROOT/runtime/migrate/go" &&
   CGO_ENABLED=0 GOWORK=off go build -o "$OUT/superschematic-migrate" ./cmd/superschematic-migrate)
+(cd "$EXAMPLE_DIR" &&
+  superschematic migrate plan schemas/services/shop-db --dialect sqlite --out "$OUT/shop-db.sqlite.plan.json" >/dev/null)
+"$OUT/superschematic-migrate" apply --plan "$OUT/shop-db.sqlite.plan.json" --database-url "sqlite:$OUT/shop.db" >/dev/null
+(cd "$EXAMPLE_DIR/topcoat" && ACME_SHOP_SQLITE="$OUT/shop.db" cargo test --locked -q)
+
+echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \

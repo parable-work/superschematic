@@ -16,8 +16,8 @@ rules. The crate also has a form per input type and a record per result
 type, and mounts the JSON API beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
-the in-memory implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
-serves.
+the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
+serves, which keep the shop in memory or in a SQLite file.
 
 ## Build the crate
 
@@ -120,6 +120,38 @@ browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
 procedure's body as a plain function, for Rust code and tests: Topcoat
 turns the procedure itself into a value Rust cannot call.
 
+## Keep the shop in SQLite
+
+`shop-db` lists `sqlite` beside `postgres`, so its build also writes the
+tables' SQLite DDL, and `migrate plan --dialect sqlite` plans a SQLite
+database ([SQLite](/superschematic/reference/migrations/#sqlite)):
+
+<Snippet file="schemas/services/shop-db/schema.config.ts" from="    // SQLite too" to="dialects" />
+
+The Rust server's `sqlite` feature adds `SqliteShop`, the shop's
+implementations over a file of `shop-db`'s tables, through rusqlite. The
+app turns it on. With `DATABASE_URL` set, the app opens that file, which
+must hold `shop-db`'s tables, and its reviews and orders outlive the
+process; without it, the shop is in memory:
+
+<Snippet file="topcoat/src/main.rs" symbol="main" />
+
+Plan the file from an empty database, apply the plan with the migration
+runner, and start the app on it, from `examples/acme-shop`:
+
+```bash
+superschematic migrate plan schemas/services/shop-db --dialect sqlite --out shop-db.sqlite.plan.json
+superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqlite:shop.db
+cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
+```
+
+The runner records the model it applied, so a later version of `shop-db`
+plans `--from` it ([Adopt a database built from
+create.sql](/superschematic/reference/migrations/#adopt-a-database-built-from-createsql)
+shows the commands). `Review`'s search fields give the SQLite table its
+`search_text` column, `VIRTUAL`, without the trigram index Postgres
+builds.
+
 ## Test the app
 
 `Router::handle` drives the app as a browser would. The acme app's tests
@@ -128,3 +160,9 @@ one with a rating out of range (422, the field marked invalid), post a
 valid one, and read it back from the page and from the JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+Over SQLite, a test builds a file from `sqlite/create.sql`, or copies the
+one `scripts/check.sh` migrates with the runner, writes a review and
+places an order, then opens a new app on the same file:
+
+<Snippet file="topcoat/tests/app.rs" symbol="a_sqlite_shop_outlives_the_app" />
