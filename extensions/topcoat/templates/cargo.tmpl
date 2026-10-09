@@ -18,4 +18,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 {{- if or .Records .Forms }}
 serde_json = "1.0.149"
 {{- end }}
+{{- if .ControlledProcedures }}
+# The timeout of a procedure's route controls.
+tokio = { version = "1.52.2", features = ["time"] }
+{{- end }}
 topcoat = { version = "0.10", features = ["tower"] }

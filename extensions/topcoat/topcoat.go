@@ -5,13 +5,15 @@
 // The crate mounts the service's JSON API in the app's router, calls each
 // operation in-process from a page, a shard or a procedure by its route's
 // rules (the caller admitted as the route admits it, the arguments checked
-// as the router checks them, D43), offers a guard per operation, and
-// mirrors each type an operation returns as a Topcoat record, which a
-// page can hand the browser. A form per input type whose fields a form
+// as the router checks them, D43), save a webhook and one the service
+// mounts itself, offers a guard per operation, and mirrors each type such
+// a call returns as a Topcoat record, which a page can hand the browser. A form per input type whose fields a form
 // holds parses what the browser sends by the input type's rules (D14) and
 // renders its fields with the attributes those rules give them. A
 // procedure per operation lets browser code call it, its arguments and its
-// result records, its refusal a record the browser reads.
+// result records, its refusal a record the browser reads, under its
+// route's traffic controls. An operation whose route a browser's request
+// cannot meet, a webhook's or one only a service may call, has none.
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.

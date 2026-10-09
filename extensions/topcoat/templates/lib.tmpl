@@ -16,6 +16,10 @@
 //! `procedures` lets browser code call each operation, its arguments and
 //! result records; the app's `.discover()` registers them.
 {{- end }}
+{{- if .ControlledProcedures }}
+//! `{{ .SetupMethod }}` puts each route's traffic controls in front of its
+//! procedure.
+{{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
@@ -74,6 +78,9 @@ pub trait {{ .ExtTrait }} {
     /// Mounts the JSON API (`build_router`) at `/api/{*rest}` and keeps
     /// `implementations`{{ if .HasAuth }} and `page_authenticator`{{ end }} for the in-process calls of
     /// `operations`.
+{{- if .ControlledProcedures }} Adds the layers that apply each procedure's route
+    /// controls (`procedures::route_controls`).
+{{- end }}
     #[must_use]
     fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;
 }
@@ -81,6 +88,17 @@ pub trait {{ .ExtTrait }} {
 impl {{ .ExtTrait }} for RouterBuilder {
     fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self {
         let api = build_router(implementations.clone());
+{{- if .ControlledProcedures }}
+        let router = self
+            .app_context(Setup {
+                implementations,
+{{- if .HasAuth }}
+                page_authenticator: Arc::new(page_authenticator),
+{{- end }}
+            })
+            .route(TowerRoute::any("/api/{*rest}", api));
+        procedures::route_controls(router)
+{{- else }}
         self.app_context(Setup {
             implementations,
 {{- if .HasAuth }}
@@ -88,6 +106,7 @@ impl {{ .ExtTrait }} for RouterBuilder {
 {{- end }}
         })
         .route(TowerRoute::any("/api/{*rest}", api))
+{{- end }}
     }
 }
 {{- if .HasAuth }}
