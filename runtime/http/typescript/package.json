@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/http-runtime",
   "version": "0.0.0",
-  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, and the Hono adapter. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, and the identity runtime of the core user model (./identity). Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +13,10 @@
     "./hono": {
       "types": "./dist/hono.d.ts",
       "import": "./dist/hono.js"
+    },
+    "./identity": {
+      "types": "./dist/identity/index.d.ts",
+      "import": "./dist/identity/index.js"
     }
   },
   "files": [
@@ -22,14 +26,18 @@
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json",
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
-    "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src"
+    "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src && bun run build && node scripts/identity-node-check.mjs"
   },
   "peerDependencies": {
     "@hono/node-server": "2.1.1",
-    "hono": "4.13.8"
+    "hono": "4.13.8",
+    "pg": ">=8.11.0"
   },
   "peerDependenciesMeta": {
     "@hono/node-server": {
+      "optional": true
+    },
+    "pg": {
       "optional": true
     }
   },
@@ -37,6 +45,7 @@
     "@hono/node-server": "2.1.1",
     "@types/node": "22.19.9",
     "hono": "4.13.8",
+    "pg": "8.23.0",
     "typescript": "5.9.3"
   },
   "license": "Apache-2.0",

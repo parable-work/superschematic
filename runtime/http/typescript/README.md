@@ -13,7 +13,7 @@ and keeps their wire contract:
 | success | `application/json` | `{data, meta: {requestId}}` |
 | failure | `application/problem+json` | RFC 9457: `type`, `title`, `status`, `detail`, `code`, `requestId`, `details`, extension members |
 
-Two entry points:
+Three entry points:
 
 - `@superschematic/http-runtime`, with no framework import:
   `RequestContext`, `HttpProblem` and the problem envelope, the success
@@ -65,6 +65,8 @@ Two entry points:
   service's handler decrypts or reads the body itself. `notFoundHandler` and `errorHandler` cover the
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
+- `@superschematic/http-runtime/identity`, the core user model's runtime
+  (D50, below). The main entry point does not load it.
 
 ## Authentication and permissions
 
@@ -77,7 +79,8 @@ runtime applies that requirement. It does not decide who the caller is.
   authenticator can read it, a header such as `X-API-Key`, an
   `Authorization` header of another scheme, or anything else on the
   request. No authenticator means every route that needs a caller
-  answers 401.
+  answers 401. An authenticator that sets `readsAuthorization` reads the
+  header itself, and the adapter does not run `hono/bearer-auth` for it.
 - `hasAnyPermission` is the default matcher, with the Go `session`
   runtime's rule: permissions are dotted paths, a granted permission covers
   itself and every permission nested under it, and no permission covers
@@ -86,9 +89,10 @@ runtime applies that requirement. It does not decide who the caller is.
   router options: a root permission, roles resolved elsewhere. This is the
   counterpart of the Go runtime's `RequirePermissionsWith`.
 
-Identity models and token formats of end users belong to the project's own
-package, next to the auth provider it registers for the Go server. That
-package supplies the `Authenticator` and, if it needs one, the
+Unless the schemas declare the core user model (Identity, below), identity
+models and token formats of end users belong to the project's own package,
+next to the auth provider it registers for the Go server. That package
+supplies the `Authenticator` and, if it needs one, the
 `PermissionMatcher`. A calling service is not an end user: it has its own
 credential and step (D37).
 
@@ -132,6 +136,55 @@ Bun and Cloudflare Workers. A token file (`tokenFileSource`,
 `jwksBearerTokenFile`) is read through `process.getBuiltinModule` on
 Node.js and Bun; elsewhere pass `readFile`.
 
+## Identity
+
+`@superschematic/http-runtime/identity` is the TypeScript runtime of the
+core user model (D50 in `docs/DECISIONS.md`), the sibling of the Go
+runtime's `identity` package, held to the same parity vectors
+(`runtime/http/testdata/identity_parity.json`, whose harness
+`runtime/http/testdata/README.md` states).
+
+- `parseIdentityConfig` reads the identity config every runtime reads;
+  `hashPassword` and `verifyPassword` write and read argon2id PHC strings
+  (`node:crypto`'s `argon2`, so Node.js 24.7 or later, or Bun);
+  `passwordProblem` is `Auth.Password`'s rule through superscalar;
+  `newToken`, `hashToken`, `extractCredential`, `sessionCookie`,
+  `clearCookie`, `crossOriginAllowed` (Go's
+  `net/http.CrossOriginProtection`), `validPermission`,
+  `effectivePermissions`, `uncovered` (the grant rule) and
+  `capabilitiesOf` are the primitives the vectors pin. `routesOf` reads a
+  generated operation table into the route requirements capabilities
+  answers for, keyed by the OpenAPI operation id.
+- `IdentityStore` is the storage interface. `SqlIdentityStore` implements
+  it from the schema's identity descriptor, over `pg`
+  (`postgresIdentityStore(pool, descriptor)`) or SQLite
+  (`sqliteIdentityStore(client, descriptor)`, with `nodeSqlite` and
+  `bunSqlite` binding an open `node:sqlite` or `bun:sqlite` database; the
+  engine's `SqlDriver` is a client as it is). It quotes every name, parses a
+  login with its scalar and looks it up by equality, and keeps an
+  `Identity.UUID` key base62 on the wire and hyphenated in the database.
+  On SQLite every operation runs synchronously, its transaction included.
+  The package imports no driver: `pg` is an optional peer dependency.
+- `IdentityService` holds every session and administration operation, with
+  the Go runtime's problems: 401 `invalid_credentials` and `unauthorized`,
+  403 `forbidden` and `cross_origin`, 404 `not_found`, 409 `conflict`, 422
+  `invalid_permission`, and 400 `bad_request` with field errors.
+  `identityAuthenticator(service)` is the router's `Authenticator`: the
+  principal's subject is the user's id, its permissions the roles', and its
+  claims carry the session id, login, name, transport and roles.
+- `identityHandler(service, op)` is the Hono handler of one operation of
+  `ir/identity_routes.go`, in `ManualRouteHandler`'s shape;
+  `identityRoutes` and `mountIdentityRoutes` lay them out as the Go
+  runtime's `Service.Routes` does, and `identityCors` is the credentialed
+  CORS middleware for the trusted origins. Every success is the `{data,
+  meta}` envelope; logout, changePassword, setUserPassword and deleteRole
+  answer `data: true`.
+
+The store tests run on `node:sqlite` and `bun:sqlite` always, and on the
+Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set.
+`bun run test` ends by building the package and running
+`scripts/identity-node-check.mjs` under Node.
+
 ## Using it
 
 The package ships compiled ESM with declarations (`dist/`), so it runs
@@ -161,7 +214,7 @@ app.onError(errorHandler());
 cd runtime/http/typescript
 bun install --frozen-lockfile
 bun run build    # links superscalar, then tsc writes dist/
-bun run test     # links superscalar, runs tsc --noEmit, then bun test src
+bun run test     # links superscalar, runs tsc --noEmit, bun test src, then the identity check under Node
 ```
 
 Both scripts link `third_party/superscalar` (built by
