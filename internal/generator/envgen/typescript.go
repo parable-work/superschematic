@@ -218,7 +218,8 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 	}
 	for _, field := range output.Derived {
 		derived := typeScriptDerivedField{Key: field.Key, KeyLiteral: jsString(field.Key)}
-		if field.Kind == ir.EdgeSQL {
+		switch field.Kind {
+		case ir.EdgeSQL:
 			from := "its one DB-kind dependency"
 			if field.From == "authDb" {
 				from = "its authDb"
@@ -226,11 +227,11 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 			derived.Reader, derived.Type = "loadDatabase", "Database"
 			derived.Doc = fmt.Sprintf("The connection to %s, the API's database: %s. It is read from %s_*.", field.Service, from, field.Key)
 			view.HasDatabase = true
-		} else if field.Kind == ir.EdgeBucket {
+		case ir.EdgeBucket:
 			derived.Reader, derived.Type = "loadBucket", "BucketConnection"
 			derived.Doc = fmt.Sprintf("How the server reaches %s, a bucket the API lists. It is read from %s_*.", field.Service, field.Key)
 			view.HasBucket = true
-		} else {
+		default:
 			derived.Reader, derived.Type = "loadService", "Service"
 			derived.Doc = fmt.Sprintf("The endpoint of %s, which the API calls. It is read from %s_*.", field.Service, field.Key)
 			view.HasService = true
