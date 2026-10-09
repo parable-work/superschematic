@@ -271,8 +271,12 @@ An operation another behavior's reference hook invokes on a leased
 instance, as `Dependencies`' `removeBlocker` when a blocker is deleted or
 `Links`' `unlink` when a target is, runs as the principal of that change
 and is refused like any other, so that change is refused too; a
-deployment that wants it through lists it in `exempt`. Nothing changes
-the field `maxHoldField` names while a lease is held, unless with
+deployment that wants it through lists it in `exempt`. So is a
+backfill's: `Numbering`'s `assignNumber`, which numbers an instance made
+before its schema composed `Numbering`, writes, so a deployment that
+backfills leased instances lists `"Numbering.assignNumber"`; a create
+holds no lease, and numbers its instance whatever the guard. Nothing
+changes the field `maxHoldField` names while a lease is held, unless with
 `overridePermission`, so a holder cannot extend its own hold.
 
 ### Directives

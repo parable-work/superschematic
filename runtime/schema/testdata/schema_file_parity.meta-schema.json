@@ -840,6 +840,58 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Numbering"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "format": {
+                    "description": "How a number prints: text with {seq}, or {seq:N} zero-padded to N digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the instance was created in, as often as wanted. No other {...} is allowed.",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reset": {
+                    "description": "yearly starts the count again at 1 each UTC year, the year the instance was created in; the format must then print the year, {yyyy} or {yy}.",
+                    "enum": [
+                      "yearly"
+                    ]
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "description": "Counts per target of a link of the type's Links config, which is required and holds one target: each target's instances are numbered 1, 2, 3, ... of their own.",
+                    "properties": {
+                      "link": {
+                        "description": "The link's name in the type's Links config.",
+                        "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "link"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "format"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Presence"
               }
             }
@@ -1784,6 +1836,7 @@
             "Dependencies",
             "Lease",
             "Links",
+            "Numbering",
             "Presence",
             "Queue",
             "Reactions",

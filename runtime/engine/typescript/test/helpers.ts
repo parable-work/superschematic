@@ -230,6 +230,20 @@ export function stepsDocument(): Record<string, unknown> {
 }
 
 /**
+ * invoicesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-numbering-json): its Invoice type composes Links, with the
+ * project every create gives, and Numbering, which numbers each invoice
+ * at its create, INV-2026-0001 on, in its project's count, starting
+ * again each UTC year.
+ */
+export function invoicesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-numbering-json/src/invoice.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
  * recipesDocument is the General schema-file document the core binary
  * loads with no extension linked beside the others (make cli-smoke,
  * fixture-branches-json), a schema named Recipe like its instance type,

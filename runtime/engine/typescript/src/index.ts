@@ -218,6 +218,8 @@ export type {
   LinkRecord,
   LinkSpec,
   LinksConfig,
+  NumberingConfig,
+  NumberingNumber,
   ProposalRecord,
   ProposalState,
   ReactionsConfig,

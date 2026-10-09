@@ -45,6 +45,8 @@ export interface BehaviorConfigs {
   Variants: VariantsConfig;
   /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
   Branches: BranchesConfig;
+  /** A number a person reads on each instance, set at its create from a count per schema, per scope target and per year. */
+  Numbering: NumberingConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -329,6 +331,26 @@ export interface BranchesSweep {
   readonly pruneBatch?: number;
   /** Discards a draft with no write for this many milliseconds; none when absent. */
   readonly abandonAfter?: number;
+}
+
+/** Numbering's config. */
+export interface NumberingConfig {
+  /**
+   * How a number prints: text with {seq}, or {seq:N} zero-padded to N
+   * digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the
+   * instance was created in: "INV-{yyyy}-{seq:4}" prints INV-2026-0042.
+   */
+  readonly format: string;
+  /** Counts per target of a link of the type's Links config, which is required and holds one target. */
+  readonly scope?: NumberingScope;
+  /** "yearly" starts the count again at 1 each UTC year; the format then prints the year. */
+  readonly reset?: "yearly";
+}
+
+/** What a Numbering count runs per. */
+export interface NumberingScope {
+  /** The link's name in the type's Links config. */
+  readonly link: string;
 }
 
 /** Lease's config. */

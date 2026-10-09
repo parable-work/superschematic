@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches and Numbering behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares eighteen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements eleven itself
+The core declares nineteen behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements twelve itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -39,6 +39,7 @@ schema that composes one until a deployment registers that package.
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
+| `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -1004,6 +1005,63 @@ engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the re
   type composes both. Lease's guard then holds `Branches`' writes to the
   lease's holder, as it holds any writing operation
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## Numbering
+
+A number a person reads on each instance: an invoice's `INV-2026-0042`,
+a ticket's `T-17`. The count runs per schema, per target of a scope
+link and per year, as the config says, and the create sets the number
+in its own transaction.
+
+```ts
+import { behavior } from "@superschematic/schema";
+
+@behavior("Links", { links: { project: { schema: "projects", required: true } } })
+@behavior("Numbering", { format: "INV-{yyyy}-{seq:4}", scope: { link: "project" }, reset: "yearly" })
+export abstract class Invoice {
+  title: string;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `format` (required): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` or `{yy}`, the UTC year the instance was created in; `scope: { link }`: a required, single-valued link of the type's `Links`, each of whose targets counts on its own; `reset: "yearly"`: each count starts again at 1 every UTC year, which needs the year in `format` |
+| Fields | `seq`, the number in its count, and `label`, the number as `format` prints it; both absent until the instance is numbered |
+| Operation | `assignNumber()`, which numbers an instance made before its schema composed `Numbering` |
+| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year, and a `scope` link that is not a required, single-valued link of the type's `Links` (`invalid_schema`) |
+
+```ts
+engine.instances.create(me, "invoices", { title: "Kickoff" }, { behaviors: { Links: { project: "launch" } } }).behaviors.Numbering;
+// { seq: 1, label: 'INV-2026-0001' }
+engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-0001" } });
+// the launch project's first invoice of 2026, and each other project's
+```
+
+- **No gap a refused create leaves.** The number is set after every
+  behavior's `initialize`, in the create's transaction, so a create
+  refused after it takes none. A delete leaves a gap: the next create
+  takes the next number.
+- **Unique within its scope.** A label never repeats within its count.
+  With `scope`, each target counts from 1, so a list by label can return
+  one instance per target. Moving the scope link keeps the number.
+- **The year.** `{yyyy}`, `{yy}` and `reset` read the year the instance
+  was created in, UTC, so a number given later still counts in its year.
+- **Nothing changes a number.** An update writes own fields only, and no
+  operation writes a number once set.
+- **Filters.** `where: { "Numbering.label": ... }` and `"Numbering.seq"`
+  read through an index each.
+- **Adding it later.** `Numbering` can be added to a schema with
+  instances; each holds no number (`behaviors.Numbering` is `{}`, and
+  `where: { "Numbering.seq": null }` lists them) until `assignNumber()`
+  numbers it with an event. A deployment backfills by invoking it on
+  each in creation order; on an instance numbered already it changes
+  nothing.
+- **New versions.** While the schema has instances, `format`, `scope`
+  and `reset` stay, and `Numbering` stays: added again, it would count
+  from 1. With none, any change, and the counts start again at 1.
+- **Lease.** On a type that composes `Lease`, list
+  `"Numbering.assignNumber"` in its `exempt`, or a backfill of a leased
+  instance is refused for anyone but its holder.
 
 ## Where to go next
 

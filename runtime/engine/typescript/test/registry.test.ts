@@ -345,7 +345,7 @@ for (const driver of drivers) {
       assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
         {
           path: '/types/Order/behaviors/0/name',
-          message: 'must be one of "Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"',
+          message: 'must be one of "Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Numbering", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"',
         },
       ]);
     });
