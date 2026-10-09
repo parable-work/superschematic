@@ -19,6 +19,8 @@ export {
   source,
   timeout,
   uiHidden,
+  userAdministration,
+  userSessions,
   virtual,
   webhook,
   worker
@@ -40,6 +42,8 @@ export type {
   ServiceCallersConfig,
   ServiceHandleRef,
   TimeoutConfig,
+  UserAdministrationConfig,
+  UserSessionsConfig,
   WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";

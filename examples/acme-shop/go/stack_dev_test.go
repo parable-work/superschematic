@@ -15,37 +15,46 @@ import (
 	"testing"
 	"time"
 
-	orm "example.com/acme/orm/shop-db"
 	apisdk "example.com/acme/sdk/go/shop-api"
 	"example.com/acme/sdk/go/shop-api/namespaces"
 	orderssdk "example.com/acme/sdk/go/shop-orders"
 	apitypes "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
 	orderstypes "example.com/acme/types/go/shop-orders"
-	scalars "github.com/parable-work/superscalar/go"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
 )
 
 // TestStackDevRunsTheShop is milestones 1 and 7 of docs/stack-model.md
 // (section 14) on this example. `superschematic stack dev` runs
 // shop-stack's Dev environment from examples/acme-shop, as the tutorial
-// does: Postgres in a container with shop-db migrated; shop-api and
+// does: Postgres in a container with shop-db migrated; fake-gcs-server in a
+// container with shop-media, the bucket shop-api lists (D54); shop-api and
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; and shop-storefront on
 // its generated TypeScript entrypoint, which Bun runs with the
 // implementation in typescript/shop-storefront (D51). Every connection
 // string, URL and port the test uses comes from the environment the build
-// resolved. The test waits for each server's /readyz, signs a user in
-// through the generated ORM, calls each Go API through its generated Go
-// SDK and the storefront over HTTP. PlaceOrder enqueues an OrderPlaced
-// message on shop-db's queue in the order's transaction, and shop-orders'
-// worker FulfilOrders, a process of its own on its generated entrypoint
-// with the implementation's NewWorkers, claims it and fulfils the order
-// (section 8.8, D53). Then shop-orders' job ShipOrders, on its generated
-// entrypoint with the implementation's NewJobs, ships the order fulfilled:
-// once on demand with `superschematic stack run`, and again on the
-// every-minute schedule Dev's settings give it, which stack dev runs
+// resolved. The test waits for each server's /readyz, creates a user in
+// shop-db with the identity runtime's store, as staff would through the
+// administration routes, signs them in through shop-api's generated login,
+// calls each Go API through its generated Go SDK with the session and the
+// storefront over HTTP. shop-api signs an upload of a product's image,
+// which the test PUTs to the emulator through the signed URL, as a browser
+// would, and reads back from shop-media. PlaceOrder enqueues an
+// OrderPlaced message on shop-db's queue in the order's transaction, and
+// shop-orders' worker FulfilOrders, a process of its own on its generated
+// entrypoint with the implementation's NewWorkers, claims it and fulfils
+// the order (section 8.8, D53). It reads the static site shop-web, which
+// stack dev built and serves with its config, and asks shop-api, as a
+// browser would, whether the site's origin may call it, and another origin
+// (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
+// the implementation's NewJobs, ships the order fulfilled: once on demand
+// with `superschematic stack run`, and again on the every-minute schedule
+// Dev's settings give it, which stack dev runs
 // (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
-// with --remove-database removes the container.
+// with --remove-data removes the containers.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
@@ -78,7 +87,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	})
 	output := &lockedBuffer{}
-	stack := exec.Command(binary, "stack", "dev", "--remove-database", "--out", outputRoot)
+	stack := exec.Command(binary, "stack", "dev", "--remove-data", "--out", outputRoot)
 	stack.Dir = ".."
 	stack.Stdout, stack.Stderr = output, output
 	if err := stack.Start(); err != nil {
@@ -87,8 +96,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	exited := make(chan error, 1)
 	go func() { exited <- stack.Wait() }()
 	// On a failure, stop stack dev as Ctrl-C does, then remove the
-	// container whatever it left.
-	stopped, container := false, ""
+	// containers whatever it left.
+	stopped, containers := false, []string(nil)
 	t.Cleanup(func() {
 		if !stopped {
 			_ = stack.Process.Signal(os.Interrupt)
@@ -98,7 +107,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 				_ = stack.Process.Kill()
 			}
 		}
-		if container != "" {
+		for _, container := range containers {
 			_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
 		}
 		if t.Failed() {
@@ -122,7 +131,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
-	container = env.container
+	containers = env.containers
 	for _, server := range []string{"shop-api", "shop-orders", "shop-storefront"} {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
@@ -135,7 +144,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	token := signIn(ctx, t, env.database)
+	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"])
 	n := time.Now().UnixNano()
 
 	// shop-api: staff add a product, and it is listed.
@@ -157,6 +166,44 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if !containsProduct(listed, product.Id) {
 		t.Fatalf("ListProducts returned %+v, without %s", listed, product.Id)
+	}
+
+	// shop-media (D54): shop-api names an object for the product's image
+	// and signs its upload; the image goes straight to the bucket through
+	// the signed URL, as a browser would send it, never through shop-api.
+	upload, err := products.ProductNamespace.CreateProductImageUpload(ctx, product.Id.String(), apitypes.ProductImageUploadInput{ContentType: "image/png"})
+	if err != nil {
+		t.Fatalf("CreateProductImageUpload: %v", err)
+	}
+	if !strings.HasPrefix(upload.UploadUrl, env.bucket+"/") || !strings.Contains(upload.UploadUrl, "X-Goog-Signature=") {
+		t.Fatalf("the upload URL %s is no signed URL of the bucket at %s", upload.UploadUrl, env.bucket)
+	}
+	image := []byte("\x89PNG\r\n\x1a\n green tea")
+	put, err := http.NewRequest(http.MethodPut, upload.UploadUrl, bytes.NewReader(image))
+	if err != nil {
+		t.Fatal(err)
+	}
+	put.Header.Set("Content-Type", "image/png")
+	uploaded, err := http.DefaultClient.Do(put)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploaded.Body.Close()
+	if uploaded.StatusCode != http.StatusOK {
+		t.Fatalf("PUT the image through the signed URL: %s", uploaded.Status)
+	}
+	got, err := products.ProductNamespace.GetProduct(ctx, product.Id.String())
+	if err != nil || got.ImageObject != upload.ObjectName {
+		t.Fatalf("GetProduct = %+v, %v; want the image object %s recorded", got, err, upload.ObjectName)
+	}
+	back, err := http.Get(env.bucket + "/" + upload.ObjectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := io.ReadAll(back.Body)
+	back.Body.Close()
+	if err != nil || back.StatusCode != http.StatusOK || !bytes.Equal(stored, image) || back.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
 
 	// shop-orders: a shopper orders two of it, in one transaction over
@@ -217,6 +264,39 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("read the cart without a token: %d %s, want 401", status, body)
 	}
 
+	// shop-web, the static site, which stack dev built once and serves
+	// from a file server of its own (D55): its page, its config with
+	// shop-api's address, and the page again for a route of the
+	// application. shop-api answers CORS for the site's origin, which its
+	// CORS field lists, and for no other.
+	site := env.site
+	if site == "" {
+		t.Fatalf("environment Dev has no site shop-web")
+	}
+	if status, body := call(t, http.MethodGet, site+"/", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
+		t.Fatalf("the site's page: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodGet, site+"/__superschematic/config.json", "", "")
+	var config struct {
+		APIs map[string]struct {
+			URL string `json:"url"`
+		} `json:"apis"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != env.servers["shop-api"] {
+		t.Fatalf("the site's config: %d %s, want shop-api at %s", status, body, env.servers["shop-api"])
+	}
+	if status, body := call(t, http.MethodGet, site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
+		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
+	}
+	listing := env.servers["shop-api"] + "/api/products?inStock=true"
+	if allowed := preflight(t, listing, site); allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
+		!strings.Contains(allowed.Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(allowed.Get("Access-Control-Allow-Methods"), "GET") {
+		t.Fatalf("shop-api's answer to the site's preflight: %v", allowed)
+	}
+	if refused := preflight(t, listing, "https://evil.example"); refused.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("shop-api allowed another origin: %v", refused)
+	}
+
 	// shop-orders' job ShipOrders ships every fulfilled order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
@@ -253,7 +333,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	}
 
-	// Ctrl-C stops the servers, then removes the container and its data.
+	// Ctrl-C stops the servers, then removes the containers and their data:
+	// Postgres's and the storage emulator's.
 	stopped = true
 	if err := stack.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
@@ -267,11 +348,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		_ = stack.Process.Kill()
 		t.Fatal("stack dev did not stop in 2 minutes")
 	}
-	if !strings.Contains(output.String(), "removed container "+env.container) {
-		t.Fatalf("stack dev did not remove container %s", env.container)
-	}
-	if exec.Command("docker", "container", "inspect", env.container).Run() == nil {
-		t.Fatalf("container %s outlived --remove-database", env.container)
+	for _, container := range env.containers {
+		if !strings.Contains(output.String(), "removed container "+container) {
+			t.Fatalf("stack dev did not remove container %s", container)
+		}
+		if exec.Command("docker", "container", "inspect", container).Run() == nil {
+			t.Fatalf("container %s outlived --remove-data", container)
+		}
 	}
 }
 
@@ -332,12 +415,15 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 }
 
 // environment is what the test reads from the environment the build
-// resolved: each server's URL, shop-db's connection string and the
-// Postgres container's name.
+// resolved: each server's URL, the site's origin, shop-db's connection
+// string, shop-media's URL on the storage emulator, and the names of the
+// containers, Postgres's and the emulator's.
 type environment struct {
-	servers   map[string]string
-	database  string
-	container string
+	servers    map[string]string
+	site       string
+	database   string
+	bucket     string
+	containers []string
 }
 
 func readEnvironment(t *testing.T, path string) environment {
@@ -348,9 +434,10 @@ func readEnvironment(t *testing.T, path string) environment {
 	}
 	var resolved struct {
 		Deployables []struct {
-			Name    string `json:"name"`
-			Kind    string `json:"kind"`
-			Address string `json:"address"`
+			Name          string `json:"name"`
+			Kind          string `json:"kind"`
+			Address       string `json:"address"`
+			PublicAddress string `json:"publicAddress"`
 		} `json:"deployables"`
 		Resources struct {
 			Resources []struct {
@@ -364,51 +451,93 @@ func readEnvironment(t *testing.T, path string) environment {
 	}
 	env := environment{servers: map[string]string{}}
 	for _, d := range resolved.Deployables {
-		if d.Kind == "server" {
+		switch {
+		case d.Kind == "server":
 			env.servers[d.Name] = d.Address
+		case d.Kind == "site" && d.Name == "shop-web":
+			env.site = d.PublicAddress
 		}
 	}
 	for _, r := range resolved.Resources.Resources {
 		switch {
 		case r.Type == "local:docker/container:Container":
-			env.container, _ = r.Properties["name"].(string)
+			name, _ := r.Properties["name"].(string)
+			env.containers = append(env.containers, name)
 		case r.Type == "local:postgres/database:Database" && r.Properties["service"] == "shop-db":
 			env.database, _ = r.Properties["url"].(string)
+		case r.Type == "local:storage/bucket:Bucket" && r.Properties["service"] == "shop-media":
+			endpoint, _ := r.Properties["endpoint"].(string)
+			name, _ := r.Properties["name"].(string)
+			env.bucket = endpoint + "/" + name
 		}
 	}
-	if env.database == "" || env.container == "" {
-		t.Fatalf("%s names no shop-db database or no container", path)
+	if env.database == "" || env.bucket == "" || len(env.containers) != 2 {
+		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
 	}
 	return env
 }
 
-// signIn creates a user and a session of an hour in shop-db, through the
-// generated ORM, as the shop's sign-in would, and returns the session's
-// bearer token: its jti (shop.SessionToken).
-func signIn(ctx context.Context, t *testing.T, databaseURL string) string {
+// signInOnTheStack creates a user in shop-db with a role that holds
+// products and orders, through the identity runtime's store over the
+// database, as staff would through shop-api's administration routes; signs
+// them in through shop-api's generated login with a bearer session, and
+// returns its token. It also signs in with a cookie session, which the
+// local target's servers, on plain HTTP, write as session without Secure.
+func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI string) string {
 	t.Helper()
-	database, err := orm.Connect(ctx, databaseURL)
+	config, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	database := stdlib.OpenDB(*config)
 	defer database.Close()
-	user, err := database.GetUserRepository().CreateOne(ctx, &db.User{
-		Email: db.ContactEmail(fmt.Sprintf("ada.%d@example.com", time.Now().UnixNano())),
-		Name:  "Ada Lovelace",
-	})
+	store, err := identity.NewSQLStore(database, identity.Postgres, []byte(db.IdentityDescriptor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := time.Now().UnixNano()
+	login, password := fmt.Sprintf("ada.%d@example.com", n), "ada's password"
+	hash, err := identity.HashPassword(password, identity.Config{}.Argon2Params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.CreateUser(ctx, identity.NewUser{Login: login, Name: "Ada Lovelace", PasswordHash: hash, At: time.Now()})
 	if err != nil {
 		t.Fatalf("create the user: %v", err)
 	}
-	jti := scalars.NewUUID()
-	_, err = database.GetSessionRepository().CreateOne(ctx, &db.Session{
-		Jti:       jti,
-		User:      db.User{Id: user.Id},
-		ExpiresAt: db.TemporalDateTime(time.Now().Add(time.Hour)),
-	})
+	role, err := store.CreateRole(ctx, fmt.Sprintf("staff-%d", n), []string{"products", "orders"})
 	if err != nil {
-		t.Fatalf("create the session: %v", err)
+		t.Fatalf("create the role: %v", err)
 	}
-	return jti.String()
+	if err := store.GrantRole(ctx, user.ID, role.ID, time.Now()); err != nil {
+		t.Fatalf("grant the role: %v", err)
+	}
+
+	client, err := apisdk.New(apisdk.SDKConfig{BaseURL: shopAPI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.AccountNamespace.Login(ctx, apitypes.LoginInput{Login: apitypes.ContactEmail(login), Password: apitypes.AuthPassword(password)})
+	if err != nil || result.Token == "" {
+		t.Fatalf("login: %+v, %v", result, err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, shopAPI+"/api/auth/login",
+		strings.NewReader(fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, login, password)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if cookies := response.Cookies(); response.StatusCode != http.StatusOK || len(cookies) != 1 || cookies[0].Name != identity.PlainCookieName || cookies[0].Secure {
+		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
+	}
+	return result.Token
 }
 
 func containsProduct(products []apitypes.ProductView, id apitypes.IdentityUUID) bool {
@@ -445,6 +574,29 @@ func call(t *testing.T, method, url, token, body string) (int, []byte) {
 		t.Fatal(err)
 	}
 	return response.StatusCode, answer
+}
+
+// preflight asks, from origin, as a browser does before a GET with the
+// shopper's token, whether url answers it, and returns the answer's
+// headers. The answer is 204 whatever the origin; only its headers say.
+func preflight(t *testing.T, url, origin string) http.Header {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	request.Header.Set("Access-Control-Request-Headers", "authorization")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("OPTIONS %s from %s = %d, want 204", url, origin, response.StatusCode)
+	}
+	return response.Header
 }
 
 func get(t *testing.T, url string) int {

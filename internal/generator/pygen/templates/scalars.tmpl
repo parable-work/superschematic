@@ -41,6 +41,14 @@ except ImportError:
     # {{.Naming.ScalarPythonModule}} is not installed: validation is limited to patterns
     _SCALAR_MODULE_AVAILABLE = False
 {{end}}
+{{- range $scalar := .Scalars}}{{$libType := pythonScalarLibType $scalar}}{{if $libType}}
+# {{$scalar.Name}}'s value type comes from {{$.Naming.ScalarPythonModule}}; without it the
+# value is a plain {{if eq $scalar.Traits.StructuredJSON "object"}}dict{{else}}JSON value{{end}}.
+try:
+    from {{$.Naming.ScalarPythonModule}} import {{$libType}} as _{{pythonScalarSymbol $scalar}}Value
+except ImportError:
+    _{{pythonScalarSymbol $scalar}}Value = {{if eq $scalar.Traits.StructuredJSON "object"}}Dict[str, Any]{{else}}Any{{end}}
+{{end}}{{end}}
 
 {{range .Scalars}}{{if and (or .HasCustomParse (pythonParsesJSON .)) (ne .Name "Generic.JSON")}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
@@ -270,7 +278,7 @@ def _validate_generic_json(v: Any) -> Any:
     ),
 ]
 
-{{else if .Traits.IsLocationLike -}}
+{{else if and .Traits.IsLocationLike (not (pythonParsesJSON .)) -}}
 # Location scalar for geographic coordinates
 def _validate_location(v: Any) -> Dict[str, float]:
     """Validate and parse location coordinates."""
@@ -302,7 +310,7 @@ def _validate_location(v: Any) -> Dict[str, float]:
 {{else -}}
 # Standard scalar type
 {{pythonScalarSymbol .}} = Annotated[
-    {{pythonScalarType .TargetType}},
+    {{if pythonScalarLibType .}}_{{pythonScalarSymbol .}}Value{{else}}{{pythonScalarType .TargetType}}{{end}},
     Field(
         description="{{pythonString (scalarDoc .)}}",
         {{- if .MaxLength}}
@@ -321,7 +329,7 @@ def _validate_location(v: Any) -> Dict[str, float]:
         le={{.Maximum}},
         {{- end}}
         {{- if .Example}}
-        examples=["{{pythonString .Example}}"],
+        examples=[{{pythonExample .}}],
         {{- end}}
     ),
     {{- if or .HasCustomParse (pythonParsesJSON .)}}

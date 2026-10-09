@@ -21,8 +21,9 @@
 #      shop-stack's servers, job and worker included;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
-#      typescript/shop-storefront and the clients in typescript/clients
-#      type-check, all of them one Bun workspace, which installs frozen to
+#      typescript/shop-storefront, the clients in typescript/clients and
+#      the site in web/shop-web type-check, and the site builds, all of
+#      them one Bun workspace, which installs frozen to
 #      the committed schemas/dist/bun.lock and fails when the build's
 #      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
@@ -32,19 +33,29 @@
 #      TypeScript, Python and Rust clients against the same server and
 #      compare what they print; then run all four clients against
 #      shop-orders served by the generated Rust server (rust-server/,
-#      built with --api-language RUST into schemas/dist-rust) and check
-#      they print the same; and, when Docker runs, `superschematic stack
-#      dev` runs shop-stack's Dev environment, Postgres, both Go servers and
-#      the storefront's TypeScript server on Bun, each on its generated
-#      entrypoint, and the test calls each Go API through its SDK and the
-#      storefront over HTTP (milestones 1 and 7 of docs/stack-model.md),
-#      sees shop-orders' worker fulfil each order placed from shop-db's
-#      queue (D53), then sees shop-orders' job ship an order with
-#      `superschematic stack run` and on the every-minute schedule stack dev
-#      runs (D52);
-#   4a. the Topcoat app in topcoat/ passes its tests: its pages call
-#      shop-orders in-process through the crate the Topcoat extension
-#      writes into schemas/dist-rust, with the binary that links it;
+#      built with --api-language RUST into schemas/dist-rust), with a
+#      shopper signed in through shop-api's login over a SQLite database
+#      of shop-db's identity tables (rust-server/identity.sql, whose
+#      tables have the columns shop-db's DDL gives them) that the Rust
+#      server reads too, and check they print the same; and, when Docker
+#      runs, `superschematic stack dev` runs shop-stack's Dev environment,
+#      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
+#      servers and the storefront's TypeScript server on Bun, each on its
+#      generated entrypoint, shop-orders' worker and the site shop-web, and
+#      the test calls each Go API through its SDK and the storefront over
+#      HTTP, uploads a product's image to shop-media through the URL
+#      shop-api signs and reads it back (D54), sees shop-orders' worker
+#      fulfil each order placed from shop-db's queue (D53), reads the site
+#      and its config, and checks shop-api's CORS for the site's origin
+#      (milestones 1 and 7 of docs/stack-model.md), then sees shop-orders'
+#      job ship an order with `superschematic stack run` and on the
+#      every-minute schedule stack dev runs (D52);
+#   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
+#      with their password, and its pages call shop-orders in-process
+#      through the crate the Topcoat extension writes into
+#      schemas/dist-rust, with the binary that links it, over the shop and
+#      its users in memory and in a SQLite file the migration runner
+#      migrated with shop-db's SQLite plan;
 #   5. the storefront's tests call the generated TypeScript router over its
 #      implementation through the generated TypeScript SDK, and the clients'
 #      type tests decode the generated types;
@@ -107,7 +118,7 @@ echo "==> build-all"
 clean_dist
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 6 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 8 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -120,8 +131,27 @@ built_before shop-db shop-api
 built_before shop-db shop-orders
 built_before shop-api shop-stack
 built_before shop-orders shop-stack
+built_before shop-api shop-web
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
+
+echo "==> rust-server/identity.sql holds shop-db's identity tables"
+# The Rust server, the Topcoat app in memory and the Go test of the Rust
+# server keep the shop's users in SQLite, in the tables
+# rust-server/identity.sql creates, shop-db's identity tables alone. Each
+# table has the columns shop-db's DDL gives it, in Postgres and in SQLite.
+columns() {
+  awk -v table="$2" '
+    $1 == "CREATE" && $2 == "TABLE" { name = $3; gsub(/"/, "", name); inside = (name == table); next }
+    inside && /^\);/ { inside = 0 }
+    inside && $1 !~ /^(PRIMARY|FOREIGN|UNIQUE)$/ { column = $1; gsub(/[",]/, "", column); print column }
+  ' "$1" | sort
+}
+for table in user role session user_credential user_role_grant; do
+  test -n "$(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")"
+  diff <(columns "$DIST/sql/shop-db/create.sql" "$table") <(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")
+  diff <(columns "$DIST/sql/shop-db/sqlite/create.sql" "$table") <(columns "$EXAMPLE_DIR/rust-server/identity.sql" "$table")
+done
 
 echo "==> the commands the pages show"
 capture build-shop-common.txt superschematic build schemas/services/shop-common
@@ -170,10 +200,14 @@ TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
   "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
-  "$APP/shop-storefront" "$APP/clients"; do
+  "$APP/shop-storefront" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
   echo "    ${pkg#"$EXAMPLE_DIR/"}"
   (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
+# The site, shop-web, builds with its package's script, as stack dev and a
+# deploy build it, into one page and its script (D55).
+echo "    web/shop-web: bun run build"
+(cd "$EXAMPLE_DIR/web/shop-web" && bun run build >/dev/null && test -f dist/index.html)
 
 echo "==> Python: the generated types and SDK import"
 # The schema runtime's uv environment (make setup) has pydantic and the
@@ -203,12 +237,18 @@ echo "==> Topcoat: the app's pages call shop-orders in-process"
 (cd "$EXAMPLE_DIR" &&
   "$OUT/superschematic-topcoat" build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
 test -f "$SCHEMAS/dist-rust/topcoat/shop-orders/src/operations.rs"
-(cd "$EXAMPLE_DIR/topcoat" && cargo test --locked -q)
-
-echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
-# stack dev applies shop-db's migrations with the migration runner.
+# shop-db lists sqlite, so the app can keep the shop in a SQLite file: the
+# migration runner applies shop-db's SQLite plan to a new one, and the
+# tests copy it (ACME_SHOP_SQLITE). stack dev applies shop-db's Postgres
+# migrations with the same runner, below.
 (cd "$REPO_ROOT/runtime/migrate/go" &&
   CGO_ENABLED=0 GOWORK=off go build -o "$OUT/superschematic-migrate" ./cmd/superschematic-migrate)
+(cd "$EXAMPLE_DIR" &&
+  superschematic migrate plan schemas/services/shop-db --dialect sqlite --out "$OUT/shop-db.sqlite.plan.json" >/dev/null)
+"$OUT/superschematic-migrate" apply --plan "$OUT/shop-db.sqlite.plan.json" --database-url "sqlite:$OUT/shop.db" >/dev/null
+(cd "$EXAMPLE_DIR/topcoat" && ACME_SHOP_SQLITE="$OUT/shop.db" cargo test --locked -q)
+
+echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
@@ -265,11 +305,11 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 6
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 8
 # The stack's references to the APIs it deploys are recorded under dist
 # (D41), so once dist is gone it builds again, and is cached under its new
 # key; every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 5
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 7
 grep -q '^  OK: shop-stack (built, cached)$' "$OUT/logs/build-all-restore.txt"
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"

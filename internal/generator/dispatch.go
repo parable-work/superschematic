@@ -579,6 +579,43 @@ func (r run) generateTypeScriptAPI() error {
 	return nil
 }
 
+// authDB is the schema the API's config names as its authDb, whose User
+// table every server of the API and its TypeScript SDK read (D50): with
+// one, a server authenticates with the identity runtime and the SDK takes a
+// cookie session's credentials. It is nil when the config names no authDb
+// or names the API itself, and nil when the build configures no dependency
+// loader and the API serves none of the user model's routes, so a build
+// that loads no dependency writes what it wrote before the model. Every
+// other authDb that does not load is an error.
+func (r run) authDB() (*ir.Schema, error) {
+	name := r.Config.AuthDB
+	if name == "" || name == r.Config.Name {
+		return nil, nil
+	}
+	if r.Options.LoadDependency == nil && !servesIdentityRoutes(r.Schema) {
+		return nil, nil
+	}
+	schema, err := r.LoadDependency(name)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load %s, the authDb of %s, whose User table its servers read (D50): %w", name, r.Config.Name, err)
+	}
+	return schema, nil
+}
+
+// servesIdentityRoutes reports whether schema has one of the user model's
+// operations, which the loader expands from @userSessions and
+// @userAdministration.
+func servesIdentityRoutes(schema *ir.Schema) bool {
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			if op.IdentityOperation != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // typeScriptAPI is the TypeScript API package of the run's schema, with
 // its Deps and whether it has an EnvConfig, as the API's own build writes
 // it, and the env config it writes beside it: nil for a schema without
@@ -597,11 +634,16 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	authDB, err := r.authDB()
+	if err != nil {
+		return nil, nil, err
+	}
 	output, err := tsrestgen.Generate(r.Schema, apiOutput, tsrestgen.Options{
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
+		AuthDB:       authDB,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
@@ -632,8 +674,8 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its
 // config and logger (D51): a pg Pool for the API's database, its authDb or
-// its one DB-kind dependency, and a client of each calls entry's
-// TypeScript SDK. A callee whose config the build has must generate that
+// its one DB-kind dependency, a client of each calls entry's TypeScript
+// SDK, and the HTTP runtime's Bucket per buckets entry (D54). A callee whose config the build has must generate that
 // SDK; the database needs nothing generated, since the pool is pg's.
 func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
@@ -658,6 +700,9 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 			Package: r.Options.Naming.NpmSDKPackage(call.Name),
 			Client:  sdkgen.ClassName(call.Name),
 		})
+	}
+	for _, b := range r.Schema.Buckets {
+		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
 	}
 	return deps, nil
 }
@@ -693,10 +738,18 @@ func (r run) writeTypeScriptWorkspace() error {
 
 // resolveUpstreamAuth determines the DB schema backing authentication for a
 // public API: the authDb config value when set, otherwise the single DB-kind
-// dependency. Non-public schemas carry no upstream auth.
+// dependency. A non-public API carries no upstream auth, except the IR of an
+// authDb that declares the user model (D50), as authDB loads it, whose
+// server authenticates with the identity runtime whether or not the API is
+// public: it returns that IR alone, with no name, so the upstream ORM
+// wiring stays public's.
 func (r run) resolveUpstreamAuth() (string, *ir.Schema, error) {
 	if !r.Config.Public {
-		return "", nil, nil
+		upstream, err := r.authDB()
+		if err != nil || upstream == nil || upstream.UserTable() == nil {
+			return "", nil, err
+		}
+		return "", upstream, nil
 	}
 
 	name := r.Config.AuthDB
@@ -899,8 +952,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 
 // goDeps returns what the Go server's Deps holds beside its config and
 // logger (docs/stack-model.md, section 8.5): the ORM of the API's database,
-// its authDb or its one DB-kind dependency, and a Go SDK client per calls
-// entry. It also returns their schemas, whose Go types modules the server
+// its authDb or its one DB-kind dependency, a Go SDK client per calls
+// entry, and a bucket per buckets entry, which needs nothing generated
+// (D54). It also returns their schemas, whose Go types modules the server
 // reaches through the ORM and the SDKs. A dependency whose config the
 // build has must generate what Deps imports: the database its Go types,
 // and so its ORM, and each callee its Go SDK.
@@ -965,6 +1019,9 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 			Alias:   toGoPackageName(call.Name) + "sdk",
 			Client:  gosdkgen.ClientTypeName(call.Name),
 		})
+	}
+	for _, b := range r.Schema.Buckets {
+		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
 	}
 	return deps, roots, nil
 }
@@ -1044,6 +1101,10 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	authDB, err := r.authDB()
+	if err != nil {
+		return nil, err
+	}
 	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
@@ -1052,6 +1113,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 		OutputDir:    APIDir(r.Options.OutputRoot, r.Config.Name),
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
+		AuthDB:       authDB,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
@@ -1250,6 +1312,16 @@ func (r run) generateTypeScriptSDK() error {
 		return err
 	}); err != nil {
 		return fmt.Errorf("generator: typescript sdk for %s: %w", r.Config.Name, err)
+	}
+	// An API whose authDb has a User table verifies the session cookie
+	// another API's login set, so its SDK takes the credentials mode too
+	// (D50).
+	if sdkOutput != nil && !sdkOutput.CookieSessions {
+		authDB, err := r.authDB()
+		if err != nil {
+			return err
+		}
+		sdkOutput.CookieSessions = authDB != nil && authDB.UserTable() != nil
 	}
 
 	dir := SDKDir(r.Options.OutputRoot, "typescript", r.Config.Name)

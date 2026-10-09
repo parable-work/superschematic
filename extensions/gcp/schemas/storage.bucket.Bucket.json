@@ -1,0 +1,497 @@
+{
+  "token": "gcp:storage/bucket:Bucket",
+  "terraform": {
+    "type": "google_storage_bucket",
+    "renames": {
+      "autoclass.terminalStorageClass": "terminal_storage_class",
+      "cors.maxAgeSeconds": "max_age_seconds",
+      "cors.methods": "method",
+      "cors.origins": "origin",
+      "cors.responseHeaders": "response_header",
+      "customPlacementConfig": "custom_placement_config",
+      "customPlacementConfig.dataLocations": "data_locations",
+      "defaultEventBasedHold": "default_event_based_hold",
+      "deletionPolicy": "deletion_policy",
+      "enableObjectRetention": "enable_object_retention",
+      "encryption.customerManagedEncryptionEnforcementConfig": "customer_managed_encryption_enforcement_config",
+      "encryption.customerManagedEncryptionEnforcementConfig.effectiveTime": "effective_time",
+      "encryption.customerManagedEncryptionEnforcementConfig.restrictionMode": "restriction_mode",
+      "encryption.customerSuppliedEncryptionEnforcementConfig": "customer_supplied_encryption_enforcement_config",
+      "encryption.customerSuppliedEncryptionEnforcementConfig.effectiveTime": "effective_time",
+      "encryption.customerSuppliedEncryptionEnforcementConfig.restrictionMode": "restriction_mode",
+      "encryption.defaultKmsKeyName": "default_kms_key_name",
+      "encryption.googleManagedEncryptionEnforcementConfig": "google_managed_encryption_enforcement_config",
+      "encryption.googleManagedEncryptionEnforcementConfig.effectiveTime": "effective_time",
+      "encryption.googleManagedEncryptionEnforcementConfig.restrictionMode": "restriction_mode",
+      "forceDestroy": "force_destroy",
+      "hierarchicalNamespace": "hierarchical_namespace",
+      "ipFilter": "ip_filter",
+      "ipFilter.allowAllServiceAgentAccess": "allow_all_service_agent_access",
+      "ipFilter.allowCrossOrgVpcs": "allow_cross_org_vpcs",
+      "ipFilter.publicNetworkSource": "public_network_source",
+      "ipFilter.publicNetworkSource.allowedIpCidrRanges": "allowed_ip_cidr_ranges",
+      "ipFilter.vpcNetworkSources": "vpc_network_sources",
+      "ipFilter.vpcNetworkSources.allowedIpCidrRanges": "allowed_ip_cidr_ranges",
+      "lifecycleRules": "lifecycle_rule",
+      "lifecycleRules.action.storageClass": "storage_class",
+      "lifecycleRules.condition.createdBefore": "created_before",
+      "lifecycleRules.condition.customTimeBefore": "custom_time_before",
+      "lifecycleRules.condition.daysSinceCustomTime": "days_since_custom_time",
+      "lifecycleRules.condition.daysSinceNoncurrentTime": "days_since_noncurrent_time",
+      "lifecycleRules.condition.matchesPrefixes": "matches_prefix",
+      "lifecycleRules.condition.matchesStorageClasses": "matches_storage_class",
+      "lifecycleRules.condition.matchesSuffixes": "matches_suffix",
+      "lifecycleRules.condition.noncurrentTimeBefore": "noncurrent_time_before",
+      "lifecycleRules.condition.numNewerVersions": "num_newer_versions",
+      "lifecycleRules.condition.sendAgeIfZero": "send_age_if_zero",
+      "lifecycleRules.condition.sendDaysSinceCustomTimeIfZero": "send_days_since_custom_time_if_zero",
+      "lifecycleRules.condition.sendDaysSinceNoncurrentTimeIfZero": "send_days_since_noncurrent_time_if_zero",
+      "lifecycleRules.condition.sendNumNewerVersionsIfZero": "send_num_newer_versions_if_zero",
+      "lifecycleRules.condition.sizeAboveBytes": "size_above_bytes",
+      "lifecycleRules.condition.sizeBelowBytes": "size_below_bytes",
+      "lifecycleRules.condition.withState": "with_state",
+      "logging.logBucket": "log_bucket",
+      "logging.logObjectPrefix": "log_object_prefix",
+      "publicAccessPrevention": "public_access_prevention",
+      "requesterPays": "requester_pays",
+      "retentionPolicy": "retention_policy",
+      "retentionPolicy.isLocked": "is_locked",
+      "retentionPolicy.retentionPeriod": "retention_period",
+      "softDeletePolicy": "soft_delete_policy",
+      "softDeletePolicy.effectiveTime": "effective_time",
+      "softDeletePolicy.retentionDurationSeconds": "retention_duration_seconds",
+      "storageClass": "storage_class",
+      "uniformBucketLevelAccess": "uniform_bucket_level_access",
+      "website.mainPageSuffix": "main_page_suffix",
+      "website.notFoundPage": "not_found_page"
+    }
+  },
+  "inputProperties": {
+    "autoclass": {
+      "$ref": "#/types/gcp:storage/BucketAutoclass:BucketAutoclass"
+    },
+    "cors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:storage/BucketCor:BucketCor"
+      }
+    },
+    "customPlacementConfig": {
+      "$ref": "#/types/gcp:storage/BucketCustomPlacementConfig:BucketCustomPlacementConfig"
+    },
+    "defaultEventBasedHold": {
+      "type": "boolean"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "enableObjectRetention": {
+      "type": "boolean"
+    },
+    "encryption": {
+      "$ref": "#/types/gcp:storage/BucketEncryption:BucketEncryption"
+    },
+    "forceDestroy": {
+      "type": "boolean"
+    },
+    "hierarchicalNamespace": {
+      "$ref": "#/types/gcp:storage/BucketHierarchicalNamespace:BucketHierarchicalNamespace"
+    },
+    "ipFilter": {
+      "$ref": "#/types/gcp:storage/BucketIpFilter:BucketIpFilter"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "lifecycleRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:storage/BucketLifecycleRule:BucketLifecycleRule"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "logging": {
+      "$ref": "#/types/gcp:storage/BucketLogging:BucketLogging"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "publicAccessPrevention": {
+      "type": "string"
+    },
+    "requesterPays": {
+      "type": "boolean"
+    },
+    "retentionPolicy": {
+      "$ref": "#/types/gcp:storage/BucketRetentionPolicy:BucketRetentionPolicy"
+    },
+    "rpo": {
+      "type": "string"
+    },
+    "softDeletePolicy": {
+      "$ref": "#/types/gcp:storage/BucketSoftDeletePolicy:BucketSoftDeletePolicy"
+    },
+    "storageClass": {
+      "type": "string"
+    },
+    "uniformBucketLevelAccess": {
+      "type": "boolean"
+    },
+    "versioning": {
+      "$ref": "#/types/gcp:storage/BucketVersioning:BucketVersioning"
+    },
+    "website": {
+      "$ref": "#/types/gcp:storage/BucketWebsite:BucketWebsite"
+    }
+  },
+  "requiredInputs": [
+    "location"
+  ],
+  "types": {
+    "gcp:storage/BucketAutoclass:BucketAutoclass": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "terminalStorageClass": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "gcp:storage/BucketCor:BucketCor": {
+      "type": "object",
+      "properties": {
+        "maxAgeSeconds": {
+          "type": "integer"
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "responseHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp:storage/BucketCustomPlacementConfig:BucketCustomPlacementConfig": {
+      "type": "object",
+      "properties": {
+        "dataLocations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "dataLocations"
+      ]
+    },
+    "gcp:storage/BucketEncryption:BucketEncryption": {
+      "type": "object",
+      "properties": {
+        "customerManagedEncryptionEnforcementConfig": {
+          "$ref": "#/types/gcp:storage/BucketEncryptionCustomerManagedEncryptionEnforcementConfig:BucketEncryptionCustomerManagedEncryptionEnforcementConfig"
+        },
+        "customerSuppliedEncryptionEnforcementConfig": {
+          "$ref": "#/types/gcp:storage/BucketEncryptionCustomerSuppliedEncryptionEnforcementConfig:BucketEncryptionCustomerSuppliedEncryptionEnforcementConfig"
+        },
+        "defaultKmsKeyName": {
+          "type": "string"
+        },
+        "googleManagedEncryptionEnforcementConfig": {
+          "$ref": "#/types/gcp:storage/BucketEncryptionGoogleManagedEncryptionEnforcementConfig:BucketEncryptionGoogleManagedEncryptionEnforcementConfig"
+        }
+      }
+    },
+    "gcp:storage/BucketEncryptionCustomerManagedEncryptionEnforcementConfig:BucketEncryptionCustomerManagedEncryptionEnforcementConfig": {
+      "type": "object",
+      "properties": {
+        "effectiveTime": {
+          "type": "string"
+        },
+        "restrictionMode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "restrictionMode"
+      ]
+    },
+    "gcp:storage/BucketEncryptionCustomerSuppliedEncryptionEnforcementConfig:BucketEncryptionCustomerSuppliedEncryptionEnforcementConfig": {
+      "type": "object",
+      "properties": {
+        "effectiveTime": {
+          "type": "string"
+        },
+        "restrictionMode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "restrictionMode"
+      ]
+    },
+    "gcp:storage/BucketEncryptionGoogleManagedEncryptionEnforcementConfig:BucketEncryptionGoogleManagedEncryptionEnforcementConfig": {
+      "type": "object",
+      "properties": {
+        "effectiveTime": {
+          "type": "string"
+        },
+        "restrictionMode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "restrictionMode"
+      ]
+    },
+    "gcp:storage/BucketHierarchicalNamespace:BucketHierarchicalNamespace": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "gcp:storage/BucketIpFilter:BucketIpFilter": {
+      "type": "object",
+      "properties": {
+        "allowAllServiceAgentAccess": {
+          "type": "boolean"
+        },
+        "allowCrossOrgVpcs": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "publicNetworkSource": {
+          "$ref": "#/types/gcp:storage/BucketIpFilterPublicNetworkSource:BucketIpFilterPublicNetworkSource"
+        },
+        "vpcNetworkSources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:storage/BucketIpFilterVpcNetworkSource:BucketIpFilterVpcNetworkSource"
+          }
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "gcp:storage/BucketIpFilterPublicNetworkSource:BucketIpFilterPublicNetworkSource": {
+      "type": "object",
+      "properties": {
+        "allowedIpCidrRanges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "allowedIpCidrRanges"
+      ]
+    },
+    "gcp:storage/BucketIpFilterVpcNetworkSource:BucketIpFilterVpcNetworkSource": {
+      "type": "object",
+      "properties": {
+        "allowedIpCidrRanges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowedIpCidrRanges",
+        "network"
+      ]
+    },
+    "gcp:storage/BucketLifecycleRule:BucketLifecycleRule": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/types/gcp:storage/BucketLifecycleRuleAction:BucketLifecycleRuleAction"
+        },
+        "condition": {
+          "$ref": "#/types/gcp:storage/BucketLifecycleRuleCondition:BucketLifecycleRuleCondition"
+        }
+      },
+      "required": [
+        "action",
+        "condition"
+      ]
+    },
+    "gcp:storage/BucketLifecycleRuleAction:BucketLifecycleRuleAction": {
+      "type": "object",
+      "properties": {
+        "storageClass": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "gcp:storage/BucketLifecycleRuleCondition:BucketLifecycleRuleCondition": {
+      "type": "object",
+      "properties": {
+        "age": {
+          "type": "integer"
+        },
+        "createdBefore": {
+          "type": "string"
+        },
+        "customTimeBefore": {
+          "type": "string"
+        },
+        "daysSinceCustomTime": {
+          "type": "integer"
+        },
+        "daysSinceNoncurrentTime": {
+          "type": "integer"
+        },
+        "matchesPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matchesStorageClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matchesSuffixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "noncurrentTimeBefore": {
+          "type": "string"
+        },
+        "numNewerVersions": {
+          "type": "integer"
+        },
+        "sendAgeIfZero": {
+          "type": "boolean"
+        },
+        "sendDaysSinceCustomTimeIfZero": {
+          "type": "boolean"
+        },
+        "sendDaysSinceNoncurrentTimeIfZero": {
+          "type": "boolean"
+        },
+        "sendNumNewerVersionsIfZero": {
+          "type": "boolean"
+        },
+        "sizeAboveBytes": {
+          "type": "integer"
+        },
+        "sizeBelowBytes": {
+          "type": "integer"
+        },
+        "withState": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:storage/BucketLogging:BucketLogging": {
+      "type": "object",
+      "properties": {
+        "logBucket": {
+          "type": "string"
+        },
+        "logObjectPrefix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "logBucket"
+      ]
+    },
+    "gcp:storage/BucketRetentionPolicy:BucketRetentionPolicy": {
+      "type": "object",
+      "properties": {
+        "isLocked": {
+          "type": "boolean"
+        },
+        "retentionPeriod": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "retentionPeriod"
+      ]
+    },
+    "gcp:storage/BucketSoftDeletePolicy:BucketSoftDeletePolicy": {
+      "type": "object",
+      "properties": {
+        "effectiveTime": {
+          "type": "string"
+        },
+        "retentionDurationSeconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:storage/BucketVersioning:BucketVersioning": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "gcp:storage/BucketWebsite:BucketWebsite": {
+      "type": "object",
+      "properties": {
+        "mainPageSuffix": {
+          "type": "string"
+        },
+        "notFoundPage": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

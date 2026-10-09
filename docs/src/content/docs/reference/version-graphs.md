@@ -314,8 +314,8 @@ A list adds `[]` to its element's class (`uuid[]`) and a list of lists
 an element there that is not an object type or a JSON value keeps its own
 class (`integer[][]`). A graph member with a field no class reads fails
 generation, naming
-the field and its SQL type: `Geo.Location`, stored as `POINT`, and
-`Embedding.Vector`, a JSON array stored as `TEXT`. The contract, with every rule and its
+the field and its SQL type: `Geo.Location`, a JSON object stored as
+`POINT`, and `Embedding.Vector`, a JSON array stored as `TEXT`. The contract, with every rule and its
 vectors in `runtime/versiongraph/testdata/canonical`, is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#canonical-rows).
 The Go package `github.com/parable-work/superschematic/runtime/versiongraph/go/canonical`

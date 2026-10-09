@@ -10,19 +10,14 @@ import (
 // The SQLite plan cases: every plan case whose change SQLite supports,
 // planned for SQLite, and the cases that exercise the copy-table rebuild.
 // Both versions of a case drop what SQLite refuses from the shop first: the
-// projection and the search field (sqliteShop).
+// projection (sqliteShop).
 
 // sqliteShop removes from a version of the shop what the SQLite dialect
-// refuses: projections and search fields.
+// refuses: projections.
 func sqliteShop(s *ir.Schema) {
 	for name, td := range s.Types {
 		if td.Role == ir.RoleProjection {
 			delete(s.Types, name)
-		}
-	}
-	for _, td := range s.Types {
-		for _, f := range td.Fields {
-			f.SearchField = false
 		}
 	}
 }
@@ -166,6 +161,17 @@ var sqliteOnlyCases = []planCase{
 	// and one of them itself too, with rows that do: SQLite checks the keys
 	// at the commit, when the step has dropped both tables.
 	{name: "drop-tables-in-restrict-cycle", before: addRestrictedSupplierAndWarehouse, rows: supplierWarehouseCycle},
+	// A column the search_text column reads is renamed: RENAME COLUMN
+	// rewrites the VIRTUAL column's expression, and the column is then
+	// added again with the expression the new model writes.
+	{name: "rename-search-field", after: func(s *ir.Schema) { fieldNamed(s, "Product", "title").Name = "heading" },
+		renames: []Rename{{From: "product.title", To: "product.heading"}}},
+	// Search fields named as SQLite keywords that Postgres does not
+	// reserve: search_text's expression quotes them as SQLite does.
+	{name: "add-keyword-search-fields", after: func(s *ir.Schema) {
+		addField(s, "Customer", &ir.FieldDef{Name: "escape", TypeRef: stringRef, SearchField: true})
+		addField(s, "Customer", &ir.FieldDef{Name: "exists", TypeRef: stringRef, SearchField: true})
+	}},
 }
 
 // addCustomerChildren adds tables that reference customer, beside order's
@@ -349,7 +355,7 @@ func sqliteTypesSchema() *ir.Schema {
 func sqliteModelFixtures(t *testing.T) map[string]*ir.Schema {
 	t.Helper()
 	fixtures := map[string]*ir.Schema{"types-db": sqliteTypesSchema()}
-	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-queue-db"} {
+	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-user-model-db", "fixture-queue-db"} {
 		fixtures[name] = planCase{base: sqlgenFixtures + "/" + name}.load(t, nil)
 	}
 	fixtures["shop-db"] = planCase{}.load(t, sqliteShop)

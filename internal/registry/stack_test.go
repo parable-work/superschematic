@@ -60,6 +60,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"no Lower", func(s *PlatformSpec) { s.Lower = nil }, "needs NameOf, AddressOf and Lower"},
 		{"no NameOf", func(s *PlatformSpec) { s.NameOf = nil }, "needs NameOf, AddressOf and Lower"},
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
+		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,6 +76,13 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.Dialects = nil
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "declares no SQL dialects") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("database with an identity config", func(t *testing.T) {
+		spec := sqlPlatform("fake.sql")
+		spec.IdentityConfig = `{"cookie": {"secure": false}}`
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -216,6 +224,31 @@ func TestRegisterConnectorRejects(t *testing.T) {
 		spec := jobPlatform
 		spec.Languages = nil
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `job platform "fake.job" declares no languages`) {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	// A bucket edge runs to a bucket platform, which declares no languages
+	// and no dialects (D54).
+	bucketPlatform := runPlatform("fake.storage")
+	bucketPlatform.Kind, bucketPlatform.Languages = ir.DeployableBucket, nil
+	toBucket := ConnectorSpec{Name: "run-storage", Edge: ir.EdgeBucket, From: "fake.run", To: "fake.storage", Connect: connect}
+	t.Run("a bucket edge", func(t *testing.T) {
+		if err := finalize(t, []PlatformSpec{runPlatform("fake.run"), bucketPlatform}, toBucket); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a bucket edge to a database platform", func(t *testing.T) {
+		spec := toBucket
+		spec.To = "fake.sql"
+		err := finalize(t, []PlatformSpec{runPlatform("fake.run"), sqlPlatform("fake.sql")}, spec)
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.sql", a database platform; a bucket edge's to is a bucket`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("a bucket platform with languages", func(t *testing.T) {
+		spec := bucketPlatform
+		spec.Languages = []string{APILanguageGo}
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `bucket platform "fake.storage" declares server languages or SQL dialects`) {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -396,7 +429,7 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 	if err := reg.RegisterTarget(TargetSpec{Name: "fake", Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "fake.run"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

@@ -111,6 +111,9 @@ extension.
 
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE review ADD COLUMN search_text" to="STORED;" />
 
+The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
+SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
@@ -144,8 +147,8 @@ soft-deletable:
 `DeleteOne` records who deleted the row, so it needs the acting user on the
 context, set with `orm.WithUserID`; without one it returns
 `ErrNoUserInContext`. The generated API server authenticates callers but
-does not tell the ORM who they are, so the orders service adds that step
-to its auth middleware:
+does not tell the ORM who they are, so each method of the orders service
+that writes rows hands the caller over:
 
 <Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
 

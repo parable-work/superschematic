@@ -9,7 +9,9 @@ import (
 // sqliteDialect plans for SQLite. Its ALTER TABLE renames a table or a
 // column, adds a column SQLite allows to add (no NOT NULL without a
 // constant default, no default that is not a constant, a foreign key only
-// on a nullable column with no default), and drops a column. An index, a
+// on a nullable column with no default), and drops a column. A generated
+// column is VIRTUAL, which ADD COLUMN can add, so a new expression drops
+// the column and adds it again (D27, amended). An index, a
 // unique field's index and their drops are statements of their own. Every
 // other change to a table that exists rebuilds it by copying it (rebuild).
 // Every step runs in a transaction: the runner opens each with BEGIN
@@ -43,7 +45,8 @@ func qsList(names []string) string {
 func (sqliteDialect) canAlter(c *change) bool {
 	switch c.op {
 	case opRenameTable, opRenameColumn, opRenameConstraint, opRenameIndex,
-		opCreateIndex, opReplaceIndex, opAddUnique, opDropUnique, opDropIndex, opDropColumn:
+		opCreateIndex, opReplaceIndex, opAddUnique, opDropUnique, opDropIndex, opDropColumn,
+		opRegenerateColumn:
 		return true
 	case opAddColumn:
 		return sqliteAddable(c.column, foreignKeyOver(c.tableDef, c.column.Name) != nil)
@@ -56,14 +59,14 @@ func (sqliteDialect) canAlter(c *change) bool {
 	return false
 }
 
-// sqliteAddable reports whether ALTER TABLE ADD COLUMN adds col. A column
-// under a foreign key must have a NULL default while foreign keys are
-// enforced, a NOT NULL column a default other than NULL, and the default a
-// constant.
+// sqliteAddable reports whether ALTER TABLE ADD COLUMN adds col. A
+// generated column is VIRTUAL, which it adds. A column under a foreign key
+// must have a NULL default while foreign keys are enforced, a NOT NULL
+// column a default other than NULL, and the default a constant.
 func sqliteAddable(col *Column, references bool) bool {
 	switch {
 	case col.Generated != "":
-		return false
+		return true
 	case references:
 		return col.Nullable && col.Default == ""
 	case col.Default == "":
@@ -145,8 +148,21 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		return one(sqliteStep(c, "DROP INDEX "+qs(c.index.Name))), nil
 	case opDropColumn:
 		step := sqliteStep(c, "ALTER TABLE "+qs(c.table)+" DROP COLUMN "+qs(c.column.Name))
-		blocking(step, fmt.Sprintf("SQLite rewrites %s to drop the column, holding the database's write lock for time that grows with the table.", c.table))
+		// A VIRTUAL column has no values in the table's rows to rewrite.
+		if c.column.Generated == "" {
+			blocking(step, fmt.Sprintf("SQLite rewrites %s to drop the column, holding the database's write lock for time that grows with the table.", c.table))
+		}
 		return one(step), nil
+	case opRegenerateColumn:
+		// The columns are VIRTUAL and nothing indexes them, so neither
+		// statement reads or rewrites the table's rows.
+		var statements []string
+		for _, g := range c.alter.regenerate {
+			statements = append(statements,
+				"ALTER TABLE "+qs(g.table)+" DROP COLUMN "+qs(g.before.Name),
+				"ALTER TABLE "+qs(g.table)+" ADD COLUMN "+sqliteColumnSQL(g.after))
+		}
+		return one(sqliteStep(c, statements...)), nil
 	case opGraphContent:
 		return noSQL(c), nil
 	case opDropTable:
@@ -169,7 +185,12 @@ func sqliteIndexBlocking(step *Step, table, what string) {
 }
 
 // sqliteColumnSQL is a column's definition in CREATE TABLE and ADD COLUMN.
+// A generated column is VIRTUAL: SQLite computes it when a row is read, and
+// ADD COLUMN cannot add a STORED one.
 func sqliteColumnSQL(col *Column) string {
+	if col.Generated != "" {
+		return qs(col.Name) + " " + col.Type + " GENERATED ALWAYS AS (" + col.Generated + ") VIRTUAL"
+	}
 	def := qs(col.Name) + " " + col.Type
 	if col.Default != "" {
 		def += " DEFAULT " + col.Default
@@ -254,7 +275,8 @@ const sqliteDeferForeignKeys = "PRAGMA defer_foreign_keys = ON"
 // ON DELETE action reaches a table the step keeps; renames each new table,
 // which rewrites the foreign keys naming it; and creates the unique
 // indexes and indexes. A column a table gains is left out of its copy, so
-// its default fills it; a column whose affinity changes is cast, and a list
+// its default fills it, and so is a generated column, which SQLite
+// computes; a column whose affinity changes is cast, and a list
 // whose element changes has each element converted. Renaming an old table
 // out of the way instead would rewrite the foreign keys that reference it
 // to the old table, whose drop would then run their ON DELETE actions.
@@ -374,7 +396,7 @@ func sqliteCopySQL(before, after *Table, into string) string {
 	var columns, values []string
 	for _, col := range after.Columns {
 		prev := columnNamed(before, col.Name)
-		if prev == nil {
+		if prev == nil || prev.Generated != "" || col.Generated != "" {
 			continue
 		}
 		value := qs(col.Name)

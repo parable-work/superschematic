@@ -29,6 +29,9 @@
     },
 {{- end }}
     "./openapi.json": "./openapi.json"
+{{- if .PermissionCatalogJSON }},
+    "./permissions.json": "./permissions.json"
+{{- end }}
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

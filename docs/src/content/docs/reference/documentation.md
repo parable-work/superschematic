@@ -223,9 +223,12 @@ src/ticket.schema.ts: type Ticket: @display states labels "lost", which is not a
 The record is `TypeDef.display` (`ir.TypeDisplay`). The JSON and YAML
 forms write the decorator's argument under the type's `display` key, and
 `superschematic json-schema` checks it with the same schema the
-TypeScript frontend checks the argument with. It is presentation only:
-no generator renders it, as none renders a field's title, and it adds no
-field, operation or storage. The engine's describe document carries it
+TypeScript frontend checks the argument with. It is presentation only,
+and adds no field, operation or storage. The core's generators leave it
+out; the Topcoat extension's display components read its `noun`,
+`plural`, `titleField` and `summaryFields`
+([Pages with Topcoat](/superschematic/guides/topcoat/#display-components)).
+The engine's describe document carries it
 for the schema's instance type, with each field's title and icon
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
 

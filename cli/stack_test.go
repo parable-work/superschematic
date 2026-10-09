@@ -55,7 +55,7 @@ func TestStackDevNeedsALocalEnvironment(t *testing.T) {
 			err := root.Execute()
 			require.Error(t, err, buf.String())
 			require.Contains(t, err.Error(), tc.want)
-			require.Contains(t, buf.String(), "Built 4 schema services for shop-stack")
+			require.Contains(t, buf.String(), "Built 6 schema services for shop-stack")
 		})
 	}
 }
@@ -73,7 +73,7 @@ func TestStackDevRefusesAServiceThatIsNoStack(t *testing.T) {
 
 // devStack is a stack over the fixture's shop-api, in the YAML form, whose
 // Dev environment runs on the local target on the ports given.
-func devStack(pgPort, apiPort int) map[string]string {
+func devStack(pgPort, storagePort, apiPort int) map[string]string {
 	return map[string]string{
 		"schema.config.yaml": "name: dev-stack\nkind: Stack\noutputs: {}\n",
 		"src/stack.schema.yaml": fmt.Sprintf(`kind: Stack
@@ -89,11 +89,11 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
-      values: { postgresPort: %d }
+      values: { postgresPort: %d, storagePort: %d }
       settings:
         - of: { service: { name: shop-api, kind: API } }
           values: { port: %d }
-`, pgPort, apiPort),
+`, pgPort, storagePort, apiPort),
 	}
 }
 
@@ -161,9 +161,10 @@ func (b *lockedBuffer) String() string {
 // TestStackDevRunsALocalEnvironment runs `stack dev` for real, with Docker:
 // it builds the stack and shop-api with its database, which writes
 // shop-api's generated entrypoint and scaffolds its implementation, runs
-// Postgres with shop-db migrated, builds the entrypoint and starts it with
-// its resolved config, and on cancellation, as on Ctrl-C, stops it and,
-// with --remove-database, removes the container. The entrypoint reads its
+// Postgres with shop-db migrated and fake-gcs-server with shop-api's bucket
+// (D54), builds the entrypoint and starts it with its resolved config, and
+// on cancellation, as on Ctrl-C, stops it and, with --remove-data, removes
+// the containers. The entrypoint reads its
 // whole config at startup, so a server that answers shows its variables
 // reached it: it listens on PORT, refuses to start without the secret
 // STRIPE_KEY, and answers /readyz 200 only while the database at the URL
@@ -184,15 +185,15 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	t.Setenv(local.MigrateEnv, runner)
 
 	servicesRoot := prepareStackServicesRoot(t)
-	pgPort, apiPort := freeTCPPort(t), freeTCPPort(t)
-	writeFiles(t, filepath.Join(servicesRoot, "dev-stack"), devStack(pgPort, apiPort))
+	pgPort, storagePort, apiPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	writeFiles(t, filepath.Join(servicesRoot, "dev-stack"), devStack(pgPort, storagePort, apiPort))
 	writeRuntimePaths(t, filepath.Dir(servicesRoot))
 	outputRoot := t.TempDir()
 	stateDir, err := local.EnsureStateDir(filepath.Dir(servicesRoot), "dev-stack", "Dev")
 	require.NoError(t, err)
 	require.NoError(t, local.WriteSecret(filepath.Join(stateDir, local.SecretsFile), "PaymentsSecrets.STRIPE_KEY", "sk_test_dev"))
-	container := local.ContainerName("dev-stack", "Dev")
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container).Run() })
+	container, storage := local.ContainerName("dev-stack", "Dev"), local.StorageContainerName("dev-stack", "Dev")
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -200,7 +201,7 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"stack", "dev", filepath.Join(servicesRoot, "dev-stack"), "--out", outputRoot, "--remove-database"})
+	root.SetArgs([]string{"stack", "dev", filepath.Join(servicesRoot, "dev-stack"), "--out", outputRoot, "--remove-data"})
 	done := make(chan error, 1)
 	go func() { done <- root.ExecuteContext(ctx) }()
 
@@ -237,6 +238,13 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	require.Contains(t, buf.String(), "+ implementation scaffold of shop-api written to")
 	require.Contains(t, buf.String(), fmt.Sprintf(`"msg":"listening","stack":"dev-stack","server":"shop-api","addr":":%d"`, apiPort))
 	require.Contains(t, buf.String(), "migrate shop-db: ")
+	// shop-api's bucket is on the emulator, which the summary names.
+	emulator := local.StorageURL(storagePort)
+	resp, err := http.Get(emulator + local.StorageReadinessPath + "/shop-media")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, buf.String())
+	require.Contains(t, buf.String(), "bucket   shop-media")
 
 	cancel()
 	select {
@@ -246,6 +254,8 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 		t.Fatalf("stack dev did not stop:\n%s", buf)
 	}
 	require.Contains(t, buf.String(), "removed container "+container)
-	require.Error(t, exec.Command("docker", "container", "inspect", container).Run(), "the container outlived --remove-database")
+	require.Contains(t, buf.String(), "removed container "+storage)
+	require.Error(t, exec.Command("docker", "container", "inspect", container).Run(), "the container outlived --remove-data")
+	require.Error(t, exec.Command("docker", "container", "inspect", storage).Run(), "the storage emulator outlived --remove-data")
 	t.Log(buf.String())
 }

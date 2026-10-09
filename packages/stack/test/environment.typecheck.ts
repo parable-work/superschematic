@@ -13,6 +13,7 @@ declare module "../src/index" {
       server: { minInstances?: number };
       database: { tier?: string; highAvailability?: boolean };
       job: { cpu?: string };
+      bucket: { versioning?: boolean };
       worker: { memory?: string };
     };
   }
@@ -40,6 +41,8 @@ const ShopApi = service<"API", ShopApiConfig>({ name: "shop-api", kind: SchemaKi
 const ShopOrders = service({ name: "shop-orders", kind: SchemaKind.API });
 const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
+// A Bucket service's handle (D54).
+const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
 // An API with @job classes, whose names the sentinel writes as the third
 // type argument.
 const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
@@ -70,6 +73,8 @@ export abstract class Data {}
     // A declared deployable's class takes either kind's settings.
     { of: Backend, minInstances: 2, env: { ANY_FIELD: "x" } },
     { of: Data, tier: "small" },
+    // A bucket takes the target's bucket settings.
+    { of: ShopMedia, versioning: true },
     // A platform outside the target takes its own settings, which the
     // loader checks.
     { of: ShopDb, platform: "other.sql", storageGb: 10 },
@@ -152,6 +157,20 @@ export abstract class EnvOnDatabase {}
 
 @environment({
   target: "fake",
+  // @ts-expect-error a server's settings on a bucket
+  settings: [{ of: ShopMedia, minInstances: 1 }],
+})
+export abstract class ServerSettingOnBucket {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket has no env
+  settings: [{ of: ShopMedia, env: { LOG_LEVEL: "warn" } }],
+})
+export abstract class EnvOnBucket {}
+
+@environment({
+  target: "fake",
   // @ts-expect-error a General service is no deployable
   settings: [{ of: ShopCommon }],
 })
@@ -165,7 +184,7 @@ export abstract class ServesDb {}
 @database({ hosts: [ShopApi] })
 export abstract class HostsApi {}
 
-// @ts-expect-error only API and DB services are deployed
+// @ts-expect-error only API, DB and Site services are deployed
 @stack({ deploy: [ShopCommon] })
 export abstract class DeploysGeneral {}
 
@@ -176,7 +195,7 @@ export abstract class Dev {}
 
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432 },
+  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443 },
   settings: [{ of: ShopApi, port: 8080, env: { LOG_LEVEL: "debug" } }, { of: Backend, port: 8081 }],
 })
 export abstract class PinnedDev {}
@@ -194,6 +213,13 @@ export abstract class LocalProject {}
   settings: [{ of: ShopDb, tier: "large" }],
 })
 export abstract class LocalDatabaseSetting {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local bucket takes no settings
+  settings: [{ of: ShopMedia, versioning: true }],
+})
+export abstract class LocalBucketSetting {}
 
 @environment({
   target: "local",
@@ -264,6 +290,30 @@ export abstract class EnabledString {}
   settings: [{ of: ShopCart, job: "ExpireCarts", port: 8080 }],
 })
 export abstract class LocalJobPort {}
+
+// A site (D55): a stack deploys it, may name it in expose, and gives it the
+// local target's site settings, its port, and no env.
+const ShopWeb = service({ name: "shop-web", kind: SchemaKind.Site });
+
+@stack({ deploy: [ShopApi, ShopWeb], expose: [ShopApi, ShopWeb] })
+export abstract class SiteShop {}
+
+@environment({ target: "local", settings: [{ of: ShopWeb, port: 8090 }] })
+export abstract class SiteDev {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a site reads no env
+  settings: [{ of: ShopWeb, env: { API_URL: "x" } }],
+})
+export abstract class SiteEnv {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a site takes a site's settings, not a database's
+  settings: [{ of: ShopWeb, tier: "large" }],
+})
+export abstract class DatabaseSettingOnSite {}
 
 // A worker's element names its API's handle and the worker's class; it
 // sets how many instances run and how many messages each handles, takes

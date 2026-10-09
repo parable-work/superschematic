@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -226,6 +228,91 @@ func (j *FakeJobs) RunJob(_ context.Context, req registry.JobRunRequest) error {
 		j.log.Record("run job %s: %s", req.Job, req.Image)
 	}
 	return j.Fail[req.Job]
+}
+
+// FakeSites is a site publisher in memory (D55): it records each publish
+// in the provisioner's call log, `publish site <site>: <digest>`, with
+// `upload <n> files` when it uploads and `config <json>` when it writes
+// the config, and keeps the files of each digest it was given.
+type FakeSites struct {
+	log *FakeProvisioner
+
+	mu    sync.Mutex
+	files map[string][]string
+	// configs holds the last config written for each site, by digest.
+	configs map[string]map[string]string
+
+	// Fail holds the error to return for a site's publish.
+	Fail map[string]error
+}
+
+var _ registry.SitePublisher = (*FakeSites)(nil)
+
+// Publish records the publish, keeps the files of req.Dir under its
+// digest, and refuses a digest with no files when it is given none.
+func (s *FakeSites) Publish(_ context.Context, req registry.SitePublishRequest) error {
+	if err := req.Check(); err != nil {
+		return err
+	}
+	if err := s.Fail[req.Site]; err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := req.Site + "@" + req.Digest
+	line := fmt.Sprintf("publish site %s: %s", req.Site, req.Digest)
+	switch _, known := s.files[key]; {
+	case req.Dir != "":
+		var files []string
+		err := filepath.WalkDir(req.Dir, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(req.Dir, path)
+			files = append(files, filepath.ToSlash(rel))
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		if s.files == nil {
+			s.files = map[string][]string{}
+		}
+		s.files[key] = files
+		line += fmt.Sprintf(", upload %d files", len(files))
+	case !known:
+		return fmt.Errorf("site %s: no files under %s, and the publish gives none", req.Site, req.Digest)
+	}
+	if req.Config != nil {
+		if s.configs == nil {
+			s.configs = map[string]map[string]string{}
+		}
+		if s.configs[req.Site] == nil {
+			s.configs[req.Site] = map[string]string{}
+		}
+		s.configs[req.Site][req.Digest] = string(req.Config)
+		line += ", config " + string(req.Config)
+	}
+	if s.log != nil {
+		s.log.Record("%s", line)
+	}
+	return nil
+}
+
+// Files returns the files published for a site under digest, sorted.
+func (s *FakeSites) Files(site, digest string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files := slices.Clone(s.files[site+"@"+digest])
+	sort.Strings(files)
+	return files
+}
+
+// Config returns the config last written for a site under digest.
+func (s *FakeSites) Config(site, digest string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.configs[site][digest]
 }
 
 // archiveEntries lists a gzipped tarball's entries.

@@ -7,7 +7,8 @@
 // The fake platforms lower to resource types of a provider named `fake`,
 // shaped like the gcp target's (section 7.2): a server is a service with
 // its own account, a database an instance with a database per hosted
-// schema, a sql edge a client grant and an http edge an invoker grant.
+// schema, a bucket a private bucket, a sql edge a client grant, an http
+// edge an invoker grant and a bucket edge an object user grant.
 package stacktest
 
 import (
@@ -53,10 +54,25 @@ const (
 	JobSQLConnector  = "fake.job-sql"
 	JobHTTPConnector = "fake.job-run"
 
-	// WorkerSQLConnector and WorkerHTTPConnector connect a worker, whose
-	// edges are its API's, as a job's connectors do.
-	WorkerSQLConnector  = "fake.worker-sql"
-	WorkerHTTPConnector = "fake.worker-run"
+	// SitePlatform serves a site's files from storage under their digest,
+	// as gcp serves them from a bucket behind its load balancer, and
+	// SiteConnector connects a site to a server whose API it calls (D55).
+	SitePlatform  = "fake.site"
+	SiteConnector = "fake.site-run"
+
+	// BucketPlatform keeps a bucket, as gcp keeps one in Cloud Storage;
+	// BucketConnector and JobBucketConnector grant a server's or a job's
+	// account its objects (D54).
+	BucketPlatform     = "fake.storage"
+	BucketConnector    = "fake.run-storage"
+	JobBucketConnector = "fake.job-storage"
+
+	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
+	// connect a worker, whose edges are its API's, as a job's connectors
+	// do.
+	WorkerSQLConnector    = "fake.worker-sql"
+	WorkerHTTPConnector   = "fake.worker-run"
+	WorkerBucketConnector = "fake.worker-storage"
 
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
@@ -81,6 +97,8 @@ const (
 	TypeRecord   = "fake:dns/record:Record"
 	TypeJob      = "fake:run/job:Job"
 	TypeSchedule = "fake:scheduler/job:Job"
+	TypeSite     = "fake:storage/site:Site"
+	TypeBucket   = "fake:storage/bucket:Bucket"
 	TypePool     = "fake:run/pool:Pool"
 )
 
@@ -99,6 +117,7 @@ type Extension struct {
 	Builder     *FakeBuilder
 	CI          *FakeCI
 	Jobs        *FakeJobs
+	Sites       *FakeSites
 	Tools       []registry.CLITool
 	NoJobRunner bool
 }
@@ -132,10 +151,14 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Jobs == nil {
 		e.Jobs = &FakeJobs{}
 	}
+	if e.Sites == nil {
+		e.Sites = &FakeSites{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
 	e.Jobs.log = e.Provisioner
+	e.Sites.log = e.Provisioner
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
@@ -150,6 +173,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 			NameOf:    serverName,
 			AddressOf: func(ctx registry.PlatformContext) any {
 				return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "url"}
+			},
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				return publicAddress(ctx, ctx.Deployable.Name+".service")
 			},
 			Lower: lowerServer,
 		}
@@ -186,6 +212,28 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      SitePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableSite,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				return publicAddress(ctx, ctx.Deployable.Name+".site")
+			},
+			Lower: lowerSite,
+		},
+		{
+			Name:      BucketPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableBucket,
+			Settings:  json.RawMessage(bucketSettings),
+			NameOf:    bucketName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".bucket", Name: "name"}
+			},
+			Lower: lowerBucket,
+		},
+		{
 			Name:      WorkerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableWorker,
@@ -205,8 +253,12 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: RunPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: JobPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: SitePlatform, To: RunPlatform, Connect: connectSite},
+		{Name: BucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: RunPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: JobBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -233,6 +285,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   RunPlatform,
 			ir.DeployableDatabase: SQLPlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableSite:     SitePlatform,
+			ir.DeployableBucket:   BucketPlatform,
 			ir.DeployableWorker:   WorkerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
@@ -250,6 +304,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Builder:    e.Builder,
 		CI:         e.CI,
 		Jobs:       jobs,
+		Sites:      e.Sites,
 	})
 }
 
@@ -299,6 +354,14 @@ const databaseSettings = `{
   "additionalProperties": false
 }`
 
+const bucketSettings = `{
+  "type": "object",
+  "properties": {
+    "versioning": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}`
+
 const dnsValues = `{
   "type": "object",
   "properties": {"zone": {"type": "string", "minLength": 1}},
@@ -340,10 +403,21 @@ var resourceTypes = map[string]string{
 	      "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
+	TypeSite: `{"type": "object", "required": ["name", "prefix", "public"],
+	  "properties": {
+	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"}
+	  },
+	  "additionalProperties": false}`,
 	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
 	  "properties": {
 	    "name": {"type": "string"}, "schedule": {"type": "string"}, "timeZone": {"type": "string"},
 	    "job": {"type": "string"}, "account": {"type": "string"}
+	  },
+	  "additionalProperties": false}`,
+	TypeBucket: `{"type": "object", "required": ["name", "location", "public"],
+	  "properties": {
+	    "name": {"type": "string"}, "location": {"type": "string"}, "public": {"type": "boolean"},
+	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
 	  },
 	  "additionalProperties": false}`,
 	TypePool: `{"type": "object", "required": ["name", "image", "account", "language", "instances", "concurrency"],
@@ -502,6 +576,55 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
+// publicAddress is where a browser reaches an exposed server or site: its
+// host under the environment's domain, or the url output of its node id
+// when the environment sets no domain (D55).
+func publicAddress(ctx registry.PlatformContext, id string) any {
+	if ctx.Environment.Domain == "" {
+		return ir.Output{Resource: id, Name: "url"}
+	}
+	return Join("https://", ctx.Deployable.ResourceName, ".", ctx.Environment.Domain)
+}
+
+// lowerSite lowers a site (D55) to its storage, public, serving its files
+// under the prefix of their digest, which the deploy pins, with the
+// single-page fallback, and under the environment's domain a route and a
+// CNAME record, as an exposed server's.
+func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Site == nil {
+		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
+	}
+	id := d.Name + ".site"
+	props := map[string]any{"name": d.ResourceName, "prefix": "/" + ir.SiteDigestToken + "/", "public": true}
+	if d.Site.Fallback != "" {
+		props["fallback"] = d.Site.Fallback
+	}
+	out := registry.Lowered{Resources: []*ir.Resource{{ID: id, Type: TypeSite, Properties: props}}}
+	if ctx.Environment.Domain != "" {
+		host := Join(d.ResourceName, ".", ctx.Environment.Domain)
+		out.Resources = append(out.Resources, &ir.Resource{
+			ID:         d.Name + ".route",
+			Type:       TypeRoute,
+			Properties: map[string]any{"host": host, "service": ir.Output{Resource: id, Name: "id"}},
+			Phase:      ir.PhaseExposure,
+		})
+		out.Records = append(out.Records, &ir.DNSRecord{
+			Name:  host,
+			Type:  "CNAME",
+			Value: ir.Output{Resource: d.Name + ".route", Name: "target"},
+		})
+	}
+	return out, nil
+}
+
+// connectSite derives the public address of the server whose API a site
+// calls (D55). The browser carries its end user's token, so the edge
+// grants nothing.
+func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
+}
+
 // lowerWorker lowers a worker (D53) to an account and the secrets it
 // reads, as a server's, and a pool that runs its image with its
 // environment, as many instances as its run takes, none when the
@@ -627,6 +750,57 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 			SubjectClaim: "email",
 			Callers:      []ir.ServiceAuthCaller{{Subject: account, Deployable: ctx.From.Name, Serves: serves}},
 		},
+	}, nil
+}
+
+// bucketName names a bucket after the project, the stack and the bucket,
+// since a bucket's name is unique across every project, suffixed with
+// each parameter's value under a parameter: a member of a parameterized
+// environment gets a bucket of its own (D54).
+func bucketName(ctx registry.PlatformContext) any {
+	project, _ := ctx.Environment.Values["project"].(string)
+	parts := []any{project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name)}
+	for _, param := range ctx.Environment.Parameters {
+		parts = append(parts, "-", ir.Parameter(param))
+	}
+	return Join(parts...)
+}
+
+// lowerBucket lowers a bucket to a private bucket in the environment's
+// region, versioned when its settings say so. A member of a parameterized
+// environment's bucket is its own, and its destroy empties it.
+func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	region, _ := ctx.Environment.Values["region"].(string)
+	props := map[string]any{
+		"name":     d.ResourceName,
+		"location": region,
+		"public":   false,
+	}
+	if versioning, ok := d.Settings["versioning"].(bool); ok {
+		props["versioning"] = versioning
+	}
+	if len(ctx.Environment.Parameters) > 0 {
+		props["forceDestroy"] = true
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{ID: d.Name + ".bucket", Type: TypeBucket, Properties: props}}}, nil
+}
+
+// connectBucket grants the server's or the job's account the objects of
+// the bucket and derives the bucket's name, which the account reaches with
+// no credential of the edge's own (D54).
+func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{
+		Resources: []*ir.Resource{{
+			ID:   ctx.From.Name + ".storage." + ctx.Edge.Service.Name,
+			Type: TypeGrant,
+			Properties: map[string]any{
+				"role":     "storage.objectUser",
+				"member":   ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+				"resource": ir.Output{Resource: ctx.To.Name + ".bucket", Name: "id"},
+			},
+		}},
+		Value: ir.BucketConnection{Name: ctx.To.Address},
 	}, nil
 }
 

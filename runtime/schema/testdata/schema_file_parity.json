@@ -174,6 +174,62 @@
       "error": "a service clause mode outside the enum: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/serviceCallers/mode': value must be one of 'require', 'allow'"
     },
     {
+      "name": "the user model's traits",
+      "registry": "core",
+      "input": "{\"kind\": \"DB\", \"name\": \"accounts\", \"types\": {\n\t\t\"Account\": {\"name\": \"Account\", \"role\": \"DBTable\", \"user\": {\"login\": \"email\", \"name\": \"displayName\"}},\n\t\t\"Admin\": {\"name\": \"Admin\", \"role\": \"DBTable\", \"user\": {\"login\": \"handle\", \"name\": \"\"}},\n\t\t\"Role\": {\"name\": \"Role\", \"role\": \"DBTable\", \"userRole\": {}}}}",
+      "accept": true,
+      "canonical": "{\"kind\":\"DB\",\"name\":\"accounts\",\"types\":{\"Account\":{\"name\":\"Account\",\"role\":\"DBTable\",\"user\":{\"login\":\"email\",\"name\":\"displayName\"}},\"Admin\":{\"name\":\"Admin\",\"role\":\"DBTable\",\"user\":{\"login\":\"handle\"}},\"Role\":{\"name\":\"Role\",\"role\":\"DBTable\",\"userRole\":{}}}}"
+    },
+    {
+      "name": "a user trait without its login",
+      "registry": "core",
+      "input": "{\"name\": \"Account\", \"role\": \"DBTable\", \"user\": {\"name\": \"displayName\"}}",
+      "accept": false,
+      "error": "a user trait without its login: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/user': missing property 'login'"
+    },
+    {
+      "name": "an unknown key on a user trait",
+      "registry": "core",
+      "input": "{\"name\": \"Account\", \"role\": \"DBTable\", \"user\": {\"login\": \"email\", \"password\": \"secret\"}}",
+      "accept": false,
+      "error": "an unknown key on a user trait: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/user': additional properties 'password' not allowed"
+    },
+    {
+      "name": "a key on a userRole trait",
+      "registry": "core",
+      "input": "{\"name\": \"Role\", \"role\": \"DBTable\", \"userRole\": {\"permissions\": \"permissions\"}}",
+      "accept": false,
+      "error": "a key on a userRole trait: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/userRole': additional properties 'permissions' not allowed"
+    },
+    {
+      "name": "null for a userRole trait",
+      "registry": "core",
+      "input": "{\"name\": \"Role\", \"role\": \"DBTable\", \"userRole\": null}",
+      "accept": false,
+      "error": "null for a userRole trait: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/userRole': got null, want object"
+    },
+    {
+      "name": "the user model's route sets",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"accounts-api\", \"operationSets\": [\n\t\t{\"name\": \"Account\", \"operations\": [], \"userSessions\": {\"path\": \"account\", \"noLogin\": false, \"register\": true}},\n\t\t{\"name\": \"AccountAdmin\", \"operations\": [], \"userAdministration\": {}}]}",
+      "accept": true,
+      "canonical": "{\"kind\":\"API\",\"name\":\"accounts-api\",\"operationSets\":[{\"name\":\"Account\",\"operations\":[],\"userSessions\":{\"path\":\"account\",\"register\":true}},{\"name\":\"AccountAdmin\",\"operations\":[],\"userAdministration\":{}}]}"
+    },
+    {
+      "name": "an unknown key on a route set's config",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Account\", \"operations\": [], \"userSessions\": {\"login\": false}}",
+      "accept": false,
+      "error": "an unknown key on a route set's config: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/userSessions': additional properties 'login' not allowed"
+    },
+    {
+      "name": "a route set's path that is not a string",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"AccountAdmin\", \"operations\": [], \"userAdministration\": {\"path\": 1}}",
+      "accept": false,
+      "error": "a route set's path that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/userAdministration/path': got number, want string"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

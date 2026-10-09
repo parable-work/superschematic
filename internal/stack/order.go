@@ -149,13 +149,14 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 // orderRollout numbers each server's and each job's rollout wave from 1:
 // a server rolls out one wave after the latest of its callees, so a new
 // caller never meets an old callee, and a job rolls out after its callees
-// as a server does (D52). A server's calls to the APIs it serves itself do
-// not order it. A cycle of calls between servers has no such order and
-// fails.
+// as a server does (D52), and so does a site, whose config names the
+// public addresses of the servers it calls (D55). A server's calls to the
+// APIs it serves itself do not order it. A cycle of calls between servers
+// has no such order and fails.
 func (r *resolver) orderRollout() {
 	callees := map[string][]string{}
 	for _, id := range sortedKeys(r.edges) {
-		if e := r.edges[id].res; e.Kind == ir.EdgeHTTP && e.From != e.To {
+		if e := r.edges[id].res; (e.Kind == ir.EdgeHTTP || e.Kind == ir.EdgeSite) && e.From != e.To {
 			callees[e.From] = append(callees[e.From], e.To)
 		}
 	}
@@ -187,7 +188,7 @@ func (r *resolver) orderRollout() {
 		return wave
 	}
 	for _, name := range sortedKeys(r.deployables) {
-		if r.deployables[name].res.Kind.HasImage() && !cycle {
+		if r.deployables[name].res.Kind.RollsOut() && !cycle {
 			visit(name)
 		}
 	}

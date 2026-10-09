@@ -61,6 +61,8 @@ func assemble(t *testing.T) *registry.Registry {
 // job ShipOrders (D52) runs hourly in New York's time in Staging, on its
 // decorator's schedule with two CPUs and 1 GiB in Production, and only on
 // demand in Preview, whose members run no schedule they do not turn on.
+// shop-api's bucket shop-media (D54) deletes objects after 30 days in
+// Staging and its Preview members, and keeps versions in Production.
 func shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "Shop",
@@ -81,6 +83,7 @@ func shop() *ir.Stack {
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30)}},
 				},
 			},
 			{
@@ -93,6 +96,7 @@ func shop() *ir.Stack {
 					{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Values: map[string]any{"memory": "1Gi"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2", "memory": "1Gi"}},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"versioning": true}},
 				},
 			},
 			{
@@ -123,16 +127,17 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack
 	return resolved
 }
 
-// TestGolden resolves the shop stack on gcp in each environment and checks
-// the environment.json it writes, resource graph included, against the
-// golden file. Resolution validated every node against the pinned schema
-// of its type on the way.
+// TestGolden resolves the shop stack on gcp, with the site shop-web, which
+// calls shop-api (D55), in each environment and checks the
+// environment.json it writes, resource graph included, against the golden
+// file. Resolution validated every node against the pinned schema of its
+// type on the way.
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
-	s := shop()
+	s := stacktest.WithSite(shop())
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, acmeShop(), env.Name)
+			checkGolden(t, reg, s, stacktest.WithoutWorkers(stacktest.SiteShop()), env.Name)
 		})
 	}
 }
@@ -231,7 +236,8 @@ func TestDeployOrder(t *testing.T) {
 		"infrastructure (Orders.account, Orders.cloudsql-client.shop-db, Orders.cloudsql-login.shop-db, Orders.database-user.shop-db, " +
 			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
-			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator, " +
+			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sign-as-self, shop-api.storage.shop-media, shop-api.trace-agent, " +
+			"shop-db.database.shop-db, shop-db.instance, shop-db.migrator, shop-media.bucket, " +
 			"shop-orders-ship-orders.account, shop-orders-ship-orders.cloudsql-client.shop-db, shop-orders-ship-orders.cloudsql-login.shop-db, " +
 			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.trace-agent)",
 		"migrate expand (shop-db)",

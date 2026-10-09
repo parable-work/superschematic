@@ -102,9 +102,11 @@ func copyFakeServer(t *testing.T, dir string) {
 // /readyz, and reads back the variables a server received. The caller
 // signs a token with the HTTP runtime's serviceauth.SignedToken from its
 // derived credential variables, and the token verifies against the public
-// key of the edge's key pair (D37). Run again, it reuses the container,
-// which kept its data, and migrates to the next model. Purge removes the
-// container.
+// key of the edge's key pair (D37). ledger-api's bucket is on the storage
+// emulator, whose container the run starts beside Postgres's (D54). Run
+// again, it reuses the containers, which kept their data, the database's
+// and the bucket's, and migrates to the next model. Purge removes the
+// containers.
 func TestLocalStackRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: the local stack runs Docker, Postgres and a server")
@@ -116,15 +118,17 @@ func TestLocalStackRuns(t *testing.T) {
 
 	// A stack of its own, so its container's name is the test's.
 	stackName := fmt.Sprintf("local-target-it-%d", os.Getpid())
-	pgPort, apiPort, workerPort := freePort(t), freePort(t), freePort(t)
+	pgPort, storagePort, apiPort, workerPort := freePort(t), freePort(t), freePort(t), freePort(t)
 	db := ir.ServiceRef{Name: "ledger-db", Kind: ir.SchemaKindDB}
+	files := ir.ServiceRef{Name: "ledger-files", Kind: ir.SchemaKindBucket}
 	api := ir.ServiceRef{Name: "ledger-api", Kind: ir.SchemaKindAPI}
 	worker := ir.ServiceRef{Name: "ledger-worker", Kind: ir.SchemaKindAPI}
 	greeting := "hello"
 	services := []stack.Service{
 		{Name: "ledger-db", Kind: ir.SchemaKindDB},
+		{Name: "ledger-files", Kind: ir.SchemaKindBucket},
 		{
-			Name: "ledger-api", Kind: ir.SchemaKindAPI, AuthDB: &db,
+			Name: "ledger-api", Kind: ir.SchemaKindAPI, AuthDB: &db, Buckets: []ir.ServiceRef{files},
 			Config: &stack.Config{
 				Type: "LedgerConfig",
 				Fields: []stack.ConfigField{
@@ -142,7 +146,7 @@ func TestLocalStackRuns(t *testing.T) {
 		Environments: []*ir.Environment{{
 			Name:   "Dev",
 			Target: local.Target,
-			Values: map[string]any{"postgresPort": float64(pgPort)},
+			Values: map[string]any{"postgresPort": float64(pgPort), "storagePort": float64(storagePort)},
 			Settings: []*ir.DeployableSettings{
 				{Of: ir.DeployableRef{Service: &api}, Values: map[string]any{"port": float64(apiPort)}},
 				{Of: ir.DeployableRef{Service: &worker}, Values: map[string]any{"port": float64(workerPort)}},
@@ -165,7 +169,8 @@ func TestLocalStackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	container := local.ContainerName(stackName, "Dev")
+	container, storage := local.ContainerName(stackName, "Dev"), local.StorageContainerName(stackName, "Dev")
+	emulator := local.StorageURL(storagePort)
 
 	root := t.TempDir()
 	outputRoot := filepath.Join(root, "dist")
@@ -201,7 +206,7 @@ func TestLocalStackRuns(t *testing.T) {
 	req := registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)}
 	t.Cleanup(func() {
 		_ = prov.Purge(context.Background(), req)
-		_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
+		_ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run()
 		if t.Failed() || testing.Verbose() {
 			t.Logf("provisioner output:\n%s", out)
 		}
@@ -244,10 +249,12 @@ func TestLocalStackRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"PORT":                   fmt.Sprint(apiPort),
-		"GREETING":               "hello",
-		"TOKEN":                  "s3cret",
-		"LEDGER_DB_DATABASE_URL": local.DatabaseURL(pgPort, "ledger_db"),
+		"PORT":                         fmt.Sprint(apiPort),
+		"GREETING":                     "hello",
+		"TOKEN":                        "s3cret",
+		"LEDGER_DB_DATABASE_URL":       local.DatabaseURL(pgPort, "ledger_db"),
+		"LEDGER_FILES_BUCKET_NAME":     "ledger-files",
+		"LEDGER_FILES_BUCKET_ENDPOINT": emulator,
 	} {
 		if got[name] != want {
 			t.Errorf("the server got %s=%q, want %q", name, got[name], want)
@@ -277,8 +284,20 @@ func TestLocalStackRuns(t *testing.T) {
 	}
 	checkToken(t, string(token), fmt.Sprint(outputs["ledger-worker.calls.ledger-api.key"]["publicJwk"]), "ledger-worker", "ledger-api")
 
-	// Destroy stops the server and the container, which keeps its data;
-	// the next run starts it again and migrates to the next model.
+	// The provisioner created ledger-api's bucket on the emulator, which
+	// takes an object.
+	upload, err := http.Post(emulator+"/upload/storage/v1/b/ledger-files/o?uploadType=media&name=kept.txt", "text/plain", strings.NewReader("kept"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = upload.Body.Close()
+	if upload.StatusCode != http.StatusOK {
+		t.Fatalf("upload to ledger-files: %s", upload.Status)
+	}
+
+	// Destroy stops the server and the containers, which keep their data;
+	// the next run starts them again, keeps the bucket's object, and
+	// migrates to the next model.
 	if err := prov.Destroy(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -290,12 +309,22 @@ func TestLocalStackRuns(t *testing.T) {
 	if got := columns(); got != "id,name,balance,email" {
 		t.Errorf("account columns after the second run = %s, want id,name,balance,email", got)
 	}
+	kept, err := http.Get(emulator + "/storage/v1/b/ledger-files/o/kept.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = kept.Body.Close()
+	if kept.StatusCode != http.StatusOK || !strings.Contains(out.String(), "bucket ledger-files exists") {
+		t.Errorf("the second run lost ledger-files' object (%s) or created the bucket again:\n%s", kept.Status, out)
+	}
 
 	if err := prov.Purge(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("docker", "container", "inspect", container).Run(); err == nil {
-		t.Errorf("container %s is still there after Purge", container)
+	for _, name := range []string{container, storage} {
+		if err := exec.Command("docker", "container", "inspect", name).Run(); err == nil {
+			t.Errorf("container %s is still there after Purge", name)
+		}
 	}
 }
 

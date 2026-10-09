@@ -42,6 +42,10 @@ type fakeRunner struct {
 	// notReady is how many probes of a URL answer 503 first.
 	notReady int
 	probes   map[string]int
+	// buckets are the buckets the storage emulator holds; posts are the
+	// requests that created them.
+	buckets []string
+	posts   []string
 	// exitOnStart makes every process exit as it starts.
 	exitOnStart bool
 	// exits, by the base name of a binary, are how its next processes
@@ -112,6 +116,15 @@ func (f *fakeRunner) Get(_ context.Context, url string) (int, error) {
 	if f.probes == nil {
 		f.probes = map[string]int{}
 	}
+	// A bucket on the storage emulator exists once it is created, or
+	// when the emulator kept it from an earlier run. Looking for one is no
+	// readiness probe.
+	if _, name, ok := strings.Cut(url, local.StorageReadinessPath+"/"); ok {
+		if slices.Contains(f.buckets, name) {
+			return 200, nil
+		}
+		return 404, nil
+	}
 	f.probes[url]++
 	// As net/http does, a worker's readiness, which is no URL, fails.
 	if !strings.HasPrefix(url, "http://") {
@@ -120,6 +133,18 @@ func (f *fakeRunner) Get(_ context.Context, url string) (int, error) {
 	if f.probes[url] <= f.notReady {
 		return 503, nil
 	}
+	return 200, nil
+}
+
+func (f *fakeRunner) Post(_ context.Context, url string, body []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.posts = append(f.posts, "POST "+url+" "+string(body))
+	var bucket struct{ Name string }
+	if err := json.Unmarshal(body, &bucket); err != nil {
+		return 400, nil
+	}
+	f.buckets = append(f.buckets, bucket.Name)
 	return 200, nil
 }
 
@@ -182,6 +207,7 @@ type fixture struct {
 	prov    *local.Provisioner
 	out     *bytes.Buffer
 	pgPort  int
+	stPort  int
 	apiPort int
 	ordPort int
 }
@@ -262,8 +288,8 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	runner := &fakeRunner{}
 	out := new(bytes.Buffer)
 	senv := registry.StackEnvironment{Stack: env.Stack, Name: env.Environment, Values: env.Values}
-	// The container's published port takes connections once it runs.
-	runner.inUse = []int{local.PostgresPort(senv)}
+	// The containers' published ports take connections once they run.
+	runner.inUse = []int{local.PostgresPort(senv), local.StoragePort(senv)}
 	prov := &local.Provisioner{Runner: runner, Out: out, ReadyTimeout: time.Second, PollInterval: time.Millisecond}
 	if err := prov.Render(env, dir); err != nil {
 		t.Fatal(err)
@@ -275,6 +301,7 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 		prov:    prov,
 		out:     out,
 		pgPort:  local.PostgresPort(senv),
+		stPort:  local.StoragePort(senv),
 		apiPort: local.ServerPort(senv, *env.Deployable("shop-api")),
 		ordPort: local.ServerPort(senv, *env.Deployable("Orders")),
 	}
@@ -310,12 +337,28 @@ const (
 	migrateStatus = "/bin/superschematic-migrate status --service shop-db --model"
 )
 
+// inspectOf is the line that inspects the container named name.
+func inspectOf(name string) string {
+	return inspectPrefix + " {{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}} " + name
+}
+
+// runningContainers are the rules that answer an inspect of Dev's or
+// Pinned's two containers, each running its image on its port: Postgres
+// on pgImage, and the storage emulator (D54).
+func (f *fixture) runningContainers(pgImage string) []rule {
+	env := strings.ToLower(f.env.Environment)
+	return []rule{
+		{prefix: inspectOf("superschematic-" + f.env.Stack + "-" + env + "-postgres"), out: fmt.Sprintf(`true|%s|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", pgImage, f.pgPort)},
+		{prefix: inspectOf("superschematic-" + f.env.Stack + "-" + env + "-storage"), out: fmt.Sprintf(`true|%s|{"4443/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", local.DefaultStorageImage, f.stPort)},
+	}
+}
+
 // TestApplyFromNothing applies Dev to a machine with no container: it
-// creates the container, waits for Postgres, creates the database, plans
-// the migration from an empty database and applies both phases, builds
-// each server, starts it with its resolved environment, callees first, and
-// waits until each is ready. Destroy stops the callers first, then the
-// container.
+// creates the Postgres container and the storage emulator's, waits for
+// each, creates the database and the bucket, plans the migration from an
+// empty database and applies both phases, builds each server, starts it
+// with its resolved environment, callees first, and waits until each is
+// ready. Destroy stops the callers first, then the containers.
 func TestApplyFromNothing(t *testing.T) {
 	f := newFixture(t, "Dev")
 	f.runner.notReady = 1
@@ -334,6 +377,8 @@ func TestApplyFromNothing(t *testing.T) {
 	want := []string{
 		inspectPrefix + " {{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}} superschematic-shop-stack-dev-postgres",
 		fmt.Sprintf("/bin/docker run --detach --name superschematic-shop-stack-dev-postgres --label superschematic.environment=Dev --label superschematic.stack=shop-stack --env POSTGRES_HOST_AUTH_METHOD=trust --publish 127.0.0.1:%d:5432 postgres:16-alpine", f.pgPort),
+		inspectPrefix + " {{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}} superschematic-shop-stack-dev-storage",
+		fmt.Sprintf("/bin/docker run --detach --name superschematic-shop-stack-dev-storage --label superschematic.environment=Dev --label superschematic.stack=shop-stack --publish 127.0.0.1:%[1]d:4443 %[2]s -scheme http -host 0.0.0.0 -port 4443 -backend filesystem -filesystem-root /storage -public-host 127.0.0.1:%[1]d -external-url http://127.0.0.1:%[1]d", f.stPort, local.DefaultStorageImage),
 		"/bin/docker exec superschematic-shop-stack-dev-postgres pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
 		"/bin/docker exec superschematic-shop-stack-dev-postgres pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
 		"/bin/docker exec superschematic-shop-stack-dev-postgres psql --host 127.0.0.1 --port 5432 --username postgres --dbname postgres --tuples-only --no-align --command SELECT 1 FROM pg_database WHERE datname = 'shop_db'",
@@ -426,6 +471,19 @@ func TestApplyFromNothing(t *testing.T) {
 	}
 	checkServiceCredential(t, f, api, orders)
 
+	// shop-api's bucket is created on the emulator through its JSON API,
+	// and shop-api reaches it there (D54).
+	storage := local.StorageURL(f.stPort)
+	if want := []string{"POST " + storage + `/storage/v1/b?project=local {"name":"shop-media"}`}; !slices.Equal(f.runner.posts, want) {
+		t.Errorf("posts = %v, want %v", f.runner.posts, want)
+	}
+	if got, want := envValue(api, "SHOP_MEDIA_BUCKET_NAME")+" "+envValue(api, "SHOP_MEDIA_BUCKET_ENDPOINT"), "shop-media "+storage; got != want {
+		t.Errorf("shop-api's bucket = %s, want %s", got, want)
+	}
+	if envValue(orders, "SHOP_MEDIA_BUCKET_NAME") != "" {
+		t.Error("Orders got shop-api's bucket")
+	}
+
 	// Each process's lines reach the output prefixed with its name, and
 	// the migration runner's with the schema it migrates.
 	for _, want := range []string{
@@ -449,11 +507,14 @@ func TestApplyFromNothing(t *testing.T) {
 	if got := outputs["shop-api.process"]["url"]; got != local.ServerURL(f.apiPort) {
 		t.Errorf("shop-api url output = %v", got)
 	}
+	if got := outputs["shop-media.bucket"]; got["name"] != "shop-media" || got["endpoint"] != local.StorageURL(f.stPort) {
+		t.Errorf("shop-media's outputs = %v", got)
+	}
 
-	// Destroy stops Orders, then shop-api, then the container, which keeps
-	// its data; the unfinished stderr lines are flushed.
+	// Destroy stops Orders, then shop-api, then the containers, which keep
+	// their data; the unfinished stderr lines are flushed.
 	f.runner.commands = nil
-	f.runner.rules = []rule{{prefix: inspectPrefix, out: fmt.Sprintf(`true|postgres:16-alpine|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`, f.pgPort)}}
+	f.runner.rules = f.runningContainers("postgres:16-alpine")
 	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +524,7 @@ func TestApplyFromNothing(t *testing.T) {
 	if _, ok := outputs["shop-orders-fulfil-orders.process"]; ok {
 		t.Error("the worker's process has outputs; it has no port and no URL")
 	}
-	if got := f.runner.lines(dir); len(got) != 2 || got[1] != "/bin/docker stop superschematic-shop-stack-dev-postgres" {
+	if got := f.runner.lines(dir); len(got) != 4 || got[1] != "/bin/docker stop superschematic-shop-stack-dev-postgres" || got[3] != "/bin/docker stop superschematic-shop-stack-dev-storage" {
 		t.Errorf("Destroy ran %v", got)
 	}
 	out := f.out.String()
@@ -606,20 +667,20 @@ func TestApplyRefusesATypeScriptServerItCannotRun(t *testing.T) {
 	}
 }
 
-// TestApplyAgain applies Dev to a machine where the container runs and the
-// database holds the model already: nothing is created, and the migration
-// is up to date.
+// TestApplyAgain applies Dev to a machine where the containers run, the
+// database holds the model already and the emulator keeps the bucket:
+// nothing is created, and the migration is up to date.
 func TestApplyAgain(t *testing.T) {
 	f := newFixture(t, "Dev")
 	model, err := ledgerModel(t, "shop-db").CanonicalJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.runner.rules = []rule{
-		{prefix: inspectPrefix, out: fmt.Sprintf(`true|postgres:16-alpine|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", f.pgPort)},
-		{prefix: "/bin/docker exec superschematic-shop-stack-dev-postgres psql", out: "1\n"},
-		{prefix: migrateStatus, out: string(model) + "\n"},
-	}
+	f.runner.rules = append(f.runningContainers("postgres:16-alpine"),
+		rule{prefix: "/bin/docker exec superschematic-shop-stack-dev-postgres psql", out: "1\n"},
+		rule{prefix: migrateStatus, out: string(model) + "\n"},
+	)
+	f.runner.buckets = []string{"shop-media"}
 	if err := f.applyAll(t); err != nil {
 		t.Fatalf("%v\n%s", err, f.out)
 	}
@@ -630,8 +691,11 @@ func TestApplyAgain(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(f.out.String(), "migrate shop-db: up to date") {
-		t.Errorf("output lacks the up-to-date migration:\n%s", f.out)
+	if !strings.Contains(f.out.String(), "migrate shop-db: up to date") || !strings.Contains(f.out.String(), "bucket shop-media exists") {
+		t.Errorf("output lacks the up-to-date migration or the bucket kept:\n%s", f.out)
+	}
+	if len(f.runner.posts) > 0 {
+		t.Errorf("created %v, which the emulator keeps", f.runner.posts)
 	}
 
 	// Applying a wave again restarts its server.
@@ -645,13 +709,16 @@ func TestApplyAgain(t *testing.T) {
 	if err := f.prov.Purge(context.Background(), f.req); err != nil {
 		t.Fatal(err)
 	}
-	if lines := f.runner.lines(f.req.Dir); lines[len(lines)-1] != "/bin/docker rm --force --volumes superschematic-shop-stack-dev-postgres" {
-		t.Errorf("Purge ran %v", lines[len(lines)-1])
+	lines := f.runner.lines(f.req.Dir)
+	if got, want := strings.Join(lines[len(lines)-3:], "\n"), "/bin/docker rm --force --volumes superschematic-shop-stack-dev-postgres\n"+
+		inspectOf("superschematic-shop-stack-dev-storage")+"\n"+
+		"/bin/docker rm --force --volumes superschematic-shop-stack-dev-storage"; got != want {
+		t.Errorf("Purge ran\n%s\nwant\n%s", got, want)
 	}
 }
 
-// TestPlan: on a machine with nothing, Plan creates the container and the
-// database, migrates, and starts each server.
+// TestPlan: on a machine with nothing, Plan creates the containers, the
+// database and the bucket, migrates, and starts each server.
 func TestPlan(t *testing.T) {
 	f := newFixture(t, "Dev")
 	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-shop-stack-dev-postgres"}}
@@ -665,8 +732,10 @@ func TestPlan(t *testing.T) {
 	}
 	want := []string{
 		"create postgres.container",
+		"create storage.container",
 		"create shop-db.database.shop-db",
 		"migrate shop-db.database.shop-db",
+		"create shop-media.bucket",
 		"create Orders.calls.shop-api.key",
 		"create shop-orders-fulfil-orders.calls.shop-api.key",
 		"create shop-orders-ship-orders.calls.shop-api.key",

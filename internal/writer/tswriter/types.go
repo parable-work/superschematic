@@ -84,6 +84,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
+		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
 		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
@@ -356,7 +357,8 @@ func (e *emitter) graphMemberArgs(cfg *ir.GraphMemberConfig) string {
 
 // heritageClause renders " extends Base implements A, B" from RawHeritage
 // (which preserves type arguments as written), falling back to the resolved
-// Extends and Implements names.
+// Extends and Implements names. The user model's traits, which RawHeritage
+// leaves out, lead the implements list.
 func (e *emitter) heritageClause(def *ir.TypeDef) string {
 	extends := def.Extends
 	implements := make([]string, 0, len(def.Implements))
@@ -374,6 +376,7 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 			implements = def.RawHeritage.Implements
 		}
 	}
+	implements = append(e.identityTraits(def), implements...)
 	// Resolved names drive the imports; the raw text is what renders.
 	e.recordHeritageImports(def.Extends)
 	for _, tr := range def.Implements {
@@ -388,6 +391,48 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 		b.WriteString(" implements " + strings.Join(implements, ", "))
 	}
 	return b.String()
+}
+
+// identityTraits renders the user model's traits a table carries (D50):
+// User<{ login: "email"; name: "displayName" }> and UserRole.
+func (e *emitter) identityTraits(def *ir.TypeDef) []string {
+	var out []string
+	if user := def.User; user != nil {
+		members := []string{"login: " + quote(user.Login)}
+		if user.Name != "" {
+			members = append(members, "name: "+quote(user.Name))
+		}
+		out = append(out, fmt.Sprintf("%s<{ %s }>", e.useCoreTrait("User"), strings.Join(members, "; ")))
+	}
+	if def.UserRole != nil {
+		out = append(out, e.useCoreTrait("UserRole"))
+	}
+	return out
+}
+
+// useCoreTrait records the import of a user model trait and returns the
+// name the file refers to it by: the trait's own, or an alias when the
+// service declares a definition of that name, as a table named User does.
+// The reader knows the trait by its import, so an alias reads the same.
+func (e *emitter) useCoreTrait(symbol string) string {
+	if !e.declares(symbol) {
+		return e.use(symbol)
+	}
+	alias := symbol + "Trait"
+	for i := 2; e.declares(alias); i++ {
+		alias = fmt.Sprintf("%sTrait%d", symbol, i)
+	}
+	return e.useAs(symbolPackages[symbol], symbol, alias)
+}
+
+// declares reports whether the document or a sibling file of the service
+// declares a definition of the given name.
+func (e *emitter) declares(name string) bool {
+	_, inDoc := e.doc.Types[name]
+	_, isEnum := e.doc.Enums[name]
+	_, isUnion := e.doc.Unions[name]
+	_, inService := e.ctx.DefLocations[name]
+	return inDoc || isEnum || isUnion || inService
 }
 
 // recordHeritageImports records the relative import a heritage target

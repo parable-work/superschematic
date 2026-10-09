@@ -1,11 +1,12 @@
 import { ShopApi } from "@schemas/shop-api";
 import { ShopDb } from "@schemas/shop-db";
+import { ShopMedia } from "@schemas/shop-media";
 import { ShopOrders } from "@schemas/shop-orders";
+import { ShopWeb } from "@schemas/shop-web";
 import { environment, server, stack } from "@superschematic/stack";
 
-// The stack of docs/stack-model.md, section 4.1, on stacktest's fake target:
-// stack/stacktest's Shop, written as a schema.
-@stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
+// stack/stacktest's Shop WithSite, on its fake target, written as a schema.
+@stack({ deploy: [ShopApi, ShopOrders, ShopWeb], expose: [ShopApi] })
 export abstract class Shop {}
 
 // Serves shop-orders in place of its default server. Its edges are
@@ -37,6 +38,7 @@ export abstract class Staging {}
     { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
     { of: ShopOrders, env: { FULFILLMENT_REGION: "us" } },
     { of: ShopOrders, job: "ShipOrders", cpu: "2" },
+    { of: ShopMedia, versioning: true },
     { of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }
   ]
 })

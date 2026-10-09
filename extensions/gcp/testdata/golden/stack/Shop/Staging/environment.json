@@ -36,6 +36,28 @@
           }
         },
         "deployable": "shop-api"
+      },
+      {
+        "name": "shop-web.staging.acme.dev",
+        "type": "A",
+        "value": {
+          "$output": {
+            "resource": "shop-web.address",
+            "name": "address"
+          }
+        },
+        "deployable": "shop-web"
+      },
+      {
+        "name": "_acme-challenge.shop-web.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-web.dns-authorization",
+            "name": "dnsResourceRecords[0].data"
+          }
+        },
+        "deployable": "shop-web"
       }
     ]
   },
@@ -133,6 +155,12 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-api",
@@ -142,12 +170,26 @@
           "name": "uri"
         }
       },
+      "publicAddress": "https://shop-api.staging.acme.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",
           "source": "literal",
           "value": "info",
           "default": true
+        },
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "https://shop-web.staging.acme.dev"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -172,6 +214,19 @@
           "edge": "sql:shop-api->shop-db"
         },
         {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "shop-media.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
           "field": "STRIPE_KEY",
           "source": "secret",
           "secret": "PaymentsSecrets.STRIPE_KEY"
@@ -194,6 +249,27 @@
         "$output": {
           "resource": "shop-db.instance",
           "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "gcp.storage",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "settings": {
+        "deleteAfterDays": 30
+      },
+      "resourceName": "acme-staging-shop-shop-media",
+      "address": {
+        "$output": {
+          "resource": "shop-media.bucket",
+          "name": "name"
         }
       }
     },
@@ -280,9 +356,58 @@
           "secret": "PaymentsSecrets.STRIPE_KEY"
         }
       ]
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "gcp.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "address": "https://shop-web.staging.acme.dev",
+      "publicAddress": "https://shop-web.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "https://shop-api.staging.acme.dev"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
     }
   ],
   "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrun-storage",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
     {
       "id": "http:Orders->shop-api",
       "kind": "http",
@@ -306,6 +431,18 @@
       },
       "connector": "gcp.cloudrunjob-cloudrun",
       "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "gcp.site-cloudrun",
+      "field": "shop-api"
     },
     {
       "id": "sql:Orders->shop-db",
@@ -741,6 +878,58 @@
         },
         "dependsOn": [
           "shop-api.dns-authorization"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "dns.shop-web.a",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "shop-web.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-web.address",
+                "name": "address"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "A"
+        },
+        "dependsOn": [
+          "shop-web.address"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "dns.shop-web.cname",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "_acme-challenge.shop-web.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-web.dns-authorization",
+                "name": "dnsResourceRecords[0].data"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "CNAME"
+        },
+        "dependsOn": [
+          "shop-web.dns-authorization"
         ],
         "phase": "exposure",
         "owners": [
@@ -1201,6 +1390,10 @@
                     "value": "info"
                   },
                   {
+                    "name": "SHOP_API_CORS_ORIGINS",
+                    "value": "https://shop-web.staging.acme.dev"
+                  },
+                  {
                     "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
                     "value": {
                       "$output": {
@@ -1221,6 +1414,15 @@
                   {
                     "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
                     "value": "shop-api@acme-staging.iam"
+                  },
+                  {
+                    "name": "SHOP_MEDIA_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-media.bucket",
+                        "name": "name"
+                      }
+                    }
                   },
                   {
                     "name": "STRIPE_KEY",
@@ -1301,11 +1503,65 @@
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.account",
           "shop-db.database.shop-db",
-          "shop-db.instance"
+          "shop-db.instance",
+          "shop-media.bucket"
         ],
         "phase": "rollout",
         "owners": [
           "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
+        "id": "shop-api.storage.shop-media",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-media.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
         ]
       },
       {
@@ -1430,6 +1686,35 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": false,
+          "lifecycleRules": [
+            {
+              "action": {
+                "type": "Delete"
+              },
+              "condition": {
+                "age": 30
+              }
+            }
+          ],
+          "location": "US-EAST1",
+          "name": "acme-staging-shop-shop-media",
+          "project": "acme-staging",
+          "publicAccessPrevention": "enforced",
+          "uniformBucketLevelAccess": true,
+          "versioning": {
+            "enabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
         ]
       },
       {
@@ -1819,6 +2104,358 @@
         "owners": [
           "shop-orders-ship-orders"
         ]
+      },
+      {
+        "id": "shop-web.address",
+        "type": "gcp:compute/globalAddress:GlobalAddress",
+        "properties": {
+          "ipVersion": "IPV4",
+          "name": "shop-web-ip",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.anchor",
+        "type": "gcp:compute/backendService:BackendService",
+        "properties": {
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "shop-web-anchor",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.backend",
+        "type": "gcp:compute/backendBucket:BackendBucket",
+        "properties": {
+          "bucketName": {
+            "$output": {
+              "resource": "shop-web.bucket",
+              "name": "name"
+            }
+          },
+          "cdnPolicy": {
+            "cacheMode": "USE_ORIGIN_HEADERS"
+          },
+          "enableCdn": true,
+          "name": "shop-web-backend",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-web.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": true,
+          "location": "US-EAST1",
+          "name": "acme-staging-shop-web",
+          "project": "acme-staging",
+          "publicAccessPrevention": "inherited",
+          "uniformBucketLevelAccess": true,
+          "website": {
+            "mainPageSuffix": "index.html"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.certificate",
+        "type": "gcp:certificatemanager/certificate:Certificate",
+        "properties": {
+          "managed": {
+            "dnsAuthorizations": [
+              {
+                "$output": {
+                  "resource": "shop-web.dns-authorization",
+                  "name": "id"
+                }
+              }
+            ],
+            "domains": [
+              "shop-web.staging.acme.dev"
+            ]
+          },
+          "name": "shop-web-cert",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-web.dns-authorization"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.certificate-map",
+        "type": "gcp:certificatemanager/certificateMap:CertificateMap",
+        "properties": {
+          "name": "shop-web-certs",
+          "project": "acme-staging"
+        },
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.certificate-map-entry",
+        "type": "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
+        "properties": {
+          "certificates": [
+            {
+              "$output": {
+                "resource": "shop-web.certificate",
+                "name": "id"
+              }
+            }
+          ],
+          "hostname": "shop-web.staging.acme.dev",
+          "map": {
+            "$output": {
+              "resource": "shop-web.certificate-map",
+              "name": "name"
+            }
+          },
+          "name": "shop-web-certs-host",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-web.certificate",
+          "shop-web.certificate-map"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.dns-authorization",
+        "type": "gcp:certificatemanager/dnsAuthorization:DnsAuthorization",
+        "properties": {
+          "domain": "shop-web.staging.acme.dev",
+          "name": "shop-web-dns-auth",
+          "project": "acme-staging"
+        },
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.forwarding-rule",
+        "type": "gcp:compute/globalForwardingRule:GlobalForwardingRule",
+        "properties": {
+          "ipAddress": {
+            "$output": {
+              "resource": "shop-web.address",
+              "name": "address"
+            }
+          },
+          "ipProtocol": "TCP",
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "shop-web-https",
+          "portRange": "443",
+          "project": "acme-staging",
+          "target": {
+            "$output": {
+              "resource": "shop-web.https-proxy",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-web.address",
+          "shop-web.https-proxy"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.https-proxy",
+        "type": "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
+        "properties": {
+          "certificateMap": {
+            "$concat": [
+              "//certificatemanager.googleapis.com/",
+              {
+                "$output": {
+                  "resource": "shop-web.certificate-map",
+                  "name": "id"
+                }
+              }
+            ]
+          },
+          "name": "shop-web-https",
+          "project": "acme-staging",
+          "urlMap": {
+            "$output": {
+              "resource": "shop-web.url-map",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-web.certificate-map",
+          "shop-web.certificate-map-entry",
+          "shop-web.url-map"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.public-read",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "shop-web.bucket",
+              "name": "name"
+            }
+          },
+          "member": "allUsers",
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "shop-web.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.url-map",
+        "type": "gcp:compute/uRLMap:URLMap",
+        "properties": {
+          "defaultService": {
+            "$output": {
+              "resource": "shop-web.backend",
+              "name": "id"
+            }
+          },
+          "hostRules": [
+            {
+              "hosts": [
+                "*"
+              ],
+              "pathMatcher": "files"
+            }
+          ],
+          "name": "shop-web-lb",
+          "pathMatchers": [
+            {
+              "defaultCustomErrorResponsePolicy": {
+                "errorResponseRules": [
+                  {
+                    "matchResponseCodes": [
+                      "404"
+                    ],
+                    "overrideResponseCode": 200,
+                    "path": "/{site-digest}/index.html"
+                  }
+                ],
+                "errorService": {
+                  "$output": {
+                    "resource": "shop-web.backend",
+                    "name": "id"
+                  }
+                }
+              },
+              "defaultService": {
+                "$output": {
+                  "resource": "shop-web.backend",
+                  "name": "id"
+                }
+              },
+              "name": "files",
+              "routeRules": [
+                {
+                  "matchRules": [
+                    {
+                      "fullPathMatch": "/"
+                    }
+                  ],
+                  "priority": 1,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/{site-digest}/index.html"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "shop-web.backend",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "matchRules": [
+                    {
+                      "fullPathMatch": "/__superschematic/none"
+                    }
+                  ],
+                  "priority": 2,
+                  "service": {
+                    "$output": {
+                      "resource": "shop-web.anchor",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "matchRules": [
+                    {
+                      "prefixMatch": "/"
+                    }
+                  ],
+                  "priority": 3,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/{site-digest}/"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "shop-web.backend",
+                      "name": "id"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-web.anchor",
+          "shop-web.backend"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
       }
     ]
   },
@@ -1842,16 +2479,24 @@
         "shop-api.cloudsql-login.shop-db",
         "shop-api.database-user.shop-db",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-api.sign-as-self",
+        "shop-api.storage.shop-media",
         "shop-api.trace-agent",
         "shop-db.database.shop-db",
         "shop-db.instance",
         "shop-db.migrator",
+        "shop-media.bucket",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.cloudsql-client.shop-db",
         "shop-orders-ship-orders.cloudsql-login.shop-db",
         "shop-orders-ship-orders.database-user.shop-db",
         "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
-        "shop-orders-ship-orders.trace-agent"
+        "shop-orders-ship-orders.trace-agent",
+        "shop-web.address",
+        "shop-web.anchor",
+        "shop-web.backend",
+        "shop-web.bucket",
+        "shop-web.public-read"
       ]
     },
     {
@@ -1878,13 +2523,15 @@
       "wave": 2,
       "deployables": [
         "Orders",
-        "shop-orders-ship-orders"
+        "shop-orders-ship-orders",
+        "shop-web"
       ],
       "resources": [
         "Orders.service",
         "shop-orders-ship-orders.job",
         "shop-orders-ship-orders.schedule",
-        "shop-orders-ship-orders.schedule-invoker"
+        "shop-orders-ship-orders.schedule-invoker",
+        "shop-web.url-map"
       ]
     },
     {
@@ -1899,6 +2546,8 @@
       "resources": [
         "dns.shop-api.a",
         "dns.shop-api.cname",
+        "dns.shop-web.a",
+        "dns.shop-web.cname",
         "shop-api.address",
         "shop-api.backend",
         "shop-api.certificate",
@@ -1908,7 +2557,13 @@
         "shop-api.endpoint-group",
         "shop-api.forwarding-rule",
         "shop-api.https-proxy",
-        "shop-api.url-map"
+        "shop-api.url-map",
+        "shop-web.certificate",
+        "shop-web.certificate-map",
+        "shop-web.certificate-map-entry",
+        "shop-web.dns-authorization",
+        "shop-web.forwarding-rule",
+        "shop-web.https-proxy"
       ]
     }
   ]

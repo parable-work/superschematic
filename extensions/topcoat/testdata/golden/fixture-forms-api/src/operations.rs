@@ -5,7 +5,12 @@
 //! the router checks them, then the implementation. A refusal is the
 //! `ApiError` the route answers, and `?` carries it into a page's error.
 //! A guard (`can_<operation>`) admits the caller alone, for a page that
-//! shows or hides what the operation does.
+//! shows or hides what the operation does. An operation without a call
+//! still has its guard, whose doc says why.
+//!
+//! A call does not apply the route's traffic controls (@rateLimit,
+//! @bodyLimit, @timeout): the page that makes it is a route of the app,
+//! under the controls the app gives it.
 
 #![allow(unused_imports)]
 

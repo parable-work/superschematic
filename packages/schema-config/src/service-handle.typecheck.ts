@@ -72,6 +72,35 @@ export const refusedExtensionCall = defineConfig({
   outputs: {}
 });
 
+// A Bucket service's sentinel, and its config: a name and a kind (D54).
+const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
+const bucketHandle: ServiceHandle<"Bucket"> = ShopMedia;
+
+export const bucket = defineConfig({ name: "shop-media", kind: SchemaKind.Bucket, outputs: {} });
+
+export const acceptedBuckets = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  buckets: [ShopMedia, service({ name: "shop-exports", kind: SchemaKind.Bucket })],
+  outputs: {}
+});
+
+export const refusedApiBucket = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error buckets takes Bucket handles, and ShopApi is an API handle
+  buckets: [ShopApi],
+  outputs: {}
+});
+
+export const refusedBucketCall = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error calls takes API handles, and ShopMedia is a Bucket handle
+  calls: [ShopMedia],
+  outputs: {}
+});
+
 // @ts-expect-error a handle with no config type does not stand for one with
 const untypedForTyped: ServiceHandle<"API", ShopApiConfig> = handWrittenApi;
 
@@ -90,6 +119,7 @@ export const checked = {
   dbForApi,
   ordersAsApi,
   untypedJobs,
+  bucketHandle,
   fulfilmentAsApi,
   untypedWorkers
 };

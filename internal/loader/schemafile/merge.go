@@ -305,6 +305,8 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		len(def.Behaviors) == 0 &&
 		def.Display == nil &&
 		def.RawHeritage == nil &&
+		def.User == nil &&
+		def.UserRole == nil &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&
 		!def.JsonField &&

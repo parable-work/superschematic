@@ -209,7 +209,7 @@ func TestValidateShapeChecksCalls(t *testing.T) {
 		cfg  *SchemaConfig
 		want string
 	}{
-		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Calls: []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}}, "schema config for shop-db sets calls, which only an API service may set (this service is kind DB)"},
+		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Calls: []ServiceDependency{{Name: "shop-api", Kind: ir.SchemaKindAPI}}}, "schema config for shop-db sets calls, which only an API or a Site service may set (this service is kind DB)"},
 		{"a DB handle", api(ServiceDependency{Name: "shop-db", Kind: ir.SchemaKindDB}), `schema config for shop-orders calls shop-db, a handle of kind "DB"; calls names API services only`},
 		{"no name", api(ServiceDependency{Kind: ir.SchemaKindAPI}), "schema config for shop-orders has a calls entry with no name"},
 		{"itself", api(ServiceDependency{Name: "shop-orders", Kind: ir.SchemaKindAPI}), "schema config for shop-orders calls itself"},
@@ -225,6 +225,56 @@ func TestValidateShapeChecksCalls(t *testing.T) {
 	}
 	if _, err := ValidateShapeWith(api(ServiceDependency{Name: "shop-api", Kind: ir.SchemaKindAPI}), coreKinds); err != nil {
 		t.Errorf("an API calling another API: %v", err)
+	}
+}
+
+// TestBucketsAndTheBucketKind: an API's config lists Bucket services in
+// buckets, which the IR records, and a Bucket service's config holds a
+// name and a kind and nothing else (D54).
+func TestBucketsAndTheBucketKind(t *testing.T) {
+	kinds := append(kindList{}, coreKinds...)
+	kinds = append(kinds, string(ir.SchemaKindBucket))
+	dir := writeConfig(t, "schema.config.yaml", `name: shop-api
+kind: API
+buckets:
+  - { name: shop-media, kind: Bucket }
+outputs: {}
+`)
+	cfg, err := ReadFile(dir, kinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	want := []ir.ServiceRef{{Name: "shop-media", Kind: ir.SchemaKindBucket}}
+	if schema := cfg.NewSchema(); !reflect.DeepEqual(schema.Buckets, want) {
+		t.Errorf("schema buckets = %+v, want %+v", schema.Buckets, want)
+	}
+	if _, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-media\nkind: Bucket\noutputs: {}\n"), kinds); err != nil {
+		t.Errorf("a Bucket service's config: %v", err)
+	}
+
+	media := ServiceDependency{Name: "shop-media", Kind: ir.SchemaKindBucket}
+	api := func(buckets ...ServiceDependency) *SchemaConfig {
+		return &SchemaConfig{Name: "shop-api", Kind: ir.SchemaKindAPI, Buckets: buckets}
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  *SchemaConfig
+		want string
+	}{
+		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, Buckets: []ServiceDependency{media}}, "schema config for shop-db sets buckets, which only an API service may set (this service is kind DB)"},
+		{"an API handle", api(ServiceDependency{Name: "shop-orders", Kind: ir.SchemaKindAPI}), `schema config for shop-api lists shop-orders in buckets, a handle of kind "API"; buckets names Bucket services only`},
+		{"no name", api(ServiceDependency{Kind: ir.SchemaKindBucket}), "schema config for shop-api has a buckets entry with no name"},
+		{"twice", api(media, media), "schema config for shop-api lists bucket shop-media more than once"},
+		{"a bucket with outputs", &SchemaConfig{Name: "shop-media", Kind: ir.SchemaKindBucket, Outputs: map[string]any{"types": map[string]any{}}}, "schema config for shop-media sets outputs; a Bucket service generates nothing, so its outputs are {}"},
+		{"a bucket with dependencies", &SchemaConfig{Name: "shop-media", Kind: ir.SchemaKindBucket, Dependencies: []ServiceDependency{{Name: "shop-db", Kind: ir.SchemaKindDB}}}, "schema config for shop-media sets authDb or dependencies; a Bucket service names no other service, and the APIs that use it list it in their buckets"},
+		{"a public bucket", &SchemaConfig{Name: "shop-media", Kind: ir.SchemaKindBucket, Public: true}, "schema config for shop-media sets public; a Bucket service is private, and a browser reaches an object through a signed URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateShapeWith(tc.cfg, kinds)
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("ValidateShapeWith error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

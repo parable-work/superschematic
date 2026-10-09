@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "27a3c567d57b12fd36580f260cee69bd1399ec45532eed397e01a5808b13c8fd",
-  "hash": "7ca54473556211703590734d2b218fdcc17fb65d09c9c8aa7d3d49f433ac169e",
+  "from": "35dfb5ad311754d2577d186db2828acbf7a647e22c5478bec2b8c0d2180819f2",
+  "hash": "52a038b13416a7f39dfb075aa6a45230acbd302c91abf37915a27658b448b389",
   "service": "shop-db",
   "steps": [
     {
@@ -36,7 +36,7 @@
       "phase": "expand",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE TABLE \"_new_product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"items\" TEXT,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"title\", '')) VIRTUAL,\n  PRIMARY KEY (\"id\")\n)",
         "INSERT INTO \"_new_product\" (\"id\", \"title\", \"price\", \"items\")\nSELECT \"id\", \"title\", \"price\", CASE WHEN \"product\".\"items\" IS NOT NULL THEN (SELECT json_group_array(CAST(\"_element\".\"value\" AS REAL) ORDER BY \"_element\".\"key\") FROM json_each(\"product\".\"items\") AS \"_element\") END\nFROM \"product\"",
         "DROP TABLE \"product\"",
         "ALTER TABLE \"_new_product\" RENAME TO \"product\""
@@ -45,7 +45,7 @@
       "transactional": true
     }
   ],
-  "to": "21d5144a1b6d01c49d950176463fea751a022cf3fbcce85d97be00f5fcfc2441",
+  "to": "5bbc086ca853ced7548c4ca53f1bcc6ca582e19304e5b6b1e9db17d22aa46e0d",
   "toModel": null,
   "version": 1
 }

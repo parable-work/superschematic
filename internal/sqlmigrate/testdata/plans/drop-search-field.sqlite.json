@@ -1,0 +1,22 @@
+{
+  "dialect": "sqlite",
+  "expanded": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "33a7e1aa3dde8fccf52b97f78acbd7665f2bbeba136c71f21f27611ef01350e9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"product\" DROP COLUMN \"search_text\""
+      ],
+      "subject": "table/product/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "toModel": null,
+  "version": 1
+}

@@ -212,6 +212,59 @@ export function source(_target: unknown): ClassDecorator {
   return noopClassDecorator;
 }
 
+/**
+ * The routes @userSessions adds. `path` prefixes them, "auth" by default.
+ * `login`, true by default, adds login, logout and changePassword; false
+ * leaves me and capabilities, for an API whose users sign in through
+ * another API of the same authDb. `register`, false by default, adds
+ * register, which anyone may call, and needs the login.
+ */
+export type UserSessionsConfig =
+  | {
+      readonly path?: string;
+      readonly login?: true;
+      readonly register?: boolean;
+    }
+  | {
+      readonly path?: string;
+      readonly login: false;
+      readonly register?: false;
+    };
+
+/** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
+export type UserAdministrationConfig = {
+  readonly path?: string;
+};
+
+/**
+ * The user model's session routes, on a class with no methods:
+ * superschematic adds login, logout, me, capabilities and changePassword
+ * under the path, and register with `register: true`. The identity runtime
+ * serves them, so the implementation has no method for them. The API's
+ * authDb must name a DB schema with a User table, and an API takes one
+ * such class. The class takes no Authenticated or Encrypted base and no
+ * service clause: each route's rule is the model's.
+ */
+export function userSessions(_cfg?: UserSessionsConfig): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/**
+ * The user model's administration routes, on a class with no methods:
+ * superschematic adds the routes that create, list, disable and enable
+ * users and set a password; list, create, update and delete roles; and
+ * grant and revoke them. Each needs a permission under the naming key
+ * identity_permission_prefix: identity.users.read or .users.write,
+ * identity.roles.read or .roles.write. The identity runtime serves them,
+ * so the implementation has no method for them. The API's authDb must name
+ * a DB schema with a User and a UserRole table, and an API takes one such
+ * class, which takes no Authenticated or Encrypted base and no service
+ * clause.
+ */
+export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** The options of a job: when it runs, and how long and how often it tries. */
 export type JobOptions = {
   /**

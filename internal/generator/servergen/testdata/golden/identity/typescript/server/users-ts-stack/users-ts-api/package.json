@@ -1,0 +1,25 @@
+{
+  "name": "@schemas/users-ts-stack-users-ts-api-server",
+  "version": "0.0.0",
+  "description": "Server users-ts-api of stack users-ts-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/users-db-types": "workspace:*",
+    "@schemas/users-ts-api-api": "workspace:*",
+    "@schemas/users-ts-api-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3"
+  }
+}

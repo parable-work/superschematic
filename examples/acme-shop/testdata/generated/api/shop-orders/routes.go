@@ -16,6 +16,7 @@ import (
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -43,7 +44,16 @@ type Config struct {
 	// OpenAPIBaseURL is injected into the served OpenAPI document servers list.
 	// Optional: defaults to "http://localhost:8080" if empty.
 	OpenAPIBaseURL string
-	// AuthMiddleware is the authentication middleware to apply to protected routes.
+
+	// Identity is the user model's runtime (D50): it authenticates the caller
+	// of every protected route and serves the user model's routes. Build it
+	// with NewIdentity, which gives it this API's route table.
+	Identity *identity.Service
+
+	// AuthMiddleware authenticates the caller of every protected route.
+	// Optional: nil runs Identity.Middleware. A middleware set here replaces
+	// it and authenticates the caller itself, usually by wrapping
+	// Identity.Middleware.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 
 	// Implementations contains all namespace implementation instances
@@ -59,8 +69,8 @@ func (c *Config) Validate() error {
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
 	}
-	if c.AuthMiddleware == nil {
-		return fmt.Errorf("Config.AuthMiddleware is required")
+	if c.Identity == nil {
+		return fmt.Errorf("Config.Identity is required: the user model's runtime authenticates the callers of shop-orders")
 	}
 	if err := c.Implementations.ValidateImplementations(); err != nil {
 		return err
@@ -81,7 +91,7 @@ func (c *Config) Validate() error {
 //	shoporders.RegisterRoutes(r, shoporders.Config{
 //		DB:                          db,
 //		Logger:                      logger,
-//		AuthMiddleware:              authMiddleware,
+//		Identity:                    identityService,
 //		Implementations: shoporders.Implementations{
 //			Order: &myOrderImpl{},
 //			ProductReviews: &myProductReviewsImpl{},
@@ -102,6 +112,16 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	if openAPIBaseURL == "" {
 		openAPIBaseURL = defaultOpenAPIBaseURL
 	}
+
+	// The identity runtime authenticates the protected routes' callers
+	// unless the Config replaces its middleware.
+	if cfg.AuthMiddleware == nil {
+		cfg.AuthMiddleware = cfg.Identity.Middleware
+	}
+
+	// The credentialed CORS middleware runs first, so it answers the
+	// preflights of the identity config's trusted origins.
+	r.Use(cfg.Identity.CORS())
 
 	// Add logger middleware for request-scoped logging
 	r.Use(LoggerMiddleware(cfg.Logger))

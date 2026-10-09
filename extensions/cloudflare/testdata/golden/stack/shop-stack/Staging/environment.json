@@ -33,6 +33,17 @@
           }
         },
         "deployable": "shop-api"
+      },
+      {
+        "name": "shop-web.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-web.route",
+            "name": "target"
+          }
+        },
+        "deployable": "shop-web"
       }
     ]
   },
@@ -135,6 +146,12 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-api",
@@ -144,12 +161,26 @@
           "name": "url"
         }
       },
+      "publicAddress": "https://shop-api.staging.acme.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",
           "source": "literal",
           "value": "info",
           "default": true
+        },
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "https://shop-web.staging.acme.dev"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -179,6 +210,19 @@
           "edge": "sql:shop-api->shop-db"
         },
         {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "shop-media.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
           "field": "STRIPE_KEY",
           "source": "secret",
           "secret": "PaymentsSecrets.STRIPE_KEY"
@@ -201,6 +245,24 @@
         "$output": {
           "resource": "shop-db.instance",
           "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "fake.storage",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "resourceName": "acme-staging-shop-stack-shop-media",
+      "address": {
+        "$output": {
+          "resource": "shop-media.bucket",
+          "name": "name"
         }
       }
     },
@@ -382,9 +444,57 @@
           "secret": "PaymentsSecrets.STRIPE_KEY"
         }
       ]
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "fake.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "publicAddress": "https://shop-web.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "https://shop-api.staging.acme.dev"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
     }
   ],
   "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "fake.run-storage",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
     {
       "id": "http:Orders->shop-api",
       "kind": "http",
@@ -420,6 +530,18 @@
       },
       "connector": "fake.job-run",
       "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "fake.site-run",
+      "field": "shop-api"
     },
     {
       "id": "sql:Orders->shop-db",
@@ -692,6 +814,30 @@
         ]
       },
       {
+        "id": "dns.shop-web.cname",
+        "type": "cloudflare:index/dnsRecord:DnsRecord",
+        "properties": {
+          "content": {
+            "$output": {
+              "resource": "shop-web.route",
+              "name": "target"
+            }
+          },
+          "name": "shop-web.staging.acme.dev",
+          "proxied": false,
+          "ttl": 300,
+          "type": "CNAME",
+          "zoneId": "0123456789abcdef0123456789abcdef"
+        },
+        "dependsOn": [
+          "shop-web.route"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
         "id": "secret.PaymentsSecrets.STRIPE_KEY",
         "type": "fake:secrets/secret:Secret",
         "properties": {
@@ -779,6 +925,10 @@
               "value": "info"
             },
             {
+              "name": "SHOP_API_CORS_ORIGINS",
+              "value": "https://shop-web.staging.acme.dev"
+            },
+            {
               "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
               "value": {
                 "$output": {
@@ -806,6 +956,15 @@
               }
             },
             {
+              "name": "SHOP_MEDIA_BUCKET_NAME",
+              "value": {
+                "$output": {
+                  "resource": "shop-media.bucket",
+                  "name": "name"
+                }
+              }
+            },
+            {
               "name": "STRIPE_KEY",
               "secret": {
                 "$output": {
@@ -824,7 +983,8 @@
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.account",
           "shop-db.database.shop-db",
-          "shop-db.instance"
+          "shop-db.instance",
+          "shop-media.bucket"
         ],
         "phase": "rollout",
         "owners": [
@@ -859,6 +1019,33 @@
         ]
       },
       {
+        "id": "shop-api.storage.shop-media",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "id"
+            }
+          },
+          "role": "storage.objectUser"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-media.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
         "id": "shop-db.database.shop-db",
         "type": "fake:sql/database:Database",
         "properties": {
@@ -890,6 +1077,19 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "fake:storage/bucket:Bucket",
+        "properties": {
+          "location": "us-east1",
+          "name": "acme-staging-shop-stack-shop-media",
+          "public": false
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
         ]
       },
       {
@@ -1286,6 +1486,40 @@
         "owners": [
           "sql:shop-orders-ship-orders->shop-db"
         ]
+      },
+      {
+        "id": "shop-web.route",
+        "type": "fake:run/route:Route",
+        "properties": {
+          "host": "shop-web.staging.acme.dev",
+          "service": {
+            "$output": {
+              "resource": "shop-web.site",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-web.site"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "shop-web.site",
+        "type": "fake:storage/site:Site",
+        "properties": {
+          "fallback": "index.html",
+          "name": "shop-web",
+          "prefix": "/{site-digest}/",
+          "public": true
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
       }
     ]
   },
@@ -1300,8 +1534,10 @@
         "shop-api.account",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sql.shop-db",
+        "shop-api.storage.shop-media",
         "shop-db.database.shop-db",
         "shop-db.instance",
+        "shop-media.bucket",
         "shop-orders-fulfil-orders.account",
         "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-orders-fulfil-orders.sql.shop-db",
@@ -1336,13 +1572,15 @@
       "deployables": [
         "Orders",
         "shop-orders-fulfil-orders",
-        "shop-orders-ship-orders"
+        "shop-orders-ship-orders",
+        "shop-web"
       ],
       "resources": [
         "Orders.service",
         "shop-orders-fulfil-orders.pool",
         "shop-orders-ship-orders.job",
-        "shop-orders-ship-orders.schedule"
+        "shop-orders-ship-orders.schedule",
+        "shop-web.site"
       ]
     },
     {
@@ -1356,7 +1594,9 @@
       "step": "exposure",
       "resources": [
         "dns.shop-api.cname",
-        "shop-api.route"
+        "dns.shop-web.cname",
+        "shop-api.route",
+        "shop-web.route"
       ]
     }
   ]

@@ -13,8 +13,8 @@ import (
 // (docs/stack-model.md, section 6.10) from its IR and the outputs block of
 // its config:
 //
-//   - authDb, dependencies and calls from ir.Schema. The IR keeps authDb's
-//     name, and the handle it held names a DB service;
+//   - authDb, dependencies, calls and buckets from ir.Schema. The IR keeps
+//     authDb's name, and the handle it held names a DB service;
 //   - an API's outputs.api.language and a DB's outputs.sql.dialects;
 //   - an API's operations, each with what admits a caller to it
 //     (stack.OperationsOf), against which the resolver checks each edge to
@@ -33,6 +33,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		Kind:         schema.Kind,
 		Dependencies: schema.Dependencies,
 		Calls:        schema.Calls,
+		Buckets:      schema.Buckets,
 	}
 	if schema.AuthDB != "" {
 		svc.AuthDB = &ir.ServiceRef{Name: schema.AuthDB, Kind: ir.SchemaKindDB}
@@ -67,6 +68,9 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 		}
+	case ir.SchemaKindSite:
+		// Its calls are the APIs its code calls from the browser; where its
+		// code is, the stack's build reads with SiteOf (D55).
 	}
 	return svc, nil
 }

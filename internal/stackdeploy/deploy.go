@@ -25,8 +25,17 @@ type DeployOptions struct {
 	// Sources, when set, says where the stack's build wrote each server's
 	// Dockerfile, and the deploy builds through the target's ImageBuilder
 	// the image of each server Images names none for whose context
-	// changed since the image the manifest records. Nil builds nothing.
+	// changed since the image the manifest records. It also says where
+	// each site's package is, and the deploy builds each site Sites names
+	// no digest for. Nil builds nothing.
 	Sources *Sources
+
+	// Sites are the digests of the files of the sites the deploy rolls
+	// out, by site (ParseSites): files an earlier deploy or build
+	// published, which the deploy serves again without a build. A site
+	// without one is built when Sources is set, and keeps the files the
+	// manifest records otherwise (D55).
+	Sites map[string]string
 
 	// Planner plans each database's migration. Required when the
 	// environment has a database.
@@ -124,6 +133,11 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 		return nil, fmt.Errorf("environment %s has migrations to run, and target %s has no migration runner", s.env.Environment, s.target.Name)
 	}
 
+	sites, err := s.planSitesFor(ctx, prev, o.Sites, o.Sources)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.runBuilds(ctx, images); err != nil {
 		return nil, err
 	}
@@ -131,11 +145,14 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	if pinned, err = PinSites(pinned, sites.digests); err != nil {
+		return nil, err
+	}
 	req, err := s.request(ctx, pinned)
 	if err != nil {
 		return nil, err
 	}
-	d := &deploy{session: s, opts: o, now: now, req: req, images: images.images, contexts: images.contexts, plans: plans, pending: pending}
+	d := &deploy{session: s, opts: o, now: now, req: req, images: images.images, contexts: images.contexts, sites: sites, plans: plans, pending: pending}
 	d.manifest = nextManifest(prev, s.run, o.Services)
 	if err := d.checkpoint(ctx, ""); err != nil {
 		return nil, err
@@ -175,6 +192,7 @@ type deploy struct {
 	req      registry.ProvisionRequest
 	images   map[string]string
 	contexts map[string]string
+	sites    *sitePlan
 	plans    []*DatabasePlan
 	pending  map[string][]*PendingMigration
 	manifest *Manifest
@@ -197,11 +215,24 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 	case ir.StepInfrastructure, ir.StepExposure:
 		return d.prov.Apply(ctx, d.req, *step)
 	case ir.StepRollout:
+		// A site's files and its config go up before the wave's apply
+		// points the site at them (D55).
+		for _, name := range step.Deployables {
+			if dep := d.env.Deployable(name); dep != nil && dep.Kind == ir.DeployableSite {
+				if err := d.publishSite(ctx, name); err != nil {
+					return err
+				}
+			}
+		}
 		if err := d.prov.Apply(ctx, d.req, *step); err != nil {
 			return err
 		}
-		for _, server := range step.Deployables {
-			d.manifest.setImage(server, d.images[server], d.contexts[server])
+		for _, name := range step.Deployables {
+			if dep := d.env.Deployable(name); dep != nil && dep.Kind == ir.DeployableSite {
+				d.manifest.setSite(name, d.sites.digests[name])
+				continue
+			}
+			d.manifest.setImage(name, d.images[name], d.contexts[name])
 		}
 		return nil
 	case ir.StepMigrate:
