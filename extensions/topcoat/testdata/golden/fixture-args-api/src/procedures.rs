@@ -109,6 +109,8 @@ pub struct OrderListOrdersArgsRecord {
     pub limit: Option<f64>,
     pub page: Option<i64>,
     pub archived: Option<bool>,
+    pub paid_only: Option<bool>,
+    pub gifts_only: Option<bool>,
 }
 
 impl OrderListOrdersArgsRecord {
@@ -121,6 +123,8 @@ impl OrderListOrdersArgsRecord {
             limit: decode("limit", self.limit.as_ref().map_or(Value::Null, wire::put_number))?,
             page: decode("page", self.page.as_ref().map_or(Value::Null, wire::put_integer))?,
             archived: decode("archived", self.archived.as_ref().map_or(Value::Null, wire::put_boolean))?,
+            paid_only: decode("paidOnly", self.paid_only.as_ref().map_or(Value::Null, wire::put_boolean))?,
+            gifts_only: decode("giftsOnly", self.gifts_only.as_ref().map_or(Value::Null, wire::put_boolean))?,
         })
     }
 }
@@ -201,6 +205,74 @@ pub async fn order_cancel_order(cx: &Cx, args: OrderCancelOrderArgsRecord) -> to
 pub async fn call_order_cancel_order(cx: &Cx, args: OrderCancelOrderArgsRecord) -> Result<OrderViewRecord, ProblemRecord> {
     let args = args.to_args()?;
     let value = operations::order_cancel_order(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(OrderViewRecord::from_wire(&json))
+}
+
+/// The arguments of order.holdOrder, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderHoldOrderArgsRecord {
+    pub id: String,
+    pub notify: Option<bool>,
+    pub rush: Option<bool>,
+}
+
+impl OrderHoldOrderArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderHoldOrderArgs, ProblemRecord> {
+        Ok(crate::api::OrderHoldOrderArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+            notify: decode("notify", self.notify.as_ref().map_or(Value::Null, wire::put_boolean))?,
+            rush: decode("rush", self.rush.as_ref().map_or(Value::Null, wire::put_boolean))?,
+        })
+    }
+}
+
+/// order.holdOrder, called from the browser.
+#[procedure("/_superschematic/fixture-args-api/order/hold-order")]
+pub async fn order_hold_order(cx: &Cx, args: OrderHoldOrderArgsRecord) -> topcoat::Result<Result<OrderViewRecord, ProblemRecord>> {
+    Ok(call_order_hold_order(cx, args).await)
+}
+
+/// The body of the order_hold_order procedure.
+pub async fn call_order_hold_order(cx: &Cx, args: OrderHoldOrderArgsRecord) -> Result<OrderViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_hold_order(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(OrderViewRecord::from_wire(&json))
+}
+
+/// The arguments of order.noteOrder, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderNoteOrderArgsRecord {
+    pub input: Option<OrderNoteInputRecord>,
+    pub id: String,
+}
+
+impl OrderNoteOrderArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderNoteOrderArgs, ProblemRecord> {
+        Ok(crate::api::OrderNoteOrderArgs {
+            input: decode("input", self.input.as_ref().map_or(Value::Null, OrderNoteInputRecord::to_wire))?,
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// order.noteOrder, called from the browser.
+#[procedure("/_superschematic/fixture-args-api/order/note-order")]
+pub async fn order_note_order(cx: &Cx, args: OrderNoteOrderArgsRecord) -> topcoat::Result<Result<OrderViewRecord, ProblemRecord>> {
+    Ok(call_order_note_order(cx, args).await)
+}
+
+/// The body of the order_note_order procedure.
+pub async fn call_order_note_order(cx: &Cx, args: OrderNoteOrderArgsRecord) -> Result<OrderViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_note_order(cx, args).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(OrderViewRecord::from_wire(&json))
 }

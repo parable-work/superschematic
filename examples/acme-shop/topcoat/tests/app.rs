@@ -5,7 +5,8 @@
 //! JSON API at `/api` serves the same reviews and admits the same session.
 //! An order is placed through the form with its lines as rows, filtered by
 //! the GET form on `/orders` and cancelled from its page, each refusal
-//! rendered at its control. Over a SQLite file of shop-db's tables, the
+//! rendered at its control; a post of far more lines than an order holds
+//! renders a form of 51. Over a SQLite file of shop-db's tables, the
 //! reviews, orders and sessions outlive the app.
 
 use std::path::{Path, PathBuf};
@@ -306,6 +307,29 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     assert!(page.body.contains(&format!(r#"<td data-field="productId">{anvil}</td>"#)), "{}", page.body);
     let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert!(orders.body.contains(&format!(r#"<li><a href="{order}">"#)), "{}", orders.body);
+}
+
+#[tokio::test]
+async fn a_post_of_far_more_lines_than_an_order_holds_renders_a_bounded_form() {
+    // Anyone may post the form, signed in or not. 4,000 lines, past the 50
+    // an order holds, render the form again with 51 and the list's message,
+    // rather than every line's errors.
+    let router = shop().await;
+    let lines = |count: usize| (0..count).map(|index| format!("lines[{index}]=")).collect::<Vec<_>>().join("&");
+    let refused = send(&router, "POST", "/orders/new", None, Some(&lines(4_000))).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let head = refused.body.get(..4000).unwrap_or(&refused.body);
+    assert!(refused.body.contains(r#"<legend>Lines</legend><p class="field-error">must contain at most 50 items</p>"#), "{head}");
+    assert_eq!(refused.body.matches(r#"<fieldset class="ss-row">"#).count(), 51);
+    assert!(refused.body.len() < 256 * 1024, "a response of {} bytes", refused.body.len());
+
+    // 50,000, more pairs than a form reads at all: the form's own message,
+    // and the same 51 lines.
+    let refused = send(&router, "POST", "/orders/new", None, Some(&lines(50_000))).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let head = refused.body.get(..4000).unwrap_or(&refused.body);
+    assert!(refused.body.contains(r#"<p class="form-error">The form sent more than 5000 fields, more than it reads</p>"#), "{head}");
+    assert_eq!(refused.body.matches(r#"<fieldset class="ss-row">"#).count(), 51);
 }
 
 #[tokio::test]

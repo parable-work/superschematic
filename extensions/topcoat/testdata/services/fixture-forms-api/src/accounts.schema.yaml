@@ -3,8 +3,8 @@
 # boolean. A note's input holds a list of strings, a row each. A booking's
 # input holds a field of every other kind a form renders: a nested object
 # with an optional field, an optional nested object, a list of objects with
-# bounds, a list of enums, a date, a time, a date-time, a secret, a default,
-# any JSON value and a map.
+# bounds, a list of enums, a date, a time, a date-time, a secret, a list of
+# secrets without a listMax, a default, any JSON value and a map.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -165,6 +165,9 @@ types:
         typeRef: { name: string }
         secret: true
         validateMinLength: 4
+      - name: backupCodes
+        typeRef: { name: string, isArray: true }
+        secret: true
       - name: currency
         typeRef: { name: string }
         default: GBP

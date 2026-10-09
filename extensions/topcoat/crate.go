@@ -275,10 +275,11 @@ func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0
 // FormsUse reports whether a form uses item, so forms.rs declares what it
 // needs: a kind of an input form's field ("value", "object", "objectRows",
 // "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
-// "flag", "date_time", "json_text"), "read" for any; "put", "list" and
+// "yes_no", "date_time", "json_text"), "read" for any; "put", "list" and
 // "rows" for writing an input form; "first", "values", "postedText" and
-// "postedRows" for reading a post; "args", "argsSingle", "argsList",
-// "argsInput" and "query" for argument forms; "noRows", "choosable"; and what a rendered control
+// "postedRows" for reading a post, and "maxRows" when a list's limit is
+// MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
+// argument forms; "noRows", "choosable"; and what a rendered control
 // needs ("checked", "localDateTime", "showsAll", "showsRow",
 // "showsRows").
 func (c *crate) FormsUse(item string) bool {
@@ -311,6 +312,9 @@ func (c *crate) formUses() map[string]bool {
 			}
 			if f.Kind == kindValue || f.Kind == kindValueRows {
 				uses["read"], uses[f.Read] = true, true
+			}
+			if (f.Kind == kindValueRows || f.Kind == kindObjectRows) && f.Limit() == "MAX_ROWS" {
+				uses["maxRows"] = true
 			}
 			if shown {
 				addRendered(uses, f)

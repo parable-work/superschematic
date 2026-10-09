@@ -1266,6 +1266,17 @@ fn a_form_parses_into_its_input() {
     assert_eq!((input.plan, input.seats, input.budget, input.newsletter), (types::Plan::Pro, Some(4), Some(2.5), Some(true)));
     assert_eq!(input.website, None);
 
+    // A number input sends what a reader typed: a whole number written
+    // with an exponent or a zero fraction is one.
+    for (sent, want) in [("1e1", 10), ("2.0", 2), ("3e0", 3), ("+7", 7)] {
+        let input = SignupInputForm { seats: Some(sent.to_string()), ..form.clone() }.parse().unwrap_or_else(|errors| panic!("{sent}: {errors:?}"));
+        assert_eq!(input.seats, Some(want), "{sent}");
+    }
+    for sent in ["2.5", "1e19", "-1e19", "NaN", "inf", "0x10", "1,5"] {
+        let errors = SignupInputForm { seats: Some(sent.to_string()), ..form.clone() }.parse().unwrap_err();
+        assert_eq!(errors.of("seats"), ["must be a whole number"], "{sent}");
+    }
+
     let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
     assert!(!errors.of("handle").is_empty(), "{errors:?}");
     assert!(errors.of("email").is_empty(), "{errors:?}");
@@ -1297,7 +1308,10 @@ async fn the_booking_form_renders_nested_objects_rows_and_typed_controls() {
         // JSON values.
         r#"name="arrival" type="date" required="""#,
         r#"name="checkIn" type="time""#,
-        r#"<label for="booking-input-hold-until">Hold until (UTC)</label><input id="booking-input-hold-until" name="holdUntil" type="datetime-local""#,
+        r#"<label for="booking-input-hold-until">Hold until (UTC)</label><input id="booking-input-hold-until" name="holdUntil" type="datetime-local" step="any""#,
+        // A list of secrets, without a listMax: a password per row, none yet.
+        r#"<fieldset class="ss-list" data-field="backupCodes"><legend>Backup codes</legend>"#,
+        r#"value="add:backupCodes" formnovalidate="">Add</button>"#,
         r#"name="doorCode" type="password" minlength="4" autocomplete="off""#,
         r#"name="currency" type="text" pattern="^[A-Z]{3}$" value="GBP""#,
         r#"<label for="booking-input-preferences">Preferences (JSON)</label><textarea id="booking-input-preferences" name="preferences" rows="4" spellcheck="false"></textarea>"#,
@@ -1512,6 +1526,119 @@ fn a_date_time_is_read_as_utc() {
     for sent in ["2026-02-29T10:00", "2026-10-09 14:30", "2026-10-09T24:00", "2026-10-09T14:30+1", "0999-01-01T00:00", "2026-1０-09T14:30"] {
         assert_eq!(hold(sent).unwrap_err(), ["must be a date and time"], "{sent}");
     }
+}
+
+#[tokio::test]
+async fn a_held_date_time_renders_in_utc_as_a_control_holds_it() {
+    // A datetime-local control holds no offset and no more than three
+    // digits of a second's fraction, and its step allows seconds.
+    for (sent, shown) in [
+        ("2026-10-09T14:30", "2026-10-09T14:30"),
+        ("2026-10-09T14:30+01:00", "2026-10-09T13:30"),
+        ("2026-01-01T00:30+01:00", "2025-12-31T23:30"),
+        ("2024-02-28T23:00-01:30", "2024-02-29T00:30"),
+        ("2026-10-09T14:30:15.250Z", "2026-10-09T14:30:15.250"),
+        ("2026-10-09T14:30:15.123456", "2026-10-09T14:30:15.123"),
+        // Not a date and time: shown as sent, with its error.
+        ("2026-02-30T10:00", "2026-02-30T10:00"),
+    ] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("guest.name", "A"), ("holdUntil", sent)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{sent}: {html}");
+        let control = control(&html, "holdUntil");
+        assert!(control.contains(&format!(r#"type="datetime-local" step="any" value="{shown}""#)), "{sent}: {control}");
+    }
+}
+
+/// Pairs that name rows from 0 to count, each with value.
+fn indexed(name: &str, count: usize, value: &str) -> Vec<(String, String)> {
+    (0..count).map(|index| (format!("{name}[{index}]"), value.to_owned())).collect()
+}
+
+fn encode_owned(pairs: &[(String, String)]) -> String {
+    encode(&pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect::<Vec<_>>())
+}
+
+/// The start of a page, for a failure's message.
+fn head(html: &str) -> &str {
+    &html[..html.char_indices().nth(4000).map_or(html.len(), |(at, _)| at)]
+}
+
+#[test]
+fn a_form_reads_a_bounded_number_of_rows_and_pairs() {
+    // Rows past a list's listMax: the form holds one more, which parse
+    // refuses at the list.
+    let form = BookingInputForm::from_pairs(indexed("rooms", 4000, ""));
+    assert_eq!((form.rooms.len(), form.overflow), (4, false));
+    let errors = form.parse().unwrap_err();
+    assert_eq!(errors.of("rooms"), ["must contain at most 3 items"], "{errors:?}");
+
+    // A list without a listMax holds at most MAX_ROWS, 1000, and one more.
+    let form = BookingInputForm::from_pairs(indexed("backupCodes", 4000, "1234"));
+    assert_eq!((form.backup_codes.len(), form.overflow), (1001, false));
+    assert_eq!(form.parse().unwrap_err().of("backupCodes"), ["must contain at most 1000 items"]);
+    let mut form = BookingInputForm::from_pairs(indexed("backupCodes", 1000, "1234"));
+    form.row_action = Some("add:backupCodes".to_owned());
+    assert!(form.apply_action());
+    assert_eq!(form.backup_codes.len(), 1000, "a row button adds no row past MAX_ROWS");
+
+    // More than MAX_PAIRS, 5000, pairs: the form reads the first of them
+    // and parse refuses it.
+    let form = BookingInputForm::from_pairs(indexed("rooms", 50_000, ""));
+    assert_eq!((form.rooms.len(), form.overflow), (4, true));
+    let errors = form.parse().unwrap_err();
+    assert_eq!(errors.form, ["The form sent more than 5000 fields, more than it reads"], "{errors:?}");
+    assert!(errors.fields.is_empty(), "{errors:?}");
+    let exactly: Vec<_> = indexed("tags", 4999, "a").into_iter().chain([("text".to_owned(), "Hi".to_owned())]).collect();
+    assert!(!NoteInputForm::from_pairs(exactly).overflow, "5000 pairs are read");
+}
+
+#[tokio::test]
+async fn a_post_of_too_many_rows_renders_a_form_of_bounded_size() {
+    // 50,000 rows sent to a list of at most three: refused with the form's
+    // error, its four rows rendered, and nothing called.
+    let body = encode_owned(&indexed("rooms", 50_000, ""));
+    assert!(body.len() > 500_000);
+    let bookings = Bookings::default();
+    let (status, _, html) = send_to(&app(bookings.clone()), post_request("/book", &body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(bookings.calls.lock().unwrap().is_empty());
+    assert!(html.contains(r#"<p class="form-error">The form sent more than 5000 fields, more than it reads</p>"#), "{}", head(&html));
+    assert_eq!(html.matches(r#"<fieldset class="ss-row">"#).count(), 4);
+    assert!(html.len() < 64 * 1024, "a response of {} bytes", html.len());
+
+    // 4,000 rooms, under the pairs a form reads: the list's error at the
+    // list, and its first four rows.
+    let mut pairs: Vec<(String, String)> = booking().into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect();
+    pairs.extend((2..4000).map(|index| (format!("rooms[{index}]"), String::new())));
+    let bookings = Bookings::default();
+    let (status, _, html) = send_to(&app(bookings.clone()), post_request("/book", &encode_owned(&pairs))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(bookings.calls.lock().unwrap().is_empty());
+    assert!(html.contains(r#"<legend>Rooms</legend><p class="field-error">must contain at most 3 items</p>"#), "{html}");
+    assert_eq!(html.matches(r#"<fieldset class="ss-row">"#).count(), 4);
+
+    // A list of secrets without a listMax: 1001 rows, none of them echoed.
+    let mut pairs: Vec<(String, String)> = booking().into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect();
+    pairs.extend(indexed("backupCodes", 2000, "s3cret-code"));
+    let (status, _, html) = send_to(&app(Bookings::default()), post_request("/book", &encode_owned(&pairs))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html.contains(r#"<p class="field-error">must contain at most 1000 items</p>"#), "{}", head(&html));
+    assert_eq!(html.matches(r#"id="booking-input-backup-codes-"#).count(), 1001);
+    assert!(!html.contains("s3cret-code"), "a secret is rendered back");
+    assert!(!html.contains("add:backupCodes"), "a list at MAX_ROWS has an add button");
+}
+
+#[tokio::test]
+async fn a_list_of_secrets_books_and_is_never_rendered_back() {
+    let (status, _, html, calls) = book_with(&booking_with(&[("backupCodes[0]", "1111-2222"), ("backupCodes[1]", "3333-4444")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(serde_json::to_value(&calls[0]).unwrap()["backupCodes"], json!(["1111-2222", "3333-4444"]));
+
+    // Refused, the rows render again, blank.
+    let (status, _, html, _) = book_with(&booking_with(&[("guest.name", "A"), ("backupCodes[0]", "1111-2222")])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html.contains(r#"<input id="booking-input-backup-codes-0" name="backupCodes[0]" type="password" required="" autocomplete="off">"#), "{html}");
+    assert!(!html.contains("1111-2222"), "{html}");
 }
 `
 

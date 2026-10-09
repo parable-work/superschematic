@@ -17,8 +17,11 @@
 //! the same names, so each message renders at its control. A list's rows
 //! are added and removed by submit buttons named `_action` (`add:rooms`,
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
+//! A form reads at most `MAX_PAIRS` pairs and one row past a list's
+//! limit, so what a post costs is bounded by the form, not by the post.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use crate::api::runtime::ApiError;
 use crate::api::runtime::schema::ParseError;
@@ -34,8 +37,9 @@ use topcoat::view::{View, component, view};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FormErrors {
     /// Each control's messages, by its name in the form: `email`,
-    /// `guest.name`, `rooms[0].adults`.
-    pub fields: Vec<(String, Vec<String>)>,
+    /// `guest.name`, `rooms[0].adults`. A map, so a control finds its own,
+    /// and the names under it, without reading every other control's.
+    pub fields: BTreeMap<String, Vec<String>>,
     /// Messages about the form as a whole.
     pub form: Vec<String>,
 }
@@ -47,11 +51,7 @@ impl FormErrors {
 
     /// The control's messages.
     pub fn of(&self, field: &str) -> Vec<String> {
-        self.fields
-            .iter()
-            .filter(|(name, _)| name == field)
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect()
+        self.fields.get(field).cloned().unwrap_or_default()
     }
 
     /// The messages of a control and of the values under it, each of
@@ -59,7 +59,7 @@ impl FormErrors {
     /// string`), a group's item.
     pub fn under(&self, field: &str) -> Vec<String> {
         let mut out = Vec::new();
-        for (name, messages) in &self.fields {
+        for (name, messages) in self.starting_with(field) {
             if name == field {
                 out.extend(messages.iter().cloned());
             } else if let Some(place) = place_under(name, field) {
@@ -72,17 +72,21 @@ impl FormErrors {
     /// A control's `aria-invalid`: "true" when it, or a value under it, has
     /// a message.
     pub fn invalid(&self, field: &str) -> Option<&'static str> {
-        self.fields
-            .iter()
+        self.starting_with(field)
             .any(|(name, _)| name == field || place_under(name, field).is_some())
             .then_some("true")
     }
 
     pub fn add(&mut self, field: &str, message: impl Into<String>) {
-        match self.fields.iter_mut().find(|(name, _)| name == field) {
-            Some((_, messages)) => messages.push(message.into()),
-            None => self.fields.push((field.to_owned(), vec![message.into()])),
-        }
+        self.fields.entry(field.to_owned()).or_default().push(message.into());
+    }
+
+    /// The names that begin with `field`, in order: the control's own, and
+    /// the values under it, which sort after it.
+    fn starting_with<'a>(&'a self, field: &'a str) -> impl Iterator<Item = (&'a String, &'a Vec<String>)> {
+        self.fields
+            .range::<str, _>((Bound::Included(field), Bound::Unbounded))
+            .take_while(move |(name, _)| name.starts_with(field))
     }
 
     /// The errors of an operation's refusal: its field errors (its `errors`
@@ -249,6 +253,11 @@ enum Segment {
 /// The most steps a name a form reads has.
 const MAX_DEPTH: usize = 32;
 
+/// The most pairs, a name and its value, a form reads from a post or a
+/// query. It reads none after them and `parse` refuses the form, so a post
+/// of more names than any form has costs no more than this many.
+const MAX_PAIRS: usize = 5000;
+
 /// A control's name as its steps, `rooms[0].roomId` as `rooms`, `0` and
 /// `roomId`; None for a name no control has.
 fn segments(name: &str) -> Option<Vec<Segment>> {
@@ -284,15 +293,29 @@ struct Posted {
     values: Vec<String>,
     keys: BTreeMap<String, Posted>,
     rows: BTreeMap<usize, Posted>,
+    /// The post sent more than `MAX_PAIRS` pairs, which the tree leaves
+    /// out: set at the root.
+    overflow: bool,
 }
 
 /// What a name holds when nothing was posted under it.
-static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new() };
+static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new(), overflow: false };
+
+/// The form's message when its post sent more than `MAX_PAIRS` pairs.
+fn overflowed() -> FormErrors {
+    FormErrors {
+        form: vec![format!("The form sent more than {MAX_PAIRS} fields, more than it reads")],
+        ..FormErrors::default()
+    }
+}
 
 impl Posted {
+    /// The tree of the first `MAX_PAIRS` pairs, marked as overflowing when
+    /// there were more.
     fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut root = Self::default();
-        for (name, value) in pairs {
+        let mut pairs = pairs.into_iter();
+        for (name, value) in pairs.by_ref().take(MAX_PAIRS) {
             let Some(path) = segments(&name) else {
                 continue;
             };
@@ -305,6 +328,7 @@ impl Posted {
             }
             node.values.push(value);
         }
+        root.overflow = pairs.next().is_some();
         root
     }
 
@@ -363,6 +387,9 @@ fn decode<T: DeserializeOwned>(errors: &mut FormErrors, key: &str, json: Value) 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StockReleaseReservationArgsForm {
     pub id: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl StockReleaseReservationArgsForm {
@@ -374,6 +401,7 @@ impl StockReleaseReservationArgsForm {
     pub fn new(id: impl ToString) -> Self {
         Self {
             id: Some(id.to_string()),
+            overflow: false,
         }
     }
 
@@ -384,14 +412,19 @@ impl StockReleaseReservationArgsForm {
         let posted = Posted::from_pairs(pairs);
         Self {
             id: posted.get("id").first(),
+            overflow: posted.overflow,
         }
     }
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, then checked as the router checks a request's
-    /// (`Args::check`); else each control's errors. `check` refuses the first
-    /// argument that breaks a rule.
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
     pub fn parse(&self) -> Result<crate::api::StockReleaseReservationArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
         let Some(arg_id) = arg_id else {

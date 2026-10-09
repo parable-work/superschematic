@@ -14,6 +14,33 @@ type formRenderer struct {
 	// visible whether a field renders at all.
 	choosable bool
 	visible   bool
+	// used holds each variable the view reads a value of, form or a row's
+	// (row0), so a component or a loop that reads none binds `_`.
+	used map[string]bool
+}
+
+func newFormRenderer() *formRenderer {
+	return &formRenderer{used: map[string]bool{}}
+}
+
+// use records that the view reads value, a Rust place under a variable:
+// form.guest.name, row0.
+func (r *formRenderer) use(value string) {
+	variable, _, _ := strings.Cut(value, ".")
+	r.used[variable] = true
+}
+
+// sub is a renderer of a part of r's view, which r writes after what it
+// learns of it (absorb): whether the part reads a row's value.
+func (r *formRenderer) sub() *formRenderer {
+	return &formRenderer{used: r.used}
+}
+
+// absorb writes part, a view sub rendered, after r's.
+func (r *formRenderer) absorb(part *formRenderer) {
+	r.WriteString(part.Builder.String())
+	r.choosable = r.choosable || part.choosable
+	r.visible = r.visible || part.visible
 }
 
 // scope is where a struct's fields render.
@@ -202,6 +229,9 @@ func (r *formRenderer) errors(indent int, under bool, arg string) {
 // control writes f's control over value, an Option<String> place, tied to
 // its hint by described.
 func (r *formRenderer) control(indent int, f *formField, value string, field, id name, required bool, choices, described string) {
+	if f.Control != "password" {
+		r.use(value)
+	}
 	req := ""
 	if required && f.Control != "checkbox" {
 		req = " required=(true)"
@@ -226,7 +256,9 @@ func (r *formRenderer) control(indent int, f *formField, value string, field, id
 		// A secret is never rendered back: a refused form asks for it again.
 		r.line(indent, "<input "+open+` type="password"`+req+attrs+` autocomplete="off"`+invalid+">")
 	case "datetime-local":
-		r.line(indent, "<input "+open+` type="datetime-local"`+req+attrs+" value=(local_date_time("+value+".as_deref()))"+invalid+">")
+		// Any step, so a held value with seconds, or a fraction of one, is
+		// not refused by the browser.
+		r.line(indent, "<input "+open+` type="datetime-local" step="any"`+req+attrs+" value=(local_date_time("+value+".as_deref()))"+invalid+">")
 	case "textarea":
 		r.line(indent, "<textarea "+open+` rows="4" spellcheck="false"`+req+described+invalid+">("+value+".clone())</textarea>")
 	default:
@@ -266,6 +298,7 @@ func (r *formRenderer) object(sc scope, f *formField, path []pathSegment, indent
 func (r *formRenderer) rows(sc scope, f *formField, path []pathSegment, indent int) {
 	text, dynamic := controlName(path)
 	list := sc.form + "." + f.Name
+	r.use(list)
 	index, row := fmt.Sprintf("i%d", sc.depth), fmt.Sprintf("row%d", sc.depth)
 	rowPath := with(path, pathSegment{index: index})
 	rowLabel := "let label = format!(" + rustString(escapeBraces(f.RowLabel)+" {}") + ", " + index + " + 1);"
@@ -275,45 +308,51 @@ func (r *formRenderer) rows(sc scope, f *formField, path []pathSegment, indent i
 	field := r.bind(indent+1, "list", text, dynamic)
 	r.line(indent+1, "<legend>"+rustString(f.Label)+"</legend>")
 	r.errors(indent+1, false, field.arg)
-	r.line(indent+1, "#[key("+index+")]")
-	r.line(indent+1, "for ("+index+", "+row+") in "+list+".iter().enumerate() {")
+	// A row's view is written first, to learn whether it reads the row: a
+	// secret's row, or one whose fields are hidden or secret, does not.
+	body := r.sub()
+	delete(r.used, row)
 	if f.Kind == kindObjectRows {
-		r.line(indent+2, `<fieldset class="ss-row">`)
-		r.line(indent+3, "let row = format!("+rustString(formatName(rowPath))+");")
-		r.line(indent+3, rowLabel)
-		r.line(indent+3, "<legend>(&label)</legend>")
-		r.line(indent+3, `<input type="hidden" name=(&row) value="">`)
-		r.errors(indent+3, false, "&row")
-		r.fields(scope{form: row, path: rowPath, idBase: sc.idBase, depth: sc.depth + 1}, f.Child, indent+3)
-		r.removeButton(indent+3, list, f.Min, fmt.Sprintf(remove, "row"))
-		r.line(indent+2, "</fieldset>")
+		body.line(indent+2, `<fieldset class="ss-row">`)
+		body.line(indent+3, "let row = format!("+rustString(formatName(rowPath))+");")
+		body.line(indent+3, rowLabel)
+		body.line(indent+3, "<legend>(&label)</legend>")
+		body.line(indent+3, `<input type="hidden" name=(&row) value="">`)
+		body.errors(indent+3, false, "&row")
+		body.fields(scope{form: row, path: rowPath, idBase: sc.idBase, depth: sc.depth + 1}, f.Child, indent+3)
+		body.removeButton(indent+3, list, f.Min, fmt.Sprintf(remove, "row"))
+		body.line(indent+2, "</fieldset>")
 	} else {
-		r.line(indent+2, `<div class="field ss-row">`)
-		r.line(indent+3, "let name = format!("+rustString(formatName(rowPath))+");")
-		r.line(indent+3, "let id = format!("+rustString(controlID(sc.idBase, rowPath))+");")
-		r.line(indent+3, rowLabel)
-		r.line(indent+3, "<label for=(&id)>(&label)</label>")
+		body.line(indent+2, `<div class="field ss-row">`)
+		body.line(indent+3, "let name = format!("+rustString(formatName(rowPath))+");")
+		body.line(indent+3, "let id = format!("+rustString(controlID(sc.idBase, rowPath))+");")
+		body.line(indent+3, rowLabel)
+		body.line(indent+3, "<label for=(&id)>(&label)</label>")
 		if f.Control == "checkbox" {
-			r.line(indent+3, `<input type="hidden" name=(&name) value="">`)
+			body.line(indent+3, `<input type="hidden" name=(&name) value="">`)
 		}
-		r.control(indent+3, f, row, name{attr: "(&name)", arg: "&name"}, name{attr: "(&id)", arg: "&id"}, true, choicePath(path), "")
-		r.removeButton(indent+3, list, f.Min, fmt.Sprintf(remove, "name"))
-		r.errors(indent+3, f.Control == "textarea", "&name")
-		r.line(indent+2, "</div>")
+		body.control(indent+3, f, row, name{attr: "(&name)", arg: "&name"}, name{attr: "(&id)", arg: "&id"}, true, choicePath(path), "")
+		body.removeButton(indent+3, list, f.Min, fmt.Sprintf(remove, "name"))
+		body.errors(indent+3, f.Control == "textarea", "&name")
+		body.line(indent+2, "</div>")
 	}
+	binding := row
+	if !r.used[row] {
+		binding = "_"
+	}
+	r.line(indent+1, "#[key("+index+")]")
+	r.line(indent+1, "for ("+index+", "+binding+") in "+list+".iter().enumerate() {")
+	r.absorb(body)
 	r.line(indent+1, "}")
 	add := "value=" + rustString("add:"+text)
 	if dynamic {
 		add = `value=(format!("add:{list}"))`
 	}
-	button := `<button type="submit" class="ss-add" name="_action" ` + add + ` formnovalidate=(true)>` + rustString(f.AddLabel) + `</button>`
-	if f.Max != nil {
-		r.line(indent+1, fmt.Sprintf("if %s.len() < %d {", list, *f.Max))
-		r.line(indent+2, button)
-		r.line(indent+1, "}")
-	} else {
-		r.line(indent+1, button)
-	}
+	// The add button shows while the list holds fewer rows than its limit,
+	// its listMax or MAX_ROWS.
+	r.line(indent+1, fmt.Sprintf("if %s.len() < %s {", list, f.Limit()))
+	r.line(indent+2, `<button type="submit" class="ss-add" name="_action" `+add+` formnovalidate=(true)>`+rustString(f.AddLabel)+`</button>`)
+	r.line(indent+1, "}")
 	r.line(indent, "</fieldset>")
 }
 
@@ -334,6 +373,7 @@ func (r *formRenderer) removeButton(indent int, list string, min int, button str
 func (r *formRenderer) group(sc scope, f *formField, path []pathSegment, indent int) {
 	text, dynamic := controlName(path)
 	value := sc.form + "." + f.Name
+	r.use(value)
 	r.line(indent, `<fieldset class="ss-choices" data-field=`+rustString(f.JSONName)+">")
 	field := r.bind(indent+1, "name", text, dynamic)
 	r.line(indent+1, "<legend>"+rustString(f.Label)+"</legend>")
@@ -361,14 +401,22 @@ func (r *formRenderer) repeated(sc scope, f *formField, path []pathSegment, inde
 		r.line(indent+1, `<p class="field-hint">`+rustString(f.Hint)+"</p>")
 	}
 	r.errors(indent+1, true, field.arg)
+	r.use(sc.form)
+	body := r.sub()
+	delete(r.used, row)
+	body.line(indent+2, `<div class="field ss-row">`)
+	body.line(indent+3, "let id = format!("+rustString(controlID(sc.idBase, rowPath))+");")
+	body.line(indent+3, "let label = format!("+rustString(escapeBraces(f.Label)+" {}")+", "+index+" + 1);")
+	body.line(indent+3, "<label for=(&id)>(&label)</label>")
+	body.control(indent+3, f, row, field, name{attr: "(&id)", arg: "&id"}, false, choicePath(path), "")
+	body.line(indent+2, "</div>")
+	binding := row
+	if !r.used[row] {
+		binding = "_"
+	}
 	r.line(indent+1, "#[key("+index+")]")
-	r.line(indent+1, "for ("+index+", "+row+") in "+sc.form+"."+f.Name+".iter().cloned().map(Some).chain([None]).enumerate() {")
-	r.line(indent+2, `<div class="field ss-row">`)
-	r.line(indent+3, "let id = format!("+rustString(controlID(sc.idBase, rowPath))+");")
-	r.line(indent+3, "let label = format!("+rustString(escapeBraces(f.Label)+" {}")+", "+index+" + 1);")
-	r.line(indent+3, "<label for=(&id)>(&label)</label>")
-	r.control(indent+3, f, row, field, name{attr: "(&id)", arg: "&id"}, false, choicePath(path), "")
-	r.line(indent+2, "</div>")
+	r.line(indent+1, "for ("+index+", "+binding+") in "+sc.form+"."+f.Name+".iter().cloned().map(Some).chain([None]).enumerate() {")
+	r.absorb(body)
 	r.line(indent+1, "}")
 	r.line(indent, "</fieldset>")
 }

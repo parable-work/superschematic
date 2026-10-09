@@ -17,8 +17,11 @@
 //! the same names, so each message renders at its control. A list's rows
 //! are added and removed by submit buttons named `_action` (`add:rooms`,
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
+//! A form reads at most `MAX_PAIRS` pairs and one row past a list's
+//! limit, so what a post costs is bounded by the form, not by the post.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use crate::api::runtime::ApiError;
 use crate::api::runtime::schema::ParseError;
@@ -36,8 +39,9 @@ use topcoat::view::{View, component, view};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FormErrors {
     /// Each control's messages, by its name in the form: `email`,
-    /// `guest.name`, `rooms[0].adults`.
-    pub fields: Vec<(String, Vec<String>)>,
+    /// `guest.name`, `rooms[0].adults`. A map, so a control finds its own,
+    /// and the names under it, without reading every other control's.
+    pub fields: BTreeMap<String, Vec<String>>,
     /// Messages about the form as a whole.
     pub form: Vec<String>,
 }
@@ -49,11 +53,7 @@ impl FormErrors {
 
     /// The control's messages.
     pub fn of(&self, field: &str) -> Vec<String> {
-        self.fields
-            .iter()
-            .filter(|(name, _)| name == field)
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect()
+        self.fields.get(field).cloned().unwrap_or_default()
     }
 
     /// The messages of a control and of the values under it, each of
@@ -61,7 +61,7 @@ impl FormErrors {
     /// string`), a group's item.
     pub fn under(&self, field: &str) -> Vec<String> {
         let mut out = Vec::new();
-        for (name, messages) in &self.fields {
+        for (name, messages) in self.starting_with(field) {
             if name == field {
                 out.extend(messages.iter().cloned());
             } else if let Some(place) = place_under(name, field) {
@@ -74,17 +74,21 @@ impl FormErrors {
     /// A control's `aria-invalid`: "true" when it, or a value under it, has
     /// a message.
     pub fn invalid(&self, field: &str) -> Option<&'static str> {
-        self.fields
-            .iter()
+        self.starting_with(field)
             .any(|(name, _)| name == field || place_under(name, field).is_some())
             .then_some("true")
     }
 
     pub fn add(&mut self, field: &str, message: impl Into<String>) {
-        match self.fields.iter_mut().find(|(name, _)| name == field) {
-            Some((_, messages)) => messages.push(message.into()),
-            None => self.fields.push((field.to_owned(), vec![message.into()])),
-        }
+        self.fields.entry(field.to_owned()).or_default().push(message.into());
+    }
+
+    /// The names that begin with `field`, in order: the control's own, and
+    /// the values under it, which sort after it.
+    fn starting_with<'a>(&'a self, field: &'a str) -> impl Iterator<Item = (&'a String, &'a Vec<String>)> {
+        self.fields
+            .range::<str, _>((Bound::Included(field), Bound::Unbounded))
+            .take_while(move |(name, _)| name.starts_with(field))
     }
 
     /// The errors of an operation's refusal: its field errors (its `errors`
@@ -298,6 +302,18 @@ enum Segment {
 /// The most steps a name a form reads has.
 const MAX_DEPTH: usize = 32;
 
+/// The most pairs, a name and its value, a form reads from a post or a
+/// query. It reads none after them and `parse` refuses the form, so a post
+/// of more names than any form has costs no more than this many.
+const MAX_PAIRS: usize = 5000;
+
+/// The most rows a form holds of a list without a listMax, or with one
+/// above it: a row button adds none past it, and `parse` refuses a list
+/// that holds more. A form reads one row past a list's limit, its listMax
+/// or this, and no more, so a post of too many rows renders again with
+/// the list's error rather than with every row it sent.
+const MAX_ROWS: usize = 1000;
+
 /// A control's name as its steps, `rooms[0].roomId` as `rooms`, `0` and
 /// `roomId`; None for a name no control has.
 fn segments(name: &str) -> Option<Vec<Segment>> {
@@ -333,15 +349,29 @@ struct Posted {
     values: Vec<String>,
     keys: BTreeMap<String, Posted>,
     rows: BTreeMap<usize, Posted>,
+    /// The post sent more than `MAX_PAIRS` pairs, which the tree leaves
+    /// out: set at the root.
+    overflow: bool,
 }
 
 /// What a name holds when nothing was posted under it.
-static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new() };
+static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new(), overflow: false };
+
+/// The form's message when its post sent more than `MAX_PAIRS` pairs.
+fn overflowed() -> FormErrors {
+    FormErrors {
+        form: vec![format!("The form sent more than {MAX_PAIRS} fields, more than it reads")],
+        ..FormErrors::default()
+    }
+}
 
 impl Posted {
+    /// The tree of the first `MAX_PAIRS` pairs, marked as overflowing when
+    /// there were more.
     fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut root = Self::default();
-        for (name, value) in pairs {
+        let mut pairs = pairs.into_iter();
+        for (name, value) in pairs.by_ref().take(MAX_PAIRS) {
             let Some(path) = segments(&name) else {
                 continue;
             };
@@ -354,6 +384,7 @@ impl Posted {
             }
             node.values.push(value);
         }
+        root.overflow = pairs.next().is_some();
         root
     }
 
@@ -391,9 +422,11 @@ impl Posted {
             .collect()
     }
 
-    /// Each row posted under this name, in the order of their indexes.
-    fn rows(&self) -> impl Iterator<Item = &Posted> {
-        self.rows.values()
+    /// The rows posted under this name, in the order of their indexes: at
+    /// most one past `limit`, the list's, so a list that sent too many
+    /// holds enough to be refused and no more.
+    fn rows(&self, limit: usize) -> impl Iterator<Item = &Posted> {
+        self.rows.values().take(limit.saturating_add(1))
     }
 }
 
@@ -420,6 +453,15 @@ fn put_list(json: &mut Map<String, Value>, key: &str, items: Vec<Value>, require
     }
 }
 
+/// Refuses a list of rows that holds more than `limit`, its listMax or
+/// `MAX_ROWS`, at the list, as its listMax rule would: the form read one
+/// row past the limit of a post that sent more.
+fn within(errors: &mut FormErrors, name: &str, rows: usize, limit: usize) {
+    if rows > limit {
+        errors.add(name, format!("must contain at most {limit} items"));
+    }
+}
+
 /// A row of a list of values: its value, or null for a row that sent none,
 /// which the input's rules refuse at the row, as a list holds no null; a
 /// value the row cannot be is its message.
@@ -443,11 +485,23 @@ fn boolean(value: Option<&str>) -> Read {
     Ok(Some(Value::from(value.is_some())))
 }
 
-/// A whole number, refused when it is not one.
+/// A whole number, refused when it is not one. A number input sends what a
+/// reader typed, so `1e1` and `2.0` are whole numbers, as is any number
+/// without a fraction in the range of an i64.
 fn integer(value: Option<&str>) -> Read {
-    match value {
-        None => Ok(None),
-        Some(text) => text.trim().parse::<i64>().map(|number| Some(Value::from(number))).map_err(|_| "must be a whole number"),
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    if let Ok(number) = text.parse::<i64>() {
+        return Ok(Some(Value::from(number)));
+    }
+    match text.parse::<f64>() {
+        // i64::MIN is -2^63, which an f64 holds; i64::MAX is not, and 2^63
+        // is the first f64 past it.
+        Ok(number) if number.is_finite() && number.fract() == 0.0 && number >= i64::MIN as f64 && number < -(i64::MIN as f64) => {
+            Ok(Some(Value::from(number as i64)))
+        }
+        _ => Err("must be a whole number"),
     }
 }
 
@@ -474,37 +528,61 @@ fn date_time(value: Option<&str>) -> Read {
 /// reads it: in UTC unless it ends in an offset (`Z`, `+01:00`). None for
 /// any other text, or a date or a time that does not exist.
 fn utc_date_time(text: &str) -> Option<String> {
-    let (date, rest) = text.split_once('T')?;
-    let (clock, offset) = rest.split_at(rest.find(['Z', '+', '-']).unwrap_or(rest.len()));
-    let (d, c, o) = (date.as_bytes(), clock.as_bytes(), offset.as_bytes());
-    let year = digits(d, 0..4).filter(|year| *year >= 1000)?;
-    let month = digits(d, 5..7).filter(|month| (1..=12).contains(month))?;
-    digits(d, 8..10).filter(|day| (1..=days_in_month(year, month)).contains(day))?;
-    digits(c, 0..2).filter(|hour| *hour < 24)?;
-    digits(c, 3..5).filter(|minute| *minute < 60)?;
-    let seconds = match c.len() {
-        5 => ":00",
-        8.. if c[5] == b':'
-            && digits(c, 6..8).is_some_and(|second| second < 60)
-            && (c.len() == 8 || (c[8] == b'.' && c.len() > 9 && c[9..].iter().all(u8::is_ascii_digit))) =>
-        {
-            ""
+    let at = DateTime::parse(text)?;
+    let zone = if at.offset.is_empty() { "Z" } else { at.offset };
+    let seconds = if at.seconds.is_empty() { ":00" } else { at.seconds };
+    Some(format!("{:04}-{:02}-{:02}T{:02}:{:02}{seconds}{zone}", at.year, at.month, at.day, at.hour, at.minute))
+}
+
+/// A date and time as the form reads it: its date and its hour and minute,
+/// then its seconds with their fraction as sent (`:15.5`, or nothing) and
+/// its offset (`Z`, `+01:00`, or nothing for UTC).
+struct DateTime<'a> {
+    year: u32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    seconds: &'a str,
+    offset: &'a str,
+}
+
+impl<'a> DateTime<'a> {
+    /// `YYYY-MM-DDTHH:MM[:SS[.fraction]][Z|±HH:MM]`, else None, as for a
+    /// date or a time that does not exist.
+    fn parse(text: &'a str) -> Option<Self> {
+        let (date, rest) = text.split_once('T')?;
+        let (time, offset) = rest.split_at(rest.find(['Z', '+', '-']).unwrap_or(rest.len()));
+        let (d, c, o) = (date.as_bytes(), time.as_bytes(), offset.as_bytes());
+        if d.len() != 10 || d[4] != b'-' || d[7] != b'-' || c.len() < 5 || c[2] != b':' {
+            return None;
         }
-        _ => return None,
-    };
-    let offset_ok = match o {
-        [] | [b'Z'] => true,
-        [b'+' | b'-', ..] => {
-            o.len() == 6
-                && o[3] == b':'
-                && digits(o, 1..3).is_some_and(|hour| hour < 24)
-                && digits(o, 4..6).is_some_and(|minute| minute < 60)
-        }
-        _ => false,
-    };
-    let zone = if offset.is_empty() { "Z" } else { offset };
-    (d.len() == 10 && d[4] == b'-' && d[7] == b'-' && c[2] == b':' && offset_ok)
-        .then(|| format!("{date}T{clock}{seconds}{zone}"))
+        let year = digits(d, 0..4).filter(|year| *year >= 1000)?;
+        let month = digits(d, 5..7).filter(|month| (1..=12).contains(month))?;
+        let day = digits(d, 8..10).filter(|day| (1..=days_in_month(year, month)).contains(day))?;
+        let hour = digits(c, 0..2).filter(|hour| *hour < 24)?;
+        let minute = digits(c, 3..5).filter(|minute| *minute < 60)?;
+        let seconds_ok = match c.len() {
+            5 => true,
+            8.. => {
+                c[5] == b':'
+                    && digits(c, 6..8).is_some_and(|second| second < 60)
+                    && (c.len() == 8 || (c[8] == b'.' && c.len() > 9 && c[9..].iter().all(u8::is_ascii_digit)))
+            }
+            _ => false,
+        };
+        let offset_ok = match o {
+            [] | [b'Z'] => true,
+            [b'+' | b'-', ..] => {
+                o.len() == 6
+                    && o[3] == b':'
+                    && digits(o, 1..3).is_some_and(|hour| hour < 24)
+                    && digits(o, 4..6).is_some_and(|minute| minute < 60)
+            }
+            _ => false,
+        };
+        (seconds_ok && offset_ok).then_some(Self { year, month, day, hour, minute, seconds: &time[5..], offset })
+    }
 }
 
 /// The number the ASCII digits at `range` spell, when they are all digits.
@@ -525,10 +603,51 @@ fn days_in_month(year: u32, month: u32) -> u32 {
     }
 }
 
-/// A date and time as a `datetime-local` control shows it: a UTC value
-/// without its `Z`.
-fn local_date_time(value: Option<&str>) -> Option<&str> {
-    value.map(|value| value.strip_suffix('Z').or_else(|| value.strip_suffix("+00:00")).unwrap_or(value))
+/// A date and time as a `datetime-local` control shows it, which holds no
+/// offset: in UTC, as the form reads it, `YYYY-MM-DDTHH:MM` with its
+/// seconds and up to three digits of their fraction when it has them, so
+/// a value with an offset (`2026-10-09T14:30+01:00`) shows as
+/// `2026-10-09T13:30`. A value that is not a date and time shows as sent,
+/// with its error.
+fn local_date_time(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    let Some(at) = DateTime::parse(value.trim()) else {
+        return Some(value.to_owned());
+    };
+    let (mut year, mut month, mut day) = (at.year, at.month, at.day);
+    // The offset, east of UTC, in minutes, which parse checked.
+    let east = match at.offset.as_bytes() {
+        [sign @ (b'+' | b'-'), ..] => {
+            let minutes = (digits(at.offset.as_bytes(), 1..3).unwrap_or(0) * 60 + digits(at.offset.as_bytes(), 4..6).unwrap_or(0)) as i32;
+            if *sign == b'-' { -minutes } else { minutes }
+        }
+        _ => 0,
+    };
+    let mut minutes = (at.hour * 60 + at.minute) as i32 - east;
+    if minutes < 0 {
+        minutes += 24 * 60;
+        if day > 1 {
+            day -= 1;
+        } else if month > 1 {
+            month -= 1;
+            day = days_in_month(year, month);
+        } else {
+            (year, month, day) = (year - 1, 12, 31);
+        }
+    } else if minutes >= 24 * 60 {
+        minutes -= 24 * 60;
+        if day < days_in_month(year, month) {
+            day += 1;
+        } else if month < 12 {
+            (month, day) = (month + 1, 1);
+        } else {
+            (year, month, day) = (year + 1, 1, 1);
+        }
+    }
+    // A control reads at most three digits of a second's fraction:
+    // `:SS.fff`.
+    let seconds = at.seconds.get(..7).unwrap_or(at.seconds);
+    Some(format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}{seconds}", minutes / 60, minutes % 60))
 }
 
 /// A JSON value, from its text.
@@ -545,11 +664,11 @@ fn checked(values: &[String], value: &str) -> bool {
 }
 
 /// A list's bounds: a row button adds no row past `max`, the list's
-/// listMax, and removes none at `min`, its listMin.
+/// listMax or `MAX_ROWS`, and removes none at `min`, its listMin.
 #[derive(Clone, Copy)]
 struct Bounds {
     min: usize,
-    max: Option<usize>,
+    max: usize,
 }
 
 /// Applies a row action to `rows` at `path`: adds a row (`new`) when
@@ -565,7 +684,7 @@ fn act_on_rows<T>(
 ) -> bool {
     match path {
         [] if add => {
-            let room = bounds.max.is_none_or(|max| rows.len() < max);
+            let room = rows.len() < bounds.max;
             if room {
                 rows.push(new());
             }
@@ -709,12 +828,16 @@ pub struct BookingInputForm {
     pub check_in: Option<String>,
     pub hold_until: Option<String>,
     pub door_code: Option<String>,
+    pub backup_codes: Vec<Option<String>>,
     pub currency: Option<String>,
     pub preferences: Option<String>,
     pub labels: Option<String>,
     /// The row button that submitted the form (`_action`), which
     /// `apply_action` applies.
     pub row_action: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl BookingInputForm {
@@ -731,10 +854,12 @@ impl BookingInputForm {
             check_in: None,
             hold_until: None,
             door_code: None,
+            backup_codes: Vec::new(),
             currency: Some("GBP".to_owned()),
             preferences: None,
             labels: None,
             row_action: None,
+            overflow: false,
         }
     }
 
@@ -745,15 +870,23 @@ impl BookingInputForm {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields, and the row button pressed.
+    /// The form as posted: its fields, the row button pressed
+    /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
-        Self { row_action: posted.get("_action").text(), ..Self::from_posted(posted) }
+        Self {
+            row_action: posted.get("_action").text(),
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
     }
 
     /// The input: each field read as the input type's JSON, then parsed by
     /// the type's rules with undeclared keys refused; else each control's
-    /// errors.
+    /// errors, or the form's when its post sent more than it reads.
     pub fn parse(&self) -> Result<types::BookingInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let json = self.write("", &mut errors);
         if !errors.is_empty() {
@@ -789,16 +922,18 @@ impl BookingInputForm {
         Self {
             guest: GuestForm::from_posted(posted.get("guest")),
             billing: BillingAddressForm::from_posted(posted.get("billing")),
-            rooms: posted.get("rooms").rows().map(RoomRequestForm::from_posted).collect(),
+            rooms: posted.get("rooms").rows(3).map(RoomRequestForm::from_posted).collect(),
             amenities: posted.get("amenities").values(false),
             arrival: posted.get("arrival").text(),
             check_in: posted.get("checkIn").text(),
             hold_until: posted.get("holdUntil").text(),
             door_code: posted.get("doorCode").text(),
+            backup_codes: posted.get("backupCodes").rows(MAX_ROWS).map(Posted::text).collect(),
             currency: posted.get("currency").text(),
             preferences: posted.get("preferences").text(),
             labels: posted.get("labels").text(),
             row_action: None,
+            overflow: false,
         }
     }
 
@@ -816,12 +951,21 @@ impl BookingInputForm {
             .enumerate()
             .map(|(index, row)| Value::Object(row.write(&format!("{at}rooms[{index}]."), errors)))
             .collect();
+        within(errors, &format!("{at}rooms"), rows.len(), 3);
         put_list(&mut json, "rooms", rows, true);
         put_list(&mut json, "amenities", self.amenities.iter().map(|value| Value::from(value.as_str())).collect(), false);
         put(&mut json, errors, "arrival", &format!("{at}arrival"), text(self.arrival.as_deref()));
         put(&mut json, errors, "checkIn", &format!("{at}checkIn"), text(self.check_in.as_deref()));
         put(&mut json, errors, "holdUntil", &format!("{at}holdUntil"), date_time(self.hold_until.as_deref()));
         put(&mut json, errors, "doorCode", &format!("{at}doorCode"), text(self.door_code.as_deref()));
+        let rows: Vec<Value> = self
+            .backup_codes
+            .iter()
+            .enumerate()
+            .map(|(index, value)| row(errors, &format!("{at}backupCodes[{index}]"), text(value.as_deref())))
+            .collect();
+        within(errors, &format!("{at}backupCodes"), rows.len(), MAX_ROWS);
+        put_list(&mut json, "backupCodes", rows, false);
         put(&mut json, errors, "currency", &format!("{at}currency"), text(self.currency.as_deref()));
         put(&mut json, errors, "preferences", &format!("{at}preferences"), json_text(self.preferences.as_deref()));
         put(&mut json, errors, "labels", &format!("{at}labels"), json_text(self.labels.as_deref()));
@@ -842,6 +986,7 @@ impl BookingInputForm {
                 "checkIn" => rest.is_empty(),
                 "holdUntil" => rest.is_empty(),
                 "doorCode" => rest.is_empty(),
+                "backupCodes" => shows_row(rest),
                 "currency" => rest.is_empty(),
                 "preferences" => shows_all(rest),
                 "labels" => shows_all(rest),
@@ -858,7 +1003,8 @@ impl BookingInputForm {
             return false;
         };
         match key.as_str() {
-            "rooms" => act_on_rows(&mut self.rooms, rest, add, Bounds { min: 1, max: Some(3) }, RoomRequestForm::new, no_rows),
+            "rooms" => act_on_rows(&mut self.rooms, rest, add, Bounds { min: 1, max: 3 }, RoomRequestForm::new, no_rows),
+            "backupCodes" => act_on_rows(&mut self.backup_codes, rest, add, Bounds { min: 0, max: MAX_ROWS }, || None, no_rows),
             _ => false,
         }
     }
@@ -935,6 +1081,9 @@ pub struct NoteInputForm {
     /// The row button that submitted the form (`_action`), which
     /// `apply_action` applies.
     pub row_action: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl NoteInputForm {
@@ -946,6 +1095,7 @@ impl NoteInputForm {
             text: None,
             tags: Vec::new(),
             row_action: None,
+            overflow: false,
         }
     }
 
@@ -956,15 +1106,23 @@ impl NoteInputForm {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields, and the row button pressed.
+    /// The form as posted: its fields, the row button pressed
+    /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
-        Self { row_action: posted.get("_action").text(), ..Self::from_posted(posted) }
+        Self {
+            row_action: posted.get("_action").text(),
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
     }
 
     /// The input: each field read as the input type's JSON, then parsed by
     /// the type's rules with undeclared keys refused; else each control's
-    /// errors.
+    /// errors, or the form's when its post sent more than it reads.
     pub fn parse(&self) -> Result<types::NoteInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let json = self.write("", &mut errors);
         if !errors.is_empty() {
@@ -999,8 +1157,9 @@ impl NoteInputForm {
     fn from_posted(posted: &Posted) -> Self {
         Self {
             text: posted.get("text").text(),
-            tags: posted.get("tags").rows().map(Posted::text).collect(),
+            tags: posted.get("tags").rows(3).map(Posted::text).collect(),
             row_action: None,
+            overflow: false,
         }
     }
 
@@ -1015,6 +1174,7 @@ impl NoteInputForm {
             .enumerate()
             .map(|(index, value)| row(errors, &format!("{at}tags[{index}]"), text(value.as_deref())))
             .collect();
+        within(errors, &format!("{at}tags"), rows.len(), 3);
         put_list(&mut json, "tags", rows, false);
         json
     }
@@ -1040,7 +1200,7 @@ impl NoteInputForm {
             return false;
         };
         match key.as_str() {
-            "tags" => act_on_rows(&mut self.tags, rest, add, Bounds { min: 0, max: Some(3) }, || None, no_rows),
+            "tags" => act_on_rows(&mut self.tags, rest, add, Bounds { min: 0, max: 3 }, || None, no_rows),
             _ => false,
         }
     }
@@ -1120,6 +1280,9 @@ pub struct SignupInputForm {
     pub seats: Option<String>,
     pub budget: Option<String>,
     pub newsletter: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl SignupInputForm {
@@ -1136,6 +1299,7 @@ impl SignupInputForm {
             seats: None,
             budget: None,
             newsletter: None,
+            overflow: false,
         }
     }
 
@@ -1146,15 +1310,22 @@ impl SignupInputForm {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields, and the row button pressed.
+    /// The form as posted: its fields
+    /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
-        Self::from_posted(posted)
+        Self {
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
     }
 
     /// The input: each field read as the input type's JSON, then parsed by
     /// the type's rules with undeclared keys refused; else each control's
-    /// errors.
+    /// errors, or the form's when its post sent more than it reads.
     pub fn parse(&self) -> Result<types::SignupInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let json = self.write("", &mut errors);
         if !errors.is_empty() {
@@ -1174,6 +1345,7 @@ impl SignupInputForm {
             seats: posted.get("seats").text(),
             budget: posted.get("budget").text(),
             newsletter: posted.get("newsletter").text(),
+            overflow: false,
         }
     }
 
@@ -1395,7 +1567,7 @@ pub async fn booking_input_fields(
         </div>
         <div class="field">
             <label for="booking-input-hold-until">"Hold until (UTC)"</label>
-            <input id="booking-input-hold-until" name="holdUntil" type="datetime-local" value=(local_date_time(form.hold_until.as_deref())) aria-invalid=(errors.invalid("holdUntil"))>
+            <input id="booking-input-hold-until" name="holdUntil" type="datetime-local" step="any" value=(local_date_time(form.hold_until.as_deref())) aria-invalid=(errors.invalid("holdUntil"))>
             for message in errors.of("holdUntil") {
                 <p class="field-error">(message)</p>
             }
@@ -1407,6 +1579,29 @@ pub async fn booking_input_fields(
                 <p class="field-error">(message)</p>
             }
         </div>
+        <fieldset class="ss-list" data-field="backupCodes">
+            <legend>"Backup codes"</legend>
+            for message in errors.of("backupCodes") {
+                <p class="field-error">(message)</p>
+            }
+            #[key(i0)]
+            for (i0, _) in form.backup_codes.iter().enumerate() {
+                <div class="field ss-row">
+                    let name = format!("backupCodes[{i0}]");
+                    let id = format!("booking-input-backup-codes-{i0}");
+                    let label = format!("Backup codes {}", i0 + 1);
+                    <label for=(&id)>(&label)</label>
+                    <input id=(&id) name=(&name) type="password" required=(true) autocomplete="off" aria-invalid=(errors.invalid(&name))>
+                    <button type="submit" class="ss-remove" name="_action" value=(format!("remove:{name}")) formnovalidate=(true) aria-label=(format!("Remove {label}"))>"Remove"</button>
+                    for message in errors.of(&name) {
+                        <p class="field-error">(message)</p>
+                    }
+                </div>
+            }
+            if form.backup_codes.len() < MAX_ROWS {
+                <button type="submit" class="ss-add" name="_action" value="add:backupCodes" formnovalidate=(true)>"Add"</button>
+            }
+        </fieldset>
         <div class="field">
             <label for="booking-input-currency">"Currency"</label>
             match choices.of("currency", "currency") {
@@ -1594,6 +1789,9 @@ pub async fn signup_input_fields(
 pub struct AccountAnnotateArgsForm {
     pub id: Option<String>,
     pub input: NoteInputForm,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl AccountAnnotateArgsForm {
@@ -1607,6 +1805,7 @@ impl AccountAnnotateArgsForm {
         Self {
             id: Some(id.to_string()),
             input: NoteInputForm::new(),
+            overflow: false,
         }
     }
 
@@ -1618,14 +1817,19 @@ impl AccountAnnotateArgsForm {
         Self {
             id: posted.get("id").first(),
             input: NoteInputForm::from_post(&posted),
+            overflow: posted.overflow,
         }
     }
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, the input parsed by its form, then checked as
     /// the router checks a request's (`Args::check`); else each control's
-    /// errors. `check` refuses the first argument that breaks a rule.
+    /// errors, or the form's when the browser sent more than it reads. `check`
+    /// refuses the first argument that breaks a rule.
     pub fn parse(&self) -> Result<crate::api::AccountAnnotateArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
         let input = match self.input.parse() {

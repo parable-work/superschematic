@@ -56,6 +56,30 @@ pub async fn order_cancel_order(cx: &Cx, args: crate::api::OrderCancelOrderArgs)
         .await
 }
 
+/// order.holdOrder (`POST /api/orders/{id}/hold`): Holds an order, telling the shopper unless told not to.
+pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+    let caller = can_order_hold_order(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .order
+        .hold_order(operations::ORDER_HOLD_ORDER.context(caller), args)
+        .await
+}
+
+/// order.noteOrder (`POST /api/orders/{id}/notes`): Notes an order, or marks it noted when the note is left out.
+pub async fn order_note_order(cx: &Cx, args: crate::api::OrderNoteOrderArgs) -> Result<types::OrderView, ApiError> {
+    let caller = can_order_note_order(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .order
+        .note_order(operations::ORDER_NOTE_ORDER.context(caller), args)
+        .await
+}
+
 /// order.tagOrder (`POST /api/orders/{id}/tags`): Tags an order; its form holds the map as JSON text.
 pub async fn order_tag_order(cx: &Cx, args: crate::api::OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_tag_order(cx).await?;
@@ -97,6 +121,20 @@ pub async fn can_order_get_order(cx: &Cx) -> Result<Option<Principal>, ApiError>
 /// Admits the caller of order.cancelOrder as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_order_cancel_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
+}
+
+/// Admits the caller of order.holdOrder as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_hold_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
+}
+
+/// Admits the caller of order.noteOrder as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_note_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     let _ = cx;
     Ok(None)
 }

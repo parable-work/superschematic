@@ -3,6 +3,7 @@ package topcoat
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -32,9 +33,11 @@ type argForm struct {
 	// Input is the input's form, which the argument form embeds; nil for an
 	// operation without an input.
 	Input *argInput
-	// Choosable reports whether a control takes the app's choices, and
-	// Body is the component's view.
+	// Choosable reports whether a control takes the app's choices,
+	// UsesForm whether the component's view reads the form, and Body is
+	// the view.
 	Choosable bool
+	UsesForm  bool
 	Body      string
 }
 
@@ -179,6 +182,14 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		for _, field := range st.Fields {
 			names[field.JSONName] = "its input's field " + field.JSONName
 		}
+		if st.Rows {
+			names[rowActionName] = "the name of its input's row buttons"
+		}
+		// An optional input is part of the arguments only when one of its
+		// fields was sent, which its form says.
+		if f.Input.Optional {
+			st.markSent()
+		}
 	}
 	args := map[string]*ir.ArgumentDef{}
 	for _, arg := range op.Arguments {
@@ -196,13 +207,16 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 			if other, taken := names[arg.Name]; taken {
 				return argForm{}, fmt.Sprintf("argument %s and %s share a form field's name", arg.Name, other), nil
 			}
+			if param.Field == "overflow" {
+				return argForm{}, fmt.Sprintf("argument %s is the form's overflow", arg.Name), nil
+			}
 			names[arg.Name] = "argument " + arg.Name
 			f.Fields = append(f.Fields, s.argField(arg, param, place.location, method == "get"))
 		}
 	}
-	r := &formRenderer{}
+	r := newFormRenderer()
 	r.arguments(f, 2)
-	f.Choosable, f.Body = r.choosable, r.String()
+	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
 	return f, "", nil
 }
 
@@ -211,7 +225,9 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 // (schemaSet.control); a list of an enum is a group of checkboxes, any
 // other list of values an input per value; a path argument is a hidden
 // input; and a value no control holds (a map, a list of lists, an object,
-// a list of booleans, a union, any JSON value) is its JSON text.
+// a list of booleans, a union, any JSON value) is its JSON text. A
+// boolean is a checkbox, as an input's is, but in a filter, whose
+// boolean is a select of true and false (booleanSelect).
 func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, location string, filter bool) *argField {
 	ref := arg.TypeRef
 	optional := strings.HasPrefix(param.RustType, "Option<")
@@ -261,15 +277,33 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 	default:
 		f.Kind = kindValue
 	}
-	if location == "path" {
-		f.Kind, f.Control, f.Attrs, f.Hint, f.Choosable = kindPath, "hidden", "", "", false
+	boolean := f.Control == "checkbox"
+	if boolean && af.HasDefault {
+		af.Default = strconv.FormatBool(strings.EqualFold(strings.TrimSpace(af.Default), "true"))
 	}
-	// A filter's optional flag, unchecked, filters nothing: it is absent,
-	// where an action's unchecked box is false, as an input form's is.
-	if f.Control == "checkbox" && optional && filter {
-		f.Read = "flag"
+	switch {
+	case location == "path":
+		f.Kind, f.Control, f.Attrs, f.Hint, f.Choosable = kindPath, "hidden", "", "", false
+		if boolean {
+			// A path's boolean is true or false, as the page fills it.
+			f.Read = "yes_no"
+		}
+	case boolean && filter:
+		af.booleanSelect()
 	}
 	return af
+}
+
+// booleanSelect makes a filter's boolean a select of true and false, after
+// a blank option when the filter may leave it out, which reads its
+// declared default or filters nothing. A checkbox sends nothing when it is
+// not checked, which a filter could not tell from leaving the flag out:
+// false could not be filtered on, and a flag whose default is true could
+// not be turned off.
+func (af *argField) booleanSelect() {
+	f := af.formField
+	f.Control, f.Read = "select", "yes_no"
+	f.Options = []formOption{{Value: "true", Label: "Yes"}, {Value: "false", Label: "No"}}
 }
 
 // jsonText makes the argument a textarea of its JSON text.
@@ -282,28 +316,36 @@ func (af *argField) jsonText() {
 
 // ReadExpr is the parse's read of the field as its argument's JSON: a
 // list's values, each by its reader; else the single value, a blank one
-// its declared default.
+// its declared default. A checkbox has no blank value: it sends nothing
+// when it is not checked, which is false, so its default is only what a
+// new form shows (NewValue).
 func (af *argField) ReadExpr() string {
 	key := rustString(af.JSONName)
 	if af.IsList() {
 		return fmt.Sprintf("list(&mut errors, %s, &self.%s, %s)", key, af.Name, af.Read)
 	}
 	value := "self." + af.Name + ".as_deref()"
-	if af.HasDefault {
+	if af.HasDefault && af.Control != "checkbox" {
 		value += ".filter(|value| !value.is_empty()).or(Some(" + rustString(af.Default) + "))"
 	}
 	return fmt.Sprintf("single(&mut errors, %s, %s(%s))", key, af.Read, value)
 }
 
-// NewValue is the field's value in a new form: its default, or nothing.
+// NewValue is the field's value in a new form: its default, or nothing; a
+// checkbox is checked for a default of true, as an input's is.
 func (af *argField) NewValue() string {
 	switch {
 	case af.IsList():
 		return "Vec::new()"
-	case af.HasDefault && af.Kind != kindPath:
-		return "Some(" + rustString(af.Default) + ".to_owned())"
+	case af.Kind == kindPath || !af.HasDefault:
+		return "None"
+	case af.Control == "checkbox":
+		if af.Default == "true" {
+			return `Some("on".to_owned())`
+		}
+		return "None"
 	}
-	return "None"
+	return "Some(" + rustString(af.Default) + ".to_owned())"
 }
 
 // arguments writes the view of an argument form: each argument's control,
@@ -315,6 +357,7 @@ func (r *formRenderer) arguments(f argForm, indent int) {
 		path := []pathSegment{{key: a.JSONName}}
 		switch a.Kind {
 		case kindPath:
+			r.use("form")
 			r.line(indent, `<input type="hidden" name=`+rustString(a.JSONName)+" value=(form."+a.Name+".clone())>")
 		case kindValue:
 			r.value(sc, a.formField, path, indent)

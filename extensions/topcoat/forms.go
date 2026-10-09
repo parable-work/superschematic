@@ -22,8 +22,9 @@ type form struct {
 	Rows bool
 	// Choosable reports whether a field takes the app's choices.
 	Choosable bool
-	// Visible reports whether the component renders a field.
-	Visible bool
+	// UsesForm reports whether the component's view reads the form: a
+	// form whose fields are hidden or secret renders none of its values.
+	UsesForm bool
 	// Body is the component's view, the fields rendered at their names.
 	Body string
 	// Struct is the input type's struct.
@@ -179,23 +180,45 @@ func formsOf(schemas schemaSet, inProcess []declared, log func(format string, ar
 		}
 	}
 	for i, st := range roots {
-		if st.Rows {
-			for _, f := range st.Fields {
-				if f.Name == "row_action" {
-					return nil, nil, fmt.Errorf("topcoat: input %s: field %s is the form's row_action", st.TypeName, f.JSONName)
-				}
-			}
+		if err := reserved(st); err != nil {
+			return nil, nil, err
 		}
-		r := &formRenderer{}
+		r := newFormRenderer()
 		r.fields(scope{form: "form", idBase: st.IDBase}, st, 2)
 		forms[i].Rows = st.Rows
 		forms[i].Choosable = r.choosable
-		forms[i].Visible = r.visible
+		forms[i].UsesForm = r.used["form"]
 		forms[i].Body = r.String()
 	}
 	sort.Slice(forms, func(i, j int) bool { return forms[i].Name < forms[j].Name })
 	return forms, structs, nil
 }
+
+// reserved refuses an input whose form would hold a field under a name the
+// form keeps for itself: overflow, which says the post sent more than the
+// form reads, and, in a form with rows, row_action, the row button
+// pressed, and the JSON name _action, which the row buttons send.
+func reserved(st *formStruct) error {
+	for _, f := range st.Fields {
+		switch {
+		case f.Name == "overflow":
+			return fmt.Errorf("topcoat: input %s: field %s is the form's overflow", st.TypeName, f.JSONName)
+		case st.Rows && f.Name == "row_action":
+			return fmt.Errorf("topcoat: input %s: field %s is the form's row_action", st.TypeName, f.JSONName)
+		case st.Rows && f.JSONName == rowActionName:
+			return fmt.Errorf("topcoat: input %s: field %s has the name of the form's row buttons", st.TypeName, f.JSONName)
+		}
+	}
+	return nil
+}
+
+// rowActionName is the name of a form's row buttons, whose value is the
+// row action (add:rooms, remove:rooms[1]).
+const rowActionName = "_action"
+
+// maxRows is the most rows a form holds of a list without a listMax, or
+// with one above it, the crate's MAX_ROWS.
+const maxRows = 1000
 
 // formBuilder builds the struct of each object type a form holds.
 type formBuilder struct {
@@ -495,13 +518,18 @@ func (f *formField) New() string {
 	return "None"
 }
 
+// Limit is the Rust expression of the most rows a form holds of a list:
+// its listMax, or MAX_ROWS for a list without one or with one above it.
+func (f *formField) Limit() string {
+	if f.Max != nil && *f.Max <= maxRows {
+		return strconv.Itoa(*f.Max)
+	}
+	return "MAX_ROWS"
+}
+
 // Bounds is the Rust `Bounds` of a list's rows.
 func (f *formField) Bounds() string {
-	limit := "None"
-	if f.Max != nil {
-		limit = fmt.Sprintf("Some(%d)", *f.Max)
-	}
-	return fmt.Sprintf("Bounds { min: %d, max: %s }", f.Min, limit)
+	return fmt.Sprintf("Bounds { min: %d, max: %s }", f.Min, f.Limit())
 }
 
 // defaultOf is the Rust expression of field's @default as its control holds

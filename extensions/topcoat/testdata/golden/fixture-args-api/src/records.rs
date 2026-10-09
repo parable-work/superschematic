@@ -12,6 +12,41 @@ use crate::api::types;
 use crate::wire;
 use topcoat::runtime::record;
 
+/// The record of `types::OrderNoteInput`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderNoteInputRecord {
+    pub text: String,
+}
+
+impl OrderNoteInputRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            text: wire::string(&json["text"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("text".to_owned(), wire::put_string(&self.text));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::OrderNoteInput> for OrderNoteInputRecord {
+    fn from(value: &types::OrderNoteInput) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::OrderNoteInput> for OrderNoteInputRecord {
+    fn from(value: types::OrderNoteInput) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::OrderView`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

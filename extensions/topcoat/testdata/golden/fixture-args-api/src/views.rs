@@ -17,7 +17,7 @@
 //! The markup has `ss-` classes and `data-field` attributes, the field's
 //! JSON key, for a stylesheet or a test, and no style of its own.
 
-use crate::records::{OrderViewRecord, ReviewViewRecord, WriteReviewInputRecord};
+use crate::records::{OrderNoteInputRecord, OrderViewRecord, ReviewViewRecord, WriteReviewInputRecord};
 use topcoat::view::{View, component, view};
 
 /// Labels a value of `OrderStatus`: its member's name in words. A value the
@@ -30,6 +30,42 @@ pub fn order_status_label(value: &str) -> &str {
         "cancelled" => "Cancelled",
         other => other,
     }
+}
+
+/// `OrderNoteInputRecord` as a description list: each field's label and value.
+#[component]
+pub async fn order_note_input_detail(record: OrderNoteInputRecord) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="OrderNoteInput" role="group">
+            <dl>
+                <div data-field="text">
+                    <dt>"Text"</dt>
+                    <dd>(record.text)</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `OrderNoteInputRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="OrderNoteInput">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="text">"Text"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for row in rows {
+                    <tr>
+                        <td data-field="text">(row.text)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
 }
 
 /// `OrderViewRecord` as a description list: each field's label and value.

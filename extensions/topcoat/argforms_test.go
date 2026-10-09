@@ -24,10 +24,13 @@ const argsService = "fixture-args-api"
 // operation with its arguments; an over-long reason, a forged path
 // argument and the operation's refusal re-render the form with 422 and
 // each error at its control or the form's; a GET filter reads repeated
-// enum values, a comma-separated list, a limit, a page and a flag from the
-// query and renders them as sent, and a limit out of range at its control;
-// a form that embeds its input's form parses both; a map argument is JSON
-// text; and the app's choices make an argument a select.
+// enum values, a comma-separated list, a limit, a page and flags from the
+// query and renders them as sent, a blank flag its default, and a limit
+// out of range at its control; an action's checkbox is false when not
+// checked, whatever its default; an optional input is absent when none of
+// its fields is sent; a form that embeds its input's form parses both; a
+// map argument is JSON text; the app's choices make an argument a select;
+// and a query of more pairs than a form reads is refused.
 func TestArgumentFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, argsService, argsAppTest)
 }
@@ -53,10 +56,12 @@ func TestWhatHasNoArgumentForm(t *testing.T) {
 		"pub struct OrderCancelOrderArgsForm {",
 		"pub struct OrderTagOrderArgsForm {",
 		"pub struct OrderListOrdersArgsForm {\n    pub statuses: Vec<String>,",
-		"pub struct ProductReviewsWriteReviewArgsForm {\n    pub product_id: Option<String>,\n    pub input: WriteReviewInputForm,\n}",
+		"pub struct ProductReviewsWriteReviewArgsForm {\n    pub product_id: Option<String>,\n    pub input: WriteReviewInputForm,\n",
 		"impl OrderListOrdersArgsForm {\n    /// How a page sends the form: `<form method=(Self::METHOD)>`.\n    pub const METHOD: &'static str = \"get\";",
 		`statuses: posted.get("statuses").values(true),`,
-		`let arg_archived = single(&mut errors, "archived", flag(self.archived.as_deref()));`,
+		`let arg_archived = single(&mut errors, "archived", yes_no(self.archived.as_deref()));`,
+		// An optional input is read only when one of its fields was sent.
+		"let input = match self.input.is_sent().then(|| self.input.parse()).transpose() {",
 		`let arg_labels = single(&mut errors, "labels", json_text(self.labels.as_deref()));`,
 		"pub fn new(id: impl ToString) -> Self {",
 		"pub async fn order_cancel_order_args_fields(",
@@ -115,13 +120,14 @@ const argsAppTest = `use std::sync::Arc;
 use async_trait::async_trait;
 use schemas_fixture_args_api_topcoat::api::runtime::{ApiError, RequestContext};
 use schemas_fixture_args_api_topcoat::api::{
-    types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
-    OrderTagOrderArgs, ProductReviewsImplementation, ProductReviewsWriteReviewArgs,
+    types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderHoldOrderArgs, OrderImplementation,
+    OrderListOrdersArgs, OrderNoteOrderArgs, OrderTagOrderArgs, ProductReviewsImplementation, ProductReviewsWriteReviewArgs,
 };
 use schemas_fixture_args_api_topcoat::forms::{
-    order_cancel_order_args_fields, order_list_orders_args_fields, order_tag_order_args_fields,
-    product_reviews_write_review_args_fields, Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm,
-    OrderTagOrderArgsForm, ProductReviewsWriteReviewArgsForm,
+    order_cancel_order_args_fields, order_hold_order_args_fields, order_list_orders_args_fields,
+    order_note_order_args_fields, order_tag_order_args_fields, product_reviews_write_review_args_fields, Choices, FormErrors,
+    OrderCancelOrderArgsForm, OrderHoldOrderArgsForm, OrderListOrdersArgsForm, OrderNoteOrderArgsForm, OrderTagOrderArgsForm,
+    ProductReviewsWriteReviewArgsForm,
 };
 use schemas_fixture_args_api_topcoat::RouterBuilderFixtureArgsApiExt;
 use serde_json::json;
@@ -158,7 +164,10 @@ struct Shop;
 #[async_trait]
 impl OrderImplementation for Shop {
     async fn list_orders(&self, _ctx: RequestContext, args: OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
-        let note = format!("tags={:?} limit={:?} page={:?} archived={:?}", args.tags, args.limit, args.page, args.archived);
+        let note = format!(
+            "tags={:?} limit={:?} page={:?} archived={:?} paid={:?} gifts={:?}",
+            args.tags, args.limit, args.page, args.archived, args.paid_only, args.gifts_only
+        );
         Ok(args.statuses.unwrap_or_default().into_iter().map(|status| order(status, note.clone())).collect())
     }
     async fn get_order(&self, _ctx: RequestContext, args: OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
@@ -170,6 +179,13 @@ impl OrderImplementation for Shop {
         }
         let note = format!("cancelled {} {} {:?}", which(&args.id), json!(args.code), args.reason);
         Ok(order(types::OrderStatus::Cancelled, note))
+    }
+    async fn hold_order(&self, _ctx: RequestContext, args: OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(order(types::OrderStatus::Onhold, format!("held {} notify={:?} rush={:?}", which(&args.id), args.notify, args.rush)))
+    }
+    async fn note_order(&self, _ctx: RequestContext, args: OrderNoteOrderArgs) -> Result<types::OrderView, ApiError> {
+        let text = args.input.map(|input| input.text);
+        Ok(order(types::OrderStatus::Placed, format!("noted {} {text:?}", which(&args.id))))
     }
     async fn tag_order(&self, _ctx: RequestContext, args: OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
         let mut labels: Vec<_> = args.labels.into_iter().collect();
@@ -216,6 +232,41 @@ async fn cancel_choices_page() -> topcoat::Result<impl View> {
     })
 }
 
+#[page("/hold")]
+async fn hold_page() -> topcoat::Result<impl View> {
+    Ok(view! { <form method="post">order_hold_order_args_fields(form: OrderHoldOrderArgsForm::new(ORDER))</form> })
+}
+
+#[page(POST "/hold")]
+async fn hold(cx: &Cx, Form(form): Form<OrderHoldOrderArgsForm>) -> topcoat::Result<impl View> {
+    let (status, note, errors) = match form.submit(cx).await {
+        Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
+        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+    };
+    Ok(view! {
+        (status)
+        if let Some(note) = note {
+            <p class="done">(note)</p>
+        }
+        <form method="post">order_hold_order_args_fields(form: form, errors: errors)</form>
+    })
+}
+
+#[page(POST "/note")]
+async fn add_note(cx: &Cx, Form(form): Form<OrderNoteOrderArgsForm>) -> topcoat::Result<impl View> {
+    let (status, note, errors) = match form.submit(cx).await {
+        Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
+        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+    };
+    Ok(view! {
+        (status)
+        if let Some(note) = note {
+            <p class="done">(note)</p>
+        }
+        <form method="post">order_note_order_args_fields(form: form, errors: errors)</form>
+    })
+}
+
 #[page(POST "/tag")]
 async fn tag(cx: &Cx, Form(form): Form<OrderTagOrderArgsForm>) -> topcoat::Result<impl View> {
     let (status, note, errors) = match form.submit(cx).await {
@@ -252,6 +303,11 @@ async fn filter_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <form method="get">order_list_orders_args_fields(form: filter)</form> })
 }
 
+#[page("/filter/new")]
+async fn new_filter_page() -> topcoat::Result<impl View> {
+    Ok(view! { <form method="get">order_list_orders_args_fields(form: OrderListOrdersArgsForm::new())</form> })
+}
+
 #[page(POST "/review")]
 async fn review(cx: &Cx, Form(form): Form<ProductReviewsWriteReviewArgsForm>) -> topcoat::Result<impl View> {
     let (status, title, errors) = match form.submit(cx).await {
@@ -279,9 +335,13 @@ fn app() -> Router {
         .page(cancel_page)
         .page(cancel_choices_page)
         .page(cancel)
+        .page(hold_page)
+        .page(hold)
+        .page(add_note)
         .page(tag)
         .page(orders)
         .page(filter_page)
+        .page(new_filter_page)
         .page(review)
         .page(review_page)
         .fixture_args_api(Implementations { order: Arc::new(Shop), product_reviews: Arc::new(Shop) })
@@ -366,7 +426,7 @@ async fn a_refused_post_renders_again_with_each_error_at_its_control() {
 #[tokio::test]
 async fn a_filter_reads_the_query_and_renders_it_as_sent() {
     let (status, html) =
-        get("/orders?statuses=placed&statuses=shipped&tags=fragile,+heavy&limit=5&page=2&archived=on").await;
+        get("/orders?statuses=placed&statuses=shipped&tags=fragile,+heavy&limit=5&page=2&archived=true&giftsOnly=").await;
     assert_eq!(status, StatusCode::OK, "{html}");
     for want in [
         r#"<form method="get">"#,
@@ -378,18 +438,38 @@ async fn a_filter_reads_the_query_and_renders_it_as_sent() {
         r#"<input id="order-list-orders-tags-2" name="tags" type="text" maxlength="20">"#,
         r#"type="number" step="any" min="1" max="100" value="5">"#,
         r#"type="number" step="1" min="1" max="9007199254740991" value="2">"#,
-        r#"name="archived" type="checkbox" checked="""#,
-        r#"<p class="order">Placed tags=Some(["fragile", "heavy"]) limit=Some(5.0) page=Some(2) archived=Some(true)</p>"#,
+        // A filter's flag is a select of yes and no after a blank option.
+        r#"<select id="order-list-orders-archived" name="archived"><option value=""></option><option value="true" selected="">Yes</option><option value="false">No</option></select>"#,
+        r#"<select id="order-list-orders-gifts-only" name="giftsOnly"><option value="" selected=""></option>"#,
+        // A blank flag reads its default.
+        r#"<p class="order">Placed tags=Some(["fragile", "heavy"]) limit=Some(5.0) page=Some(2) archived=Some(true) paid=Some(true) gifts=Some(false)</p>"#,
         r#"<p class="order">Shipped "#,
     ] {
         assert!(html.contains(want), "missing {want} in {html}");
     }
     assert!(!html.contains(r#"value="on_hold" checked"#), "{html}");
 
-    // An empty filter: no list, no limit, and an unchecked flag is absent.
+    // An empty filter: no list, no limit, a flag left blank absent and each
+    // flag with a default its default.
     let (status, html) = get("/orders?statuses=placed&limit=").await;
     assert_eq!(status, StatusCode::OK, "{html}");
-    assert!(html.contains(r#"<p class="order">Placed tags=None limit=None page=None archived=None</p>"#), "{html}");
+    assert!(html.contains(r#"<p class="order">Placed tags=None limit=None page=None archived=None paid=Some(true) gifts=Some(false)</p>"#), "{html}");
+
+    // A filter can say no, and turn off a flag whose default is yes.
+    let (status, html) = get("/orders?statuses=placed&archived=false&paidOnly=false&giftsOnly=true").await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains(r#"archived=Some(false) paid=Some(false) gifts=Some(true)</p>"#), "{html}");
+    assert!(html.contains(r#"<select id="order-list-orders-paid-only" name="paidOnly"><option value=""></option><option value="true">Yes</option><option value="false" selected="">No</option>"#), "{html}");
+
+    // A flag that is not yes or no is refused at its control.
+    let (status, html) = get("/orders?statuses=placed&archived=on").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains(r#"<p class="field-error">must be true or false</p>"#), "{html}");
+
+    // A new filter selects each flag's default.
+    let (_, html) = get("/filter/new").await;
+    assert!(html.contains(r#"name="paidOnly"><option value=""></option><option value="true" selected="">Yes</option>"#), "{html}");
+    assert!(html.contains(r#"name="giftsOnly"><option value=""></option><option value="true">Yes</option><option value="false" selected="">No</option>"#), "{html}");
 
     // from_query reads the same filter outside an extractor.
     let (_, html) = get("/filter?statuses=on_hold&limit=7").await;
@@ -462,6 +542,50 @@ async fn a_map_argument_is_json_text() {
     let (status, html) = post("/tag", &format!("id={ORDER}&labels=%7Bvip")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
     assert!(html.contains(r#"<p class="field-error">must be JSON</p>"#), "{html}");
+}
+
+#[tokio::test]
+async fn an_actions_checkbox_is_false_when_not_checked_whatever_its_default() {
+    // A new form checks the box whose default is true, and only it.
+    let (_, html) = get("/hold").await;
+    assert!(html.contains(r#"name="notify" type="checkbox" checked="">"#), "{html}");
+    assert!(html.contains(r#"name="rush" type="checkbox">"#), "{html}");
+
+    let (status, html) = post("/hold", &format!("id={ORDER}")).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains(r#"<p class="done">held order notify=Some(false) rush=Some(false)</p>"#), "{html}");
+    let (status, html) = post("/hold", &format!("id={ORDER}&notify=on&rush=on")).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains(r#"<p class="done">held order notify=Some(true) rush=Some(true)</p>"#), "{html}");
+}
+
+#[tokio::test]
+async fn an_optional_input_is_absent_when_none_of_its_fields_is_sent() {
+    for body in [format!("id={ORDER}"), format!("id={ORDER}&text=")] {
+        let (status, html) = post("/note", &body).await;
+        assert_eq!(status, StatusCode::OK, "{body}: {html}");
+        assert!(html.contains(r#"<p class="done">noted order None</p>"#), "{body}: {html}");
+    }
+    let (status, html) = post("/note", &format!("id={ORDER}&text=Leave+it+by+the+door")).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains(r#"<p class="done">noted order Some(&quot;Leave it by the door&quot;)</p>"#) || html.contains(r#"noted order Some("Leave it by the door")"#), "{html}");
+
+    // Sent, it is parsed by its rules.
+    let (status, html) = post("/note", &format!("id={ORDER}&text=L")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains(r#"<p class="field-error">must be at least 2 characters</p>"#), "{html}");
+}
+
+#[tokio::test]
+async fn a_query_of_more_pairs_than_a_form_reads_is_refused() {
+    let query = vec!["tags=x"; 5001].join("&");
+    let form = OrderListOrdersArgsForm::from_pairs(query.split('&').map(|pair| (pair[..4].to_owned(), pair[5..].to_owned())));
+    assert!(form.overflow);
+    assert_eq!(form.tags.len(), 5000);
+    let (status, html) = get(&format!("/orders?{query}")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html.contains(r#"<p class="form-error">The form sent more than 5000 fields, more than it reads</p>"#));
+    assert!(!html.contains(r#"<p class="order">"#));
 }
 
 #[tokio::test]

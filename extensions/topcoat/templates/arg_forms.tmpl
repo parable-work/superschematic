@@ -15,6 +15,9 @@ pub struct {{ .Name }} {
 {{- with .Input }}
     pub input: {{ .Struct.Name }},
 {{- end }}
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl {{ .Name }} {
@@ -34,6 +37,7 @@ impl {{ .Name }} {
 {{- with .Input }}
             input: {{ .Struct.Name }}::new(),
 {{- end }}
+            overflow: false,
         }
     }
 
@@ -51,6 +55,7 @@ impl {{ .Name }} {
 {{- with .Input }}
             input: {{ .Struct.Name }}::from_post(&posted),
 {{- end }}
+            overflow: posted.overflow,
         }
     }
 {{- if .IsGet }}
@@ -63,14 +68,22 @@ impl {{ .Name }} {
     }
 {{- end }}
 
-    {{ doc4 (printf "The operation's arguments: each written as the JSON a request carries and decoded into its type%s, then checked as the router checks a request's (`Args::check`); else each control's errors. `check` refuses the first argument that breaks a rule." (or (and .Input ", the input parsed by its form") "")) }}
+    {{ doc4 (printf "The operation's arguments: each written as the JSON a request carries and decoded into its type%s, then checked as the router checks a request's (`Args::check`); else each control's errors, or the form's when the browser sent more than it reads. `check` refuses the first argument that breaks a rule." (or (and .Input (or (and .Input.Optional ", the input parsed by its form when one of its fields was sent") ", the input parsed by its form")) "")) }}
     pub fn parse(&self) -> Result<crate::api::{{ .ArgsName }}, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
 {{- range .Fields }}
         let {{ .Local }} = {{ .ReadExpr }};
 {{- end }}
-{{- if .Input }}
+{{- with .Input }}
+{{- if .Optional }}
+        // The input is optional: absent when none of its fields was sent.
+        let input = match self.input.is_sent().then(|| self.input.parse()).transpose() {
+{{- else }}
         let input = match self.input.parse() {
+{{- end }}
             Ok(input) => Some(input),
             Err(refused) => {
                 errors.merge(refused);
@@ -93,7 +106,7 @@ impl {{ .Name }} {
             {{ .Name }}: {{ .Local }},
 {{- end }}
 {{- with .Input }}
-            input{{ if .Optional }}: Some(input){{ end }},
+            input,
 {{- end }}
         };
         args.check().map_err(|err| FormErrors::from_api(&err))?;
@@ -172,6 +185,9 @@ pub async fn {{ .Component }}(
 {{- if not .Choosable }}
     let _ = choices;
 {{- end }}
+{{- if not .UsesForm }}
+    let _ = form;
+{{- end }}
     Ok(view! {
 {{- if .Rows }}
         // The button Enter presses, ahead of every row button: it submits
@@ -181,7 +197,9 @@ pub async fn {{ .Component }}(
         for message in form_errors {
             <p class="form-error">(message)</p>
         }
+{{- if .Body }}
 {{ .Body }}
+{{- end }}
     })
 }
 {{- end }}

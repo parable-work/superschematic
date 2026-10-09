@@ -1,9 +1,11 @@
 # Orders and reviews, through argument forms: a list of orders filtered by
-# a list of statuses, a list of tags, a limit, a page and a flag in the
-# query; an order fetched by its id alone, a link with no form; an order
-# cancelled by its id in the path and a code and an optional reason in the
-# body; a review written by its product's id in the path and an input; and
-# an order tagged by a map, which its form holds as JSON text.
+# a list of statuses, a list of tags, a limit, a page, a flag and two flags
+# with defaults, true and false, in the query; an order fetched by its id
+# alone, a link with no form; an order cancelled by its id in the path and
+# a code and an optional reason in the body; an order held by its id and
+# two flags with defaults in the body; an order noted by its id and an
+# optional input; a review written by its product's id in the path and an
+# input; and an order tagged by a map, which its form holds as JSON text.
 name: fixture-args-api
 kind: API
 scalars:
@@ -60,6 +62,14 @@ types:
       - name: title
         typeRef: { name: string }
         required: true
+  OrderNoteInput:
+    name: OrderNoteInput
+    role: APIInput
+    fields:
+      - name: text
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 2
   WriteReviewInput:
     name: WriteReviewInput
     role: APIInput
@@ -103,6 +113,14 @@ operationSets:
           - name: archived
             typeRef: { name: boolean }
             isQuery: true
+          - name: paidOnly
+            typeRef: { name: boolean }
+            isQuery: true
+            default: "true"
+          - name: giftsOnly
+            typeRef: { name: boolean }
+            isQuery: true
+            default: "false"
       # One order.
       - name: getOrder
         typeRef: { name: OrderView }
@@ -132,6 +150,34 @@ operationSets:
             description: Why the order is cancelled, as the shopper wrote it.
             typeRef: { name: string }
             validateMaxLength: 500
+      # Holds an order, telling the shopper unless told not to.
+      - name: holdOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/hold"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: notify
+            typeRef: { name: boolean }
+            default: "true"
+          - name: rush
+            typeRef: { name: boolean }
+            default: "false"
+      # Notes an order, or marks it noted when the note is left out.
+      - name: noteOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/notes"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: OrderNoteInput }
       # Tags an order; its form holds the map as JSON text.
       - name: tagOrder
         typeRef: { name: OrderView }

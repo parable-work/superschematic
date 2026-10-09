@@ -17,8 +17,11 @@
 //! the same names, so each message renders at its control. A list's rows
 //! are added and removed by submit buttons named `_action` (`add:rooms`,
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
+//! A form reads at most `MAX_PAIRS` pairs and one row past a list's
+//! limit, so what a post costs is bounded by the form, not by the post.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use crate::api::runtime::ApiError;
 use crate::api::runtime::schema::ParseError;
@@ -38,8 +41,9 @@ use topcoat::view::{View, component, view};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FormErrors {
     /// Each control's messages, by its name in the form: `email`,
-    /// `guest.name`, `rooms[0].adults`.
-    pub fields: Vec<(String, Vec<String>)>,
+    /// `guest.name`, `rooms[0].adults`. A map, so a control finds its own,
+    /// and the names under it, without reading every other control's.
+    pub fields: BTreeMap<String, Vec<String>>,
     /// Messages about the form as a whole.
     pub form: Vec<String>,
 }
@@ -51,11 +55,7 @@ impl FormErrors {
 
     /// The control's messages.
     pub fn of(&self, field: &str) -> Vec<String> {
-        self.fields
-            .iter()
-            .filter(|(name, _)| name == field)
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect()
+        self.fields.get(field).cloned().unwrap_or_default()
     }
 
     /// The messages of a control and of the values under it, each of
@@ -63,7 +63,7 @@ impl FormErrors {
     /// string`), a group's item.
     pub fn under(&self, field: &str) -> Vec<String> {
         let mut out = Vec::new();
-        for (name, messages) in &self.fields {
+        for (name, messages) in self.starting_with(field) {
             if name == field {
                 out.extend(messages.iter().cloned());
             } else if let Some(place) = place_under(name, field) {
@@ -76,17 +76,21 @@ impl FormErrors {
     /// A control's `aria-invalid`: "true" when it, or a value under it, has
     /// a message.
     pub fn invalid(&self, field: &str) -> Option<&'static str> {
-        self.fields
-            .iter()
+        self.starting_with(field)
             .any(|(name, _)| name == field || place_under(name, field).is_some())
             .then_some("true")
     }
 
     pub fn add(&mut self, field: &str, message: impl Into<String>) {
-        match self.fields.iter_mut().find(|(name, _)| name == field) {
-            Some((_, messages)) => messages.push(message.into()),
-            None => self.fields.push((field.to_owned(), vec![message.into()])),
-        }
+        self.fields.entry(field.to_owned()).or_default().push(message.into());
+    }
+
+    /// The names that begin with `field`, in order: the control's own, and
+    /// the values under it, which sort after it.
+    fn starting_with<'a>(&'a self, field: &'a str) -> impl Iterator<Item = (&'a String, &'a Vec<String>)> {
+        self.fields
+            .range::<str, _>((Bound::Included(field), Bound::Unbounded))
+            .take_while(move |(name, _)| name.starts_with(field))
     }
 
     /// The errors of an operation's refusal: its field errors (its `errors`
@@ -300,6 +304,11 @@ enum Segment {
 /// The most steps a name a form reads has.
 const MAX_DEPTH: usize = 32;
 
+/// The most pairs, a name and its value, a form reads from a post or a
+/// query. It reads none after them and `parse` refuses the form, so a post
+/// of more names than any form has costs no more than this many.
+const MAX_PAIRS: usize = 5000;
+
 /// A control's name as its steps, `rooms[0].roomId` as `rooms`, `0` and
 /// `roomId`; None for a name no control has.
 fn segments(name: &str) -> Option<Vec<Segment>> {
@@ -335,15 +344,29 @@ struct Posted {
     values: Vec<String>,
     keys: BTreeMap<String, Posted>,
     rows: BTreeMap<usize, Posted>,
+    /// The post sent more than `MAX_PAIRS` pairs, which the tree leaves
+    /// out: set at the root.
+    overflow: bool,
 }
 
 /// What a name holds when nothing was posted under it.
-static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new() };
+static NOTHING: Posted = Posted { values: Vec::new(), keys: BTreeMap::new(), rows: BTreeMap::new(), overflow: false };
+
+/// The form's message when its post sent more than `MAX_PAIRS` pairs.
+fn overflowed() -> FormErrors {
+    FormErrors {
+        form: vec![format!("The form sent more than {MAX_PAIRS} fields, more than it reads")],
+        ..FormErrors::default()
+    }
+}
 
 impl Posted {
+    /// The tree of the first `MAX_PAIRS` pairs, marked as overflowing when
+    /// there were more.
     fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut root = Self::default();
-        for (name, value) in pairs {
+        let mut pairs = pairs.into_iter();
+        for (name, value) in pairs.by_ref().take(MAX_PAIRS) {
             let Some(path) = segments(&name) else {
                 continue;
             };
@@ -356,6 +379,7 @@ impl Posted {
             }
             node.values.push(value);
         }
+        root.overflow = pairs.next().is_some();
         root
     }
 
@@ -414,17 +438,40 @@ fn text(value: Option<&str>) -> Read {
     Ok(value.map(Value::from))
 }
 
-/// A filter's optional flag: true when its checkbox is sent, which it is
-/// when checked, and absent when not, so it filters nothing.
-fn flag(value: Option<&str>) -> Read {
-    Ok(value.map(|_| Value::Bool(true)))
+/// A checkbox: true when the browser sent it, which it does when checked.
+fn boolean(value: Option<&str>) -> Read {
+    Ok(Some(Value::from(value.is_some())))
 }
 
-/// A whole number, refused when it is not one.
-fn integer(value: Option<&str>) -> Read {
+/// A boolean from a select of `true` and `false`: a filter's, whose blank
+/// option sends nothing, so a filter can leave it out, and a path
+/// argument's.
+fn yes_no(value: Option<&str>) -> Read {
     match value {
         None => Ok(None),
-        Some(text) => text.trim().parse::<i64>().map(|number| Some(Value::from(number))).map_err(|_| "must be a whole number"),
+        Some("true") => Ok(Some(Value::Bool(true))),
+        Some("false") => Ok(Some(Value::Bool(false))),
+        Some(_) => Err("must be true or false"),
+    }
+}
+
+/// A whole number, refused when it is not one. A number input sends what a
+/// reader typed, so `1e1` and `2.0` are whole numbers, as is any number
+/// without a fraction in the range of an i64.
+fn integer(value: Option<&str>) -> Read {
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    if let Ok(number) = text.parse::<i64>() {
+        return Ok(Some(Value::from(number)));
+    }
+    match text.parse::<f64>() {
+        // i64::MIN is -2^63, which an f64 holds; i64::MAX is not, and 2^63
+        // is the first f64 past it.
+        Ok(number) if number.is_finite() && number.fract() == 0.0 && number >= i64::MIN as f64 && number < -(i64::MIN as f64) => {
+            Ok(Some(Value::from(number as i64)))
+        }
+        _ => Err("must be a whole number"),
     }
 }
 
@@ -505,11 +552,109 @@ fn decode<T: DeserializeOwned>(errors: &mut FormErrors, key: &str, json: Value) 
     }
 }
 
+/// The form of `OrderNoteInput`, each field as the browser sends it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrderNoteInputForm {
+    pub text: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl OrderNoteInputForm {
+    /// A new form: each field's `@default`, a required nested object's new
+    /// form, and each list's first rows: its listMin, or one when the
+    /// input requires the list. An optional nested object starts empty.
+    pub fn new() -> Self {
+        Self {
+            text: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser posted, from its pairs: each control read by its
+    /// name, a list's rows in the order of their indexes.
+    /// `Form<OrderNoteInputForm>` decodes a post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self::from_post(&Posted::from_pairs(pairs))
+    }
+
+    /// The form as posted: its fields
+    /// and whether the post sent more than the form reads.
+    fn from_post(posted: &Posted) -> Self {
+        Self {
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
+    }
+
+    /// The input: each field read as the input type's JSON, then parsed by
+    /// the type's rules with undeclared keys refused; else each control's
+    /// errors, or the form's when its post sent more than it reads.
+    pub fn parse(&self) -> Result<types::OrderNoteInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let json = self.write("", &mut errors);
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        types::validators::parse_order_note_input(Value::Object(json), UnknownFields::Refuse).map_err(FormErrors::from)
+    }
+
+    /// The form as posted under `posted`.
+    fn from_posted(posted: &Posted) -> Self {
+        Self {
+            text: posted.get("text").text(),
+            overflow: false,
+        }
+    }
+
+    /// Each field as the input type's JSON, its controls named under `at`;
+    /// a value a control cannot hold is an error at the control.
+    fn write(&self, at: &str, errors: &mut FormErrors) -> Map<String, Value> {
+        let mut json = Map::new();
+        put(&mut json, errors, "text", &format!("{at}text"), text(self.text.as_deref()));
+        json
+    }
+
+    /// Whether a field was sent: an optional nested object is part of the
+    /// input only then.
+    fn is_sent(&self) -> bool {
+        self.text.is_some()
+    }
+
+    /// Whether the component shows the errors at `path`: at a control, a
+    /// nested object's or a list's fieldset, or a row.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [] => true,
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "text" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderNoteInputForm {
+    /// Reads the pairs of a post, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
 /// The form of `WriteReviewInput`, each field as the browser sends it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WriteReviewInputForm {
     pub rating: Option<String>,
     pub title: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl WriteReviewInputForm {
@@ -520,6 +665,7 @@ impl WriteReviewInputForm {
         Self {
             rating: None,
             title: None,
+            overflow: false,
         }
     }
 
@@ -530,15 +676,22 @@ impl WriteReviewInputForm {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields, and the row button pressed.
+    /// The form as posted: its fields
+    /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
-        Self::from_posted(posted)
+        Self {
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
     }
 
     /// The input: each field read as the input type's JSON, then parsed by
     /// the type's rules with undeclared keys refused; else each control's
-    /// errors.
+    /// errors, or the form's when its post sent more than it reads.
     pub fn parse(&self) -> Result<types::WriteReviewInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let json = self.write("", &mut errors);
         if !errors.is_empty() {
@@ -552,6 +705,7 @@ impl WriteReviewInputForm {
         Self {
             rating: posted.get("rating").text(),
             title: posted.get("title").text(),
+            overflow: false,
         }
     }
 
@@ -585,6 +739,35 @@ impl<'de> Deserialize<'de> for WriteReviewInputForm {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
     }
+}
+
+/// The fields of `OrderNoteInputForm`, each with its label, its value as sent,
+/// the attributes the input type's rules give it and its errors; a nested
+/// object's in a fieldset, and a list's rows with their buttons. `form` is
+/// a new form when the page passes none, and `choices` turns a text or
+/// number field the app names into a select.
+#[component]
+pub async fn order_note_input_fields(
+    #[default(OrderNoteInputForm::new())] form: OrderNoteInputForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(OrderNoteInputForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <div class="field">
+            <label for="order-note-input-text">"Text"</label>
+            match choices.of("text", "text") {
+                Some(options) => choice_select(id: "order-note-input-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.text.as_deref())),
+                None => <input id="order-note-input-text" name="text" type="text" required=(true) minlength="2" value=(form.text.clone()) aria-invalid=(errors.invalid("text"))>,
+            }
+            for message in errors.of("text") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
 }
 
 /// The fields of `WriteReviewInputForm`, each with its label, its value as sent,
@@ -633,6 +816,9 @@ pub struct OrderCancelOrderArgsForm {
     pub id: Option<String>,
     pub code: Option<String>,
     pub reason: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl OrderCancelOrderArgsForm {
@@ -646,6 +832,7 @@ impl OrderCancelOrderArgsForm {
             id: Some(id.to_string()),
             code: None,
             reason: None,
+            overflow: false,
         }
     }
 
@@ -658,14 +845,19 @@ impl OrderCancelOrderArgsForm {
             id: posted.get("id").first(),
             code: posted.get("code").first(),
             reason: posted.get("reason").first(),
+            overflow: posted.overflow,
         }
     }
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, then checked as the router checks a request's
-    /// (`Args::check`); else each control's errors. `check` refuses the first
-    /// argument that breaks a rule.
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
     pub fn parse(&self) -> Result<crate::api::OrderCancelOrderArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
         let arg_code = single(&mut errors, "code", text(self.code.as_deref()));
@@ -759,6 +951,142 @@ pub async fn order_cancel_order_args_fields(
     })
 }
 
+/// The arguments of order.holdOrder, each as the browser sends it. Sent by
+/// POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrderHoldOrderArgsForm {
+    pub id: Option<String>,
+    pub notify: Option<String>,
+    pub rush: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl OrderHoldOrderArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            notify: Some("on".to_owned()),
+            rush: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<OrderHoldOrderArgsForm>` decodes a post this
+    /// way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            notify: posted.get("notify").first(),
+            rush: posted.get("rush").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::OrderHoldOrderArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let arg_notify = single(&mut errors, "notify", boolean(self.notify.as_deref()));
+        let arg_rush = single(&mut errors, "rush", boolean(self.rush.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(arg_notify) = arg_notify else {
+            return Err(errors);
+        };
+        let Some(arg_rush) = arg_rush else {
+            return Err(errors);
+        };
+        let args = crate::api::OrderHoldOrderArgs {
+            id: arg_id,
+            notify: arg_notify,
+            rush: arg_rush,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::order_hold_order`). A refusal, the form's or the
+    /// operation's (`FormErrors::from_api`), is the form's errors, which a
+    /// page renders the form again with.
+    pub async fn submit(&self, cx: &Cx) -> Result<types::OrderView, FormErrors> {
+        let args = self.parse()?;
+        operations::order_hold_order(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "notify" => rest.is_empty(),
+                "rush" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderHoldOrderArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `OrderHoldOrderArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn order_hold_order_args_fields(
+    #[default] form: OrderHoldOrderArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(OrderHoldOrderArgsForm::shows);
+    let _ = choices;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="order-hold-order-notify">"Notify"</label>
+            <input id="order-hold-order-notify" name="notify" type="checkbox" checked=(form.notify.is_some()) aria-invalid=(errors.invalid("notify"))>
+            for message in errors.of("notify") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="order-hold-order-rush">"Rush"</label>
+            <input id="order-hold-order-rush" name="rush" type="checkbox" checked=(form.rush.is_some()) aria-invalid=(errors.invalid("rush"))>
+            for message in errors.of("rush") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
 /// The arguments of order.listOrders, each as the browser sends it. A filter,
 /// sent by GET and read from the query.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -768,6 +1096,11 @@ pub struct OrderListOrdersArgsForm {
     pub limit: Option<String>,
     pub page: Option<String>,
     pub archived: Option<String>,
+    pub paid_only: Option<String>,
+    pub gifts_only: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl OrderListOrdersArgsForm {
@@ -782,6 +1115,9 @@ impl OrderListOrdersArgsForm {
             limit: None,
             page: None,
             archived: None,
+            paid_only: Some("true".to_owned()),
+            gifts_only: Some("false".to_owned()),
+            overflow: false,
         }
     }
 
@@ -796,6 +1132,9 @@ impl OrderListOrdersArgsForm {
             limit: posted.get("limit").first(),
             page: posted.get("page").first(),
             archived: posted.get("archived").first(),
+            paid_only: posted.get("paidOnly").first(),
+            gifts_only: posted.get("giftsOnly").first(),
+            overflow: posted.overflow,
         }
     }
 
@@ -808,15 +1147,21 @@ impl OrderListOrdersArgsForm {
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, then checked as the router checks a request's
-    /// (`Args::check`); else each control's errors. `check` refuses the first
-    /// argument that breaks a rule.
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
     pub fn parse(&self) -> Result<crate::api::OrderListOrdersArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_statuses = list(&mut errors, "statuses", &self.statuses, text);
         let arg_tags = list(&mut errors, "tags", &self.tags, text);
         let arg_limit = single(&mut errors, "limit", number(self.limit.as_deref()));
         let arg_page = single(&mut errors, "page", integer(self.page.as_deref()));
-        let arg_archived = single(&mut errors, "archived", flag(self.archived.as_deref()));
+        let arg_archived = single(&mut errors, "archived", yes_no(self.archived.as_deref()));
+        let arg_paid_only = single(&mut errors, "paidOnly", yes_no(self.paid_only.as_deref().filter(|value| !value.is_empty()).or(Some("true"))));
+        let arg_gifts_only = single(&mut errors, "giftsOnly", yes_no(self.gifts_only.as_deref().filter(|value| !value.is_empty()).or(Some("false"))));
         let Some(arg_statuses) = arg_statuses else {
             return Err(errors);
         };
@@ -832,12 +1177,20 @@ impl OrderListOrdersArgsForm {
         let Some(arg_archived) = arg_archived else {
             return Err(errors);
         };
+        let Some(arg_paid_only) = arg_paid_only else {
+            return Err(errors);
+        };
+        let Some(arg_gifts_only) = arg_gifts_only else {
+            return Err(errors);
+        };
         let args = crate::api::OrderListOrdersArgs {
             statuses: arg_statuses,
             tags: arg_tags,
             limit: arg_limit,
             page: arg_page,
             archived: arg_archived,
+            paid_only: arg_paid_only,
+            gifts_only: arg_gifts_only,
         };
         args.check().map_err(|err| FormErrors::from_api(&err))?;
         Ok(args)
@@ -862,6 +1215,8 @@ impl OrderListOrdersArgsForm {
                 "limit" => rest.is_empty(),
                 "page" => rest.is_empty(),
                 "archived" => rest.is_empty(),
+                "paidOnly" => rest.is_empty(),
+                "giftsOnly" => rest.is_empty(),
                 _ => false,
             },
             _ => false,
@@ -942,8 +1297,159 @@ pub async fn order_list_orders_args_fields(
         </div>
         <div class="field">
             <label for="order-list-orders-archived">"Archived"</label>
-            <input id="order-list-orders-archived" name="archived" type="checkbox" checked=(form.archived.is_some()) aria-invalid=(errors.invalid("archived"))>
+            <select id="order-list-orders-archived" name="archived" aria-invalid=(errors.invalid("archived"))>
+                <option value="" selected=(form.archived.is_none())>""</option>
+                <option value="true" selected=(form.archived.as_deref() == Some("true"))>"Yes"</option>
+                <option value="false" selected=(form.archived.as_deref() == Some("false"))>"No"</option>
+            </select>
             for message in errors.of("archived") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="order-list-orders-paid-only">"Paid only"</label>
+            <select id="order-list-orders-paid-only" name="paidOnly" aria-invalid=(errors.invalid("paidOnly"))>
+                <option value="" selected=(form.paid_only.is_none())>""</option>
+                <option value="true" selected=(form.paid_only.as_deref() == Some("true"))>"Yes"</option>
+                <option value="false" selected=(form.paid_only.as_deref() == Some("false"))>"No"</option>
+            </select>
+            for message in errors.of("paidOnly") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="order-list-orders-gifts-only">"Gifts only"</label>
+            <select id="order-list-orders-gifts-only" name="giftsOnly" aria-invalid=(errors.invalid("giftsOnly"))>
+                <option value="" selected=(form.gifts_only.is_none())>""</option>
+                <option value="true" selected=(form.gifts_only.as_deref() == Some("true"))>"Yes"</option>
+                <option value="false" selected=(form.gifts_only.as_deref() == Some("false"))>"No"</option>
+            </select>
+            for message in errors.of("giftsOnly") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
+/// The arguments of order.noteOrder, each as the browser sends it, its input's
+/// fields beside them. Sent by POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrderNoteOrderArgsForm {
+    pub id: Option<String>,
+    pub input: OrderNoteInputForm,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl OrderNoteOrderArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default, and
+    /// the input's new form.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            input: OrderNoteInputForm::new(),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value, and the input's fields by their names.
+    /// `Form<OrderNoteOrderArgsForm>` decodes a post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            input: OrderNoteInputForm::from_post(&posted),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, the input parsed by its form when one of its
+    /// fields was sent, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::OrderNoteOrderArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        // The input is optional: absent when none of its fields was sent.
+        let input = match self.input.is_sent().then(|| self.input.parse()).transpose() {
+            Ok(input) => Some(input),
+            Err(refused) => {
+                errors.merge(refused);
+                None
+            }
+        };
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(input) = input else {
+            return Err(errors);
+        };
+        let args = crate::api::OrderNoteOrderArgs {
+            id: arg_id,
+            input,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::order_note_order`). A refusal, the form's or the
+    /// operation's (`FormErrors::from_api`), is the form's errors, which a
+    /// page renders the form again with.
+    pub async fn submit(&self, cx: &Cx) -> Result<types::OrderView, FormErrors> {
+        let args = self.parse()?;
+        operations::order_note_order(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control or the input's. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        OrderNoteInputForm::shows(path)
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderNoteOrderArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `OrderNoteOrderArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input; then the input's fields. `choices` turns a text
+/// or number control the app names into a select.
+#[component]
+pub async fn order_note_order_args_fields(
+    #[default] form: OrderNoteOrderArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(OrderNoteOrderArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="order-note-order-text">"Text"</label>
+            match choices.of("text", "text") {
+                Some(options) => choice_select(id: "order-note-order-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.input.text.as_deref())),
+                None => <input id="order-note-order-text" name="text" type="text" required=(true) minlength="2" value=(form.input.text.clone()) aria-invalid=(errors.invalid("text"))>,
+            }
+            for message in errors.of("text") {
                 <p class="field-error">(message)</p>
             }
         </div>
@@ -955,6 +1461,9 @@ pub async fn order_list_orders_args_fields(
 pub struct OrderTagOrderArgsForm {
     pub id: Option<String>,
     pub labels: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl OrderTagOrderArgsForm {
@@ -967,6 +1476,7 @@ impl OrderTagOrderArgsForm {
         Self {
             id: Some(id.to_string()),
             labels: None,
+            overflow: false,
         }
     }
 
@@ -978,14 +1488,19 @@ impl OrderTagOrderArgsForm {
         Self {
             id: posted.get("id").first(),
             labels: posted.get("labels").first(),
+            overflow: posted.overflow,
         }
     }
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, then checked as the router checks a request's
-    /// (`Args::check`); else each control's errors. `check` refuses the first
-    /// argument that breaks a rule.
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
     pub fn parse(&self) -> Result<crate::api::OrderTagOrderArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
         let arg_labels = single(&mut errors, "labels", json_text(self.labels.as_deref()));
@@ -1066,6 +1581,9 @@ pub async fn order_tag_order_args_fields(
 pub struct ProductReviewsWriteReviewArgsForm {
     pub product_id: Option<String>,
     pub input: WriteReviewInputForm,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
 }
 
 impl ProductReviewsWriteReviewArgsForm {
@@ -1079,6 +1597,7 @@ impl ProductReviewsWriteReviewArgsForm {
         Self {
             product_id: Some(product_id.to_string()),
             input: WriteReviewInputForm::new(),
+            overflow: false,
         }
     }
 
@@ -1090,14 +1609,19 @@ impl ProductReviewsWriteReviewArgsForm {
         Self {
             product_id: posted.get("productId").first(),
             input: WriteReviewInputForm::from_post(&posted),
+            overflow: posted.overflow,
         }
     }
 
     /// The operation's arguments: each written as the JSON a request carries
     /// and decoded into its type, the input parsed by its form, then checked as
     /// the router checks a request's (`Args::check`); else each control's
-    /// errors. `check` refuses the first argument that breaks a rule.
+    /// errors, or the form's when the browser sent more than it reads. `check`
+    /// refuses the first argument that breaks a rule.
     pub fn parse(&self) -> Result<crate::api::ProductReviewsWriteReviewArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
         let mut errors = FormErrors::default();
         let arg_product_id = single(&mut errors, "productId", text(self.product_id.as_deref()));
         let input = match self.input.parse() {

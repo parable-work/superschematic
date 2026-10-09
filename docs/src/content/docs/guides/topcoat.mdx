@@ -172,8 +172,9 @@ fields is, so none of its controls is required.
 ### Rows without JavaScript
 
 A list's rows are added and removed by submit buttons named `_action`:
-`add:lines` after the rows, until the list holds its `listMax`, and
-`remove:lines[1]` in each row while it holds more than its `listMin`. The
+`add:lines` after the rows, until the list holds its `listMax`, or 1000
+rows for a list without one, and `remove:lines[1]` in each row while it
+holds more than its `listMin`. The
 form keeps the button pressed, and `apply_action()` applies it and says
 whether a row button submitted the form, in which case the page renders
 the form again, 200, without calling the operation. The acme app's
@@ -186,6 +187,11 @@ A page answers with one view, so the row action and a refusal set the
 status, and both render the same `place_order_page` component. The
 buttons skip the browser's checks (`formnovalidate`), so a row can be
 added before the others are valid, and Enter still submits the form.
+
+A form reads no more than a browser could send it. It reads one row past
+a list's limit, which `parse` refuses at the list, and at most 5000 names
+and values, past which it reads none and `parse` refuses the form. A post
+of 20,000 `lines[n]` renders the form again with 51 lines, not 20,000.
 
 The row type's `@display` names the rows and the add button: each row is
 numbered by its `noun` ("Line 1"), else by the list's label, and the add
@@ -235,7 +241,15 @@ reads it from the query with Topcoat's `Form<T>`, which reads the query on
 GET, or with `from_query(cx)`, so the controls show the filters in effect.
 A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
 a comma-separated value is split as the router splits it. A blank field is
-absent, and so is an optional flag whose checkbox is not checked.
+absent, or its declared default. A filter's boolean is a `<select>` of Yes
+and No after a blank option, so a filter can leave a flag out, ask for
+false, or turn off a flag whose default is true; a new form selects the
+default. Any other form's boolean is a checkbox, as an input's is:
+unchecked is false, whatever the argument's default, which only checks
+the box of a new form.
+
+An operation whose input is optional takes it only when one of its fields
+is sent, so a blank form calls it without one.
 
 `submit` turns every refusal into the form's errors, a caller's 401 or
 403 included. The acme orders page keeps the route's status instead: it
@@ -250,7 +264,9 @@ limit past 100, say, gets 422 and the message at its control:
 A `Temporal.Date` field or argument is `type="date"` and a
 `Temporal.Time` one `type="time"`. A `Temporal.DateTime` one is
 `type="datetime-local"`, which carries no offset, so the form reads it as
-UTC and its label says so. A `@secret` field is `type="password"` and is
+UTC and its label says so, and a value held with an offset renders in
+UTC. A number field holding a whole number reads any a browser sends,
+`1e1` and `2.0` too. A `@secret` field is `type="password"` and is
 never rendered with its value, so a refused form asks for it again. A
 record leaves the field out, but a form holds what a reader types. A
 value no control holds, a union, any JSON value or a map, is a
