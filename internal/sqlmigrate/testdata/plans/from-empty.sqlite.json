@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
   "from": "",
-  "hash": "493dd267efe2ec777b5b082bbdad322cddc1d886364e2abce563a70aa2c1922f",
+  "hash": "0238f7b69d66613153d2e1e2903349dd5c44a115eb9e7aa460c0b534220c6dba",
   "service": "shop-db",
   "steps": [
     {
@@ -61,7 +61,7 @@
       "op": "createTable",
       "phase": "expand",
       "statements": [
-        "CREATE TABLE \"product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(title, '')) VIRTUAL,\n  PRIMARY KEY (\"id\")\n)"
+        "CREATE TABLE \"product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"title\", '')) VIRTUAL,\n  PRIMARY KEY (\"id\")\n)"
       ],
       "subject": "table/product",
       "transactional": true
@@ -77,7 +77,7 @@
       "transactional": true
     }
   ],
-  "to": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
+  "to": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
   "toModel": null,
   "version": 1
 }

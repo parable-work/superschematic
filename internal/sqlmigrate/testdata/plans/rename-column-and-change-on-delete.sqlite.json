@@ -1,8 +1,8 @@
 {
   "dialect": "sqlite",
-  "expanded": "84fe20eefe8b2d593d0a1db89519c455ca307e4fb42e08d24a7d234de45c6194",
-  "from": "833179e7ba25ed3cfc21f812248292641123cf1b020a4e158ec4e4bcaf69cdc0",
-  "hash": "96be5d3e999fa6cd7a87cd1b869db87bd5ec93755a357c08f1a9ebc31ae0971f",
+  "expanded": "6ace3e16a8e660f06f8024d715b36e6464e8f248663ed2964f3a0283b4b303a8",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "8d0b48dde680a5565d05883de273e38e0ae0248edb6c5c862bb0fc42c3344bbb",
   "renames": [
     "order.customer_id=order.buyer_id"
   ],
@@ -83,7 +83,7 @@
       "transactional": true
     }
   ],
-  "to": "9e0312c6f1d0587ad4e34c555fbfd50a1280b3302af04823dce8a17de381e2a9",
+  "to": "cbbc1a890542c59cd38f36de12f56b8c99306e9c01726565903d76aec7e09ac2",
   "toModel": null,
   "version": 1
 }

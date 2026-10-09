@@ -103,7 +103,9 @@ type change struct {
 	phase   Phase
 	subject string
 	// order breaks ties between changes of one rank: dropped tables go in
-	// reverse dependency order, everything else by subject.
+	// reverse dependency order, a generated column is added after the
+	// plain columns and dropped before them, since its expression reads
+	// them, and everything else goes by subject.
 	order int
 
 	// table is the name of the table the change is on; created is set when

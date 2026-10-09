@@ -270,7 +270,7 @@
           "type": "INTEGER"
         },
         {
-          "generated": "COALESCE(title, '')",
+          "generated": "COALESCE(\"title\", '')",
           "name": "search_text",
           "nullable": true,
           "type": "TEXT"
