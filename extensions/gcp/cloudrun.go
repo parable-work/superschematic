@@ -43,7 +43,9 @@ func serviceAddress(ctx registry.PlatformContext) any {
 //     Cloud Trace (section 7.5), a Secret Manager secret and an accessor
 //     grant per secret binding, and the Cloud SQL volume and VPC egress
 //     its edges need;
-//   - the Cloud Run service. An internal server takes internal traffic
+//   - the Cloud Run service, whose CPU is allocated only while it handles
+//     a request unless the server's settings keep it allocated
+//     (cpuAlwaysAllocated). An internal server takes internal traffic
 //     only and keeps Cloud Run's invoker check, which admits the callers
 //     its edges grant. An exposed one turns the check off, since browsers
 //     call it, and with a domain takes traffic from the load balancer
@@ -81,6 +83,18 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"periodSeconds":    livenessPeriod,
 		"timeoutSeconds":   livenessTimeout,
 		"failureThreshold": livenessFailures,
+	}
+	// Cloud Run allocates a service's CPU only while it handles a request,
+	// and bills its instances for that time and their starts and stops,
+	// unless the service sets its resources, as every one here does
+	// (lowerWorkload): then cpuIdle must say so, or each instance keeps its
+	// CPU and is billed for its whole life. A server that works between
+	// requests keeps its CPU with cpuAlwaysAllocated. Cloud Run returns no
+	// cpuIdle for false, so that server leaves it out, as a service without
+	// a minimum leaves out minInstanceCount. A job's task always has its
+	// CPU and takes no cpuIdle.
+	if always, _ := d.Settings["cpuAlwaysAllocated"].(bool); !always {
+		container["resources"].(map[string]any)["cpuIdle"] = true
 	}
 	// Cloud Run returns no minInstanceCount for a service without a
 	// minimum, so a 0 in the template would differ from the service on

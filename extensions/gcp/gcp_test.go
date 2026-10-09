@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -269,6 +270,54 @@ func TestPreviewInherits(t *testing.T) {
 	}
 	if got := mustJSON(t, env.Deployable("shop-api").ResourceName); got != `{"$concat":["shop-api-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("preview server name = %s", got)
+	}
+}
+
+// TestServiceCPU: a server's Cloud Run service sets cpuIdle beside its
+// resource limits, so its CPU is allocated only while it handles a
+// request, unless its settings keep the CPU allocated
+// (cpuAlwaysAllocated); a job's task, which always has its CPU, takes no
+// cpuIdle.
+func TestServiceCPU(t *testing.T) {
+	reg := assemble(t)
+	service := func(env *ir.ResolvedEnvironment, server string) any {
+		template := node(t, env, server+".service").Properties["template"].(map[string]any)
+		return template["containers"].([]any)[0].(map[string]any)["resources"]
+	}
+	const (
+		idle   = `{"cpuIdle":true,"limits":{"cpu":"1","memory":"512Mi"}}`
+		always = `{"limits":{"cpu":"1","memory":"512Mi"}}`
+	)
+
+	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	wantJSON(t, "shop-api's resources", service(env, "shop-api"), idle)
+	wantJSON(t, "Orders' resources", service(env, "Orders"), idle)
+	task := node(t, env, stacktest.ShipOrdersJob+".job").Properties["template"].(map[string]any)["template"].(map[string]any)
+	wantJSON(t, "the job's resources", task["containers"].([]any)[0].(map[string]any)["resources"], always)
+
+	for _, keep := range []bool{true, false} {
+		s := shop()
+		staging := s.Environment("Staging")
+		staging.Settings = append(staging.Settings, &ir.DeployableSettings{
+			Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": keep},
+		})
+		env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
+		want := idle
+		if keep {
+			want = always
+		}
+		wantJSON(t, fmt.Sprintf("shop-api's resources with cpuAlwaysAllocated %t", keep), service(env, "shop-api"), want)
+		wantJSON(t, "Orders' resources", service(env, "Orders"), idle)
+	}
+
+	s := shop()
+	staging := s.Environment("Staging")
+	staging.Settings = append(staging.Settings, &ir.DeployableSettings{
+		Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": "yes"},
+	})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+	if err == nil || !strings.Contains(err.Error(), "cpuAlwaysAllocated") {
+		t.Errorf("cpuAlwaysAllocated \"yes\": err = %v, want a refusal naming cpuAlwaysAllocated", err)
 	}
 }
 
