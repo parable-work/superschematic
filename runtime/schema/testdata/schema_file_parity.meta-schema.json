@@ -1843,6 +1843,174 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Timers"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "deadlines": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "afterMs": {
+                          "description": "How long after its start the deadline is due, in milliseconds; 0 when absent. Negative, before its start, for a field start alone.",
+                          "maximum": 3153600000000,
+                          "minimum": -3153600000000,
+                          "type": "integer"
+                        },
+                        "start": {
+                          "description": "What the deadline starts from: the instance's create ({ create: true }), each entry of the status into a state of the type's Workflow ({ enters }), or the time an own date-time field holds ({ field }), which moves the deadline when it changes and cancels it when it is cleared.",
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "create": {
+                                  "const": true,
+                                  "description": "Starts at the instance's create."
+                                }
+                              },
+                              "required": [
+                                "create"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "enters": {
+                                  "description": "A state of the type's Workflow; the deadline starts again at each entry into it.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "enters"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "field": {
+                                  "description": "An own field of the type, by JSON key, whose values are date-times.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "field"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "then": {
+                          "additionalProperties": false,
+                          "description": "Moves the status of the type's Workflow, through its transition, when the deadline fires while the status is one of from.",
+                          "properties": {
+                            "from": {
+                              "description": "The states the status moves from; in any other it stays. When absent, the state the deadline starts in: its enters state, or the Workflow's initial state for a create start. A field start names them.",
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            "transition": {
+                              "description": "The state to move to.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "transition"
+                          ],
+                          "type": "object"
+                        },
+                        "until": {
+                          "description": "Cancels the deadline while it is pending once a change leaves the status out of the state it starts in ({ leaves }) or in one of the states given ({ enters }). Needs Workflow on the type.",
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "leaves": {
+                                  "description": "The state the deadline starts in: its enters state, or the Workflow's initial state for a create start.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "leaves"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "enters": {
+                                  "description": "States of the type's Workflow, none of them the state the deadline starts in.",
+                                  "items": {
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": [
+                                "enters"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "start"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "The deadlines, by name.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs to reset or snooze a deadline; nobody may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sweepMs": {
+                    "description": "How often the engine's runner fires the due deadlines, in milliseconds; 5000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "deadlines"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Variants"
               }
             }
@@ -2048,6 +2216,7 @@
             "Rollups",
             "Search",
             "StateRules",
+            "Timers",
             "Variants",
             "Workflow",
             "acme.Audited",

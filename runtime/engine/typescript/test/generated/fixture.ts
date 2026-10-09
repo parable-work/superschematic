@@ -686,7 +686,7 @@ export type ReviewDetail = {
   pullRequest: number;
 };
 
-/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, and it waits for its blockers. */
+/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, it waits for its blockers, and it fails a day after it starts unless it is done. */
 export type TaskFields = {
   /** What the task does. */
   title: string;
@@ -747,6 +747,23 @@ export type TaskBehaviors = {
     readonly seq?: number;
     /** The number as the format prints it, unique within its scope; absent until it is numbered. */
     readonly label?: string;
+  };
+  readonly Timers: {
+    /** Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed. */
+    readonly deadlines: {
+      overdue?: {
+        dueAt: number;
+        fired: boolean;
+        firedAt?: number;
+        outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+      };
+      stuck?: {
+        dueAt: number;
+        fired: boolean;
+        firedAt?: number;
+        outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+      };
+    };
   };
   readonly Dependencies: {
     /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
@@ -956,6 +973,46 @@ export type TaskAssignNumberResult = {
   seq: number;
 };
 
+/** The parameters of Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
+export type TaskFireTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+};
+
+/** What Timers' fireTimer returns. */
+export type TaskFireTimerResult = {
+  /** Whether this call fired the deadline. */
+  fired: boolean;
+  /** When it fired a deadline with then: what the move met. */
+  outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+};
+
+/** The parameters of Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
+export type TaskResetTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+};
+
+/** What Timers' resetTimer returns. */
+export type TaskResetTimerResult = {
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
+};
+
+/** The parameters of Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
+export type TaskSnoozeTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
+};
+
+/** What Timers' snoozeTimer returns. */
+export type TaskSnoozeTimerResult = {
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
+};
+
 /** The parameters of Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
 export type TaskAddBlockerParams = {
   /** The blocker's id. */
@@ -1031,6 +1088,9 @@ export type TaskOperations = {
   unlink: { scope: 'instance'; params: TaskUnlinkParams; result: TaskUnlinkResult };
   listLinked: { scope: 'schema'; params: TaskListLinkedParams; result: TaskListLinkedResult };
   assignNumber: { scope: 'instance'; params: TaskAssignNumberParams; result: TaskAssignNumberResult };
+  fireTimer: { scope: 'instance'; params: TaskFireTimerParams; result: TaskFireTimerResult };
+  resetTimer: { scope: 'instance'; params: TaskResetTimerParams; result: TaskResetTimerResult };
+  snoozeTimer: { scope: 'instance'; params: TaskSnoozeTimerParams; result: TaskSnoozeTimerResult };
   addBlocker: { scope: 'instance'; params: TaskAddBlockerParams; result: TaskAddBlockerResult };
   removeBlocker: { scope: 'instance'; params: TaskRemoveBlockerParams; result: TaskRemoveBlockerResult };
   listBlockers: { scope: 'instance'; params: TaskListBlockersParams; result: TaskListBlockersResult };
@@ -1038,7 +1098,7 @@ export type TaskOperations = {
 };
 
 /** The name of an operation on one Task. */
-export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'assignNumber' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Task's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type TaskVetoes = {
@@ -1046,6 +1106,7 @@ export type TaskVetoes = {
   Comments: never;
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Numbering: never;
+  Timers: 'no_deadline' | 'not_armed';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Variants: never;
@@ -1090,6 +1151,12 @@ export interface TaskClient {
   listLinked(params: TaskListLinkedParams, options?: CallOptions): Promise<TaskListLinkedResult>;
   /** Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
   assignNumber(id: string, params?: TaskAssignNumberParams, options?: TaskWriteOptions): Promise<TaskAssignNumberResult>;
+  /** Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
+  fireTimer(id: string, params: TaskFireTimerParams, options?: TaskWriteOptions): Promise<TaskFireTimerResult>;
+  /** Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
+  resetTimer(id: string, params: TaskResetTimerParams, options?: TaskWriteOptions): Promise<TaskResetTimerResult>;
+  /** Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
+  snoozeTimer(id: string, params: TaskSnoozeTimerParams, options?: TaskWriteOptions): Promise<TaskSnoozeTimerResult>;
   /** Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
   addBlocker(id: string, params: TaskAddBlockerParams, options?: TaskWriteOptions): Promise<TaskAddBlockerResult>;
   /** Dependencies' removeBlocker: Stops another instance from blocking this one. */
@@ -1141,6 +1208,15 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     assignNumber(id, params, options) {
       return client.instances.invoke<TaskAssignNumberResult>('Task', id, 'assignNumber', params ?? {}, options);
+    },
+    fireTimer(id, params, options) {
+      return client.instances.invoke<TaskFireTimerResult>('Task', id, 'fireTimer', params, options);
+    },
+    resetTimer(id, params, options) {
+      return client.instances.invoke<TaskResetTimerResult>('Task', id, 'resetTimer', params, options);
+    },
+    snoozeTimer(id, params, options) {
+      return client.instances.invoke<TaskSnoozeTimerResult>('Task', id, 'snoozeTimer', params, options);
     },
     addBlocker(id, params, options) {
       return client.instances.invoke<TaskAddBlockerResult>('Task', id, 'addBlocker', params, options);

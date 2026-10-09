@@ -1,7 +1,7 @@
 {
   "kind": "General",
   "name": "Task",
-  "description": "A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, and it waits for its blockers.",
+  "description": "A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, it waits for its blockers, and it fails a day after it starts unless it is done.",
   "scalars": {
     "Generic.JSON": { "name": "Generic.JSON", "languagePrimitive": "string" },
     "Generic.Int64": { "name": "Generic.Int64", "languagePrimitive": "number" },
@@ -46,6 +46,16 @@
           }
         },
         { "name": "Numbering", "config": { "format": "T-{seq}", "scope": { "link": "project" } } },
+        {
+          "name": "Timers",
+          "config": {
+            "deadlines": {
+              "overdue": { "start": { "field": "due" } },
+              "stuck": { "start": { "enters": "doing" }, "afterMs": 86400000, "then": { "transition": "failed" } }
+            },
+            "permission": "tasks.timers"
+          }
+        },
         { "name": "Dependencies", "config": { "schemas": ["Task", "Spec"] } },
         { "name": "Constants", "config": { "fields": ["kind"] } },
         { "name": "Variants", "config": { "field": "detail", "by": "kind", "types": { "build": "BuildDetail", "review": "ReviewDetail" } } }

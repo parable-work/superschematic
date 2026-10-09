@@ -51,6 +51,8 @@ export interface BehaviorConfigs {
   Approvals: ApprovalsConfig;
   /** A number a person reads on each instance, set at its create from a count per schema, per scope target and per year. */
   Numbering: NumberingConfig;
+  /** Named deadlines that start at the create, at an entry into a state of the type's Workflow or at a date-time field, and fire once due, moving the status. */
+  Timers: TimersConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -449,6 +451,46 @@ export interface NumberingScope {
   /** The link's name in the type's Links config. */
   readonly link: string;
 }
+
+/** Timers' config. */
+export interface TimersConfig {
+  /** The deadlines, by name: a letter, then letters, digits, `_` and `-`. */
+  readonly deadlines: Readonly<Record<string, TimersDeadline>>;
+  /** How often the engine's runner fires the due deadlines, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
+  /** The permission a caller needs to reset or snooze a deadline; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/**
+ * One deadline of a Timers config: due afterMs after what it starts from,
+ * it fires once when it comes due, marked fired whatever its move meets.
+ * A deadline that names a state needs Workflow on the type.
+ */
+export interface TimersDeadline {
+  /** What it starts from: the create, each entry of the status into a state of the type's Workflow, or the time an own date-time field holds. */
+  readonly start: TimersStart;
+  /** How long after its start it is due, in milliseconds; 0 when absent. Negative, before it, for a field start alone. */
+  readonly afterMs?: number;
+  /** Moves the status of the type's Workflow when it fires, while the status is one of from. */
+  readonly then?: TimersThen;
+  /** Cancels it while it is pending: once the status is out of the state it starts in (leaves), or in one of the states given (enters). */
+  readonly until?: TimersUntil;
+}
+
+/** What a Timers deadline starts from: a field start moves with its field, and its field cleared cancels it. */
+export type TimersStart = { readonly create: true } | { readonly enters: string } | { readonly field: string };
+
+/** The move a Timers deadline makes when it fires. */
+export interface TimersThen {
+  /** The state to move to. */
+  readonly transition: string;
+  /** The states it moves from; when absent, the state the deadline starts in, its enters state or the Workflow's initial one. A field start names them. */
+  readonly from?: readonly string[];
+}
+
+/** What cancels a pending Timers deadline: leaves names the state it starts in, which a field start has none of. */
+export type TimersUntil = { readonly leaves: string } | { readonly enters: readonly string[] };
 
 /** Lease's config. */
 export interface LeaseConfig {

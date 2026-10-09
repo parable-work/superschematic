@@ -353,6 +353,13 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   numbers each new instance whoever holds what. Its `assignNumber`, which
   numbers an instance made before the schema composed it, writes: list
   `"Numbering.assignNumber"` in `exempt` to backfill leased instances.
+- **Beside `Timers`.** The runner fires a
+  [`Timers`](/superschematic/guides/engine-behaviors/#timers) deadline
+  through `fireTimer`, a writing operation of its own principal, so the
+  guard refuses the fire of a leased instance, and the sweep leaves the
+  deadline for its next run. List `"Timers.fireTimer"` in `exempt` to let
+  a deadline move leased work on; its move is a call of the instance's
+  own, which the guard lets through.
 - **Heartbeats fill the log.** Each one is an operation event. A
   dashboard that streams the event log passes `exclude=heartbeat` and
   keeps its place past them without receiving one.

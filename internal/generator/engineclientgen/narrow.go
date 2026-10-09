@@ -79,6 +79,7 @@ var coreNarrowers = map[string]narrower{
 	"Variants":     narrowVariants,
 	"Approvals":    narrowApprovals,
 	"Numbering":    narrowNumbering,
+	"Timers":       narrowTimers,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -575,6 +576,37 @@ func narrowNumbering(n *narrowing, _ map[string]any, _ narrowTarget) error {
 		typedField{"seq", integer(), false},
 		typedField{"label", map[string]any{"type": "string"}, false},
 	)
+}
+
+// timersOutcomes are what a fire's move meets, as a deadline's outcome
+// holds it.
+var timersOutcomes = []string{"moved", "skipped", "vetoed", "forbidden"}
+
+// Timers: the deadlines field holds, by deadline of the config, the ones
+// that have started, so none is required; each has its due time and
+// whether it fired, and once fired when, and with a then its outcome. The
+// operations name a deadline of the config.
+func narrowTimers(n *narrowing, config map[string]any, _ narrowTarget) error {
+	deadlines, _ := config["deadlines"].(map[string]any)
+	names := sortedKeys(deadlines)
+	properties := map[string]any{}
+	for _, name := range names {
+		properties[name] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"dueAt", "fired"},
+			"properties": map[string]any{
+				"dueAt":   integer(),
+				"fired":   boolean(),
+				"firedAt": integer(),
+				"outcome": enumOf(timersOutcomes),
+			},
+		}
+	}
+	for _, op := range []string{"fireTimer", "resetTimer", "snoozeTimer"} {
+		if err := setOperationProperty(n.params, op, nil, "deadline", enumOf(names)); err != nil {
+			return err
+		}
+	}
+	return setField(n, "deadlines", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
 }
 
 // stringScalar reports whether a scalar's values are strings.

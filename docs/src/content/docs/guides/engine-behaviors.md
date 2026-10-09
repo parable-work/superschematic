@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, StateRules, Numbering and Approvals behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-one behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements fourteen itself
+The core declares twenty-two behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements fifteen itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -42,6 +42,7 @@ schema that composes one until a deployment registers that package.
 | `StateRules` | own fields a Workflow state requires to enter it, and ones it freezes while an instance is in it | `Workflow` | [StateRules](#staterules) |
 | `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
+| `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -332,8 +333,8 @@ preconditions say.
 ## The runner
 
 Some work happens after a change commits rather than inside it:
-`Reactions` rules, and timed sweeps such as expiring leases or missed
-worker heartbeats. `engine.runner` runs it, in your server's process, as a
+`Reactions` rules, and timed sweeps such as `Timers`' deadlines, expiring
+leases or missed worker heartbeats. `engine.runner` runs it, in your server's process, as a
 principal you name:
 
 ```ts
@@ -1232,6 +1233,97 @@ engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-00
 - **Lease.** On a type that composes `Lease`, list
   `"Numbering.assignNumber"` in its `exempt`, or a backfill of a leased
   instance is refused for anyone but its holder.
+
+## Timers
+
+Deadlines on an instance that move it on when nobody does: a request open
+four hours without an answer is escalated, one waiting a week on its
+customer is resolved, and a visit is reminded a day before its time. The
+runner fires each deadline once it is due.
+
+```ts
+import { Temporal } from "superscalar";
+import { behavior } from "@superschematic/schema";
+
+@behavior("Workflow", {
+  states: ["open", "waiting", "escalated", "resolved"],
+  transitions: [
+    { from: "open", to: "waiting" },
+    { from: "waiting", to: "open" },
+    { from: "open", to: "escalated" },
+    { from: "escalated", to: "open" },
+    { from: "open", to: "resolved" },
+    { from: "waiting", to: "resolved" },
+    { from: "escalated", to: "resolved" },
+  ],
+})
+@behavior("Timers", {
+  deadlines: {
+    respond: { start: { enters: "open" }, afterMs: 14400000, then: { transition: "escalated" }, until: { leaves: "open" } },
+    lapse: { start: { enters: "waiting" }, afterMs: 604800000, then: { transition: "resolved" }, until: { leaves: "waiting" } },
+    remind: { start: { field: "visitAt" }, afterMs: -86400000, until: { enters: ["resolved"] } },
+  },
+  sweepMs: 60000,
+  permission: "requests.timers",
+})
+export abstract class Request {
+  title: string;
+  visitAt?: Temporal.DateTime;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `deadlines` (required): by name, `{ start, afterMs?, then?, until? }`. `start` is `{ create: true }`, `{ enters: <state> }`, each entry into a state of the type's Workflow, or `{ field: <own date-time field> }`; `afterMs`, from the start, 0 by default and negative only for a field start; `then: { transition, from? }`, the move a fire makes, from the state the deadline starts in unless `from` names others (a field start names them); `until: { leaves }` (the state it starts in) or `{ enters: [states] }`, what cancels a pending deadline. `sweepMs` (5000 by default, at least 1000); `permission`, to reset or snooze a deadline, which nobody may without it |
+| Field | `deadlines`: `{ <name>: { dueAt, fired, firedAt?, outcome? } }`, each started deadline; `outcome` is what its `then` met: `moved`, `skipped` (the status was not one it moves from), `vetoed` or `forbidden` |
+| Operations | `fireTimer({ deadline })`, which the runner calls on each due deadline; `resetTimer({ deadline })`; `snoozeTimer({ deadline, dueAt })` |
+| Vetoes | `no_deadline`, a deadline the config does not name; `not_armed`, a reset with nothing to start from now or a snooze of a deadline not started, either while `until` holds. A caller without `permission` is `forbidden` (403) |
+| Refusals at define | a state the type's Workflow lacks, a `start.field` that is not an own date-time field, a negative `afterMs` for another start, a `then` with no transition from a `from` state to its state, a field start's `then` without `from` or `until.leaves`, and an `enters`, a `then` or an `until` on a type without `Workflow` (`invalid_schema`) |
+
+```ts
+engine.instances.create(me, "requests", { title: "Printer jams" }, { id: "jam" }).behaviors.Timers;
+// { deadlines: { respond: { dueAt: 1760014800000, fired: false } } }
+// four hours later, the runner's sweep fires it:
+engine.instances.get(me, "requests", "jam")?.behaviors;
+// { Workflow: { status: 'escalated', ... }, Timers: { deadlines: { respond: { dueAt: 1760014800000, fired: true, firedAt: 1760014860000, outcome: 'moved' } } } }
+```
+
+- **What a deadline starts from.** A deadline arms when its fact
+  changes: the create, the status's entry into the state (its
+  `enteredAt`), or the field's value. A write that leaves the fact as it
+  is changes nothing, so a snooze survives it, and a status that leaves
+  the state and comes back, within one call too, starts the deadline
+  again. A field moved arms it again, unfired; a field cleared cancels
+  it.
+- **Fired once, whatever the move meets.** A fire marks the deadline
+  fired, then moves the status when it is one of `from`. A guard's veto
+  or a transition permission the caller lacks leaves the status as it
+  is, and `outcome` records which; the deadline is not tried again, so a
+  stuck instance holds nothing back.
+- **Overdue.** Nothing in `deadlines` follows the clock: a deadline not
+  fired is overdue once its `dueAt` has passed. A `Reactions` rule hears
+  a fire with `{ when: { changes: { field: "Timers.deadlines.respond.fired", to: true } } }`.
+- **The runner.** Every `sweepMs`, the runner fires the due deadlines of
+  each schema in each namespace, earliest first, up to 1000 a run, as its
+  principal, which needs `read` and `write` on the schema and any
+  permission a `then` transition names. An archived namespace fires nothing until it
+  is unarchived; then its overdue deadlines fire, 1000 a run. A caller
+  who may write the instance can call `fireTimer` itself; on a deadline
+  not due, or fired already, it changes nothing.
+- **Snooze and reset.** `snoozeTimer` moves a started deadline to
+  `dueAt`, epoch milliseconds, and a fired one fires again then;
+  `resetTimer` starts one again from its fact. Both need `permission`.
+- **New versions.** Any change: a new `afterMs` moves each pending
+  deadline from its start, but a snoozed one; a removed deadline, or one
+  whose `start` changes, is dropped, and arms again at the instance's
+  next write. A new field deadline arms every instance at the publish; a
+  new `create` or `enters` deadline arms at each instance's next write, so
+  an instance never written again never arms it. `Timers` can be added
+  to and removed from a schema with instances.
+- **Deleting.** Deleting an instance deletes its deadlines.
+- **Lease.** On a leased type, list `"Timers.fireTimer"` in `Lease`'s
+  `exempt`, or the holder's lease refuses the runner's fire
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ## Where to go next
 

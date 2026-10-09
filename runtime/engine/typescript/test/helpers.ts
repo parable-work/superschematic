@@ -286,3 +286,19 @@ export function expensesDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-approvals-json/src/expense.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * requestsDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-timers-json), a schema named requests: its Request type composes
+ * Workflow, from open to waiting, escalated or resolved, and Timers, whose
+ * respond escalates a request open four hours, whose lapse resolves one
+ * waiting a week, each cancelled when the request leaves that state, and
+ * whose remind fires a day before visitAt, with requests.timers to reset
+ * or snooze one.
+ */
+export function requestsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-timers-json/src/request.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

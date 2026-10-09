@@ -10,8 +10,10 @@
 // a result of the kind's shape, fixture-branches-json, whose recipes
 // are version graphs, and fixture-staterules-json, whose invoices need
 // and keep fields by their status, and fixture-approvals-json, whose expense claims
-// wait for sign-offs, and fixture-numbering-json, whose invoices are
-// numbered per project and per year.
+// wait for sign-offs, fixture-numbering-json, whose invoices are
+// numbered per project and per year, and fixture-timers-json, whose
+// support requests are escalated or resolved when nobody moves them in
+// time.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -30,6 +32,7 @@ import {
   projectTreeDocument,
   projectsDocument,
   recipesDocument,
+  requestsDocument,
   stepsDocument,
   tasksDocument,
 } from './helpers.ts';
@@ -52,7 +55,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow']);
       assert.deepEqual(
         engine.behaviors.declaration('Workflow')?.fields?.map((field) => field.name),
         ['status', 'enteredAt']
@@ -440,6 +443,42 @@ for (const driver of drivers) {
           ['pia', true],
         ]
       );
+    });
+
+    test('it runs the requests document: a request open four hours is escalated on the runner, one that left open in time is not, and a visit is reminded a day before', () => {
+      const runner: Principal = { subject: 'runner', permissions: [] };
+      const lead: Principal = { subject: 'lee', permissions: ['requests.timers'] };
+      let now = Date.UTC(2026, 9, 9, 9);
+      const engine = openTestEngine({ driver, clock: () => now, runner: { principal: runner } });
+      engine.schemas.define(alice, requestsDocument());
+      engine.schemas.publish(alice, 'requests');
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'requests').map(({ name }) => name),
+        ['Workflow', 'Timers']
+      );
+      engine.runner.runDue();
+      const start = now;
+      const visitAt = new Date(start + 3 * 86_400_000).toISOString();
+      const created = engine.instances.create(writer, 'requests', { title: 'Printer jams', visitAt }, { id: 'jam' });
+      assert.deepEqual(created.behaviors.Timers, {
+        deadlines: { remind: { dueAt: start + 2 * 86_400_000, fired: false }, respond: { dueAt: start + 4 * 3_600_000, fired: false } },
+      });
+      engine.instances.create(writer, 'requests', { title: 'Toner' }, { id: 'toner' });
+      engine.instances.invoke(writer, 'requests', 'toner', 'transition', { to: 'waiting' });
+      // The waiting request's lapse is snoozed a day, by a lead.
+      engine.instances.invoke(lead, 'requests', 'toner', 'snoozeTimer', { deadline: 'lapse', dueAt: start + 8 * 86_400_000 });
+      now = start + 5 * 3_600_000;
+      engine.runner.runDue();
+      const read = (id: string) => engine.instances.get(alice, 'requests', id);
+      const deadlines = (id: string) => read(id)?.behaviors.Timers.deadlines as Record<string, { fired: boolean }>;
+      assert.deepEqual([read('jam')?.behaviors.Workflow.status, read('toner')?.behaviors.Workflow.status], ['escalated', 'waiting']);
+      assert.deepEqual(deadlines('jam').respond, { dueAt: start + 4 * 3_600_000, fired: true, firedAt: now, outcome: 'moved' });
+      now = start + 2 * 86_400_000;
+      engine.runner.runDue();
+      assert.equal(deadlines('jam').remind.fired, true);
+      // The customer answers: leaving waiting cancels lapse.
+      engine.instances.invoke(writer, 'requests', 'toner', 'transition', { to: 'open' });
+      assert.deepEqual(Object.keys(deadlines('toner')), ['respond']);
     });
 
     test('it runs the recipes document: a recipe is a graph root whose drafts merge into its primary line, and a tagged commit is released', () => {

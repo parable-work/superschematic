@@ -279,7 +279,10 @@ instance off. So is a
 backfill's: `Numbering`'s `assignNumber`, which numbers an instance made
 before its schema composed `Numbering`, writes, so a deployment that
 backfills leased instances lists `"Numbering.assignNumber"`; a create
-holds no lease, and numbers its instance whatever the guard. Nothing
+holds no lease, and numbers its instance whatever the guard. So is the
+runner's fire of a `Timers` deadline, `fireTimer`, which the sweep leaves
+for its next run: `"Timers.fireTimer"` in `exempt` lets a deadline move
+leased work on, its move a `call()` the guard lets through. Nothing
 changes the field `maxHoldField` names while a lease is held, unless with
 `overridePermission`, so a holder cannot extend its own hold.
 

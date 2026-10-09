@@ -70,6 +70,7 @@ for (const driver of drivers) {
         'Rollups',
         'Search',
         'StateRules',
+        'Timers',
         'Variants',
         'Workflow',
       ]);

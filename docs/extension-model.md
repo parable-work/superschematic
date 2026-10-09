@@ -951,8 +951,8 @@ The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`,
-`Variants`, `Branches`, `StateRules`, `Numbering` and `Approvals`. It
-declares the work-queue behaviors the optional
+`Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
+`Approvals`. It declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
 (`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
@@ -964,7 +964,7 @@ takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
 `Dependencies` declare a `createParamsSchema`: a create's links by name
 and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
-`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`,
+`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`, `Timers`,
 `StateRules`, `Approvals`
 and every work-queue behavior list the codes of their
 vetoes. `Constants` and `Variants` declare no field, operation,
@@ -976,7 +976,9 @@ implementation checks what JSON Schema cannot (a Workflow transition
 that names a state the config does not list, a Workflow outcome for a
 state a transition leaves, a gated state of `Dependencies` that is not a
 state of the type's Workflow, a gate of `Approvals` on a state the
-Workflow lacks, or a rollup whose linked schema has no such link, say);
+Workflow lacks, a `Timers` deadline that starts at a field whose values
+are not date-times, or a rollup whose linked schema has no such link,
+say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -1002,6 +1004,7 @@ engine; without them the engine refuses a schema that composes one.
 | `StateRules` | `states` (by a state of the type's Workflow: `required`, `frozen`, a list or `all`), `permission`; required; requires `Workflow` | none | none |
 | `Approvals` | `gates` (by state of the type's Workflow: `count`, `permission`, `from`, `excludeCreator`), `resetOnChange`; required; requires `Workflow` | `gates` | `signOff`, `withdrawSignOff`, the read-only `listSignOffs` |
 | `Numbering` | `format`, `scope` (`link`), `reset` (`yearly`); required | `seq`, `label` | `assignNumber` |
+| `Timers` | `deadlines` (by name: `start`, one of `create`, `enters` and `field`, `afterMs`, `then` (`transition`, `from`), `until`, one of `leaves` and `enters`), `sweepMs`, `permission`; required; `Workflow` for `enters`, `then` and `until` | `deadlines` | `fireTimer`, `resetTimer`, `snoozeTimer` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`revised.link`, `name`, `data`); optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
@@ -1049,6 +1052,16 @@ format prints no year, when the schema is defined. It declares no veto
 code: nothing it does after the define is refused. `make cli-smoke`
 loads `fixture-numbering-json`, whose invoices are numbered per project
 and per year, and its TypeScript twin loads to the same IR.
+
+`Timers` names states of the type's Workflow and an own field, which the
+loader does not check: the engine refuses a state the Workflow lacks, a
+field whose JSON Schema format is not `date-time`, and a deadline that
+names a state on a type without `Workflow`, which a declaration's
+`requires` cannot say, since a field deadline needs none, when the
+schema is defined. The engine's runner fires its deadlines (D16,
+amended). `make cli-smoke` loads `fixture-timers-json`, whose support
+requests are escalated or resolved when nobody moves them in time, and
+its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
@@ -1554,7 +1567,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
