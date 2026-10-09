@@ -35,8 +35,9 @@ pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ 
 /// Admits the caller of {{ .Namespace }}.{{ .Name }} as its route does: {{ if .RequiresAuth }}401 without one, 403
 /// {{- if .Permissions }} without one of {{ join .Permissions ", " }}{{ else }} never{{ end }}. The caller, for the implementation.{{ else }}it needs none, so
 /// `Ok(None)`.{{ end }}{{ if .Manual }} The service mounts the operation
-/// (@manualRouteRegistration), so it has no in-process call.{{ end }}{{ if .Identity }} The identity runtime serves the operation
-/// (D50), so it has no in-process call.{{ end }}
+/// (@manualRouteRegistration), so it has no in-process call.{{ end }}{{ if .Identity }}
+/// The identity runtime serves the operation (D50), so it has no
+/// in-process call.{{ end }}
 pub async fn can_{{ .SnakeName }}(cx: &Cx) -> Result<Option<Principal>, ApiError> {
 {{- if $.HasAuth }}
     crate::admit(cx, &operations::{{ .ConstName }}).await
