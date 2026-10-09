@@ -12,7 +12,7 @@ depends on a generated type.
 | `requestctx` | request-scoped values (request id, database handle) with typed accessors |
 | `middleware` | request logging, recovery, AES-GCM payload decryption and the `PayloadDecryptor` seam |
 | `routing` | route registration and handler adapter scaffolding |
-| `session` | the core auth provider's runtime: session store, middleware and permission checks |
+| `session` | the principal on the request context, `RequireAuth` and the permission checks every provider's routes run, and the store interfaces a provider of its own may build on; the core user model's sessions are `identity`'s |
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `identity` | the core user model's runtime (D50): the identity `Config`, argon2id passwords as PHC strings, session tokens, the session cookie, the credential a request carries (`ExtractCredential`), the cross-origin check and the credentialed `CORS` middleware, roles and capabilities, the `Store` with its `database/sql` `SQLStore` for Postgres and SQLite, the `Service` with every session and administration operation, its handlers and its `Middleware` |
 | `filterparse` | list-endpoint filter expression parsing |
