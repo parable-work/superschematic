@@ -4735,3 +4735,31 @@ is a TypeScript or Rust server, not a site.
 Status: not built.
 
 The rule is reversible until the first release.
+
+### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
+
+The gcp target's Cloud Run platform sets every service's resource limits,
+from `cpu` and `memory` or their defaults. Cloud Run allocates a service's
+CPU only while it handles a request when the service sets no resources;
+once it sets them, `resources.cpuIdle` must be `true` to keep that, as the
+provider's schema and the Admin API say, and the platform set nothing. So
+every server it deployed kept its CPU between requests and was billed for
+its instances' whole lives, Google's instance-based billing, where
+`docs/stack-model.md` (section 7.4) and the Cloud SQL connector's lazy
+refresh assumed Cloud Run throttles it. Cloud Run takes a `cpu` below 1,
+which the settings accept, only with request-based billing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server's Cloud Run service sets `cpuIdle: true` beside its limits: its CPU is allocated only while an instance handles a request, and Cloud Run bills its instances for that time and their starts and stops, request-based billing. Work a server does outside its requests belongs in a job (D52). | Leaving the resources unset to take Cloud Run's default, which drops the `cpu` and `memory` settings. Instance-based billing by default, which bills a server that idles between requests, the usual case, for time it does no work. |
+| A server's settings keep its CPU with `cpuAlwaysAllocated: true`, for one that works between requests, in goroutines of its own or on the warm instances `minInstances` keeps, and pays for its instances' whole lives. Its service leaves `cpuIdle` out, since Cloud Run returns none for false, as a service without a minimum leaves out `minInstanceCount`. A job takes no such setting: its task always has its CPU, and the job's schema has no `cpuIdle`. | A setting named for the Admin API's `cpuIdle`, which a server would set to false to keep its CPU, where each other setting says what it sets. `billing: "instance"`, the console's term, which names the bill rather than what the server gets. Writing `cpuIdle: false` into the service, a value Cloud Run does not return. |
+| Startup CPU boost stays off, as the Admin API and the provider leave it. | Turning it on, as `gcloud run deploy` and the console do for a new service: it bills the boosted CPU, twice the default one, for each instance's startup and ten seconds after, for a Go or Bun server whose startup is short and waits on its databases, not its CPU. |
+
+Status: built. `extensions/gcp`'s `TestServiceCPU` covers a server's
+`cpuIdle`, a server that keeps its CPU, an explicit `false`, a refused
+non-boolean, and a job's task, which has no `cpuIdle`; the gcp goldens and
+the Pulumi render goldens hold `cpuIdle: true` on every service. None of
+it has run against Google Cloud, where the next plan of a deployed
+environment updates each service.
+
+The rule is reversible until the first release.
