@@ -96,12 +96,18 @@ are the union of its APIs' edges, so grouping APIs never restates one.
 
 ### 3.3 Edges
 
-An edge is a need met by something that provides it. v1 has two kinds:
+An edge is a need met by something that provides it. v1 has three kinds:
 
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
 | sql | server or job | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
 | http | server or job | server | `calls` in the config of each API the calling server serves |
+| site | site | server | `calls` in the Site service's config; the server must be exposed (D55, section 8.10) |
+
+A site edge derives the API's public address and nothing else, since the
+browser carries its end user's token. Resolution refuses a site that
+calls an API whose server the stack does not expose
+(`site-calls-unexposed`), which no browser reaches.
 
 A job takes its API's edges, from itself (D52): the sql edge to the API's
 database and an http edge to the server of each API its API calls. A job
@@ -181,7 +187,16 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   name. It holds what the server's `ServiceAuthenticator` checks: the
   issuers it accepts, with their keys and audience, and the deployable
   each caller identity is, which the connectors of the http edges to the
-  API write together (section 9.2).
+  API write together (section 9.2);
+- a CORS field per served API that a site calls, `<API>_CORS`
+  (`SHOP_API_CORS`), named by the core's rule over the API's own name as
+  the callers field is. It lists the public origin of each site whose site
+  edge reaches the API, which its server answers CORS for and no other
+  (D55, section 8.10).
+
+A site has no config of its own to fill: its one binding per site edge,
+named after the API it reaches, is what the deploy writes into the site's
+config for the environment, which the browser reads when the site loads.
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -210,6 +225,8 @@ connector's value against it and refuses one that breaks it with a
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
 | http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
+| site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
+| site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
 
 A member holds a string or a reference to an output or a parameter. A
 credential's `source` and `headers` are literals, as are an issuer's
@@ -221,7 +238,10 @@ In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
 with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of objects, or an empty
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`). A list of strings one of which is
+a reference, such as the origins of a CORS field whose site's address is
+an output, is one concatenation of them and the commas
+(`SHOP_API_CORS_ORIGINS`, D55). A list of objects, or an empty
 list, is a variable that holds the list's length, and each object's
 members follow the list's name and the object's index
 (`SHOP_API_CALLERS_ISSUERS=1`, `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`). A
@@ -317,12 +337,13 @@ export abstract class Preview extends Staging {}
 ```
 
 - **`@stack`** declares the stack, once per schema. **`deploy`** names
-  the entry points, API and DB services. Everything they reach through
-  `authDb`, DB dependencies and `calls` joins the stack, so `shop-db`
-  needs no mention.
+  the entry points, API, DB and Site services. Everything they reach
+  through `authDb`, DB dependencies and `calls` joins the stack, so
+  `shop-db` needs no mention, and a site brings the APIs it calls.
 - **`expose`** names what is reachable from outside the environment, an
   API's handle or an `@server` class. Everything else is internal, and
-  reachable only along its edges.
+  reachable only along its edges. A site is always exposed, named here or
+  not, and every API a site calls must be (D55, section 8.10).
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
@@ -657,15 +678,29 @@ registers a `PlatformSpec`:
   environment. Under a parameter the name references the parameter
   (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
   usually references an output of one of the deployable's nodes;
+- `PublicAddressOf`, where a browser reaches an exposed deployable from
+  outside the environment, beside `AddressOf`, where an edge inside it
+  does (D55). Resolution asks it for each exposed deployable and records
+  it in `environment.json` as `publicAddress`. A site edge derives the
+  API's from its server's, and a site's own is the origin the CORS field
+  of each API it calls lists, so a site platform must have one. The local
+  target's is the loopback URL, as its address is. On gcp it is
+  `https://<host>`, the server's host under the environment's domain, or
+  its `run.app` URL without a domain, where its ingress lets a browser
+  reach it. The generic connector, which joins deployables on two
+  targets, will read it too;
 - `Lower`, a pure function from the environment and the resolved
   deployable, bindings included, to the deployable's resources and, for an
   exposed server, the DNS records it needs (section 6.9).
 
 A resource a platform leaves without a phase gets the default of its
-producer: rollout for a server's or a job's own resources, infrastructure
-for a database's. A job platform's `AddressOf` may return nothing, since
-no edge reaches a job, and its `Lower` reads the job's run from the
-deployable's `Job` (D52).
+producer: rollout for a server's, a job's or a site's own resources,
+infrastructure for a database's. A job platform's `AddressOf` may return
+nothing, since no edge reaches a job, and its `Lower` reads the job's run
+from the deployable's `Job` (D52). A site platform needs no languages or
+dialects; its `Lower` reads what the site builds and serves from the
+deployable's `Site`, and writes `ir.SiteDigestToken` where the digest of
+the files it serves goes, which the deploy pins (D55).
 
 ### 6.2 Connector
 
@@ -1041,9 +1076,10 @@ because a domain's DNS often lives with a different provider than its
 compute.
 
 Exposure produces records in a neutral shape (name, type, value): the host
-of each exposed server, and the records its certificate needs for
-validation. The DNS platform lowers them to its provider's resources, in the
-same provisioner run as the rest of the environment.
+of each exposed server and of each site, which is always exposed (D55),
+and the records its certificate needs for validation. The DNS platform
+lowers them to its provider's resources, in the same provisioner run as
+the rest of the environment.
 
 A DNS platform registers a `DNSPlatformSpec`: the JSON Schema of an
 environment's values for it (a zone) and a pure `Lower` from the records
@@ -1537,7 +1573,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 3. It applies the deploy order (section 5.3) through the local provisioner,
    then stays in the foreground until Ctrl-C or until a server exits,
    running each job on its schedule meanwhile (section 8.7). The summary it
-   prints names each server's URL and when each job runs.
+   prints names each server's and each site's URL and when each job runs.
 4. It stops the servers, callers first, then the container, which keeps
    its data for the next run. `--remove-database` removes the container
    and its data instead.
@@ -1548,10 +1584,12 @@ runs an environment on the `local` target (`internal/stack/local`):
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
+| site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
+| site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
-| port | a server's `port` setting and the `postgresPort` value, else a hash of the stack, the environment and the server: 20000 to 22767 for a server and 30000 to 32767 for Postgres, the same from run to run |
+| port | a server's or a site's `port` setting and the `postgresPort` value, else a hash of the stack, the environment and the deployable: 20000 to 22767 for a server or a site and 30000 to 32767 for Postgres, the same from run to run |
 
 `<schemas-root>/.superschematic` holds what belongs to one machine: each
 local environment's secrets file and the key pairs of its edges. It
@@ -1562,7 +1600,7 @@ which the provisioner reads when it starts the caller.
 
 The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
-migrations, servers and jobs it runs. Beside it are the models `stack
+migrations, servers, jobs and sites it runs. Beside it are the models `stack
 dev` writes for it (`models/<service>.json`), the plans it applies
 (`migrations/<service>.plan.json`) and the Go servers' and jobs' binaries
 it builds (`bin/`). A TypeScript server has no binary: the provisioner
@@ -2168,26 +2206,72 @@ export default defineConfig({
 });
 ```
 
-- **Source.** The site's code sits at its implementation path, a member
-  of the Bun workspace (D51), so it imports the SDKs of the APIs it calls.
-  The build writes a typed browser config there: a function that returns a
-  client per API the site calls. superscalar's browser build is a
-  prerequisite, since the SDKs validate through it.
+Every member of `site` is optional: `build` is the package.json script
+that builds the site, `build` unless set; `output` the directory it
+writes, relative to the site's package, `dist` unless set; and
+`fallback` the file, relative to the output, served for a path that names
+no file, which a single-page application's router reads. A site with no
+fallback answers such a path 404. A Site schema declares nothing; its
+config may leave `outputs` out.
+
+- **Source.** The site's code sits at its implementation path, the naming
+  file's `[implementation_paths] site`, `web/{service}` unless set, a
+  member of the Bun workspace (D51), so it imports the SDKs of the APIs it
+  calls. The build writes a typed browser config there,
+  `config.generated.ts`, on every build: `loadApis()` returns each API the
+  site calls, by the camel case of its name, with its public `baseUrl` and
+  `client(create)`, which builds a client of the API from a factory the
+  site hands it, its SDK's constructor or any other. It imports no SDK:
+  a browser bundle of a generated SDK takes superscalar's Node backend
+  until superscalar's browser build bundles (D55, amended). When the
+  package is missing, the build scaffolds a minimal site there once: an
+  `index.html`, a script that loads the config, and a `build` script that
+  bundles them with `bun build`.
 - **Build.** The deploy runs the site's `build` script after a frozen
-  install. It digests the output as it digests a server's build context,
-  and uploads only what changed.
+  install of the workspace. It digests the output as it digests a server's
+  build context (D46): every file in path order, at the epoch, owned by
+  root, with no link. It uploads the files under their digest when the
+  digest is new, and keeps the files of every digest it uploaded. `stack
+  build` builds and uploads the same way, and prints each site's digest
+  as a `--site` flag, which `stack deploy` takes, with no build, to serve
+  those files again: a rollback.
 - **Edges.** A site gets a `site` edge to each API it calls. The API must
-  be exposed, since a browser reaches it at its public address. The edge
-  derives that address and nothing else: the browser carries its end
-  user's token.
+  be exposed, since a browser reaches it at its public address
+  (`site-calls-unexposed`). The edge derives that address and nothing
+  else (`ir.SiteEndpoint`): the browser carries its end user's token. A
+  site rolls out a wave after the servers it calls.
 - **Config.** One build serves every environment. The site reads
   `/__superschematic/config.json` when it loads, which the deploy writes
-  per environment with each API's public address. It is never cached.
+  per environment with each API's public address,
+  `{"apis": {"shop-api": {"url": "https://shop-api.acme.dev"}}}`, read
+  from the run's outputs once the servers it calls rolled out. It is never
+  cached.
 - **CORS.** Each API answers CORS for the origins of the sites that call
-  it. Those origins are derived into a field of the API, as its callers
-  are (section 9.2), and the Go and TypeScript runtimes check them.
-- **Local.** `stack dev` serves the built directory and its config from a
-  small file server, with the single-page fallback.
+  it. Those origins are derived into a field of the API, `<API>_CORS`
+  (`ir.CORSPolicy`, one variable, `<API>_CORS_ORIGINS`), as its callers
+  are (section 9.2). The Go and TypeScript runtimes read it
+  (`stackconfig.LoadCORS`, `loadCors`) and check it (`runtime/http`'s
+  `cors`): a preflight from a listed origin is answered 204 with the
+  origin, credentials, `Accept`, `Authorization` and `Content-Type`, the
+  methods of the API's operations and a max age of ten minutes, and any
+  other request from it carries the origin and credentials. Any other
+  origin gets `Vary` alone. On a server that serves several APIs, a
+  request is the API's whose routes take it, a preflight by the method it
+  asks for. The vectors in `runtime/http/testdata/cors_parity.json` hold
+  both runtimes to one decision, and the generated entrypoints wire it for
+  each API a site of the stack calls.
+- **Publish.** A target publishes a site through its `Sites` seam
+  (`registry.SitePublisher`): the files of a build under their digest,
+  and the site's config for a run. The site's platform writes where it
+  serves its files from into the graph with `ir.SiteDigestToken`, and the
+  deploy pins it to the digest it publishes (`stackdeploy.PinSites`), as
+  it pins an image, so the graph stays a function of the schemas. The
+  deploy publishes a site before the wave that rolls it out applies, and
+  the apply switches the site to the new files at once. The manifest
+  records each site's digest (`sites`).
+- **Local.** `stack dev` builds each site once and serves the built
+  directory and its config from a small file server, with the single-page
+  fallback, and prints its URL in the summary (section 8.3).
 - **gcp.** The output goes to a bucket under a prefix per content digest.
   A backend bucket with Cloud CDN serves it behind the HTTPS load balancer
   that exposure builds, with the fallback on the URL map. A deploy writes

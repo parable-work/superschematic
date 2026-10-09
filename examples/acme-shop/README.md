@@ -16,11 +16,13 @@ kind, decorators and auth provider.
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs |
 | `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; its job `ShipOrders` ships placed orders |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
-| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, and `shop-orders`' job; its `Dev` environment runs on the `local` target, the job every minute |
+| `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
+| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, `shop-orders`' job, and the site `shop-web`; its `Dev` environment runs on the `local` target, the job every minute |
 | `go/` | the Go module: `auth.go`, the auth both APIs share, and the tests, which call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
 | `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)` and `AuthMiddleware(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)`, which its job's does |
 | `typescript/shop-storefront` | `shop-storefront`'s implementation, at the naming file's `[implementation_paths]` default, `typescript/{service}`: `create(deps)` and `authenticate(deps)`, which the generated entrypoint calls; its tests call it through the TypeScript SDK |
 | `typescript/clients` | a `shop-orders` client and type tests; like the implementation, a member of `schemas/dist`'s Bun workspace |
+| `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, bundled with `bun build`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, in memory; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
@@ -34,8 +36,9 @@ kind, decorators and auth provider.
 `superschematic stack dev`, from this directory, runs `shop-stack`'s `Dev`
 environment: Postgres in a container with `shop-db` migrated, `shop-api`
 and `shop-orders` on their generated Go entrypoints, `shop-storefront` on
-its generated TypeScript one, on Bun, and `shop-orders`' job `ShipOrders`
-every minute. It needs Docker, Go, Bun and the migration runner,
+its generated TypeScript one, on Bun, `shop-orders`' job `ShipOrders`
+every minute, and the site `shop-web`, built once and served on its own
+port with its config. It needs Docker, Go, Bun and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL and port, and Ctrl-C stops it. While it runs, `superschematic stack
 run Dev shop-orders-ship-orders` runs the job once.

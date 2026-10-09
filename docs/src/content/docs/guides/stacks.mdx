@@ -37,6 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
+| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, and the deploy's publish through a target's `Sites` seam | the gcp target's sites |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -48,9 +49,10 @@ A stack has three tiers:
 
 - **Schemas** are your DB and API services, as they are today.
 - **Deployables** are what runs. A database hosts DB schemas, a server
-  serves API schemas, and a job runs one of an API's `@job` classes to
-  completion. With nothing declared, each API service is one server, each
-  of its jobs one job, and each DB service one database.
+  serves API schemas, a job runs one of an API's `@job` classes to
+  completion, and a site serves a Site service's built files. With
+  nothing declared, each API service is one server, each of its jobs one
+  job, each DB service one database and each Site service one site.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -62,6 +64,7 @@ most of them:
 | --- | --- | --- | --- |
 | sql | a server or a job | a database | each served API's `authDb`, or its one DB-kind dependency |
 | http | a server or a job | a server | `calls` in the config of each API the calling server serves |
+| site | a site | an exposed server | `calls` in a Site service's config ([static sites](/superschematic/guides/static-sites/)) |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
 one server restates nothing. A job's are its API's.
@@ -499,6 +502,25 @@ the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
 
+## Static sites
+
+A Site service is a static site: its config names the APIs its browser
+code calls and how it builds, and a stack that deploys it serves the
+files its build writes, always exposed, with a config per environment
+that holds each API's public address. Each API a site calls must be
+exposed, and answers CORS for the site's origin, which its CORS field,
+`<API>_CORS`, lists:
+
+```ts
+@stack({ deploy: [ShopApi, ShopOrders, ShopStorefront, ShopWeb], expose: [ShopApi, ShopOrders, ShopStorefront] })
+export abstract class Shop {}
+```
+
+`stack dev` builds the site once and serves it on a port of its own, and
+`stack deploy` builds it, publishes its files and its config through the
+target, and records their digest. [Static
+sites](/superschematic/guides/static-sites/) is the guide.
+
 ## Build a stack
 
 Build the stack like any service. A single build loads the services it
@@ -583,9 +605,10 @@ malformed declarations and names nothing registers.
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
 `shop-api` and `shop-orders`, each on a default Go server, and
 `shop-storefront`, on a default TypeScript server, and exposes all three;
-`shop-db`, the `authDb` of both Go APIs, joins as their database, and
-`shop-orders`' job `ShipOrders` as a job. Its one environment, `Dev`, is
-on the core's `local` target, and runs the job every minute:
+`shop-db`, the `authDb` of both Go APIs, joins as their database,
+`shop-orders`' job `ShipOrders` as a job, and `shop-web`, a static site
+whose browser code calls `shop-api`, as a site. Its one environment,
+`Dev`, is on the core's `local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -602,11 +625,13 @@ the storefront's.
 
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, both Go servers on their generated
-entrypoints, the storefront's on Bun, and the job on its schedule.
-`go/stack_dev_test.go` runs it in the example's check whenever Docker is
-running, calls each Go server through its SDK, reads a cart from the
-storefront, and sees the job ship the order it placed, once with `stack
-run` and once on the schedule. The job's code is `NewJobs` in
+entrypoints, the storefront's on Bun, the job on its schedule, and the
+site, built once and served with its config. `go/stack_dev_test.go` runs
+it in the example's check whenever Docker is running, calls each Go server
+through its SDK, reads a cart from the storefront, reads the site and its
+config, checks that `shop-api` answers CORS for the site's origin and no
+other, and sees the job ship the order it placed, once with `stack run`
+and once on the schedule. The job's code is `NewJobs` in
 `go/shop-orders/jobs.go`:
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />

@@ -3,4 +3,5 @@
   OK: shop-common (restored from cache)
   OK: shop-orders (restored from cache)
   OK: shop-storefront (restored from cache)
+  OK: shop-web (restored from cache)
   OK: shop-stack (built, cached)

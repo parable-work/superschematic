@@ -533,10 +533,17 @@ design is section 8.3 of
    it, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
    prints with its name in front. A job's run never stops the environment.
+7. Build each site once, `bun run <build>` in its package after the same
+   install, once the servers it calls are ready, and serve the directory
+   its build wrote from a file server on `http://127.0.0.1:<port>`, with
+   the site's config at `/__superschematic/config.json`, each API it calls
+   at its loopback URL, and its fallback for a path that names no file.
+   The summary prints each site's URL. A rebuilt site needs another `stack
+   dev`.
 
 Dev stays in the foreground until Ctrl-C or until a server exits, then
-stops the servers, callers first, and the container, which keeps its data
-for the next run. `--remove-database` removes the container and its data
+stops the sites, the servers, callers first, and the container, which
+keeps its data for the next run. `--remove-database` removes the container and its data
 instead.
 
 A secret a server reads comes from
@@ -692,8 +699,8 @@ superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
 of every resource, with each server's image pinned, and each database's
 migration plan from the schema the deploy manifest records. It also lists
-the secrets with no value, the servers and jobs with no image yet (which a
-deploy builds), the migration
+the secrets with no value, the servers and jobs with no image yet and the
+sites with no files yet (which a deploy builds), the migration
 phases a failed deploy left part-way, and the records to create by hand
 for a domain no DNS platform holds. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
@@ -701,6 +708,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--image` | the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
+| `--site` | the manifest's | the files a site serves, `<site>=sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
@@ -715,23 +723,28 @@ nothing. A Go or TypeScript server, or a Go job, builds from the Dockerfile
 `<output-root>/server/<stack>/<deployable>/`, with the repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
 build runs on Cloud Build and pushes to the stack's Artifact Registry
-repository. It prints each image as a `stack deploy` flag:
+repository. Each site builds with its package's build script after a
+frozen install of the Bun workspace, and its files go up where the target
+serves sites from, under their digest, when they are new; they serve
+nothing until a deploy takes them. It prints each image and each site's
+files as a `stack deploy` flag:
 
 ```
 $ superschematic stack build Staging
 --image Orders=us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:...
 --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
+--site shop-web=sha256:...
 ```
 
 A build writes no deploy manifest.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--deployable` | every server and job with a Dockerfile | build this server or job only; repeatable |
-| `--server` | none | build this server only; repeatable. `--deployable` takes a job too |
-| `--force` | false | build a server or job whose context did not change |
+| `--deployable` | every server and job with a Dockerfile, and every site | build this server, job or site only; repeatable |
+| `--server` | none | build this server only; repeatable. `--deployable` takes a job or a site too |
+| `--force` | false | build a server or job whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
-| `--format` | `text` | print `--image` flags (`text`) or the result as `json` |
+| `--format` | `text` | print `--image` and `--site` flags (`text`) or the result as `json` |
 
 ### `stack deploy <environment>`
 
@@ -741,8 +754,13 @@ Deploy the environment in deploy order: infrastructure, each database's
 server and job
 `--image` names none for whose build context changed since the image the
 manifest records, as `stack build` does; one with no Dockerfile keeps the
-manifest's image. The deploy manifest records each step, and the
-context each image it built came from. Every secret needs a value before
+manifest's image. It builds each site `--site` names no files for, and
+before the wave that rolls the site out it uploads the site's files under
+their digest when they are new and writes the site's config for the run,
+each API it calls with its public address; the wave's apply then serves
+them. The deploy manifest records each step, the
+context each image it built came from, and the digest of each site's
+files, which `--site` takes to serve them again: a rollback. Every secret needs a value before
 the first step after infrastructure; at a terminal the deploy asks for
 each one missing. On gcp each migration phase runs as an execution of the
 stack's Cloud Run job, `<stack>-migrate`, which also gives each server
@@ -764,7 +782,8 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--image` | a build, else the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable. One with none of them is refused |
-| `--no-build` | false | build no image: take each from `--image` or the manifest |
+| `--site` | a build, else the manifest's | the files a site serves, published by an earlier deploy or build, `<site>=sha256:<digest>`; repeatable. One with none of them is refused |
+| `--no-build` | false | build no image and no site: take each from `--image`, `--site` or the manifest |
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |

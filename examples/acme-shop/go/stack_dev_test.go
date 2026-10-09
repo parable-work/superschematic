@@ -36,7 +36,10 @@ import (
 // string, URL and port the test uses comes from the environment the build
 // resolved. The test waits for each server's /readyz, signs a user in
 // through the generated ORM, calls each Go API through its generated Go
-// SDK and the storefront over HTTP. Then shop-orders' job ShipOrders, on
+// SDK and the storefront over HTTP. It reads the static site shop-web,
+// which stack dev built and serves with its config, and asks shop-api, as
+// a browser would, whether the site's origin may call it, and another
+// origin (D55). Then shop-orders' job ShipOrders, on
 // its generated entrypoint with the implementation's NewJobs, ships the
 // order placed: once on demand with `superschematic stack run`, and again
 // on the every-minute schedule Dev's settings give it, which stack dev runs
@@ -201,6 +204,39 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("read the cart without a token: %d %s, want 401", status, body)
 	}
 
+	// shop-web, the static site, which stack dev built once and serves
+	// from a file server of its own (D55): its page, its config with
+	// shop-api's address, and the page again for a route of the
+	// application. shop-api answers CORS for the site's origin, which its
+	// CORS field lists, and for no other.
+	site := env.site
+	if site == "" {
+		t.Fatalf("environment Dev has no site shop-web")
+	}
+	if status, body := call(t, http.MethodGet, site+"/", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
+		t.Fatalf("the site's page: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodGet, site+"/__superschematic/config.json", "", "")
+	var config struct {
+		APIs map[string]struct {
+			URL string `json:"url"`
+		} `json:"apis"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != env.servers["shop-api"] {
+		t.Fatalf("the site's config: %d %s, want shop-api at %s", status, body, env.servers["shop-api"])
+	}
+	if status, body := call(t, http.MethodGet, site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
+		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
+	}
+	listing := env.servers["shop-api"] + "/api/products?inStock=true"
+	if allowed := preflight(t, listing, site); allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
+		!strings.Contains(allowed.Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(allowed.Get("Access-Control-Allow-Methods"), "GET") {
+		t.Fatalf("shop-api's answer to the site's preflight: %v", allowed)
+	}
+	if refused := preflight(t, listing, "https://evil.example"); refused.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("shop-api allowed another origin: %v", refused)
+	}
+
 	// shop-orders' job ShipOrders ships every placed order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
@@ -301,10 +337,11 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 }
 
 // environment is what the test reads from the environment the build
-// resolved: each server's URL, shop-db's connection string and the
-// Postgres container's name.
+// resolved: each server's URL, the site's origin, shop-db's connection
+// string and the Postgres container's name.
 type environment struct {
 	servers   map[string]string
+	site      string
 	database  string
 	container string
 }
@@ -317,9 +354,10 @@ func readEnvironment(t *testing.T, path string) environment {
 	}
 	var resolved struct {
 		Deployables []struct {
-			Name    string `json:"name"`
-			Kind    string `json:"kind"`
-			Address string `json:"address"`
+			Name          string `json:"name"`
+			Kind          string `json:"kind"`
+			Address       string `json:"address"`
+			PublicAddress string `json:"publicAddress"`
 		} `json:"deployables"`
 		Resources struct {
 			Resources []struct {
@@ -333,8 +371,11 @@ func readEnvironment(t *testing.T, path string) environment {
 	}
 	env := environment{servers: map[string]string{}}
 	for _, d := range resolved.Deployables {
-		if d.Kind == "server" {
+		switch {
+		case d.Kind == "server":
 			env.servers[d.Name] = d.Address
+		case d.Kind == "site" && d.Name == "shop-web":
+			env.site = d.PublicAddress
 		}
 	}
 	for _, r := range resolved.Resources.Resources {
@@ -414,6 +455,29 @@ func call(t *testing.T, method, url, token, body string) (int, []byte) {
 		t.Fatal(err)
 	}
 	return response.StatusCode, answer
+}
+
+// preflight asks, from origin, as a browser does before a GET with the
+// shopper's token, whether url answers it, and returns the answer's
+// headers. The answer is 204 whatever the origin; only its headers say.
+func preflight(t *testing.T, url, origin string) http.Header {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	request.Header.Set("Access-Control-Request-Headers", "authorization")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("OPTIONS %s from %s = %d, want 204", url, origin, response.StatusCode)
+	}
+	return response.Header
 }
 
 func get(t *testing.T, url string) int {

@@ -4735,3 +4735,35 @@ is a TypeScript or Rust server, not a site.
 Status: not built.
 
 The rule is reversible until the first release.
+
+### D55, amended: the typed browser config hands out each API's base URL and a client factory, and imports no SDK, until superscalar bundles for the browser
+
+D55 made superscalar's browser build a prerequisite of a site's SDKs.
+Building the sites found what a browser bundle of a generated SDK needs
+from superscalar, at the commit `superscalar.pin` names:
+
+- The SDK imports its types package, whose validators import
+  `superscalar/scalars` and `superscalar/validation`. `superscalar/scalars`,
+  and the package's root, import their scalar backend by a relative path
+  (`./backend`), so the `browser` export condition superscalar declares on
+  `superscalar/backend` never reaches them: a bundle takes the Node
+  backend, with `node:module`, `node:url` and the napi addon, and `bun
+  build --target=browser` refuses it.
+- The browser backend (`backend.browser.mts`) imports wasm-pack's
+  `bundler` target, which a bundler with WebAssembly ESM integration
+  instantiates (webpack's `asyncWebAssembly`, a Vite plugin). Bun's
+  bundler takes a `.wasm` import as a file and hands back its path, so
+  `wasm.__wbindgen_start` is undefined.
+- The checkout (`scripts/superscalar-dep.sh`) builds neither
+  `wasm-bundler/` nor the browser ESM, and the WebAssembly module is about
+  2.5 MB.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The build writes `config.generated.ts` into the site's package: `loadApis()` returns each API the site calls with its public `baseUrl` and `client(create)`, a factory that hands the base URL to the site's own constructor, its SDK's or any other. It imports no SDK, so a site bundles today and calls its APIs with `fetch`; once superscalar bundles for the browser, the site builds its SDK through the factory, and the config does not change. | A config that imports each API's SDK, which no site's bundle builds today. A Bun build plugin from superschematic that redirects superscalar's backend import to a shim of its own, which would hold another repository's internals. Building superscalar's `bundler` target in `scripts/superscalar-dep.sh`, which Bun's bundler still cannot load. |
+| What superscalar needs, in its own repository: a `browser` condition on `.` and `./scalars` that takes a build importing the browser backend (or a package `browser` map from `./dist/esm/backend.js` to `./dist/esm/backend.browser.mjs`); and a browser backend that instantiates its module without a bundler's integration, such as wasm-pack's `web` target initialized with top-level `await`, or the bytes inlined and `initSync`. superschematic then builds that target in `scripts/superscalar-dep.sh` and pins the commit. | |
+
+Status: built with the rest of D55's first half. The acme shop's
+`web/shop-web` calls shop-api with `fetch` through `loadApis()`.
+
+The rule is reversible until the first release.

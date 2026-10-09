@@ -149,6 +149,7 @@
           "name": "url"
         }
       },
+      "publicAddress": "https://shop-api.acme.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",

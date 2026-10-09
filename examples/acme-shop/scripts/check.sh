@@ -21,8 +21,9 @@
 #      shop-stack's servers and job included;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
-#      typescript/shop-storefront and the clients in typescript/clients
-#      type-check, all of them one Bun workspace, which installs frozen to
+#      typescript/shop-storefront, the clients in typescript/clients and
+#      the site in web/shop-web type-check, and the site builds, all of
+#      them one Bun workspace, which installs frozen to
 #      the committed schemas/dist/bun.lock and fails when the build's
 #      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
@@ -36,8 +37,10 @@
 #      they print the same; and, when Docker runs, `superschematic stack
 #      dev` runs shop-stack's Dev environment, Postgres, both Go servers and
 #      the storefront's TypeScript server on Bun, each on its generated
-#      entrypoint, and the test calls each Go API through its SDK and the
-#      storefront over HTTP (milestones 1 and 7 of docs/stack-model.md),
+#      entrypoint, and the site shop-web, and the test calls each Go API
+#      through its SDK and the storefront over HTTP, reads the site and
+#      its config, and checks shop-api's CORS for the site's origin
+#      (milestones 1 and 7 of docs/stack-model.md),
 #      then sees shop-orders' job ship an order with `superschematic stack
 #      run` and on the every-minute schedule stack dev runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: its pages call
@@ -105,7 +108,7 @@ echo "==> build-all"
 clean_dist
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 6 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 7 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -118,6 +121,7 @@ built_before shop-db shop-api
 built_before shop-db shop-orders
 built_before shop-api shop-stack
 built_before shop-orders shop-stack
+built_before shop-api shop-web
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
 
@@ -168,10 +172,14 @@ TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
   "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
-  "$APP/shop-storefront" "$APP/clients"; do
+  "$APP/shop-storefront" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
   echo "    ${pkg#"$EXAMPLE_DIR/"}"
   (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
+# The site, shop-web, builds with its package's script, as stack dev and a
+# deploy build it, into one page and its script (D55).
+echo "    web/shop-web: bun run build"
+(cd "$EXAMPLE_DIR/web/shop-web" && bun run build >/dev/null && test -f dist/index.html)
 
 echo "==> Python: the generated types and SDK import"
 # The schema runtime's uv environment (make setup) has pydantic and the
@@ -263,11 +271,11 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 6
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 7
 # The stack's references to the APIs it deploys are recorded under dist
 # (D41), so once dist is gone it builds again, and is cached under its new
 # key; every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 5
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 6
 grep -q '^  OK: shop-stack (built, cached)$' "$OUT/logs/build-all-restore.txt"
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"

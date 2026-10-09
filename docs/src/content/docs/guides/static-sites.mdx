@@ -1,0 +1,164 @@
+---
+title: Static sites
+description: Declare a front end as a Site service, read each API's address from the config every environment serves, run it with stack dev, and let each API answer CORS for it.
+sidebar:
+  order: 5.6
+---
+
+A static site is a directory a front-end build writes, served as files: a
+single-page application, a marketing page, an admin console. A front end
+rendered on a server is a TypeScript or Rust server instead.
+
+A site is a service of the core kind `Site`. Its config names the APIs its
+browser code calls and how it builds; its code is a package of your own.
+In a stack, a site is always exposed, each API it calls must be exposed
+too, and each of those APIs answers CORS for the site's origin and no
+other. One build of the site serves every environment: the site reads
+each API's address from a config the environment serves beside its files.
+
+The design is section 8.10 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
+and D55 in `docs/DECISIONS.md` records the decisions.
+
+## What is built
+
+| Built | Not built yet |
+| --- | --- |
+| the `Site` kind, its config and its sentinel; the typed browser config and the scaffold | a site's typed SDK clients in the browser, which wait on superscalar's browser build |
+| the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
+| `stack dev`: each site built once and served with its config and its fallback | rebuilding a site while `stack dev` runs |
+| the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | the gcp target's sites |
+
+## Declare a site
+
+```ts
+// schemas/services/shop-web/schema.config.ts
+import { ShopApi } from "@acme/shop-api";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+
+export default defineConfig({
+  name: "shop-web",
+  kind: SchemaKind.Site,
+  calls: [ShopApi],
+  site: { build: "build", output: "dist", fallback: "index.html" },
+});
+```
+
+- **`calls`** names the APIs the site's browser code calls, by handle.
+- **`site.build`** is the script of the site's `package.json` that builds
+  it, `build` unless set.
+- **`site.output`** is the directory the build writes, relative to the
+  site's package, `dist` unless set.
+- **`site.fallback`** is the file, relative to the output, served for a
+  path that names no file, so a single-page application's router reads
+  the path. Without it such a path answers 404.
+
+A Site schema declares nothing, and its config may leave `outputs` out.
+Its sentinel, `ShopWeb`, is what a stack deploys.
+
+## The site's code
+
+The site's package sits at the naming file's `[implementation_paths]
+site`, `web/{service}` unless set, under the repository root, and is a
+member of the output root's Bun workspace, so it imports the SDKs of the
+APIs it calls with `workspace:*`. When the directory is missing, the
+build scaffolds a minimal site there once: `index.html`, `src/main.ts`, a
+`package.json` whose `build` script bundles them with `bun build`, and a
+`.gitignore` for the output. It is yours to change, or to replace with
+your framework's project.
+
+Every build writes the site's typed browser config into the package,
+`config.generated.ts`. Its `loadApis()` fetches the config the
+environment serves at `/__superschematic/config.json`, uncached, and
+returns each API the site calls, by the camel case of its name:
+
+```ts
+import { loadApis } from "../config.generated";
+
+const { shopApi } = await loadApis();
+const response = await fetch(`${shopApi.baseUrl}/api/products?inStock=true`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
+```
+
+Each API has its public `baseUrl` and `client(create)`, which hands the
+base URL to a constructor of your choice:
+
+```ts
+const sdk = shopApi.client(options => new ShopApiSDK({ ...options, auth: { token } }));
+```
+
+A browser bundle of a generated SDK does not build yet: the SDK validates
+through superscalar, whose browser build a bundler cannot take today. Call
+an API with `fetch` until it does; the config does not change when it
+does.
+
+## Deploy it in a stack
+
+Name the site in `deploy`. It is exposed whether `expose` names it or
+not, and every API it calls must be exposed, or the stack does not
+resolve (`site-calls-unexposed`):
+
+```ts
+@stack({ deploy: [ShopApi, ShopOrders, ShopWeb], expose: [ShopApi, ShopOrders] })
+export abstract class Shop {}
+```
+
+Resolution gives the site a `site` edge to the server of each API it
+calls, which derives the API's public address and nothing else, since the
+browser carries its end user's token. The site rolls out a wave after
+those servers. Each API a site calls gets a CORS field, `<API>_CORS`
+(`SHOP_API_CORS`), whose one variable, `SHOP_API_CORS_ORIGINS`, lists the
+origin of each site that calls it.
+
+## CORS
+
+The generated entrypoint of a server whose API a site calls reads the
+API's CORS field and answers CORS for those origins only, in Go and in
+TypeScript alike:
+
+- a preflight from a listed origin is answered 204 with the origin,
+  credentials, the `Accept`, `Authorization` and `Content-Type` headers,
+  the methods of the API's operations and a max age of ten minutes;
+- any other request from a listed origin carries the origin and
+  credentials;
+- any other origin gets `Vary: Origin` alone, so the browser refuses the
+  answer.
+
+On a server that serves several APIs, a request is the API's whose routes
+take it, so each API answers only the sites that call it.
+
+## Run it locally
+
+`superschematic stack dev` builds each site once, `bun run build` in its
+package after the workspace's install, and serves its output from a file
+server of its own on `http://127.0.0.1:<port>`: its files, its config with
+each API's loopback URL, and its fallback. HTML files and the config are
+served uncached. The summary prints the site's URL:
+
+```
+  server   shop-api                 http://127.0.0.1:22424
+  site     shop-web                 http://127.0.0.1:22638
+```
+
+A site's `port` setting pins its port. To see a change, run `stack dev`
+again, or point your own dev server at the APIs it prints.
+
+## Deploy it
+
+`stack deploy` builds each site after a frozen install of the workspace,
+digests the files its build wrote, and, before the wave that rolls the
+site out, publishes them through the target, under their digest when they
+are new, with the site's config for the run: each API's public address,
+read from the run's outputs. The wave's apply then serves the new files at
+once. The deploy manifest records the digest. `stack build` builds and
+uploads the files without deploying them, and prints them as a `--site`
+flag, which `stack deploy` takes to serve those files again with no build:
+
+```
+superschematic stack build Staging
+superschematic stack deploy Staging --site shop-web=sha256:...
+```
+
+The gcp target, which serves a site from Cloud Storage behind its load
+balancer, is the next piece of D55.

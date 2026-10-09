@@ -177,6 +177,15 @@
           "name": "url"
         }
       },
+      "publicAddress": {
+        "$concat": [
+          "https://shop-api-",
+          {
+            "$parameter": "pr"
+          },
+          ".staging.acme.dev"
+        ]
+      },
       "bindings": [
         {
           "field": "LOG_LEVEL",

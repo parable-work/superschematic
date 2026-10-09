@@ -282,7 +282,7 @@ func TestBuild(t *testing.T) {
 		t.Errorf("a forced build of Orders: %+v", r)
 	}
 	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Deployables: []string{"shop-db"}})
-	if err == nil || !strings.Contains(err.Error(), "has no server or job shop-db") {
+	if err == nil || !strings.Contains(err.Error(), "has no server, job or site shop-db") {
 		t.Errorf("a build of a database: %v", err)
 	}
 	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *sources(t, "shop-api"), Deployables: []string{"Orders"}})

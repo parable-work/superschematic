@@ -293,9 +293,15 @@ func (c *deployContext) options(cmd *cobra.Command, params map[string]string) st
 // sources says where the stack's build wrote each server's Dockerfile, and
 // every image's build context: the repository root, the parent of the
 // schemas root, or the naming file's [paths] build_context
-// (docs/stack-model.md, section 8.2).
+// (docs/stack-model.md, section 8.2). Each site's package is under the
+// parent of the schemas root, which the naming file's
+// [implementation_paths] are relative to (D55).
 func (c *deployContext) sources() *stackdeploy.Sources {
-	return &stackdeploy.Sources{OutputRoot: c.project.outputRoot, RepositoryRoot: c.project.names.BuildContext(filepath.Dir(c.project.schemasRoot))}
+	return &stackdeploy.Sources{
+		OutputRoot:         c.project.outputRoot,
+		RepositoryRoot:     c.project.names.BuildContext(filepath.Dir(c.project.schemasRoot)),
+		ImplementationRoot: filepath.Dir(c.project.schemasRoot),
+	}
 }
 
 // digests returns the IR digest of each service the stack reaches:
@@ -496,7 +502,7 @@ values it lacks, and asks for them when it runs at a terminal.`,
 func newStackPlanCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
 	gate := &gateFlags{}
-	var images []string
+	var images, sites []string
 	var out, format string
 	cmd := &cobra.Command{
 		Use:   "plan <environment>",
@@ -526,6 +532,10 @@ plans.`,
 			if err != nil {
 				return err
 			}
+			files, err := stackdeploy.ParseSites(sites)
+			if err != nil {
+				return err
+			}
 			g, err := gate.gate()
 			if err != nil {
 				return err
@@ -538,6 +548,7 @@ plans.`,
 			result, err := stackdeploy.Plan(cmd.Context(), stackdeploy.PlanOptions{
 				Options: c.options(cmd, params),
 				Images:  imgs,
+				Sites:   files,
 				Planner: c.planner(),
 				Gate:    g,
 			})
@@ -572,6 +583,7 @@ plans.`,
 	flags.register(cmd, true)
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves: <site>=sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&out, "out", "", "write the plan as JSON to this file, for stack deploy --expect")
 	cmd.Flags().StringVar(&format, "format", "text", "print the plan as text or json")
 	return cmd
@@ -607,6 +619,9 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 	if len(r.Unpinned) > 0 {
 		fmt.Fprintf(&b, "\nServers and jobs with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
 	}
+	if len(r.Unpublished) > 0 {
+		fmt.Fprintf(&b, "\nSites with no files yet, planned with no digest: %s (deploy builds them, or takes them with --site)\n", strings.Join(r.Unpublished, ", "))
+	}
 	if len(r.MissingSecrets) > 0 {
 		fmt.Fprintf(&b, "\nSecrets with no value: %s (stack secrets set %s)\n", strings.Join(r.MissingSecrets, ", "), environment)
 	}
@@ -631,7 +646,7 @@ func newStackBuildCmd(a *app) *cobra.Command {
 	var out, format string
 	cmd := &cobra.Command{
 		Use:   "build <environment>",
-		Short: "Build the images of an environment's servers and jobs without deploying them",
+		Short: "Build the images of an environment's servers and jobs, and its sites' files, without deploying them",
 		Long: `build builds, through the environment's target (Cloud Build on gcp), the
 image of each server and job whose build context changed since the image
 the deploy manifest records, as stack deploy would, and deploys nothing.
@@ -640,10 +655,16 @@ superschematic build-all writes at <output-root>/server/<stack>/<deployable>/,
 with the repository root as its context, cut down by the
 Dockerfile.dockerignore beside it.
 
-It prints each image as a stack deploy --image flag; --format json prints
-the result, and --out writes it to a file. --deployable builds the servers
-and jobs it names only, and --force builds one whose context did not
-change. A build writes no deploy manifest.`,
+Each site builds with its package's build script after a frozen install of
+the Bun workspace, and its files go up where the target serves sites from,
+under their digest, when they differ from the ones it serves; they serve
+nothing until a deploy takes them (docs/stack-model.md, section 8.10).
+
+It prints each image as a stack deploy --image flag and each site's files
+as a --site flag; --format json prints the result, and --out writes it to
+a file. --deployable builds the servers, jobs and sites it names only, and
+--force builds one whose context or files did not change. A build writes
+no deploy manifest.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -687,11 +708,16 @@ change. A build writes no deploy manifest.`,
 					return err
 				}
 			}
+			for _, flag := range result.SiteFlags() {
+				if _, err := fmt.Fprintf(w, "--site %s\n", flag); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
 	flags.register(cmd, true)
-	cmd.Flags().StringArrayVar(&deployables, "deployable", nil, "build this server or job only (repeatable)")
+	cmd.Flags().StringArrayVar(&deployables, "deployable", nil, "build this server, job or site only (repeatable)")
 	cmd.Flags().StringArrayVar(&servers, "server", nil, "build this server only (repeatable); --deployable takes a job too")
 	cmd.Flags().BoolVar(&force, "force", false, "build a server or job whose context did not change")
 	cmd.Flags().StringVar(&out, "out", "", "write the result as JSON to this file")
@@ -704,7 +730,7 @@ change. A build writes no deploy manifest.`,
 func newStackDeployCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
 	gate := &gateFlags{}
-	var images []string
+	var images, sites []string
 	var expect string
 	var noBuild bool
 	cmd := &cobra.Command{
@@ -721,9 +747,13 @@ each service, the image of each server and job and each database's schema.
 Each server's and job's image is given by digest with --image, or built
 through the target (Cloud Build on gcp) from the Dockerfile superschematic
 build-all wrote for it when its build context changed since the image the
-manifest records, or kept from the manifest. The builds run before
-anything changes. --no-build builds nothing. Every secret needs a value
-before the first step after infrastructure; at a terminal, deploy asks for each one missing. A
+manifest records, or kept from the manifest. Each site builds with its
+package's build script, and its files go up under their digest when they
+are new, with its config for the run, before its wave points it at them;
+--site serves files a deploy or a build published before, which rolls a
+site back. The builds run before anything changes. --no-build builds
+nothing. Every secret needs a value before the first step after
+infrastructure; at a terminal, deploy asks for each one missing. A
 migration hazard of a --fail-on class stops the deploy unless --allow
 names it, and --expect refuses migration plans other than the ones stack
 plan --out wrote.
@@ -737,6 +767,10 @@ schema between the phases, and the next deploy plans from it.`,
 				return err
 			}
 			imgs, err := stackdeploy.ParseImages(images)
+			if err != nil {
+				return err
+			}
+			files, err := stackdeploy.ParseSites(sites)
 			if err != nil {
 				return err
 			}
@@ -772,6 +806,7 @@ schema between the phases, and the next deploy plans from it.`,
 			m, err := stackdeploy.Deploy(cmd.Context(), stackdeploy.DeployOptions{
 				Options:  c.options(cmd, params),
 				Images:   imgs,
+				Sites:    files,
 				Sources:  src,
 				Planner:  c.planner(),
 				Services: digests,
@@ -789,8 +824,9 @@ schema between the phases, and the next deploy plans from it.`,
 	flags.register(cmd, true)
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves, published before: <site>=sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&expect, "expect", "", "a plan stack plan --out wrote: refuse migration plans other than its")
-	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image: take each server's and job's from --image or the manifest")
+	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image and no site: take each from --image, --site or the manifest")
 	return cmd
 }
 

@@ -558,9 +558,9 @@ The field of each API an API `calls`.
 
 ## `[implementation_paths]`
 
-Where each API service's implementation lives, per language, as a path
-from the repository root (the parent of the schemas root) in which
-`{service}` is the service's name. A stack's build writes a missing
+Where each API service's implementation lives, per language, and each
+site's code, as a path from the repository root (the parent of the
+schemas root) in which `{service}` is the service's name. A stack's build writes a missing
 implementation there for each API its servers serve, and
 `build --scaffold` and `build-all --scaffold` for each Go or TypeScript
 API built. A server's generated entrypoint imports the implementation
@@ -583,6 +583,18 @@ package's `Constructor` types. The scaffold names it
 output root's Bun workspace has every directory the template matches,
 with `*` for `{service}`, as a member, so keep other packages out of
 them.
+
+### `implementation_paths.site`
+
+Default: `web/{service}`
+
+The package of a Site service's code, a static site (D55). Every build of
+the site writes its typed browser config there, `config.generated.ts`,
+and scaffolds the package once when the directory is missing, naming it
+`<npm_scope>/<service>-site`. The output root's Bun workspace has every
+directory the template matches as a member, as it has the TypeScript
+implementations, so the site imports the SDKs of the APIs it calls with
+`workspace:*`. A stack's provisioner and deploy build the site there.
 
 ## `[extension.<name>]`
 
