@@ -528,16 +528,22 @@ design is section 8.3 of
    line a server prints is printed with its name in front. Go servers need
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
    run locally yet, and the environment does not resolve.
-6. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
+6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
+   the same way, and start it with the servers of its wave: a process with
+   no port, ready once it starts, with `WORKER_CONCURRENCY` set to the
+   concurrency the environment gives it, each line it prints with its name
+   in front. One process runs whatever the worker's `instances`, and none
+   for a worker the environment turns off.
+7. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
    same way, and run each job that has a schedule in the environment on
    it, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
    prints with its name in front. A job's run never stops the environment.
 
-Dev stays in the foreground until Ctrl-C or until a server exits, then
-stops the servers, callers first, and the container, which keeps its data
-for the next run. `--remove-database` removes the container and its data
-instead.
+Dev stays in the foreground until Ctrl-C or until a server or a worker
+exits, then stops the servers and the workers, callers first, and the
+container, which keeps its data for the next run. `--remove-database`
+removes the container and its data instead.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -700,7 +706,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--image` | the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
+| `--image` | the manifest's | a server's, job's or worker's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
@@ -727,9 +733,9 @@ A build writes no deploy manifest.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--deployable` | every server and job with a Dockerfile | build this server or job only; repeatable |
-| `--server` | none | build this server only; repeatable. `--deployable` takes a job too |
-| `--force` | false | build a server or job whose context did not change |
+| `--deployable` | every server, job and worker with a Dockerfile | build this server, job or worker only; repeatable |
+| `--server` | none | build this server only; repeatable. `--deployable` takes a job or a worker too |
+| `--force` | false | build a server, job or worker whose context did not change |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image` flags (`text`) or the result as `json` |
 

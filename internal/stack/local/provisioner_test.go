@@ -113,6 +113,10 @@ func (f *fakeRunner) Get(_ context.Context, url string) (int, error) {
 		f.probes = map[string]int{}
 	}
 	f.probes[url]++
+	// As net/http does, a worker's readiness, which is no URL, fails.
+	if !strings.HasPrefix(url, "http://") {
+		return 0, fmt.Errorf("Get %q: unsupported protocol scheme", url)
+	}
 	if f.probes[url] <= f.notReady {
 		return 503, nil
 	}

@@ -85,8 +85,9 @@ realizes it (section 6.1), and the edges it takes part in.
 ### 3.2 Defaults
 
 With nothing declared, each API service in a stack is one server, each
-`@job` of an API service is one job, and each DB service is one database.
-A deployable is declared only to change that:
+`@job` of an API service is one job, each `@worker` of an API service is
+one worker, and each DB service is one database. A deployable is declared
+only to change that:
 
 - to run several APIs in one process;
 - to host several DB schemas on one database.
@@ -100,14 +101,15 @@ An edge is a need met by something that provides it. v1 has two kinds:
 
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
-| sql | server or job | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
-| http | server or job | server | `calls` in the config of each API the calling server serves |
+| sql | server, job or worker | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
+| http | server, job or worker | server | `calls` in the config of each API the calling server serves |
 
 A job takes its API's edges, from itself (D52): the sql edge to the API's
 database and an http edge to the server of each API its API calls. A job
 of an API that a declared server serves with the API it calls still
 calls over HTTP, with a credential, since it runs in a process of its
-own.
+own. A worker takes its API's edges the same way (D53); its sql edge is
+also how it claims its queue, which lives in that database.
 
 `calls` is the one wiring fact a person writes, because no schema says that
 one API's implementation calls another API. It sits in the API service's
@@ -352,6 +354,13 @@ export abstract class Preview extends Staging {}
   merge over the `extends` chain as a server's do. A schedule runs unless
   the settings turn it off, except in a parameterized environment, whose
   members run none unless their settings turn it on (section 8.7).
+- **A worker's settings** name the worker beside its API's handle: `{ of:
+  ShopOrders, worker: "FulfilOrders", instances: 3, concurrency: 8,
+  enabled: false }` (D53). `instances` is how many run, one unless set,
+  `concurrency` replaces the `@worker` decorator's, and `enabled: false`
+  runs none; every other key is the worker platform's setting, and `env`
+  binds the worker's fields, its API's, over what the API's server is
+  given (section 8.8).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
   makes it a family of environments, one per value (section 5.4). An
   `@environment` class extends only another `@environment` class.
@@ -505,7 +514,10 @@ line that holds it.
   jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
   "ShipOrders">`, with `unknown` for the config type of an API without
   one. It defaults to `string`, any job, and the sweep keeps it as it
-  keeps the config type.
+  keeps the config type. A fourth, `W`, names its workers, its `@worker`
+  classes (D53): `service<"API", OrdersConfig, "ShipOrders",
+  "FulfilOrders">`, with `never` for the jobs of an API that declares
+  none. It defaults to `string` too.
 - **Targets type their own values and settings.** `@superschematic/stack`
   declares an empty `Targets` interface. Each target's authoring package
   augments it with the target's environment values and a settings type per
@@ -514,7 +526,7 @@ line that holds it.
   ```ts
   declare module "@superschematic/stack" {
     interface Targets {
-      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings };
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings; worker: WorkerPoolSettings };
     }
   }
   ```
@@ -530,6 +542,10 @@ line that holds it.
   - an API handle beside a `job`, which must be one of the handle's jobs,
     takes the target's `job` settings, a `schedule`, a `timeZone` and
     `enabled`, and an `env` typed from the handle's config type (D52);
+  - an API handle beside a `worker`, which must be one of the handle's
+    workers, takes the target's `worker` settings, `instances`,
+    `concurrency` and `enabled`, and an `env` typed from the handle's
+    config type (D53);
   - a DB handle takes the target's `database` settings and no `env`;
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
@@ -608,9 +624,9 @@ The order comes from the graph:
 
 1. infrastructure;
 2. the migrations' `expand` steps, which the running servers survive;
-3. servers and jobs, callees before callers, so a new caller never meets
-   an old callee (a job calls what its API calls, and nothing calls a
-   job);
+3. servers, jobs and workers, callees before callers, so a new caller
+   never meets an old callee (a job or a worker calls what its API calls,
+   and nothing calls either);
 4. the migrations' `contract` steps, once no server of the previous
    version runs (D27);
 5. exposure.
@@ -648,10 +664,10 @@ Cloud SQL databases, local processes, a local Postgres container. It
 registers a `PlatformSpec`:
 
 - `Kind`, the deployable kind, and what it accepts: `Languages` for a
-  server or job platform, spelt as `outputs.api.language` spells them
-  (`GO`, `TYPESCRIPT`, `RUST`), since a job is written in its API's
-  language, or `Dialects` for a database platform (`postgres`, `sqlite`),
-  in order of preference;
+  server, job or worker platform, spelt as `outputs.api.language` spells
+  them (`GO`, `TYPESCRIPT`, `RUST`), since a job or a worker is written in
+  its API's language, or `Dialects` for a database platform (`postgres`,
+  `sqlite`), in order of preference;
 - `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
@@ -665,7 +681,9 @@ A resource a platform leaves without a phase gets the default of its
 producer: rollout for a server's or a job's own resources, infrastructure
 for a database's. A job platform's `AddressOf` may return nothing, since
 no edge reaches a job, and its `Lower` reads the job's run from the
-deployable's `Job` (D52).
+deployable's `Job` (D52). A worker platform's does the same, reading the
+worker's run from the deployable's `Worker`: its queue, its instances and
+its concurrency (D53).
 
 ### 6.2 Connector
 
@@ -677,10 +695,10 @@ Cloud SQL connection on the service) and the value of the derived binding.
 One connector serves an edge kind between two platforms; a second is
 refused. An http edge between two APIs one server serves runs from the
 server to itself, and its connector derives the server's own address.
-`From` is a server or a job platform: a job takes its API's edges, so a
-target that places jobs registers a connector from its job platform for
-each edge its servers take, which may share the server connector's
-`Connect`.
+`From` is a server, a job or a worker platform: a job takes its API's
+edges, and so does a worker, so a target that places jobs or workers
+registers a connector from its job or worker platform for each edge its
+servers take, which may share the server connector's `Connect`.
 
 A generic connector covers a pair of platforms on different providers that
 no specific connector serves, such as a Cloudflare Worker calling a Cloud
@@ -704,7 +722,8 @@ A target is a named bundle, registered as a `TargetSpec`, of:
 - a platform for each deployable kind. A kind it names none for is
   refused in its environments: a stack whose APIs declare jobs resolves
   only on a target with a job platform, or with each job placed on one by
-  a settings `platform`;
+  a settings `platform`, and one whose APIs declare workers likewise needs
+  a worker platform;
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
@@ -1535,9 +1554,10 @@ runs an environment on the `local` target (`internal/stack/local`):
 2. It reads the environment the build resolved: `--environment`, or the
    stack's one environment on the local target.
 3. It applies the deploy order (section 5.3) through the local provisioner,
-   then stays in the foreground until Ctrl-C or until a server exits,
-   running each job on its schedule meanwhile (section 8.7). The summary it
-   prints names each server's URL and when each job runs.
+   then stays in the foreground until Ctrl-C or until a server or a worker
+   exits, running each job on its schedule meanwhile (section 8.7). The
+   summary it prints names each server's URL, when each job runs, and the
+   queue each worker handles (section 8.8).
 4. It stops the servers, callers first, then the container, which keeps
    its data for the next run. `--remove-database` removes the container
    and its data instead.
@@ -1548,6 +1568,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
+| worker | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -1562,10 +1583,10 @@ which the provisioner reads when it starts the caller.
 
 The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
-migrations, servers and jobs it runs. Beside it are the models `stack
-dev` writes for it (`models/<service>.json`), the plans it applies
-(`migrations/<service>.plan.json`) and the Go servers' and jobs' binaries
-it builds (`bin/`). A TypeScript server has no binary: the provisioner
+migrations, servers, workers and jobs it runs. Beside it are the models
+`stack dev` writes for it (`models/<service>.json`), the plans it applies
+(`migrations/<service>.plan.json`) and the Go servers', workers' and
+jobs' binaries it builds (`bin/`). A TypeScript server has no binary: the provisioner
 runs `bun install` once at the output root, whatever the number of
 TypeScript servers and waves, then starts each with `bun main.ts`. The
 install is the one an engineer runs, not frozen: it writes the
@@ -1587,7 +1608,9 @@ servers; a Rust server, which has no entrypoint yet, does not resolve
 Not built:
 
 - Key rotation: a local key pair lasts until its file is removed.
-- Restarting a server that exits: `stack dev` stops the environment.
+- Restarting a server or a worker that exits: `stack dev` stops the
+  environment.
+- More than one process of a worker, whatever its `instances`.
 
 The resolver is the same, so local and cloud differ only in their platforms
 and connectors.
@@ -1683,10 +1706,12 @@ found with no declaration:
   refuses every request with 401 until it verifies the end user, and
   `PayloadDecryptor(deps)`, which refuses every encrypted payload. For an
   API with jobs it writes `NewJobs`, whose value has a method per job that
-  returns the not-implemented error (D52). It never writes into a
-  directory that holds a Go file, so the package is the engineer's from
-  then on: a stack's build fails on an API whose package declares no
-  `NewJobs` while the API declares jobs, an implementation that predates
+  returns the not-implemented error (D52), and for an API with workers
+  `NewWorkers`, whose value has a method per worker that does (D53). It
+  never writes into a directory that holds a Go file, so the package is
+  the engineer's from then on: a stack's build fails on an API whose
+  package declares no `NewJobs` while the API declares jobs, or no
+  `NewWorkers` while it declares workers, an implementation that predates
   them, and says what to add. A stack's build scaffolds each API its servers
   serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
   API built, outside a stack. A service the cache would restore builds
@@ -1734,6 +1759,22 @@ found with no declaration:
   }
 
   type JobsConstructor func(deps Deps) (Jobs, error)
+  ```
+
+  For an API with workers, it declares `Workers`, a method per worker
+  sorted by name, which handles one message of the worker's queue, typed
+  from its database's Go types, and `WorkersConstructor`, which the
+  scaffold asserts with `var _ api.WorkersConstructor = NewWorkers`
+  (D53):
+
+  ```go
+  type Workers interface {
+      // FulfilOrders handles a message of the queue OrderPlaced, 4 at a time
+      // unless an environment changes the worker's concurrency.
+      FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced) error
+  }
+
+  type WorkersConstructor func(deps Deps) (Workers, error)
   ```
 
 Outside a stack the scaffold stays opt-in. Nothing imports the package
@@ -1915,7 +1956,7 @@ A job is a run to completion that an API service declares, with `@job` on
 a class of its schema (D52):
 
 ```ts
-// The warehouse's pick run: ships each placed order.
+// The warehouse's pick run: it ships every order FulfilOrders fulfilled.
 @job({ schedule: "*/15 * * * *", timeZone: "UTC", timeout: "5m", retries: 1 })
 export abstract class ShipOrders {}
 ```
@@ -2052,62 +2093,142 @@ export abstract class ShipOrders {}
     created or updated (`runExecutionToken`, `startExecutionToken` in the
     pinned schema), which a job that runs on every deploy could use.
 
-Workers, which run until stopped, come with queues. A job that runs on
-every deploy is not built.
+Workers, which run until stopped, handle queues (section 8.8). A job that
+runs on every deploy is not built.
 
 ### 8.8 Queues and workers
 
 A queue is data, so it lives in a database (D53). A DB service's schema
 declares one with `@queue` on a message class. The database the stack
-places that service on is its backing, in the service's dialect: Postgres
-on the local container or Cloud SQL, SQLite, and D1 when a target offers
-it.
+places that service on is its backing, in the service's dialect.
 
 ```ts
 // shop-db (DB service)
 @queue({ retries: 5, backoff: "30s" })
-export class OrderPlaced { orderId!: string }
+export abstract class OrderPlaced {
+  orderId: Identity.UUID;
+}
 
-// shop-orders (API service)
+// shop-orders (API service), which imports OrderPlaced from shop-db
 @worker({ queue: OrderPlaced, concurrency: 4 })
 export abstract class FulfilOrders {}
 ```
 
-- **Storage.** sqlgen writes the queue's table, and the migration plan
-  (D27) carries it like any table. Each message has:
-  - its fields, as the message class declares them;
-  - a state: ready, claimed, done or dead;
-  - an attempt count, a time it is next due, and a claim's expiry.
-- **Enqueue.** The DB's ORM gains a typed `Enqueue` per queue, which takes
-  the transaction the caller writes in. A message commits with the writes
-  that caused it, or not at all.
-- **Claim.** Each dialect claims its own way: `FOR UPDATE SKIP LOCKED` on
-  Postgres, and a write transaction on SQLite and D1, which have one
-  writer. A claim that expires returns its message to ready, so a worker
-  that dies loses nothing. Delivery is at least once, and handlers are
-  idempotent.
-- **Retries.** A failed handler retries after the queue's backoff, up to
-  its retries, then marks the message dead, where an operator finds it.
-- **Workers.** An API declares `@worker({ queue })`. Its implementation
-  implements a typed handler per worker with the API's `Deps`, through a
-  generated `Workers` interface and scaffold. Each worker is a deployable
-  of kind `worker` by default, named after its API and its class. Its
-  edges and its identity are its API's, as a job's are (section 8.7). The
-  queue's DB must be the API's `authDb` or one of its DB dependencies, so
-  the worker already has the connection.
-- **Entrypoint.** A worker gets a module of its own beside the servers'.
-  Its `main`:
-  - builds `Deps` as a server's does;
-  - claims and handles up to `concurrency` messages at a time;
-  - on SIGTERM stops claiming, lets the running handlers finish within
-    the platform's grace, and returns what is left to ready.
-- **Local.** `stack dev` runs each worker as a process with no port. A
-  worker that exits stops the environment, as a server's exit does.
+- **Declaration.** `@queue` comes from `@superschematic/db` and goes on a
+  class of a DB schema, whose fields are the message's. Every argument is
+  optional: `retries`, how many times a message whose handler fails is
+  handled again before it is dead, five unless set; `backoff`, how long a
+  failed message waits before it is due again, thirty seconds unless set;
+  and `lease`, how long a claim holds a message unless its worker extends
+  it, a minute unless set. Both durations are whole seconds as Go writes
+  them (`90s`, `5m`). The class stays a type, the message, with the role
+  `EmbeddedStruct`, so every language's types declare it, and the IR
+  records the queue on it (`ir.TypeDef.Queue`, `ir.QueueDef`), which the
+  data forms write as `queue:` beside the fields. A message's fields are
+  values: a scalar, an enum, a list or map of them, or a JSON value such as
+  a `@jsonField` type. Verification refuses a reference to a table, a
+  `@key`, a generated field, an index, a field that takes one of the
+  queue's own columns' names (`createdAt` is `created_at`), and a queue in
+  any schema but a DB's.
+- **Storage.** sqlgen writes the queue's table after the tables, named
+  after its class in snake case with `_queue` (`order_placed_queue`):
+  `id`, a UUID; a column per field, as a table's field becomes one; then
+  `state` (`ready`, `claimed`, `done` or `dead`), `attempts`, `due_at`,
+  `claim_expires_at`, `claim_token`, `last_error`, `created_at` and
+  `updated_at` (`ir.QueueColumns`). A partial index serves each half of a
+  claim: `due_at` where the state is ready, `claim_expires_at` where it is
+  claimed. The migration plan (D27) carries the table as any table, in
+  every dialect the service lists, the SQLite model included.
+- **Enqueue.** The DB's Go ORM writes `queues.go` with a typed
+  `Enqueue<Queue>(ctx, tx, msg)` per queue, which takes the caller's
+  `TxInterface`: the message commits with the writes that caused it, or
+  not at all. Each field reaches its column as a table's does through a
+  repository's `CreateOne`, and an optional field that is unset, or a
+  required list that is nil, takes its column's default.
+- **Claim.** `<Database>.<Queue>Queue()` returns the queue's claims: `Claim`
+  takes up to n messages that are ready and due, or claimed past their
+  claim's expiry, with `FOR UPDATE SKIP LOCKED`, gives each a new claim
+  token (`gen_random_uuid()`) and one more attempt, and returns each with
+  its typed message; `Complete` marks one done; `Fail` records the error
+  and makes it due again after the backoff, or dead once its retries are
+  spent; `Extend` holds a claim longer; `Release` gives one back, due at
+  once, without counting the attempt. Each takes the message's ID and its
+  claim's token and returns `ErrClaimLost` when another claim took the
+  message since. A message whose last attempt's claim expired is dead, so
+  a message that kills its worker every time stops coming back. Times are
+  the database's clock. Delivery is at least once, and handlers are
+  idempotent. The Go ORM runs on Postgres alone, so the claims do too:
+  resolution refuses a worker whose queue's database the environment
+  places on a platform of another dialect, SQLite or D1, which no runtime
+  claims on yet.
+- **Workers.** `@worker` comes from `@superschematic/api` and goes on a
+  class of an API schema that holds nothing: `queue`, the `@queue` class,
+  required, imported from the API's database; `concurrency`, how many
+  messages an instance handles at a time, one unless set; and `grace`, how
+  long a stopping worker lets its running handlers finish, eight seconds
+  unless set, under the ten Cloud Run gives a container after SIGTERM. The
+  IR records it in `Schema.Workers` (`ir.Worker`), and the data forms
+  under `workers:`. The queue must be a queue of the database the API
+  connects to, its `authDb` or its one DB dependency, which the API's
+  build and resolution both check, so the worker already has the
+  connection.
+- **Code.** The API generator writes a `Workers` interface with a method
+  per worker, `FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced)
+  error`, the message typed from the database's Go types, and
+  `WorkersConstructor`. The scaffold writes `NewWorkers` and a method that
+  returns the not-implemented error, which fails each message. A stack's
+  build refuses an implementation that predates its workers, with no
+  `NewWorkers`, printing what to add (section 8.5).
+- **Deployable.** Each worker of an API in the stack is a deployable of
+  kind `worker`, named as a job is (`shop-orders-fulfil-orders`,
+  `ir.WorkerDeployableName`). Its edges, its config, its secrets, its env
+  and its identity are its API's, as a job's are (section 8.7): it serves
+  its API in a callee's callers field, so `from: [ShopOrders]` admits it.
+  It rolls out after its callees, in a wave after the migrations, as a
+  server does. It is never exposed.
+- **Settings.** An environment's settings change how it runs: `{ of:
+  ShopOrders, worker: "FulfilOrders", instances, concurrency, enabled }`,
+  typed through the handle's fourth type argument (section 4.3), beside
+  the platform's settings. `instances` is how many run, one unless set;
+  `concurrency` replaces the decorator's; and `enabled: false` runs none,
+  and its queue's messages wait. A member of a parameterized environment
+  runs one instance unless its settings say otherwise. Resolution records
+  what runs on the deployable (`ir.ResolvedWorker`): its API and class,
+  its queue and the database that holds it, the instances, the
+  concurrency and the grace.
+- **Entrypoint.** The `server` generator writes a Go module per worker at
+  `<output-root>/server/<stack>/<worker>/`, from the templates a server's
+  and a job's share, with its image as theirs (section 8.2), the binary at
+  `/worker`. Its `main`:
+  - builds `Deps` as a server's does, and calls the implementation's
+    `NewWorkers`;
+  - runs `worker.Run` (`runtime/http/go/worker`), the claim loop, over the
+    ORM's claims: it claims for its free slots, up to the concurrency
+    that `WORKER_CONCURRENCY` gives, which the platform sets, or the
+    decorator's; runs each message's method in a goroutine of its own and
+    extends the claim every third of the lease while it runs; completes
+    the message when the method returns nil and fails it when the method
+    returns an error or panics; logs each outcome; and waits a second
+    after a claim that found nothing, and longer, up to thirty seconds,
+    after one that failed;
+  - on SIGTERM or SIGINT claims no more, lets the running methods finish
+    within the grace, then cancels them, releases their messages and
+    exits 0.
+- **Local.** `stack dev` runs each worker as a process with no port,
+  ready once it starts, its output prefixed with its name. Its exit stops
+  the environment, as a server's does (section 8.3).
 - **gcp.** A worker is a Cloud Run worker pool
-  (`gcp:cloudrunv2/workerPool:WorkerPool`), which has no port and no URL.
-  Its instance count is a setting, one unless set. A member of a
-  parameterized environment runs one instance per worker unless its
-  settings say otherwise.
+  (`gcp:cloudrunv2/workerPool:WorkerPool`), which has no port and no URL,
+  with as many instances as its settings say. Not built yet: the gcp
+  target places no worker.
+
+Not built:
+
+- A worker in TypeScript or Rust, and the claims in their runtimes.
+- Claims on SQLite and D1, whose write transaction would claim.
+- Removing `done` messages, which stay in the table, and an operator's
+  command to read and retry dead ones.
+- A backoff that grows with each attempt.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
@@ -3271,10 +3392,11 @@ model, or retired, when it lands.
    the generic connector (section 6.2) so compute can mix. Built so far:
    - TypeScript servers on Bun (section 8.6, D51);
    - jobs and scheduled jobs, on the local target and on gcp as Cloud
-     Run jobs with Cloud Scheduler (section 8.7, D52).
+     Run jobs with Cloud Scheduler (section 8.7, D52);
+   - queues in a DB service's database, and Go workers that handle them,
+     on the local target (section 8.8, D53).
    
-   Not yet: buckets, queues with their workers, static sites and a
-   second target.
+   Not yet: workers on gcp, buckets, static sites and a second target.
 
 ## 15. Open questions
 

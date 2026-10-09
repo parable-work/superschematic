@@ -12,8 +12,9 @@ export abstract class Shop {}
 
 // This machine: `superschematic stack dev` runs Postgres in a container and
 // each server as a process, and derives every connection string, URL and
-// port. shop-orders' job ShipOrders runs every minute here, so an order
-// placed while developing ships within one.
+// port. shop-orders' worker FulfilOrders runs as a process too, and
+// fulfils each order as it is placed; its job ShipOrders runs every minute
+// here, so an order placed while developing ships within one.
 @environment({
   target: "local",
   settings: [{ of: ShopOrders, job: "ShipOrders", schedule: "* * * * *" }]
