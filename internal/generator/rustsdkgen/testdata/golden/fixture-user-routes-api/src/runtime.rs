@@ -1,0 +1,605 @@
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use regex::Regex;
+use rsa::pkcs8::DecodePublicKey;
+use rsa::{Oaep, RsaPublicKey};
+use serde::Serialize;
+use serde_json::Value;
+use sha2::Sha256;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+use std::sync::Arc;
+
+use crate::errors::SDKError;
+
+/// The bytes JavaScript's encodeURIComponent writes as they are: ASCII
+/// letters and digits and `-_.!~*'()`. Every other byte is percent-encoded.
+const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'!')
+    .remove(b'~')
+    .remove(b'*')
+    .remove(b'\'')
+    .remove(b'(')
+    .remove(b')');
+
+/// Writes a path parameter value as one path segment, percent-encoded once
+/// as encodeURIComponent writes it. Every server decodes a path parameter
+/// exactly once, so a value holding %, /, ? or # reaches the implementation
+/// as it was passed; `Url::set_path` would leave % and / as they are.
+pub fn path_segment(value: &impl std::fmt::Display) -> String {
+    utf8_percent_encode(&value.to_string(), PATH_SEGMENT).to_string()
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadFile {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
+impl UploadFile {
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MultipartBody {
+    pub json_data: Option<Value>,
+    pub files: BTreeMap<String, UploadFile>,
+}
+
+pub type RequestHook =
+    Arc<dyn Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Send + Sync>;
+
+/// Config-level request interceptor applied to every outgoing call. Mirrors
+/// the Go SDK's `RequestInterceptor` so Rust callers can attach headers
+/// (routing scope, tracing context, service identity) without threading
+/// `RequestOptions` through every namespace method.
+///
+/// Runs after the auth header is attached, before any per-call
+/// `RequestOptions::request_hook` — caller hooks can therefore override
+/// values set here.
+pub type RequestInterceptor =
+    Arc<dyn Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Send + Sync>;
+
+/// The end user a call forwards, from the request a server is serving
+/// (D37). Set by [`RequestOptions::forward`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForwardedUser {
+    /// The bearer token of the request being served; `None` when it has no
+    /// end user.
+    pub bearer_token: Option<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct RequestOptions {
+    pub timeout_ms: Option<u64>,
+    pub request_hook: Option<RequestHook>,
+    /// Forward this end user instead of the configured auth.
+    pub forward: Option<ForwardedUser>,
+}
+
+impl RequestOptions {
+    /// Options that forward the end user of the request being served, as
+    /// `RequestOptions::forward(ctx.bearer_token())`: the call sends
+    /// `Authorization: Bearer <token>`, or no `Authorization` when `token`
+    /// is `None`, instead of the configured auth, and does not refresh on a
+    /// 401. Other options combine by struct update:
+    /// `RequestOptions { timeout_ms: Some(5_000), ..RequestOptions::forward(token) }`.
+    pub fn forward(token: Option<&str>) -> Self {
+        Self {
+            forward: Some(ForwardedUser {
+                bearer_token: token.map(str::to_string),
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// Options that set one routing header (a scope such as an account or
+    /// workspace header) and, when `auth_token` is given, a per-request
+    /// `Authorization: Bearer` header. Batch services pass their
+    /// config-level service token (or `None` when the token already lives
+    /// on `ClientConfig`); interactive callers pass the caller's token so
+    /// each request carries its own identity.
+    pub fn with_header(
+        header_name: &'static str,
+        header_value: impl Into<String>,
+        auth_token: Option<String>,
+        timeout_ms: Option<u64>,
+    ) -> Self {
+        let header_value: String = header_value.into();
+        Self {
+            timeout_ms,
+            request_hook: Some(Arc::new(move |request| {
+                let request = request.header(header_name, header_value.clone());
+                if let Some(ref token) = auth_token {
+                    request.header("Authorization", format!("Bearer {token}"))
+                } else {
+                    request
+                }
+            })),
+            forward: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PublicEncryptionKey {
+    pub public_key: String,
+    pub algorithm: String,
+    pub key_id: String,
+}
+
+#[derive(Clone, Default)]
+pub struct EncryptedRequestOptions {
+    pub public_encryption_key: Option<PublicEncryptionKey>,
+    pub request_options: Option<RequestOptions>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EncryptedPayloadEnvelope {
+    pub algorithm: String,
+    pub payload: String,
+    #[serde(rename = "encryptedKey", skip_serializing_if = "Option::is_none")]
+    pub encrypted_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iv: Option<String>,
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+}
+
+pub fn strip_fields_for_multipart<T>(input: &T, field_names: &[&str]) -> Result<Value, SDKError>
+where
+    T: Serialize,
+{
+    let mut value = serde_json::to_value(input)?;
+    if let Value::Object(ref mut object) = value {
+        for field_name in field_names {
+            object.remove(*field_name);
+        }
+    }
+    Ok(value)
+}
+
+pub fn validate_input(schema_name: &str, value: &Value) -> Result<(), SDKError> {
+    let schemas = input_schemas()?;
+    if schemas.is_empty() {
+        return Ok(());
+    }
+
+    let Some(schema) = schemas.get(schema_name) else {
+        return Err(SDKError::config(format!(
+            "missing input validation schema for {schema_name}"
+        )));
+    };
+
+    let mut errors: Vec<String> = Vec::new();
+    validate_schema_value(value, schema, schemas, "input", &mut errors);
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    Err(SDKError::config(format!(
+        "input validation failed: {}",
+        errors.join("; ")
+    )))
+}
+const INPUT_SCHEMAS_JSON: &str = r###"{"ChangePasswordInput":{"description":"What changePassword takes: the caller's current password and the new one.","properties":{"current":{"description":"The caller's current password.","maxLength":128,"minLength":8,"type":"string"},"password":{"description":"The new password.","maxLength":128,"minLength":8,"type":"string"}},"required":["current","password"],"type":"object"},"CreateUserInput":{"description":"What createUser takes: the new user's login, name and password.","properties":{"login":{"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string"},"name":{"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"nullable":true,"type":"string"},"password":{"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string"}},"required":["login","password"],"type":"object"},"LoginInput":{"description":"What login takes: the user's login and password, and how the session travels.","properties":{"login":{"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string"},"password":{"description":"The user's password.","maxLength":128,"minLength":8,"type":"string"},"session":{"description":"How the session travels; bearer when absent.","oneOf":[{"$ref":"#/components/schemas/SessionTransport"},{"enum":[null],"nullable":true,"type":"string"}]}},"required":["login","password"],"type":"object"},"RegisterInput":{"description":"What register takes: the new user's login, name and password, and how the session travels.","properties":{"login":{"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string"},"name":{"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"nullable":true,"type":"string"},"password":{"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string"},"session":{"description":"How the session travels; bearer when absent.","oneOf":[{"$ref":"#/components/schemas/SessionTransport"},{"enum":[null],"nullable":true,"type":"string"}]}},"required":["login","password"],"type":"object"},"RoleInput":{"description":"What createRole and updateRole take: the role's name and the permissions it grants.","properties":{"name":{"type":"string"},"permissions":{"description":"The permissions the role grants.","items":{"type":"string"},"type":"array"}},"required":["name","permissions"],"type":"object"},"SessionTransport":{"description":"How a session travels: bearer answers its token for the Authorization header; cookie sets the session cookie and answers no token.","enum":["bearer","cookie"],"type":"string"},"SetPasswordInput":{"description":"What setUserPassword takes: the user's new password.","properties":{"password":{"description":"The new password.","maxLength":128,"minLength":8,"type":"string"}},"required":["password"],"type":"object"}}"###;
+static INPUT_SCHEMAS: OnceLock<Result<serde_json::Map<String, Value>, String>> = OnceLock::new();
+
+fn input_schemas() -> Result<&'static serde_json::Map<String, Value>, SDKError> {
+    let parsed = INPUT_SCHEMAS.get_or_init(|| match serde_json::from_str::<Value>(INPUT_SCHEMAS_JSON) {
+        Ok(Value::Object(map)) => Ok(map),
+        Ok(_) => Err("input validation schemas must be a JSON object".to_string()),
+        Err(err) => Err(format!("failed to parse input validation schemas: {err}")),
+    });
+
+    match parsed {
+        Ok(map) => Ok(map),
+        Err(message) => Err(SDKError::config(message.clone())),
+    }
+}
+
+fn validate_schema_value(
+    value: &Value,
+    schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let Some(schema_name) = schema_name_from_ref(reference) else {
+            errors.push(format!("{path}: unsupported schema reference {reference}"));
+            return;
+        };
+        let Some(resolved_schema) = schemas.get(schema_name) else {
+            errors.push(format!("{path}: unresolved schema reference {reference}"));
+            return;
+        };
+        validate_schema_value(value, resolved_schema, schemas, path, errors);
+        return;
+    }
+
+    if let Some(enum_values) = schema.get("enum").and_then(Value::as_array) {
+        if !enum_values.iter().any(|candidate| candidate == value) {
+            errors.push(format!(
+                "{path}: value must match one of the allowed enum values"
+            ));
+            return;
+        }
+    }
+
+    let Some(schema_type) = schema.get("type").and_then(Value::as_str) else {
+        return;
+    };
+
+    match schema_type {
+        "object" => validate_object_value(value, schema, schemas, path, errors),
+        "array" => validate_array_value(value, schema, schemas, path, errors),
+        "string" => validate_string_value(value, schema, path, errors),
+        "integer" => validate_integer_value(value, schema, path, errors),
+        "number" => validate_number_value(value, schema, path, errors),
+        "boolean" if !value.is_boolean() => {
+            errors.push(format!("{path}: expected boolean"));
+        }
+        _ => {}
+    }
+}
+
+fn validate_object_value(
+    value: &Value,
+    schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(object) = value.as_object() else {
+        errors.push(format!("{path}: expected object"));
+        return;
+    };
+
+    let properties = schema.get("properties").and_then(Value::as_object);
+    let mut skip_fields: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    if let Some(required_fields) = schema.get("required").and_then(Value::as_array) {
+        for required_entry in required_fields {
+            let Some(field_name) = required_entry.as_str() else {
+                continue;
+            };
+            let field_path = format!("{path}.{field_name}");
+            match object.get(field_name) {
+                None | Some(Value::Null) => {
+                    errors.push(format!("{field_path}: required field"));
+                    skip_fields.insert(field_name.to_string());
+                }
+                Some(Value::String(text)) if text.is_empty() => {
+                    if let Some(field_schema) = properties.and_then(|props| props.get(field_name)) {
+                        if schema_expects_string(field_schema, schemas) {
+                            errors.push(format!("{field_path}: required field"));
+                            skip_fields.insert(field_name.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(properties) = properties {
+        for (field_name, field_schema) in properties {
+            if skip_fields.contains(field_name) {
+                continue;
+            }
+            let Some(field_value) = object.get(field_name) else {
+                continue;
+            };
+            if field_value.is_null() {
+                continue;
+            }
+            let field_path = format!("{path}.{field_name}");
+            validate_schema_value(field_value, field_schema, schemas, &field_path, errors);
+        }
+    }
+
+    if let Some(additional_schema) = schema.get("additionalProperties") {
+        validate_additional_properties(object, properties, additional_schema, schemas, path, errors);
+    }
+}
+
+fn validate_additional_properties(
+    object: &serde_json::Map<String, Value>,
+    properties: Option<&serde_json::Map<String, Value>>,
+    additional_schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    for (field_name, field_value) in object {
+        if let Some(props) = properties {
+            if props.contains_key(field_name) {
+                continue;
+            }
+        }
+        if field_value.is_null() && schema_allows_null(additional_schema, schemas) {
+            continue;
+        }
+        let field_path = format!("{path}.{field_name}");
+        validate_schema_value(field_value, additional_schema, schemas, &field_path, errors);
+    }
+}
+
+fn validate_array_value(
+    value: &Value,
+    schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(items) = value.as_array() else {
+        errors.push(format!("{path}: expected array"));
+        return;
+    };
+
+    if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
+        if (items.len() as u64) < min_items {
+            errors.push(format!("{path}: must contain at least {min_items} items"));
+        }
+    }
+    if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64) {
+        if (items.len() as u64) > max_items {
+            errors.push(format!("{path}: must contain at most {max_items} items"));
+        }
+    }
+
+    let Some(item_schema) = schema.get("items") else {
+        return;
+    };
+
+    for (index, item) in items.iter().enumerate() {
+        let item_path = format!("{path}[{index}]");
+        validate_schema_value(item, item_schema, schemas, &item_path, errors);
+    }
+}
+
+fn validate_string_value(value: &Value, schema: &Value, path: &str, errors: &mut Vec<String>) {
+    let Some(text) = value.as_str() else {
+        errors.push(format!("{path}: expected string"));
+        return;
+    };
+
+    if let Some(min_length) = schema.get("minLength").and_then(Value::as_u64) {
+        if text.chars().count() < min_length as usize {
+            errors.push(format!("{path}: must be at least {min_length} characters"));
+        }
+    }
+    if let Some(max_length) = schema.get("maxLength").and_then(Value::as_u64) {
+        if text.chars().count() > max_length as usize {
+            errors.push(format!("{path}: must be at most {max_length} characters"));
+        }
+    }
+    if let Some(pattern) = schema.get("pattern").and_then(Value::as_str) {
+        match Regex::new(pattern) {
+            Ok(regex) => {
+                if !regex.is_match(text) {
+                    errors.push(format!("{path}: invalid format"));
+                }
+            }
+            Err(err) => errors.push(format!("{path}: invalid validation pattern: {err}")),
+        }
+    }
+}
+
+fn validate_integer_value(value: &Value, schema: &Value, path: &str, errors: &mut Vec<String>) {
+    let number = if let Some(num) = value.as_i64() {
+        num as f64
+    } else if let Some(num) = value.as_u64() {
+        num as f64
+    } else {
+        errors.push(format!("{path}: expected integer"));
+        return;
+    };
+
+    validate_number_bounds(number, schema, path, errors);
+}
+
+fn validate_number_value(value: &Value, schema: &Value, path: &str, errors: &mut Vec<String>) {
+    let Some(number) = value.as_f64() else {
+        errors.push(format!("{path}: expected number"));
+        return;
+    };
+
+    validate_number_bounds(number, schema, path, errors);
+}
+
+fn validate_number_bounds(number: f64, schema: &Value, path: &str, errors: &mut Vec<String>) {
+    if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
+        if number < minimum {
+            errors.push(format!("{path}: must be at least {minimum}"));
+        }
+    }
+    if let Some(maximum) = schema.get("maximum").and_then(Value::as_f64) {
+        if number > maximum {
+            errors.push(format!("{path}: must be at most {maximum}"));
+        }
+    }
+}
+
+fn schema_expects_string(schema: &Value, schemas: &serde_json::Map<String, Value>) -> bool {
+    schema_expects_string_inner(
+        schema,
+        schemas,
+        &mut std::collections::BTreeSet::<String>::new(),
+    )
+}
+
+fn schema_expects_string_inner(
+    schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    visited: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let Some(schema_name) = schema_name_from_ref(reference) else {
+            return false;
+        };
+        if !visited.insert(schema_name.to_string()) {
+            return false;
+        }
+        let Some(resolved_schema) = schemas.get(schema_name) else {
+            return false;
+        };
+        return schema_expects_string_inner(resolved_schema, schemas, visited);
+    }
+
+    matches!(schema.get("type").and_then(Value::as_str), Some("string"))
+}
+
+fn schema_allows_null(schema: &Value, schemas: &serde_json::Map<String, Value>) -> bool {
+    schema_allows_null_inner(
+        schema,
+        schemas,
+        &mut std::collections::BTreeSet::<String>::new(),
+    )
+}
+
+fn schema_allows_null_inner(
+    schema: &Value,
+    schemas: &serde_json::Map<String, Value>,
+    visited: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    if schema.get("nullable").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
+
+    if let Some(enum_values) = schema.get("enum").and_then(Value::as_array) {
+        if enum_values.iter().any(Value::is_null) {
+            return true;
+        }
+    }
+
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let Some(schema_name) = schema_name_from_ref(reference) else {
+            return false;
+        };
+        if !visited.insert(schema_name.to_string()) {
+            return false;
+        }
+        let Some(resolved_schema) = schemas.get(schema_name) else {
+            return false;
+        };
+        return schema_allows_null_inner(resolved_schema, schemas, visited);
+    }
+
+    false
+}
+
+fn schema_name_from_ref(reference: &str) -> Option<&str> {
+    reference.strip_prefix("#/components/schemas/")
+}
+
+pub fn encrypt_request_payload(
+    payload: Value,
+    public_encryption_key: Option<&PublicEncryptionKey>,
+) -> Result<EncryptedPayloadEnvelope, SDKError> {
+    let key = public_encryption_key.ok_or_else(|| {
+        SDKError::config("encrypted endpoint requires a public encryption key")
+    })?;
+
+    if key.public_key.trim().is_empty() {
+        return Err(SDKError::config("public encryption key value is required"));
+    }
+    if key.algorithm.trim().is_empty() {
+        return Err(SDKError::config("public encryption key algorithm is required"));
+    }
+    if key.key_id.trim().is_empty() {
+        return Err(SDKError::config("public encryption key key_id is required"));
+    }
+
+    let payload_bytes = serde_json::to_vec(&payload)?;
+    let normalized_algorithm = normalize_algorithm(&key.algorithm);
+
+    if normalized_algorithm == "NONE" {
+        return Ok(EncryptedPayloadEnvelope {
+            algorithm: key.algorithm.clone(),
+            payload: BASE64_STANDARD.encode(payload_bytes),
+            encrypted_key: None,
+            iv: None,
+            key_id: key.key_id.clone(),
+        });
+    }
+
+    let rsa_public_key = parse_spki_public_key(&key.public_key)?;
+
+    if normalized_algorithm == "AES_256_GCM_RSA_OAEP_256" {
+        let mut aes_key_bytes = [0_u8; 32];
+        let mut iv = [0_u8; 12];
+        let mut rng = OsRng;
+        rng.fill_bytes(&mut aes_key_bytes);
+        rng.fill_bytes(&mut iv);
+
+        let aes_cipher = Aes256Gcm::new_from_slice(&aes_key_bytes)
+            .map_err(|err| SDKError::config(format!("failed to initialize AES-GCM cipher: {err}")))?;
+        let encrypted_payload = aes_cipher
+            .encrypt(Nonce::from_slice(&iv), payload_bytes.as_ref())
+            .map_err(|err| SDKError::config(format!("failed to encrypt payload with AES-GCM: {err}")))?;
+        let encrypted_key = rsa_public_key
+            .encrypt(&mut rng, Oaep::new::<Sha256>(), &aes_key_bytes)
+            .map_err(|err| SDKError::config(format!("failed to wrap AES key with RSA-OAEP: {err}")))?;
+
+        return Ok(EncryptedPayloadEnvelope {
+            algorithm: key.algorithm.clone(),
+            payload: BASE64_STANDARD.encode(encrypted_payload),
+            encrypted_key: Some(BASE64_STANDARD.encode(encrypted_key)),
+            iv: Some(BASE64_STANDARD.encode(iv)),
+            key_id: key.key_id.clone(),
+        });
+    }
+
+    if normalized_algorithm == "RSA_OAEP_256" {
+        let mut rng = OsRng;
+        let ciphertext = rsa_public_key
+            .encrypt(&mut rng, Oaep::new::<Sha256>(), payload_bytes.as_ref())
+            .map_err(|err| SDKError::config(format!("failed to encrypt payload with RSA-OAEP: {err}")))?;
+
+        return Ok(EncryptedPayloadEnvelope {
+            algorithm: key.algorithm.clone(),
+            payload: BASE64_STANDARD.encode(ciphertext),
+            encrypted_key: None,
+            iv: None,
+            key_id: key.key_id.clone(),
+        });
+    }
+
+    Err(SDKError::config(format!(
+        "unsupported encryption algorithm: {}",
+        key.algorithm
+    )))
+}
+
+fn normalize_algorithm(algorithm: &str) -> String {
+    algorithm
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .map(|ch| if ch == '-' { '_' } else { ch.to_ascii_uppercase() })
+        .collect()
+}
+
+fn parse_spki_public_key(public_key_pem: &str) -> Result<RsaPublicKey, SDKError> {
+    let trimmed = public_key_pem.trim();
+    if trimmed.is_empty() {
+        return Err(SDKError::config("public encryption key value is required"));
+    }
+
+    RsaPublicKey::from_public_key_pem(trimmed).map_err(|err| {
+        SDKError::config(format!("public encryption key is not valid PEM: {err}"))
+    })
+}

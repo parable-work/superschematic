@@ -45,11 +45,11 @@ calls from its pages.
     - services/
       - shop-common/ General: Price and Currency
       - shop-db/ DB: the tables
-      - shop-api/ API: products, served in Go
+      - shop-api/ API: products and sign-in, served in Go
       - shop-orders/ API: orders and reviews, for the guides
       - shop-storefront/ API: carts, served in TypeScript
       - shop-stack/ Stack: what runs, and the Dev environment stack dev runs
-  - go/ the Go module: auth.go, which both APIs share, and tests
+  - go/ the Go module: the implementations and tests
     - shop-api/ the implementation of shop-api
     - shop-orders/ the implementation of shop-orders
   - typescript/ the TypeScript service, a client and tests

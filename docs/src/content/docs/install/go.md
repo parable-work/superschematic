@@ -214,9 +214,13 @@ from the query string (below). In the body:
   the implementation receives `GenericJSON("null")`, the JSON null token,
   apart from an absent one, which is `nil`
   ([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
-- A `Generic.StringMap` argument takes a JSON object and an
-  `Embedding.Vector` argument a JSON array; any other JSON type, the
-  value's JSON text included, is `type`. See
+- A `Generic.StringMap` or `Geo.Location` argument takes a JSON object and
+  an `Embedding.Vector` argument a JSON array; any other JSON type, the
+  value's JSON text included, is `type`. superscalar then checks each
+  JSON object on its own JSON, before the route decodes it, so an unknown,
+  duplicate or missing key, which the Go value would drop, overwrite or
+  read as 0, is refused under the core's name (`custom`, `range`,
+  `parse`). See
   [JSON-valued scalars](/superschematic/reference/json-scalars/).
 - An object-typed argument goes through its type's decoder, and its field
   errors nest under the argument's path.

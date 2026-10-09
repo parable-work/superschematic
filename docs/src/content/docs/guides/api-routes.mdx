@@ -85,13 +85,15 @@ scaffold is one `implementation.go` whose `New` asserts `Constructor` and
 whose methods answer 501 until you write them. A `public` API's scaffold
 also has `AuthMiddleware(deps)`, which refuses every request with 401, and
 an API with encrypted operations `PayloadDecryptor(deps)`, which decrypts
-nothing; replace both. A scaffold never overwrites a file, and a build
+nothing; replace both. An API whose `authDb` declares the user model
+authenticates with the identity runtime and gets no `AuthMiddleware`
+([Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)). A scaffold never overwrites a file, and a build
 without a stack or the flag writes no `implementation.go`.
 
 A stack's build also writes each Go server's entrypoint, which fills
 `Deps`, calls each implementation's `New`, and its `AuthMiddleware` and
-`PayloadDecryptor` where the API's `Config` takes them, and serves the
-result, as
+`PayloadDecryptor` where the API's `Config` takes them, builds the
+identity service of an API over the user model, and serves the result, as
 [the Go tutorial](/superschematic/first-project/go-api/#run-it) shows for
 acme-shop. Without a stack, your own `main` does that, as the tutorial's
 tests do in-process
@@ -144,6 +146,12 @@ table's field of the same name. A field with no column behind it is
 `@virtual`, and the implementation fills it in:
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderLineView', 'OrderView']} />
+
+`@display` says how a UI shows an order: what to call one and several, and
+the fields a list of orders shows
+([Display on a type](/superschematic/reference/documentation/#display-on-a-type)).
+The Topcoat app's table of orders reads it
+([Display components](/superschematic/guides/topcoat/#display-components)).
 
 <Snippet file="go/shop-orders/orders.go" symbol="orderView" />
 
@@ -319,25 +327,31 @@ TypeScript router does, and refuses a key an input type does not declare.
 The [Rust page](/superschematic/install/rust/#serve-a-generated-api)
 lists what it refuses.
 
-The example serves shop-orders on it too, keeping its orders in memory,
-and runs all four SDKs' clients against it as against the Go server. It
-builds the service with its API in Rust, into an output root of its own:
+The example serves shop-orders on it too, keeping its orders in memory and
+its users in SQLite, and runs all four SDKs' clients against it as against
+the Go server. It builds the service with its API in Rust, into an output
+root of its own:
 
 ```bash
 superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
 ```
 
 The router takes one `Implementations` value: an implementation of each
-namespace's trait, and the `Authenticator` that says who the caller is
+namespace's trait, and the authenticator that says who the caller is.
+`shop-orders`' users are the core user model's, so that is the identity
+runtime's `IdentityAuthenticator`, over the API's identity service
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-rust)).
-One shop serves both namespaces here:
+One shop serves both namespaces here, and the users are in a SQLite
+database of `shop-db`'s identity tables:
 
-<Snippet file="rust-server/src/lib.rs" symbol={['Tokens', 'implementations']} />
+<Snippet file="rust-server/src/lib.rs" symbol={['users', 'implementations']} />
 
-`main` serves the router on a local port:
+`main` serves the router on a local port, over the database the test
+signed the shopper in on:
 
 <Snippet file="rust-server/src/main.rs" symbol="main" />
 
 The example's Topcoat app calls the same implementations from its pages,
-in the same process
-([Pages with Topcoat](/superschematic/guides/topcoat/)).
+in the same process, or their `sqlite` feature's, which keep the shop in a
+SQLite file
+([Pages with Topcoat](/superschematic/guides/topcoat/#keep-the-shop-in-sqlite)).

@@ -45,6 +45,8 @@ as their support lands in every generator.
 | `@versioned`, `@optimistic` | class | keep every version of a row, or only check versions on write | [Versioned tables](/superschematic/reference/versioned-tables/) |
 | `@versionGraph`, `@graphMember`, `@conflictUnit` | class, field | branch, commit and merge a tree of versioned tables | [Version graphs](/superschematic/reference/version-graphs/) |
 | `@projection`, `@join`, `@column` | class, field | a read-only SQL view over tables | [Projections](/superschematic/reference/projections/) |
+| `implements User<{ login, name? }>` | class | the table whose rows are the project's users; the build adds `Session` and `UserCredential` beside it | [Users and sessions](/superschematic/guides/users-and-sessions/#turn-it-on) |
+| `implements UserRole` | class | the table whose rows are roles; the build adds `UserRoleGrant` | [Users and sessions](/superschematic/guides/users-and-sessions/#turn-it-on) |
 
 ## Routes: `@superschematic/api`
 
@@ -64,6 +66,8 @@ as their support lands in every generator.
 | `@requireService({ from? })` | class, method | only a listed service may call: the server of an API whose handle `from` lists, or without `from` any server with an edge to this API; with a user clause, it must forward an end user who meets it. A method's own replaces its class's, and an `@publicRoute` method takes none. No tool lists the operation, so its `@mcp` must be hidden | [Service callers](/superschematic/guides/auth-and-permissions/#service-callers) |
 | `@allowService({ from? })` | class, method | needs a user clause: an end user who meets it, or a listed service with no end user. Neither decorator goes with `@publicRoute`, `@webhook` or `@hmacVerified` | [Service callers](/superschematic/guides/auth-and-permissions/#service-callers) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
+| `@userSessions({ path?, login?, register? })` | class with no methods | the routes users sign in and out with, which the identity runtime serves | [Users and sessions](/superschematic/guides/users-and-sessions/#serve-the-session-routes) |
+| `@userAdministration({ path? })` | class with no methods | the routes that manage users, roles and grants | [Users and sessions](/superschematic/guides/users-and-sessions/#serve-the-session-routes) |
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
 | `@mcp` | method | publishes the operation as an MCP tool, or says why not | [MCP tools](/superschematic/reference/mcp-tools/) |

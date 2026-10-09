@@ -127,8 +127,12 @@ func Register(r *registry.Registry) error {
 			Kind:      ir.DeployableServer,
 			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(serverSettings),
-			NameOf:    processName,
-			AddressOf: processAddress,
+			// A process serves plain HTTP, where a browser drops a Secure
+			// cookie: the session cookie of an API over the user model
+			// (D50) is session, without Secure.
+			IdentityConfig: identityConfig,
+			NameOf:         processName,
+			AddressOf:      processAddress,
 			// A browser on this machine reaches an exposed server where
 			// another server does (D55).
 			PublicAddressOf: processAddress,
@@ -211,6 +215,12 @@ const targetValues = `{
   },
   "additionalProperties": false
 }`
+
+// identityConfig is the identity config a process runs each API over the
+// user model with unless its environment sets the API's identity config
+// field: a session cookie without Secure, since the process serves plain
+// HTTP.
+const identityConfig = `{"cookie":{"secure":false}}`
 
 // serverSettings is the schema of a server's settings: the port it
 // listens on.

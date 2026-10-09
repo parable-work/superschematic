@@ -1,0 +1,18 @@
+# Generated Rust Types: fixture-user-model-db
+
+This crate contains Rust types generated from the `fixture-user-model-db` schema.
+
+## Generated Files
+
+- `Cargo.toml` - crate manifest
+- `src/lib.rs` - module exports
+- `src/scalars.rs` - scalar aliases
+
+- `src/types.rs` - object/input structs and imported type aliases
+- `src/identity.rs` - `IDENTITY_DESCRIPTOR`, the identity descriptor (D50)
+
+
+## Notes
+
+- This crate is generated. Do not edit manually.
+- Re-generate with `superschematic build` for the target schema.

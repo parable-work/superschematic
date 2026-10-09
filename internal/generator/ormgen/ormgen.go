@@ -73,6 +73,11 @@ type ORMOutput struct {
 	// element in one before a write and after a native array is scanned.
 	HasGenericJSONLists bool
 
+	// GeoPointListTypes are the element types of the POINT[] list columns
+	// (Field.IsGeoPointList), one per Go type and sorted; utils.go emits the
+	// helpers that convert a list of each to and from []pgtype.Point.
+	GeoPointListTypes []GeoPointListType
+
 	// UUIDGoType is the Go type used for primary-key / foreign-key plumbing
 	// (e.g. "types.IdentityUUID"). Resolved from the schema's UUID-like
 	// scalar; all UUID-like superscalar aliases share one underlying type, so
@@ -123,6 +128,14 @@ type ORMOutput struct {
 type ModuleDependencyReplace struct {
 	Module  string
 	RelPath string
+}
+
+// GeoPointListType is the element type of a POINT[] list column. utils.go
+// names its helpers after Symbol (Field.GeoPointListValue,
+// Field.GeoPointListCopy, Field.GeoPointListDecodeCall).
+type GeoPointListType struct {
+	GoType string // e.g. "types.GeoLocation"
+	Symbol string // e.g. "GeoLocation"
 }
 
 // Repository represents a generated repository for a table.
@@ -205,6 +218,8 @@ type Field struct {
 	IsNullableBool     bool   // optional boolean without a default: typegen emits *bool
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
+	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
+	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -277,15 +292,46 @@ func (f Field) NativeGenericJSONList() bool {
 // ScansElementPointers reports whether the repository scans the field's
 // native array into a list of pointers ([]*T) and copies it into the
 // entity's []T, refusing a nil element: every native list but a
-// Generic.JSON one. A list element is never null (D12, amended). pgx reads
-// a SQL NULL element into a pointer as nil. Scanned into T itself, a NULL
-// element of a type whose Scan method takes a nil source (a UUID, a
-// timestamp, a string scalar such as Identity.Name) reads as T's zero value
-// with no error, and one of a string, an enum or a number fails with pgx's
-// own message. A Generic.JSON element's Go type holds a null itself, so the
-// repository checks that scanned list instead (NativeGenericJSONList).
+// Generic.JSON one and a POINT[] one. A list element is never null (D12,
+// amended). pgx reads a SQL NULL element into a pointer as nil. Scanned into
+// T itself, a NULL element of a type whose Scan method takes a nil source (a
+// UUID, a timestamp, a string scalar such as Identity.Name) reads as T's zero
+// value with no error, and one of a string, an enum or a number fails with
+// pgx's own message. A Generic.JSON element's Go type holds a null itself, so
+// the repository checks that scanned list instead (NativeGenericJSONList). A
+// POINT[] is scanned into []pgtype.Point, whose NULL element is invalid
+// (GeoPointListCopy).
 func (f Field) ScansElementPointers() bool {
-	return f.NativeList() && !f.IsGenericJSONList
+	return f.NativeList() && !f.IsGenericJSONList && !f.IsGeoPointList
+}
+
+// GeoPointListSymbol is the Go type of a POINT[] list's element without its
+// package, GeoLocation for types.GeoLocation. It names the helpers utils.go
+// converts a list of that type with (ORMOutput.GeoPointListTypes).
+func (f Field) GeoPointListSymbol() string {
+	return strings.TrimPrefix(f.GoType, "types.")
+}
+
+// GeoPointListValue is the call that converts value, a Go expression of the
+// POINT[] list's type, to the []pgtype.Point pgx writes: x is the longitude
+// and y the latitude. A nil list stays nil, which pgx writes as NULL.
+func (f Field) GeoPointListValue(value string) string {
+	symbol := f.GeoPointListSymbol()
+	return fmt.Sprintf("%s%sPoints(%s)", strings.ToLower(symbol[:1]), symbol[1:], value)
+}
+
+// GeoPointListCopy is the call that sets dst, a pointer to the field's list,
+// from points, the []pgtype.Point scanned from its POINT[] column. It
+// returns an error that names the first NULL element.
+func (f Field) GeoPointListCopy(points, dst string) string {
+	return fmt.Sprintf("copy%sPoints(%q, %s, %s)", f.GeoPointListSymbol(), f.Name, points, dst)
+}
+
+// GeoPointListDecodeCall is the call that decodes the field's POINT[] column
+// from a history row, src, into dst. to_jsonb writes the column as a JSON
+// list of "(x,y)" texts; the decoder refuses a null element.
+func (f Field) GeoPointListDecodeCall(src, dst string) string {
+	return fmt.Sprintf("unmarshal%sPoints(%s, %s, %q)", f.GeoPointListSymbol(), src, dst, f.Name)
 }
 
 // GenericJSONNullCheck is the call that returns an error naming the first
@@ -477,6 +523,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasJSONListFields := false
 	hasGenericJSONLists := false
 	hasElementPointerLists := false
+	geoPointListGoTypes := make(map[string]string)
 	for _, repo := range repositories {
 		if repo.HasSoftDelete {
 			hasSoftDeletes = true
@@ -500,7 +547,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsArrayOfArrays {
 				hasArraysOfArrays = true
 			}
-			if field.JSONListDepth() > 0 || (field.NativeList() && repo.Versioned) {
+			if field.JSONListDepth() > 0 || (field.NativeList() && !field.IsGeoPointList && repo.Versioned) {
 				hasJSONListFields = true
 			}
 			if field.ScansElementPointers() {
@@ -509,8 +556,16 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsGenericJSONList {
 				hasGenericJSONLists = true
 			}
+			if field.IsGeoPointList {
+				geoPointListGoTypes[field.GeoPointListSymbol()] = field.GoType
+			}
 		}
 	}
+	geoPointListTypes := make([]GeoPointListType, 0, len(geoPointListGoTypes))
+	for symbol, goType := range geoPointListGoTypes {
+		geoPointListTypes = append(geoPointListTypes, GeoPointListType{GoType: goType, Symbol: symbol})
+	}
+	sort.Slice(geoPointListTypes, func(i, j int) bool { return geoPointListTypes[i].Symbol < geoPointListTypes[j].Symbol })
 
 	output := &ORMOutput{
 		SchemaName:               opts.SchemaName,
@@ -530,6 +585,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasJSONListFields:        hasJSONListFields,
 		HasGenericJSONLists:      hasGenericJSONLists,
 		HasElementPointerLists:   hasElementPointerLists,
+		GeoPointListTypes:        geoPointListTypes,
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
@@ -604,6 +660,9 @@ func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 type scalarLookup struct {
 	symbol string
 	traits codegen.ScalarTraits
+	// sqlType is the scalar's sql type mapping, the column type sqlgen
+	// stores a single value of it as (POINT for Geo.Location).
+	sqlType string
 }
 
 func buildScalarLookup(schema *ir.Schema) map[string]scalarLookup {
@@ -615,8 +674,9 @@ func buildScalarLookup(schema *ir.Schema) map[string]scalarLookup {
 			symbol = name
 		}
 		lookup[name] = scalarLookup{
-			symbol: symbol,
-			traits: codegen.BuildScalarTraits(scalarDef, tokens, ""),
+			symbol:  symbol,
+			traits:  codegen.BuildScalarTraits(scalarDef, tokens, ""),
+			sqlType: scalarDef.TypeMappings["sql"],
 		}
 	}
 	return lookup
@@ -978,6 +1038,9 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && (!traits.IsIntegerLike || fieldDef.DistinctNull)
 	isNullableBool := codegen.GoOptionalBoolIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
+	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
+	// POINT[]; a list of lists, a map and @jsonField are JSONB.
+	storedAsPoint := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "POINT")
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -1004,6 +1067,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsNullableBool:            isNullableBool,
 		IsUUIDScalar:              isScalar && !isArray && traits.IsUUIDLike,
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
+		IsGeoPoint:                storedAsPoint && !isArray,
+		IsGeoPointList:            storedAsPoint && isArray,
 		IsUUIDLike:                traits.IsUUIDLike,
 		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
 		IsIntLike:                 traits.IsIntegerLike,
@@ -1241,6 +1306,9 @@ func computeImportNeeds(repo *Repository) {
 			repo.NeedsTime = true
 		}
 		if !field.IsJSONField && !field.IsArray && field.IsDateLike && !field.IsPrimaryKey && !field.IsAuditField {
+			repo.NeedsPgtype = true
+		}
+		if field.IsGeoPoint || field.IsGeoPointList {
 			repo.NeedsPgtype = true
 		}
 		// A JSON column (a map among them) scans through []byte, never

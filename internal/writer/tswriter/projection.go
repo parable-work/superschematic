@@ -18,7 +18,7 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 		e.failf("type %s: Projection role without a projection declaration", def.Name)
 		return
 	}
-	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.IsTrait ||
+	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.User != nil || def.UserRole != nil || def.IsTrait ||
 		def.TraitConfig != nil || def.Source != nil || len(def.Indexes) > 0 || def.JsonField ||
 		def.Versioned || def.Optimistic || def.EnvVars || def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 {
 		e.failf("type %s: a projection class carries only @projection and @join", def.Name)

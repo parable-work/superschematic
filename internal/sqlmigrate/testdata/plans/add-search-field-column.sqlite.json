@@ -1,0 +1,31 @@
+{
+  "dialect": "sqlite",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "fa558db145d9117adb4688df31610eb0330fa70da37871f571d97f2055e34bdc",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"tagline\" TEXT"
+      ],
+      "subject": "table/customer/column/tagline",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"tagline\", '')) VIRTUAL"
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "4e2d3bbd64eb43cb978b45b1ec45141062fbbe0dece015e74e3176168b5ae9ff",
+  "toModel": null,
+  "version": 1
+}

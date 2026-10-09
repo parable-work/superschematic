@@ -1,6 +1,8 @@
 //! Calls shop-orders through the generated Rust SDK. go/clients_test.go runs
 //! it against the Go server and compares what it prints with the other
-//! languages' clients.
+//! languages' clients. Its arguments are the server's base URL and the
+//! shopper's bearer token, which shop-api's login issued: the Go and the
+//! Rust server both read its session from shop-db's users.
 
 use acme_shop_orders_sdk::types::{IdentityUUID, PlaceOrderInput, PlaceOrderLine, ShippingAddress, WriteReviewInput};
 use acme_shop_orders_sdk::{ClientConfig, SDKError, ShopOrdersSdk};
@@ -22,8 +24,9 @@ fn status<T>(result: Result<T, SDKError>) -> String {
 #[tokio::main]
 async fn main() -> Result<(), SDKError> {
     let base_url = std::env::args().nth(1).expect("the server's base URL");
+    let token = std::env::args().nth(2).expect("the shopper's bearer token");
     let anonymous = ShopOrdersSdk::new(ClientConfig::with_base_url(&base_url, None, None))?;
-    let shopper = ShopOrdersSdk::new(ClientConfig::with_base_url(&base_url, Some("token-1".to_string()), None))?;
+    let shopper = ShopOrdersSdk::new(ClientConfig::with_base_url(&base_url, Some(token), None))?;
     let product: IdentityUUID = PRODUCT.parse().expect("a UUID");
 
     let reviews = anonymous.product_reviews.list_reviews(product, None, None).await?;

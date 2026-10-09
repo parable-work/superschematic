@@ -291,11 +291,15 @@ type API struct {
 	// Public when its Config takes the database and the auth middleware;
 	// Encrypted when it takes a payload decryptor; ServiceAuth when it
 	// takes a service authenticator, which an operation's service clause
-	// needs (D37).
+	// needs (D37); Identity when it authenticates with the identity
+	// runtime over the user model (D50), so its Config takes the identity
+	// service, built over its database's identity store, in place of an
+	// auth middleware.
 	Config      bool
 	Public      bool
 	Encrypted   bool
 	ServiceAuth bool
+	Identity    bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -322,6 +326,14 @@ type Database struct {
 	Var     string
 	Package string
 	Module  string
+
+	// Identity is true when an API on the database authenticates with
+	// the identity runtime: the server builds one identity store over
+	// the database's pool, from the descriptor constant of its Go types,
+	// whose import name and module are Types and TypesModule.
+	Identity    bool
+	Types       string
+	TypesModule string
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -402,6 +414,7 @@ var reserved = []string{
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
+	"identity", "identityConfig", "stdlib", "method", "requested",
 	"jobs", "started",
 }
 
@@ -502,10 +515,13 @@ func Plan(in Input) (*Server, error) {
 		}
 		if s.Job == nil {
 			// A job serves no request: it mounts no routes, verifies no end
-			// user or caller, and decrypts no payload.
+			// user or caller, and decrypts no payload. So it builds no
+			// identity service either, though its API's authDb holds the
+			// user model (D50): its Deps reach the tables through the ORM.
 			apis[i].Public = o.IsPublic
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
+			apis[i].Identity = o.Auth.Identity
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -551,6 +567,17 @@ func Plan(in Input) (*Server, error) {
 				}
 			}
 			api.Database = d
+		}
+		if api.Identity {
+			d := api.Database
+			if d == nil {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime and has no database to build its identity store over", in.Stack, in.Server, o.SchemaName)
+			}
+			if !d.Identity {
+				d.Identity = true
+				d.Types = taken.take(packageName(d.Service) + "types")
+				d.TypesModule = in.Naming.OrDefault().GoTypesModule(d.Service)
+			}
 		}
 		for _, call := range o.Deps.Calls {
 			c := clients[call.Service]
@@ -788,9 +815,9 @@ func checkRoutes(in Input) error {
 // Cloud SQL, and the Dockerfile with its ignore file when s.Docker is
 // planned.
 //
-// A job's module holds the same files but serviceauth.go, and its main.go
-// runs the job (job.go.tmpl). Both main.go templates take the wiring they
-// share from wiring.tmpl.
+// A job's module holds the same files but serviceauth.go and identity.go,
+// and its main.go runs the job (job.go.tmpl). Both main.go templates take
+// the wiring they share from wiring.tmpl.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
@@ -815,6 +842,9 @@ func Write(s *Server, dir string) error {
 		}
 	}
 	if err := writeServiceAuth(s, dir); err != nil {
+		return err
+	}
+	if err := writeIdentity(s, dir); err != nil {
 		return err
 	}
 	return writeCORS(s, dir)
@@ -982,6 +1012,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyServiceAuth": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.ServiceAuth })
+		},
+		"anyIdentity": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
 		},
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })

@@ -46,8 +46,9 @@
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
 #  10. the core-only binary builds shop-db and shop-api with the session
-#      provider, both ORM stores (Session and User) are generated, and the
-#      result compiles (the regression the example found); the TypeScript
+#      provider, whose server authenticates with the identity runtime over
+#      shop-db's User table (D50) and generates no ORM store, and the
+#      result compiles; the TypeScript
 #      types write acme's scalar_jsdoc_tag directly above every scalar
 #      field, and a naming file without the key writes no tag line and
 #      otherwise the same file;
@@ -285,12 +286,15 @@ echo "==> core-only binary builds shop-db and shop-api with the session provider
 "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --naming "$OUT/session.toml" --out "$OUT/session-dist" >/dev/null
 "$OUT/superschematic" build "$SCHEMAS/services/shop-api" --naming "$OUT/session.toml" --out "$OUT/session-dist" >/dev/null
 test ! -e "$OUT/session-dist/acme"
-# Both stores must be generated: shop-db has Session and User. A missing
-# table would skip the store and the UUID-parse compile check with it.
-grep -q 'scalars.ParseUUID(jti)' "$OUT/session-dist/api/shop-api/middleware.go"
-grep -q 'scalars.ParseUUID(id)' "$OUT/session-dist/api/shop-api/middleware.go"
-grep -q 'NewSessionStore' "$OUT/session-dist/api/shop-api/middleware.go"
-grep -q 'NewPrincipalStore' "$OUT/session-dist/api/shop-api/middleware.go"
+# shop-db's User has the User trait, so the server authenticates with the
+# identity runtime: Config takes the identity service NewIdentity builds,
+# and no ORM store is generated.
+grep -q 'Identity \*identity.Service' "$OUT/session-dist/api/shop-api/routes.go"
+grep -q 'func NewIdentity(' "$OUT/session-dist/api/shop-api/identity.go"
+if grep -q 'NewSessionStore\|NewPrincipalStore' "$OUT/session-dist/api/shop-api/middleware.go"; then
+  echo "ERROR: the session provider generated an ORM store beside the identity runtime" >&2
+  exit 1
+fi
 go_module_compiles "$OUT/session-dist/api/shop-api"
 
 echo "==> TypeScript types tag every scalar field with acme's scalar_jsdoc_tag"

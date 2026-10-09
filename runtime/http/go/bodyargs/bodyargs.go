@@ -14,6 +14,12 @@
 //   - A value must have its kind's JSON type ("type": "expected a string",
 //     "expected a number", ...). A string is not a number, a number is not a
 //     string, and "true" is not a boolean.
+//   - A value of an argument built with CheckJSON (a JSON-object scalar's,
+//     such as Geo.Location) is then checked on its own JSON text, before
+//     anything else: the check sees an unknown, duplicate or missing key,
+//     which decoding drops, overwrites or reads as zero. Its failure is the
+//     value's one error, named by the kind its message starts with
+//     ("parse", "custom", "range").
 //   - A list is a JSON array ("type", "expected an array"), bounded by
 //     ListMin and ListMax. An element is never null: "required" at name[i].
 //     A list of lists has the same rules one level down: an inner list is
@@ -184,6 +190,8 @@ type Arg struct {
 	listMin  int
 	listMax  int
 	rules    []rule
+	// checkJSON checks a value's own JSON text (CheckJSON); nil is none.
+	checkJSON func(raw string) error
 }
 
 // Option sets one property of an Arg.
@@ -249,6 +257,21 @@ func Min(v float64) Option {
 // Max is the greatest value of a number ("max").
 func Max(v float64) Option {
 	return func(a *Arg) { a.rules = append(a.rules, rule{kind: ruleMax, bound: v}) }
+}
+
+// CheckJSON checks each value's own JSON text with check, once the value
+// has its kind's JSON type and before any other rule or its decoding. A
+// route passes it for a JSON-object scalar (Generic.StringMap,
+// Geo.Location): superscalar's check of the scalar, which sees what
+// decoding into the Go value loses, such as an unknown or duplicate key,
+// which encoding/json drops or overwrites, and a missing one, which it
+// reads as the zero value. A failure is the value's one error, named as
+// the scalar package's Validate methods name a superscalar error: by the
+// kind its message starts with ("parse", "custom", "range", ...). A nil
+// check is none, as superscalar's ValidatorFor returns for a scalar its
+// core does not know.
+func CheckJSON(check func(raw string) error) Option {
+	return func(a *Arg) { a.checkJSON = check }
 }
 
 // Value decodes a single-valued argument. An absent or null value is the
@@ -500,6 +523,12 @@ func decode[T any](errs validate.ValidationErrors, arg *Arg, path string, raw js
 		errs.AddFieldError(path, "type", arg.kind.typeMessage())
 		return
 	}
+	if arg.checkJSON != nil {
+		if err := arg.checkJSON(string(raw)); err != nil {
+			errs.SetFieldErrors(path, []validate.ValidationError{{Validator: scalarErrorValidator(err), Message: err.Error()}})
+			return
+		}
+	}
 	switch arg.kind {
 	case String:
 		var s string
@@ -584,6 +613,25 @@ func (a *Arg) checkNumber(f float64) (validate.ValidationError, bool) {
 		}
 	}
 	return validate.ValidationError{}, true
+}
+
+// scalarErrorValidator names a failure of a CheckJSON check as the scalar
+// package's Validate methods name a superscalar error, and the generated
+// types name one their UnmarshalJSON finds: by the kind its message starts
+// with.
+func scalarErrorValidator(err error) string {
+	message := err.Error()
+	if strings.Contains(message, "reserved") {
+		return "reservedWord"
+	}
+	kind, _, _ := strings.Cut(message, ":")
+	switch kind {
+	case "pattern", "length", "range", "enum", "custom", "parse":
+		return kind
+	case "empty":
+		return "required"
+	}
+	return "scalar"
 }
 
 // validateOwn runs the decoded value's own validation, when its type has

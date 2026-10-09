@@ -52,10 +52,11 @@ func (r *resolver) corsFields(d *deployable) map[string]string {
 }
 
 // checkCORSFields refuses a CORS field of server d that a config field, an
-// edge's derived field, a callers field or an env key of the environment
-// takes: its name, or a name it begins with and an underscore, either way
-// round. It reports the env keys it refused, which bindConfig then skips.
-func (r *resolver) checkCORSFields(d *deployable, cors, callers map[string]string, derived map[string]*edge) map[string]bool {
+// edge's derived field, a callers field, an identity config field or an env
+// key of the environment takes: its name, or a name it begins with and an
+// underscore, either way round. It reports the env keys it refused, which
+// bindConfig then skips.
+func (r *resolver) checkCORSFields(d *deployable, cors, callers, identity map[string]string, derived map[string]*edge) map[string]bool {
 	refused := map[string]bool{}
 	for _, name := range sortedKeys(cors) {
 		api := cors[name]
@@ -72,6 +73,11 @@ func (r *resolver) checkCORSFields(d *deployable, cors, callers map[string]strin
 		for _, other := range sortedKeys(callers) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
 				r.fail(CodeFieldCollision, "server %s: %s, the callers field of %s, collides with %s, the CORS field of %s", d.res.Name, other, callers[other], name, api)
+			}
+		}
+		for _, other := range sortedKeys(identity) {
+			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
+				r.fail(CodeFieldCollision, "server %s: %s, the identity config field of %s, collides with %s, the CORS field of %s", d.res.Name, other, identity[other], name, api)
 			}
 		}
 		if _, set := d.settings.env[name]; set {
