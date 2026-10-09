@@ -369,6 +369,7 @@ export class HttpClient {
         headers,
         body,
         signal,
+        ...(this.config.credentials !== undefined ? { credentials: this.config.credentials } : {}),
       });
 
       const responseHeaders = this.headersToRecord(response.headers);
@@ -604,6 +605,12 @@ export class HttpClient {
    * Get authentication token
    */
   private async getToken(): Promise<string | null> {
+    // A cookie session: the browser sends the session cookie, and no stored
+    // token takes its place in Authorization, which the server reads first.
+    if (this.config.credentials !== undefined && !this.config.auth) {
+      return null;
+    }
+
     // Check for static token in config
     if (this.config.auth?.token) {
       return this.config.auth.token;

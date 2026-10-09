@@ -28,6 +28,19 @@ export interface ValidateOptions extends SchemaTarget {
   version?: number;
 }
 
+/**
+ * What the access policy lets a principal do with one live schema: read is
+ * always true, since capabilities lists only the schemas the principal may
+ * read.
+ */
+export interface SchemaCapabilities {
+  name: string;
+  read: boolean;
+  write: boolean;
+  define: boolean;
+  publish: boolean;
+}
+
 /** A behavior a schema's instance type composes. */
 export interface ComposedBehavior {
   name: string;
@@ -95,6 +108,30 @@ export class SchemaRegistry {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
     return this.catalog.list(namespace).filter((summary) => this.access.allows(principal, 'read', namespace, summary.name));
+  }
+
+  /**
+   * capabilities answers, for each schema with a live version that the
+   * namespace reaches and the principal may read, by name, whether the
+   * access policy allows each action, as it would answer the calls. A
+   * schema the principal may not read is left out, as list leaves it out,
+   * and a draft that was never published has no live version. A behavior
+   * operation asks its action, so it is not listed apart; a call the
+   * policy allows may still be refused for another reason, a name the
+   * shared namespace holds say.
+   */
+  capabilities(principal: Principal, options: SchemaTarget = {}): SchemaCapabilities[] {
+    checkPrincipal(principal);
+    const namespace = this.namespaces.resolve(options.namespace);
+    const out: SchemaCapabilities[] = [];
+    for (const { name, liveVersion } of this.catalog.list(namespace)) {
+      if (liveVersion === null || !this.access.allows(principal, 'read', namespace, name)) {
+        continue;
+      }
+      const allows = (action: 'write' | 'define' | 'publish') => this.access.allows(principal, action, namespace, name);
+      out.push({ name, read: true, write: allows('write'), define: allows('define'), publish: allows('publish') });
+    }
+    return out;
   }
 
   /**

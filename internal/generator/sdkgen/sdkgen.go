@@ -188,6 +188,18 @@ type SDKOutput struct {
 	HasFilterableEndpoints bool            // Whether any endpoint is @filterable (gates FilterParam in types.ts)
 	Timestamp              string          // Generation timestamp
 	Version                string          // Package version
+
+	// CookieSessions reports whether the API's sessions can travel in the
+	// session cookie (D50): its authDb has a User table. SDKConfig then
+	// takes credentials, which the client passes to fetch, and a client
+	// configured with credentials and no auth sends no Authorization.
+	// Generate sets it when the API serves the user model's operations; the
+	// build sets it too for an API whose authDb has a User table and which
+	// serves none, whose users sign in through another API.
+	CookieSessions bool
+	// LoginNamespace is the namespace whose login signs a user in, empty
+	// when the API has none.
+	LoginNamespace string
 }
 
 // Generate generates TypeScript SDK from API output.
@@ -322,6 +334,12 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		// Track if any endpoint in namespace requires auth
 		if endpoint.RequiresAuth {
 			namespaceMap[ns].HasAuth = true
+		}
+		if endpoint.IdentityOperation != "" {
+			output.CookieSessions = true
+			if endpoint.IdentityOperation == ir.IdentityOpLogin {
+				output.LoginNamespace = ns
+			}
 		}
 		if endpoint.Encrypted && apigen.EncryptedBodyMethod(endpoint.Method) {
 			namespaceMap[ns].HasEncryptedPayload = true

@@ -8,9 +8,12 @@ import {
   identityAuthenticator,
   identityCors,
   identityHandler,
+  identityOperationSpec,
   identityOperations,
   identityPrincipalOf,
+  identityRouterOptions,
   identityRoutes,
+  mountIdentityOperations,
   mountIdentityRoutes,
   routesOf,
   type IdentityRoute,
@@ -538,6 +541,81 @@ describe('identity routes', () => {
     expect([users.status, ((await users.json()) as { code: string }).code]).toEqual([403, 'forbidden']);
     const bad = await app.request('/api/auth/me', { headers: { authorization: 'Bearer' } });
     expect([bad.status, ((await bad.json()) as { code: string }).code]).toEqual([401, 'unauthorized']);
+  });
+
+  test('identityOperationSpec writes the contract: public login and register, a caller elsewhere, the administration permissions, the rate limits', async () => {
+    const db = await sqlite.open();
+    open.push(db);
+    const { service } = await harness(db);
+    const specs = identityRoutes(service, { sessions: { register: true }, administration: {} }).map(route =>
+      identityOperationSpec(service, route, { basePath: '/api/', rateLimitPerMinute: 600, timeoutSeconds: 5 })
+    );
+    const row = (spec: OperationSpec) =>
+      `${spec.method} ${spec.path} ${spec.auth.public ? 'public' : spec.auth.permissions.join(',') || 'caller'} ${spec.rateLimitPerMinute}`;
+    expect(specs.map(row)).toEqual([
+      'POST /api/auth/login public 10',
+      'POST /api/auth/logout caller 600',
+      'GET /api/auth/me caller 600',
+      'GET /api/auth/capabilities caller 600',
+      'POST /api/auth/password caller 10',
+      'POST /api/auth/register public 5',
+      'POST /api/auth/admin/users identity.users.write 600',
+      'GET /api/auth/admin/users identity.users.read 600',
+      'GET /api/auth/admin/users/{id} identity.users.read 600',
+      'POST /api/auth/admin/users/{id}/disable identity.users.write 600',
+      'POST /api/auth/admin/users/{id}/enable identity.users.write 600',
+      'PUT /api/auth/admin/users/{id}/password identity.users.write 600',
+      'GET /api/auth/admin/roles identity.roles.read 600',
+      'POST /api/auth/admin/roles identity.roles.write 600',
+      'PUT /api/auth/admin/roles/{id} identity.roles.write 600',
+      'DELETE /api/auth/admin/roles/{id} identity.roles.write 600',
+      'PUT /api/auth/admin/users/{id}/roles/{roleId} identity.roles.write 600',
+      'DELETE /api/auth/admin/users/{id}/roles/{roleId} identity.roles.write 600',
+    ]);
+    const grant = specs.find(spec => spec.name === 'grantRole')!;
+    expect(grant).toMatchObject({ namespace: 'identity', manual: true, timeoutSeconds: 5 });
+    expect(grant.input).toBeUndefined();
+    expect(grant.pathParams.map(param => param.name)).toEqual(['id', 'roleId']);
+    expect(identityOperationSpec(service, { operation: 'login', method: 'POST', path: '/auth/login' }).rateLimitPerMinute).toBe(10);
+    expect(identityOperationSpec(service, { operation: 'me', method: 'GET', path: '/auth/me' }).rateLimitPerMinute).toBeUndefined();
+    expect(() => identityOperationSpec(service, { operation: 'refresh' as never, method: 'POST', path: '/auth/refresh' })).toThrow(/not an operation/);
+  });
+
+  test('mountIdentityOperations runs each route through the pipeline: the gate, the rate limit, the request id', async () => {
+    const db = await sqlite.open();
+    open.push(db);
+    const h = await harness(db);
+    const app = new Hono();
+    const mounted = mountIdentityOperations(app, h.service, { sessions: {}, administration: {}, basePath: '/api' }, { rateLimit: { now: () => 0 } });
+    expect(mounted.map(spec => spec.name)).not.toContain('register');
+    const login = (password: string) =>
+      app.request('/api/auth/login', { method: 'POST', body: JSON.stringify({ login: 'member@example.com', password }), headers: { 'x-request-id': 'req-1' } });
+    const first = await login(USER_PASSWORD);
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { meta: { requestId: string } }).meta.requestId).toBe('req-1');
+    const token = ((await (await login(USER_PASSWORD)).json()) as { data: { token: string } }).data.token;
+    // The gate refuses the member before the handler runs, with the router's problem.
+    const users = await app.request('/api/auth/admin/users', { headers: { authorization: `Bearer ${token}` } });
+    expect([users.status, ((await users.json()) as { code: string }).code]).toEqual([403, 'forbidden']);
+    const me = await app.request('/api/auth/me', { headers: { authorization: `Bearer ${token}` } });
+    expect(((await me.json()) as { data: { user: { id: string } } }).data.user.id).toBe(h.memberId);
+    for (let i = 2; i < 10; i++) await login('wrong password');
+    const limited = await login(USER_PASSWORD);
+    expect([limited.status, limited.headers.get('retry-after')]).toEqual([429, '6']);
+  });
+
+  test('identityRouterOptions authenticates with the identity service, and refuses no service or an authenticate beside it', async () => {
+    const db = await sqlite.open();
+    open.push(db);
+    const { service } = await harness(db);
+    const options = identityRouterOptions({ identity: service, bodyLimitBytes: 10 });
+    expect(options.bodyLimitBytes).toBe(10);
+    expect(options.identity).toBe(service);
+    expect(options.authenticate.readsAuthorization).toBe(true);
+    expect(() => identityRouterOptions({} as { identity?: IdentityService })).toThrow(/buildRouter: options.identity is required/);
+    expect(() => identityRouterOptions({ identity: service, authenticate: async () => null }, 'engineApp')).toThrow(
+      /engineApp: options.authenticate is refused beside options.identity/
+    );
   });
 
   test('the authenticator returns no principal for a request with no credential, and the identity principal otherwise', async () => {

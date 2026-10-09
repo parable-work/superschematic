@@ -6,6 +6,8 @@
 // success envelope by the router) or an OperationResult to choose the status.
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
+// Nor are the user model's operations (D50), which the identity runtime
+// serves.
 
 import type { OperationResult, RequestContext } from '@superschematic/http-runtime';
 import type {

@@ -52,3 +52,26 @@ export function identityAuthenticator(service: IdentityService): Authenticator {
   };
   return Object.assign(authenticate, { readsAuthorization: true });
 }
+
+/**
+ * The router options of a server of an API whose authDb has a User table
+ * (D50): options with identityAuthenticator(options.identity) as
+ * authenticate, so the identity service authenticates every route. A
+ * generated router's buildRouter, and the engine's engineApp and
+ * engineMcp, pass their options through it, and name themselves as who in
+ * its refusals: options without the service, and options with an
+ * authenticate beside it.
+ */
+export function identityRouterOptions<O extends { readonly authenticate?: Authenticator; readonly identity?: IdentityService }>(
+  options: O,
+  who = 'buildRouter'
+): Omit<O, 'authenticate'> & { readonly identity: IdentityService; readonly authenticate: Authenticator } {
+  const identity = options?.identity;
+  if (identity === undefined || identity === null || typeof identity.authenticate !== 'function') {
+    throw new TypeError(`${who}: options.identity is required: the API's authDb has a User table, so the identity service authenticates every route (D50)`);
+  }
+  if (options.authenticate !== undefined) {
+    throw new TypeError(`${who}: options.authenticate is refused beside options.identity, which authenticates every route (D50)`);
+  }
+  return { ...options, identity, authenticate: identityAuthenticator(identity) };
+}
