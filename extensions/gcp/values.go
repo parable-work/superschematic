@@ -61,6 +61,9 @@ const targetValues = `{
 }`
 
 // cloudRunSettings is the schema of a server's settings on Cloud Run.
+// cpuAlwaysAllocated keeps an instance's CPU between requests, for a
+// server that works between them, and bills the instance for its whole
+// life (lowerService).
 const cloudRunSettings = `{
   "type": "object",
   "properties": {
@@ -68,6 +71,7 @@ const cloudRunSettings = `{
     "maxInstances": {"type": "integer", "minimum": 1},
     "concurrency": {"type": "integer", "minimum": 1, "maximum": 1000},
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
+    "cpuAlwaysAllocated": {"type": "boolean"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
   "additionalProperties": false

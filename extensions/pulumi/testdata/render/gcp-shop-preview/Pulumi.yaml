@@ -147,6 +147,7 @@ resources:
             ports:
               containerPort: 8080
             resources:
+              cpuIdle: true
               limits:
                 cpu: "1"
                 memory: 512Mi
@@ -455,6 +456,7 @@ resources:
             ports:
               containerPort: 8080
             resources:
+              cpuIdle: true
               limits:
                 cpu: "1"
                 memory: 512Mi
