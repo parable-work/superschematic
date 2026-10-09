@@ -4140,32 +4140,26 @@ The session routes, under the class's `path`, `auth` by default:
 
 The administration routes, under `auth/admin` by default, and the rate limits are in `ir/identity_routes.go`.
 
-Status: the first step is built. `@superschematic/db` exports the
-traits; the TypeScript reader, the JSON and YAML readers and `format`
-read and write them; the verify pass checks them in every form
-(`internal/loader/verify/identity.go`); the loader adds the tables
-(`internal/loader/identity`); and the Go, TypeScript and Rust types
-carry the descriptor (`internal/generator/identitydesc`, whose README is
-its contract). `fixture-user-model-db` runs through the DDL, the ORM,
-against Postgres, and every types generator; every other output is the
-same bytes.
+Status: built. The traits, the tables the loader adds and the
+descriptor; the session and administration routes in the IR, the
+OpenAPI document, every SDK and the tool manifest; the identity package
+in Go, TypeScript and Rust, which pass one set of parity vectors; the Go,
+TypeScript and Rust servers, the stack's Go entrypoint, the engine,
+Topcoat's page authenticator and the TypeScript SDK's cookie session;
+the permission catalog; and the bootstrap runner. Each server's generator
+tests drive the routes end to end through its own SDK on SQLite, and on
+Postgres when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set. A
+schema without the traits builds the same bytes.
 
-The login rule waits on superscalar. Its Go metadata does not export a
-scalar's case-insensitive declaration yet, so `ScalarDef.CaseInsensitive`
-is false for every catalog scalar and the loader refuses every login
-typed by one. A data form may declare the flag on its scalar entry,
-which hydration keeps; the TypeScript form cannot, so its fixtures' loads
-skip until the catalog declares Contact.Email case-insensitive. When the
-pin moves, hydration takes the flag from the catalog row, so a data form
-can no longer declare a scalar case-insensitive that superscalar does
-not.
+acme-shop's users are the model's. `shop-db`'s `User` and `Role` take
+the traits; `shop-api` serves the session and administration routes;
+and both Go servers, the Rust server and the Topcoat app authenticate
+with the identity package, the app with a sign-in form that starts a
+cookie session in process. The storefront's API names no `authDb`, so
+it keeps its own `authenticate`.
 
-Not built: the Go identity package and server, with acme-shop moved; the
-administration routes, the bootstrap command and the permission
-catalog; the TypeScript package, server and engine; the Rust feature,
-server and Topcoat's authenticator; then the TypeScript SDK's cookie
-mode. Each step's tests run the parity vectors in the runtimes it
-reaches, and check that a schema without the traits builds the same
-bytes.
+Not built: the TypeScript and Rust stack entrypoints, which will read
+`<API>_IDENTITY` as the Go one does; and a check of an `@envVars` field
+that collides with it outside a stack.
 
 The design is reversible until the first release.
