@@ -154,54 +154,95 @@ fn the_descriptor_is_the_auth_db_s() {
 }
 `
 
+// identityTestDatabaseEnv names the Postgres database the end-to-end test
+// also runs on, as the runtime's identity tests do.
+const identityTestDatabaseEnv = "SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL"
+
 // TestRustSDKCallsTheUserModelRoutes builds fixture-user-routes-api's crate
-// with its SQLite store over the authDb's DDL, serves build_router on a
-// local socket, and drives it through the generated Rust SDK with bearer
-// sessions, and through tower's oneshot with the session cookie a browser
-// holds (identityRoundtripTest): register, login, me, capabilities, the
-// project's own route, changePassword and logout; an administrator who
-// writes and grants a role within their own permissions and no further;
-// a cookie login, a cross-origin refusal, a trusted origin's CORS, a
-// refused cookie cleared; and login's rate limit. clippy also builds the
-// crate's Postgres store.
+// with its SQLite and Postgres stores over the authDb's DDL, serves
+// build_router on a local socket, and drives it through the generated
+// Rust SDK with bearer sessions, and through tower's oneshot with the
+// session cookie a browser holds (identityRoundtripTest): register, login,
+// me, capabilities, the project's own route, changePassword and logout; an
+// administrator who writes and grants a role within their own permissions
+// and no further; a cookie login, a cross-origin refusal, a trusted
+// origin's CORS, a refused cookie cleared; and login's rate limit. Each
+// runs on SQLite, and on the Postgres database identityTestDatabaseEnv
+// names when it is set.
 func TestRustSDKCallsTheUserModelRoutes(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, userRoutesAPI))
 	if err != nil {
 		t.Fatalf("load %s: %v", userRoutesAPI, err)
 	}
 	authDB := authDBOf(t, schema)
-	model, err := sqlmigrate.BuildModel(authDB, sqlgen.Options{SchemaName: authDB.Name}, sqlmigrate.SQLite)
-	if err != nil {
-		t.Fatalf("build the SQLite model of %s: %v", authDB.Name, err)
-	}
-	ddl, err := sqlmigrate.CreateSQL(model)
-	if err != nil {
-		t.Fatalf("render the SQLite DDL of %s: %v", authDB.Name, err)
+	files := identityDDL(t, authDB)
+	if os.Getenv(identityTestDatabaseEnv) == "" {
+		t.Logf("%s is unset: the crate's tests run on SQLite alone", identityTestDatabaseEnv)
 	}
 	sdkCrate := strings.ReplaceAll(naming.Default().RustSDKCrate(userRoutesAPI), "-", "_")
 	writeDDL := func(apiDir string, _ *APIOutput) error {
 		if err := os.MkdirAll(filepath.Join(apiDir, "tests"), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(apiDir, "tests", "identity.sql"), []byte(ddl), 0o644)
+		for name, ddl := range files {
+			if err := os.WriteFile(filepath.Join(apiDir, "tests", name), []byte(ddl), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	cargoTestAPICrateWith(t, userRoutesAPI, schema, "identity", strings.ReplaceAll(identityRoundtripTest, "SDK_CRATE", sdkCrate), cargoOptions{
-		features:        []string{"identity-postgres", "identity-sqlite"},
-		devDependencies: `rusqlite = { version = "0.40.2", features = ["bundled"] }` + "\n",
+		features: []string{"identity-postgres", "identity-sqlite"},
+		devDependencies: `rusqlite = { version = "0.40.2", features = ["bundled"] }
+tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"] }
+`,
 	}, withSDK(schema, userRoutesAPI), writeDDL)
 }
 
-// identityRoundtripTest is tests/identity.rs of fixture-user-routes-api's
-// API crate, beside tests/identity.sql, the authDb's SQLite DDL.
-const identityRoundtripTest = `//! The user model end to end (D50): the crate's router over a SQLite store,
-//! called through the generated Rust SDK with bearer sessions, and through
-//! tower's oneshot with the session cookie a browser holds.
+// identityDDL is authDB's DDL as the build writes it, by the file name the
+// end-to-end test reads it from: identity.sql for SQLite and
+// identity_postgres.sql for Postgres.
+func identityDDL(t *testing.T, authDB *ir.Schema) map[string]string {
+	t.Helper()
+	opts := sqlgen.Options{SchemaName: authDB.Name}
+	model, err := sqlmigrate.BuildModel(authDB, opts, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatalf("build the SQLite model of %s: %v", authDB.Name, err)
+	}
+	sqlite, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatalf("render the SQLite DDL of %s: %v", authDB.Name, err)
+	}
+	ddl, err := sqlgen.Generate(authDB, opts)
+	if err != nil {
+		t.Fatalf("generate the DDL of %s: %v", authDB.Name, err)
+	}
+	dir := t.TempDir()
+	if err := sqlgen.WriteDDL(ddl, dir); err != nil {
+		t.Fatalf("write the DDL of %s: %v", authDB.Name, err)
+	}
+	postgres, err := os.ReadFile(filepath.Join(dir, "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"identity.sql": sqlite, "identity_postgres.sql": string(postgres)}
+}
 
+// identityRoundtripTest is tests/identity.rs of fixture-user-routes-api's
+// API crate, beside the authDb's DDL.
+const identityRoundtripTest = `//! The user model end to end (D50): the crate's router over its identity
+//! store, called through the generated Rust SDK with bearer sessions, and
+//! through tower's oneshot with the session cookie a browser holds. Each
+//! test runs on SQLite, and on the Postgres database
+//! SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is set.
+
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use API_CRATE::runtime::identity::{
-    hash_password, Config, IdentityAuthenticator, NewUser, Rusqlite, SqlStore, Store, HOST_COOKIE_NAME,
+    hash_password, Config, IdentityAuthenticator, NewUser, Rusqlite, SqlStore, Store, TokioPostgres,
+    HOST_COOKIE_NAME,
 };
 use API_CRATE::runtime::{ApiError, RequestContext};
 use API_CRATE::{build_router, identity, types, GreetingImplementation, Implementations};
@@ -220,6 +261,62 @@ const CONFIG: &str = r#"{"password": {"argon2": {"memoryKiB": 64, "iterations": 
 const ADMIN: &str = "admin@example.com";
 const ADMIN_PASSWORD: &str = "admin password";
 
+/// A database holding the authDb's tables, and the Postgres schema to drop
+/// after the test.
+struct Database {
+    name: &'static str,
+    store: Arc<SqlStore>,
+    cleanup: Option<(tokio_postgres::Client, String)>,
+}
+
+impl Database {
+    async fn close(self) {
+        if let Some((admin, schema)) = self.cleanup {
+            admin.batch_execute(&format!("DROP SCHEMA {schema} CASCADE")).await.unwrap();
+        }
+    }
+}
+
+/// SQLite in memory, and Postgres when the variable names a database.
+async fn databases() -> Vec<Database> {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(include_str!("identity.sql")).unwrap();
+    let sqlite = identity::store(Rusqlite::new(connection).unwrap()).unwrap();
+    let mut databases = vec![Database { name: "sqlite", store: Arc::new(sqlite), cleanup: None }];
+    if let Some(postgres) = postgres().await {
+        databases.push(postgres);
+    }
+    databases
+}
+
+/// A Postgres connection whose search path is a schema of its own holding
+/// the authDb's tables, with the DDL's extensions created once in public.
+async fn postgres() -> Option<Database> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let url = std::env::var("SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL").ok().filter(|url| !url.is_empty())?;
+    let connect = |config: tokio_postgres::Config| async move {
+        let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
+        tokio::spawn(connection);
+        client
+    };
+    let config: tokio_postgres::Config = url.parse().unwrap();
+    let admin = connect(config.clone()).await;
+    for extension in ["pgcrypto", "citext"] {
+        if let Err(err) = admin.batch_execute(&format!("CREATE EXTENSION IF NOT EXISTS {extension} SCHEMA public")).await {
+            // Two tests creating one extension at once: the other won.
+            assert_eq!(err.code().map(|code| code.code()), Some("23505"), "create {extension}: {err}");
+        }
+    }
+    let schema = format!("identity_e2e_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst));
+    admin.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
+    let mut scoped = config;
+    scoped.options(format!("-c search_path={schema},public"));
+    let client = connect(scoped).await;
+    client.batch_execute(include_str!("identity_postgres.sql")).await.unwrap();
+    let store = identity::store(TokioPostgres::new(client)).unwrap();
+    Some(Database { name: "postgres", store: Arc::new(store), cleanup: Some((admin, schema)) })
+}
+
 /// The project's own operation: a greeting for the caller.
 struct Greetings;
 
@@ -236,13 +333,12 @@ impl GreetingImplementation for Greetings {
     }
 }
 
-/// The API over a SQLite database holding the authDb's tables, with an
-/// administrator seeded as a deployment's bootstrap seeds one: a role
-/// holding the identity permissions, the user, and the grant.
-async fn implementations() -> Implementations {
-    let connection = rusqlite::Connection::open_in_memory().unwrap();
-    connection.execute_batch(include_str!("identity.sql")).unwrap();
-    let store: Arc<SqlStore> = Arc::new(identity::store(Rusqlite::new(connection).unwrap()).unwrap());
+/// The API over the database's store, with an administrator seeded as a
+/// deployment's bootstrap seeds one: a role holding the identity
+/// permissions, the user, and the grant.
+async fn implementations(database: &Database) -> Implementations {
+    eprintln!("on {}", database.name);
+    let store = Arc::clone(&database.store);
     let config = Config::parse(CONFIG.as_bytes()).unwrap();
     let admin = store
         .create_user(NewUser {
@@ -288,7 +384,14 @@ fn register(login: &str, name: &str) -> types::RegisterInput {
 
 #[tokio::test]
 async fn a_user_signs_in_with_a_bearer_session() {
-    let base_url = serve(implementations().await).await;
+    for database in databases().await {
+        bearer_session(implementations(&database).await).await;
+        database.close().await;
+    }
+}
+
+async fn bearer_session(implementations: Implementations) {
+    let base_url = serve(implementations).await;
     let anonymous = sdk(&base_url, None);
     let err = anonymous.greeting.greet(None).await.unwrap_err();
     assert_eq!((err.status_code(), err.error_code()), (Some(401), Some("unauthorized")), "{err}");
@@ -337,7 +440,14 @@ async fn a_user_signs_in_with_a_bearer_session() {
 
 #[tokio::test]
 async fn an_administrator_grants_no_more_than_they_hold() {
-    let base_url = serve(implementations().await).await;
+    for database in databases().await {
+        grant_rule(implementations(&database).await).await;
+        database.close().await;
+    }
+}
+
+async fn grant_rule(implementations: Implementations) {
+    let base_url = serve(implementations).await;
     let anonymous = sdk(&base_url, None);
     let admin = sdk(&base_url, anonymous.account.login(login(ADMIN, ADMIN_PASSWORD), None).await.unwrap().token);
     let registered = anonymous.account.register(register("member@example.com", "Member"), None).await.unwrap();
@@ -403,7 +513,13 @@ async fn send(router: &Router, method: &str, path: &str, headers: &[(&str, &str)
 
 #[tokio::test]
 async fn a_browser_signs_in_with_the_session_cookie() {
-    let router = build_router(implementations().await);
+    for database in databases().await {
+        cookie_session(build_router(implementations(&database).await)).await;
+        database.close().await;
+    }
+}
+
+async fn cookie_session(router: Router) {
     let credentials = json!({"login": ADMIN, "password": ADMIN_PASSWORD, "session": "cookie"});
 
     // A cookie login sets the cookie and answers no token, so no script
@@ -470,7 +586,13 @@ async fn a_browser_signs_in_with_the_session_cookie() {
 
 #[tokio::test]
 async fn login_is_rate_limited() {
-    let router = build_router(implementations().await);
+    for database in databases().await {
+        rate_limit(build_router(implementations(&database).await)).await;
+        database.close().await;
+    }
+}
+
+async fn rate_limit(router: Router) {
     let wrong = json!({"login": ADMIN, "password": "not the password"});
     for attempt in 0..10 {
         let refused = send(&router, "POST", "/api/auth/login", &[], Some(wrong.clone())).await;
