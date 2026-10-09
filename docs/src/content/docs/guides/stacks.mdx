@@ -392,7 +392,9 @@ that is missing: `implementation.go` at the naming file's
 until you implement it. Where the API's generated `Config` takes them, it
 also writes `AuthMiddleware(deps)`, which refuses every request with 401
 until it verifies your end users, and `PayloadDecryptor(deps)`, which
-refuses every encrypted payload. When no `go.mod` holds the package, it
+refuses every encrypted payload. An API over the user model takes the
+identity service instead of an auth middleware, which the entrypoint
+builds over its database and its identity config field, `<API>_IDENTITY`. When no `go.mod` holds the package, it
 writes one beside it. It never writes into a directory that holds a Go
 file, so the package is yours from then on. Outside a stack,
 `build --scaffold` writes the same scaffold for each Go API built. This
@@ -452,7 +454,8 @@ environment, `Dev`, is on the core's `local` target:
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
 default, `go/shop-api` and `go/shop-orders`, and the entrypoints the build
-writes call its `New(deps)` and `AuthMiddleware(deps)`;
+writes call its `New(deps)` and build each API's identity service over
+`shop-db`, whose `User` table has the user model's trait;
 [Serve and call it from Go](/superschematic/first-project/go-api/) walks
 `shop-api`'s.
 

@@ -71,7 +71,8 @@ which builds `shop-db` first and then `shop-api`.
   - interfaces.go what you implement
   - routes.go Config and RegisterRoutes
   - deps.go Deps and Constructor, what an implementation is built from
-  - middleware.go the session and principal stores, request middleware
+  - identity.go NewIdentity and the route table of the user model's runtime
+  - middleware.go the request middleware
   - errors.go NotFoundError and the other problem responses
   - openapi.json
   - ...
@@ -120,26 +121,26 @@ and writes the server's entrypoint, which calls `New`
 
 ## Say who the caller is
 
-The server needs an auth middleware that puts the caller on the request
-context. With the `session` provider, the generated
-`api.NewSessionStore(db)` and `api.NewPrincipalStore(db)` look the
-session and the user up in `shop-db`. Your code verifies the bearer token
-and says which roles the user holds, since the shop has no role table.
-`examples/acme-shop/go/auth.go` holds the shop's `Auth`, which `shop-api`
-and `shop-orders` share:
+You write no auth code. `shop-db`'s `User` table has the core `User`
+trait, signing in with its email, and its `Role` table the `UserRole`
+trait. The build adds the tables the core owns beside them, `Session`,
+`UserCredential` and `UserRoleGrant`, and every API whose `authDb` is
+`shop-db` authenticates its callers with the identity runtime:
 
-<Snippet file="go/auth.go" symbol={['TokenValidator', 'Auth', 'Auth.Middleware']} />
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['User', 'Role']} />
 
-`session.RequireAuth` answers 401 when no caller was found. Each route then
-checks its `@requirePermission` list against the roles and answers 403
-when none covers it.
+`shop-api` also serves the routes a user signs in and out with, and staff
+manage users and roles with:
 
-The package's `AuthMiddleware` builds it from the same `Deps`. The shop's
-tokens are opaque: a token is its session's `jti`, which
-`shop.SessionToken` hands to the session store, and `shop.Roles` gives
-every signed-in user one role that covers every route:
+<Snippet file="schemas/services/shop-api/src/account.schema.ts" />
 
-<Snippet file="go/shop-api/implementation.go" symbol="AuthMiddleware" />
+The generated `Config` takes the identity service, which the generated
+`NewIdentity` builds over a store of `shop-db`'s tables. Its middleware
+reads the session the request carries and puts the caller and their roles
+on the request context. Each route then checks its `@requirePermission`
+list against the roles and answers 403 when none covers it.
+[Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)
+has the rest.
 
 ## Run it
 
@@ -163,9 +164,9 @@ dependencies, then:
 
 - writes each server's entrypoint, a Go module under
   `schemas/dist/server/shop-stack/`, whose `main` reads its configuration
-  from the environment, connects to the database, calls `New` and
-  `AuthMiddleware` with the server's `Deps`, and serves the routes beside
-  `/healthz` and `/readyz`;
+  from the environment, connects to the database, calls `New` with the
+  server's `Deps`, builds the API's identity service over `shop-db`, and
+  serves the routes beside `/healthz` and `/readyz`;
 - starts Postgres in a container, with a database for `shop-db` migrated
   to its schema;
 - builds each server and starts it, waiting until it answers `/readyz`,
@@ -181,8 +182,9 @@ bindings are the configuration it is started with:
 Ctrl-C stops the servers and the container, which keeps its data for the
 next run; `--remove-database` removes it too. The routes answer a caller
 with a session in `shop-db`. `TestStackDevRunsTheShop`, in
-`examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, signs a user in
-through the ORM, and calls both APIs through their SDKs. The
+`examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, creates a
+user with the identity runtime's store, signs them in through `shop-api`'s
+login, and calls both APIs through their SDKs. The
 [CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
 lists the flags.
 
@@ -192,9 +194,10 @@ The generated SDK is the module `example.com/acme/sdk/go/shop-api`. Its
 client has one field per namespace, and each method takes the same
 arguments as the route. The example's tests serve the API in-process, as
 the entrypoint does, with the ORM's no-op database in place of Postgres
-and the `Auth` over fake stores, and drive it through the SDK:
+and the identity service over a store in memory, sign in through the
+SDK's `Login`, and drive it through the SDK:
 
-<Snippet file="go/server_test.go" symbol={['productsServer', 'TestTheSDKCallsTheGeneratedServer']} />
+<Snippet file="go/server_test.go" symbol={['productsServer', 'signIn', 'TestTheSDKCallsTheGeneratedServer']} />
 
 - `AuthConfig.Token` sends `Authorization: Bearer <token>`. `GetToken`
   resolves a token per request, with the request's context, when no static

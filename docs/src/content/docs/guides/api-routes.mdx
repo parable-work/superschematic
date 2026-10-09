@@ -85,13 +85,15 @@ scaffold is one `implementation.go` whose `New` asserts `Constructor` and
 whose methods answer 501 until you write them. A `public` API's scaffold
 also has `AuthMiddleware(deps)`, which refuses every request with 401, and
 an API with encrypted operations `PayloadDecryptor(deps)`, which decrypts
-nothing; replace both. A scaffold never overwrites a file, and a build
+nothing; replace both. An API whose `authDb` declares the user model
+authenticates with the identity runtime and gets no `AuthMiddleware`
+([Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)). A scaffold never overwrites a file, and a build
 without a stack or the flag writes no `implementation.go`.
 
 A stack's build also writes each Go server's entrypoint, which fills
 `Deps`, calls each implementation's `New`, and its `AuthMiddleware` and
-`PayloadDecryptor` where the API's `Config` takes them, and serves the
-result, as
+`PayloadDecryptor` where the API's `Config` takes them, builds the
+identity service of an API over the user model, and serves the result, as
 [the Go tutorial](/superschematic/first-project/go-api/#run-it) shows for
 acme-shop. Without a stack, your own `main` does that, as the tutorial's
 tests do in-process

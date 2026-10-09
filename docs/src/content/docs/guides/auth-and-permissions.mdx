@@ -8,10 +8,11 @@ sidebar:
 import { TabItem, Tabs } from '@astrojs/starlight/components';
 import Snippet from '../../../components/Snippet.astro';
 
-Auth has three parts. The schema says what each route requires. Your code
-says who the caller is and what they hold. The generated server enforces
-the first against the second: 401 when a route needs a caller and has
-none, 403 when the caller holds no permission the route accepts. This guide
+Auth has three parts. The schema says what each route requires. The core
+user model, or your code, says who the caller is and what they hold. The
+generated server enforces the first against the second: 401 when a route
+needs a caller and has none, 403 when the caller holds no permission the
+route accepts. This guide
 uses `shop-orders`, served in Go, and `shop-storefront`, served in
 TypeScript; the Rust server applies the same rules
 ([Rust](#say-who-the-caller-is-rust)). Another of your servers can call a
@@ -55,50 +56,71 @@ permission check on each protected route:
 The OpenAPI document declares a bearer scheme and attaches it to every
 route that needs a caller.
 
-## Turn it on: `public` and `authDb`
+## Turn it on: the user model
 
-An API whose routes need callers is marked `public: true` in its config.
-That renders the auth provider's code and middleware into the Go server.
-`authDb` names the DB schema the auth provider reads:
+A project's users are the rows of one table with the core `User` trait,
+and their roles the rows of one with the `UserRole` trait, both from
+`@superschematic/db`. `shop-db`'s users sign in with their email:
+
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['User', 'Role']} />
+
+The build adds the tables the core owns beside them: `Session`,
+`UserCredential` and `UserRoleGrant`. An API whose `authDb` names such a
+schema authenticates every caller with the identity runtime, public or
+not:
 
 <Snippet file="schemas/services/shop-orders/schema.config.ts" from="public: true" to="authDb" />
 
-The auth provider is the naming file's `auth_provider`, `session` by
-default. `session` finds the `authDb` schema's `Session` and `User` tables
-and generates two stores over its ORM: `NewSessionStore`, which finds a
-session by its JWT id, and `NewPrincipalStore`, which loads the user. An
-extension can register another provider, as `examples/acme-schematic`
-does for API keys; see [Write an extension](/superschematic/extending/write-an-extension/#an-auth-provider).
+`@userSessions` on a class with no methods serves the routes a user signs
+in and out with (`login`, `logout`, `me`, `capabilities` and
+`changePassword`), and `@userAdministration` the ones staff manage users,
+roles and grants with. `shop-api` serves both; `shop-orders` accepts the
+sessions its `login` starts, since both read `shop-db`:
 
-A Go API without `public` has no `AuthMiddleware`. Its `@auth` routes
-check nothing, and its `@requirePermission` routes answer 401 unless a
-middleware of your own puts the caller on the request context. The
-TypeScript and Rust servers enforce every route whatever `public` says.
+<Snippet file="schemas/services/shop-api/src/account.schema.ts" />
+
+The auth provider is the naming file's `auth_provider`, `session` by
+default, which wires the identity runtime in. An extension can register
+another provider, as `examples/acme-schematic` does for API keys; see
+[Write an extension](/superschematic/extending/write-an-extension/#an-auth-provider).
+
+A Go API that is not `public` and whose `authDb` has no `User` table has no
+`AuthMiddleware`. Its `@auth` routes check nothing, and its
+`@requirePermission` routes answer 401 unless a middleware of your own puts
+the caller on the request context. The TypeScript and Rust servers enforce
+every route whatever `public` says.
 
 ## Say who the caller is: Go
 
-The Go server's `Config.AuthMiddleware` runs before every protected route.
-It puts the caller's id and roles on the request context; the generated
-routes read them. The implementation's `AuthMiddleware(deps)` returns it,
-and the server's generated entrypoint passes it to `Config`. With the
-`session` provider, your middleware verifies the bearer token, then
-resolves it through the generated stores:
+Over the user model the Go server's `Config` takes `Identity`, the
+identity service, and `Validate` refuses a missing one. Its middleware is
+the protected routes' `AuthMiddleware`: it reads the session from
+`Authorization: Bearer` or the session cookie, and puts the caller's id,
+name and roles on the request context, which the generated routes read.
+An API that declares the user model's routes mounts them on the service's
+handlers.
 
-<Snippet file="go/auth.go" symbol={['Auth', 'Auth.Middleware', 'Auth.resolve']} />
+<Snippet file="testdata/generated/api/shop-orders/routes.go" symbol="Config" />
 
-The session store finds an expired session too, and a revoked one when the
-`Session` table is soft-deletable (has a nullable `deletedAt`), with its
-`ExpiresAt` and `DeletedAt` set. Refusing both is the middleware's job.
+The generated `NewIdentity` builds the service over a store of the
+`authDb`'s tables, with the API's route table, which `capabilities`
+answers from. A stack's entrypoint builds the store over the server's
+database pool, and reads each API's identity config, the session's
+lifetime, the cookie, the trusted origins and the password's cost, as JSON
+from its `<API>_IDENTITY` variable (`SHOP_ORDERS_IDENTITY`); the `local`
+target's cookie is not `Secure`, since it serves plain HTTP. The shop's
+tests build the service the same way, over a store in memory:
 
-Roles are yours to supply: a `session.RoleStore` returns the caller's
-roles, each with its permissions. `session.RequireAuth` answers 401 when no
-caller was found, before any route runs.
+<Snippet file="go/orders_test.go" symbol="ordersServer" />
+
+`Config.AuthMiddleware` is optional there. A middleware set in it replaces
+the identity middleware and authenticates the caller itself, usually by
+wrapping `Identity.Middleware`; the stack's entrypoint sets none.
 
 The ORM keeps its own idea of the acting user, which a soft delete records.
-The orders service builds its `Auth` over the generated stores from its
-`Deps`, and sets the acting user from the caller after authentication:
+The orders service hands it the caller in each method that writes rows:
 
-<Snippet file="go/shop-orders/implementation.go" symbol={['AuthMiddleware', 'Authenticate']} />
+<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
 
 ## Say who the caller is: TypeScript
 
@@ -155,10 +177,10 @@ after a 401. An SDK given no token sends none.
   </TabItem>
 </Tabs>
 
-`public` and `authDb` matter only to the Go server, whose auth provider
-reads the stores. The storefront is served by the TypeScript router, which
-reads no store, so its config sets neither; its SDK still sends the token,
-and the app's `authenticate` reads it. See
+`public` and the `authDb` matter only to the Go server, which wires its
+auth from them. The storefront is served by the TypeScript router, which
+takes its own `authenticate`, so its config sets neither; its SDK still
+sends the token, and the app's `authenticate` reads it. See
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/#call-it-from-typescript).
 
 ## Service callers
@@ -289,9 +311,9 @@ refuses to start. Outside a stack, you supply the config yourself. A
 deployment whose credential the config cannot express passes its own
 authenticator in the same place.
 
-On a Go API that is not `public`, an `@auth` route checks nothing
-([above](#turn-it-on-public-and-authdb)), so an `@allowService` route whose
-only user clause is `@auth` admits any caller.
+On a Go API that is neither `public` nor over the user model, an `@auth`
+route checks nothing ([above](#turn-it-on-the-user-model)), so an
+`@allowService` route whose only user clause is `@auth` admits any caller.
 
 ### Send a service credential
 
