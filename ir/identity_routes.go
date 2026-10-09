@@ -252,3 +252,86 @@ const (
 	IdentitySessionBearer = "bearer"
 	IdentitySessionCookie = "cookie"
 )
+
+// The RFC 9457 codes the identity runtime answers the routes' refusals
+// with, beside bad_request, the 400 with field errors any refused input
+// draws.
+const (
+	// IdentityCodeInvalidCredentials (401): a login, or changePassword's
+	// current password, that does not verify, for whatever reason.
+	IdentityCodeInvalidCredentials = "invalid_credentials"
+	// IdentityCodeUnauthorized (401): a route that needs a caller, without a
+	// usable session.
+	IdentityCodeUnauthorized = "unauthorized"
+	// IdentityCodeForbidden (403): the caller lacks the route's permission,
+	// or grants a permission they do not hold.
+	IdentityCodeForbidden = "forbidden"
+	// IdentityCodeCrossOrigin (403): a cookie request other than GET, or a
+	// cookie login, that the cross-origin check refuses.
+	IdentityCodeCrossOrigin = "cross_origin"
+	// IdentityCodeNotFound (404): no user or role has the id.
+	IdentityCodeNotFound = "not_found"
+	// IdentityCodeConflict (409): the login or the role name is taken.
+	IdentityCodeConflict = "conflict"
+	// IdentityCodeInvalidPermission (422): a role's permission is not
+	// dotted segments of letters, digits, _ and -; details.permissions
+	// lists them.
+	IdentityCodeInvalidPermission = "invalid_permission"
+)
+
+// IdentityRouteError is an error response a route of the user model
+// answers: its status, its code and when.
+type IdentityRouteError struct {
+	Status  int
+	Code    string
+	Meaning string
+}
+
+// IdentityOperationErrors returns the error responses the identity runtime
+// answers the operation op with, beside the 400 bad_request any refused
+// input draws: in status order, and in the order below within a status.
+// An operation that is none of the IdentityOp constants has none.
+func IdentityOperationErrors(op string) []IdentityRouteError {
+	return append([]IdentityRouteError(nil), identityOperationErrors[op]...)
+}
+
+var identityOperationErrors = func() map[string][]IdentityRouteError {
+	unauthorized := IdentityRouteError{401, IdentityCodeUnauthorized, "The request carries no usable session."}
+	permission := IdentityRouteError{403, IdentityCodeForbidden, "The caller lacks the route's permission."}
+	granting := IdentityRouteError{403, IdentityCodeForbidden, "The caller lacks the route's permission, or grants a permission they do not hold; details.permissions lists those."}
+	crossOrigin := IdentityRouteError{403, IdentityCodeCrossOrigin, "The cross-origin check refused a cookie request."}
+	cookieLogin := IdentityRouteError{403, IdentityCodeCrossOrigin, "The cross-origin check refused a cookie session's login."}
+	loginTaken := IdentityRouteError{409, IdentityCodeConflict, "The login is taken."}
+	nameTaken := IdentityRouteError{409, IdentityCodeConflict, "The role name is taken."}
+	noUser := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id."}
+	noRole := IdentityRouteError{404, IdentityCodeNotFound, "No role has the id."}
+	noUserOrRole := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no role the roleId."}
+	invalidPermission := IdentityRouteError{422, IdentityCodeInvalidPermission, "A permission is not dotted segments of letters, digits, _ and -; details.permissions lists them."}
+	return map[string][]IdentityRouteError{
+		IdentityOpLogin: {
+			{401, IdentityCodeInvalidCredentials, "The login or the password does not verify, or the user is disabled."},
+			cookieLogin,
+		},
+		IdentityOpRegister:     {cookieLogin, loginTaken},
+		IdentityOpLogout:       {unauthorized, crossOrigin},
+		IdentityOpMe:           {unauthorized},
+		IdentityOpCapabilities: {unauthorized},
+		IdentityOpChangePassword: {
+			unauthorized,
+			{401, IdentityCodeInvalidCredentials, "The current password does not verify."},
+			crossOrigin,
+		},
+		IdentityOpCreateUser:      {unauthorized, permission, crossOrigin, loginTaken},
+		IdentityOpListUsers:       {unauthorized, permission},
+		IdentityOpGetUser:         {unauthorized, permission, noUser},
+		IdentityOpDisableUser:     {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpEnableUser:      {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpSetUserPassword: {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpListRoles:       {unauthorized, permission},
+		IdentityOpCreateRole:      {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},
+		IdentityOpUpdateRole:      {unauthorized, granting, crossOrigin, noRole, nameTaken, invalidPermission},
+		IdentityOpDeleteRole:      {unauthorized, permission, crossOrigin, noRole},
+		IdentityOpGrantRole:       {unauthorized, granting, crossOrigin, noUserOrRole},
+		IdentityOpRevokeRole:      {unauthorized, permission, crossOrigin, noUserOrRole},
+	}
+}()
