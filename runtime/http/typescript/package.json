@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/http-runtime",
   "version": "0.0.0",
-  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, the readers of the config fields a stack derives, a JSON-lines logger, and a pg Pool over a derived database connection (./postgres). Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, the readers of the config fields a stack derives, a JSON-lines logger, a pg Pool over a derived database connection (./postgres), and the identity runtime of the core user model (./identity). Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +17,10 @@
     "./postgres": {
       "types": "./dist/postgres.d.ts",
       "import": "./dist/postgres.js"
+    },
+    "./identity": {
+      "types": "./dist/identity/index.d.ts",
+      "import": "./dist/identity/index.js"
     }
   },
   "files": [
@@ -26,7 +30,7 @@
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json",
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
-    "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src"
+    "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src && bun run build && node scripts/identity-node-check.mjs"
   },
   "peerDependencies": {
     "@google-cloud/cloud-sql-connector": ">=1.12.0",

@@ -83,7 +83,14 @@ func TestWriteSDKGoldenNestedArrays(t *testing.T) {
 func TestNestedArraysToolSchemasMatchToolsutil(t *testing.T) {
 	outDir := t.TempDir()
 	writeNestedArraysSDK(t, outDir)
+	requireToolSchemasMatchToolsutil(t, outDir, "fixture-nested-arrays-api")
+}
 
+// requireToolSchemasMatchToolsutil checks that tools/schema.json under
+// outDir carries the tools, digests and return schemas toolsutil's
+// tools.json golden of the fixture pins.
+func requireToolSchemasMatchToolsutil(t *testing.T, outDir, fixture string) {
+	t.Helper()
 	type toolSchema struct {
 		Name              string          `json:"name"`
 		InputSchemaDigest string          `json:"inputSchemaDigest"`
@@ -91,7 +98,7 @@ func TestNestedArraysToolSchemasMatchToolsutil(t *testing.T) {
 		Returns           json.RawMessage `json:"returns"`
 	}
 	var want []toolSchema
-	readJSON(t, filepath.Join("..", "toolsutil", "testdata", "golden", "fixture-nested-arrays-api", "tools.json"), &want)
+	readJSON(t, filepath.Join("..", "toolsutil", "testdata", "golden", fixture, "tools.json"), &want)
 	var got struct {
 		Tools []toolSchema `json:"tools"`
 	}

@@ -553,9 +553,13 @@ describes, and each one a Go server serves: `implementation.go` at the naming fi
 until you implement it. Where the API's generated `Config` takes them, it
 also writes `AuthMiddleware(deps)`, which refuses every request with 401
 until it verifies your end users, and `PayloadDecryptor(deps)`, which
-refuses every encrypted payload. When no `go.mod` holds the package, it
-writes one beside it. It never writes into a directory that holds a Go
-file, so the package is yours from then on. Outside a stack,
+refuses every encrypted payload. An API over the user model takes the
+identity service instead of an auth middleware, or a TypeScript
+implementation's `authenticate`, which the entrypoint builds over its
+database and its identity config field, `<API>_IDENTITY`; a job's
+entrypoint builds none. When no `go.mod` holds the package, it writes
+one beside it. It never writes into a directory that holds a Go file, so
+the package is yours from then on. Outside a stack,
 `build --scaffold` writes the same scaffold for each Go API built. This
 is a different stub from `outputs.api.scaffoldsOutputDir`
 ([API routes](/superschematic/guides/api-routes/#operation-sets)), which
@@ -615,8 +619,9 @@ whose browser code calls `shop-api`, as a site. Its one environment,
 
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
-default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` and
-`AuthMiddleware(deps)` the Go entrypoints call, and
+default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` the Go
+entrypoints call, building each API's identity service over `shop-db`,
+whose `User` table has the user model's trait, and
 `typescript/shop-storefront`, whose `create(deps)` and `authenticate(deps)`
 the TypeScript one calls.
 [Serve and call it from Go](/superschematic/first-project/go-api/) walks

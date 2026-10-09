@@ -6,6 +6,8 @@ use crate::types;
 {{- if .WebhookProviders }}
 use axum::extract::Request;
 use axum::middleware::Next;
+{{- end }}
+{{- if or .WebhookProviders .IdentityEndpoints }}
 use axum::routing::MethodRouter;
 {{- end }}
 use axum::body::Bytes;
@@ -33,6 +35,12 @@ use {{ .RuntimeCrateIdent }}::RouteControls;
 {{- end }}
 {{- if .HasServiceCallers }}
 use {{ .RuntimeCrateIdent }}::ServiceCaller;
+{{- end }}
+{{- if .Identity }}
+use {{ .RuntimeCrateIdent }}::Authenticator;
+{{- end }}
+{{- if .IdentityEndpoints }}
+use {{ .RuntimeCrateIdent }}::identity;
 {{- end }}
 use serde_json::Value;
 use std::collections::HashMap;
@@ -91,6 +99,17 @@ pub struct RouterState {
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
 {{- end }}
+{{- if .Identity }}
+///
+/// The caller is the user whose session the request carries, as
+/// `implementations.authenticator` reads it (D50), and the router answers
+/// the CORS of the identity config's trusted origins.
+{{- if .IdentityEndpoints }} The user model's
+/// routes are the identity runtime's handlers, behind their routes' rate
+/// limits and that caller; an administration route's handler checks its
+/// permission itself.
+{{- end }}
+{{- end }}
 {{- if .WebhookProviders }}
 ///
 /// An @hmacVerified operation's route runs its provider's verifier first.
@@ -121,13 +140,21 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         panic!("{message}");
     }
 {{- end }}
+{{- $authenticator := "Arc::clone(&state.implementations.authenticator)" }}
+{{- if .Identity }}
+    let identity_service = Arc::clone(implementations.authenticator.service());
+{{- if .HasAuth }}
+{{- $authenticator = "Arc::clone(&authenticator)" }}
+    let authenticator: Arc<dyn Authenticator> = implementations.authenticator.clone();
+{{- end }}
+{{- end }}
     let state = Arc::new(RouterState { implementations });
-    let mut router: Router<Arc<RouterState>> = Router::new();
+    let {{ if or .Endpoints .IdentityEndpoints }}mut {{ end }}router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .ControlCalls "Arc::clone(&state.implementations.authenticator)" "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -145,10 +172,25 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("{{ .Path }}", {{ $route }});
 {{- end }}
 {{- end }}
+{{- range .IdentityEndpoints }}
+{{- $route := printf "identity_handler(&identity_service, identity::%s)" .IdentityConst }}
+{{- if .HasControls }}
+    let route = RouteControls::new()
+{{- range .IdentityControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+        {{ . }}
+{{- end }}
+        .apply({{ $route }});
+{{- $route = "route" }}
+{{- end }}
+    router = router.route("{{ .Path }}", {{ $route }});
+{{- end }}
     router
         .with_state(state)
         .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, {{ rustString .SchemaName }}, &options))
+{{- if .Identity }}
+        .layer(identity_service.cors())
+{{- end }}
 }
 {{- if .WebhookProviders }}
 
@@ -165,6 +207,23 @@ where
     }))
 }
 {{- end }}
+{{- if .IdentityEndpoints }}
+
+/// The identity runtime's handler of the user model's operation `op`
+/// (D50). It reads the caller the route's authenticator established, or
+/// authenticates the request itself on a route that needs none.
+///
+/// # Panics
+///
+/// When the runtime has no operation `op`: a crate generated for a newer
+/// runtime than the one it is built with.
+fn identity_handler(service: &Arc<identity::Service>, op: &str) -> MethodRouter<Arc<RouterState>> {
+    service
+        .handler(op)
+        .unwrap_or_else(|| panic!("the identity runtime has no operation {op}"))
+}
+{{- end }}
+{{- if .Endpoints }}
 
 fn method_from_str(method: &str) -> Method {
     match method {
@@ -189,6 +248,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     }
     out
 }
+{{- end }}
 
 {{- range .Endpoints }}
 {{- $endpoint := . }}

@@ -1,7 +1,9 @@
 package rustrestgen
 
 import (
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -69,7 +72,7 @@ func generateRustAPI(t *testing.T, name string, public bool, upstream string, up
 	outDir := t.TempDir()
 	typesDir := filepath.Join(outDir, "types", "rust", name)
 
-	output, err := generateFrom(apiSchema, apiSource{public: public, upstream: upstream, upstreamIR: upstreamIR}, Options{
+	output, err := generateFrom(apiSchema, apiSource{public: public, upstream: upstream, upstreamIR: upstreamIR, authDB: authDBOf(t, apiSchema)}, Options{
 		SchemaName: name,
 		TypesCrate: "schemas-" + name + "-types",
 		TypesDir:   typesDir,
@@ -90,10 +93,12 @@ func generateRustAPI(t *testing.T, name string, public bool, upstream string, up
 func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]string {
 	t.Helper()
 
-	// Compute the Cargo.toml runtime path against a fixed fake output
-	// location so the golden stays machine-independent; SetReplacePaths only
-	// computes strings, so the directories need not exist.
-	if err := SetReplacePaths(output, naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust"}, "/repo/schemas/dist/api/"+name); err != nil {
+	// Compute the Cargo.toml runtime and scalar crate paths against a fixed
+	// fake output location so the golden stays machine-independent;
+	// SetReplacePaths only computes strings, so the directories need not
+	// exist.
+	paths := naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust", ScalarRust: "/repo/third_party/superscalar/crates/core"}
+	if err := SetReplacePaths(output, paths, "/repo/schemas/dist/api/"+name); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
 
@@ -110,6 +115,9 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		filepath.Join("src", "openapi.rs"),
 		filepath.Join("src", "operations.rs"),
 		"openapi.json",
+	}
+	if output.Identity != nil {
+		files = append(files, filepath.Join("src", "identity.rs"))
 	}
 
 	generated := make(map[string]string, len(files))
@@ -139,6 +147,15 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		if string(got) != string(want) {
 			t.Errorf("%s/%s differs from golden (run with -update to accept)", name, file)
 		}
+	}
+	// permissions.json is apigen's catalog, pinned by apigen's goldens: the
+	// crate holds it beside openapi.json, and none without one.
+	catalog, err := os.ReadFile(filepath.Join(outDir, permcatalog.FileName))
+	switch {
+	case output.PermissionCatalogJSON == "" && !errors.Is(err, fs.ErrNotExist):
+		t.Errorf("%s: %s was written for an API whose operations name no permission: %v", name, permcatalog.FileName, err)
+	case output.PermissionCatalogJSON != "" && string(catalog) != output.PermissionCatalogJSON:
+		t.Errorf("%s: %s is not apigen's catalog: %v", name, permcatalog.FileName, err)
 	}
 	return generated
 }

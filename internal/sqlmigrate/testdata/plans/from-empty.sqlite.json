@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
   "from": "",
-  "hash": "4ee9b4d2451e11ca1425d60cb0d962829871ecdf8c4a8b3042880e5edb112cae",
+  "hash": "0238f7b69d66613153d2e1e2903349dd5c44a115eb9e7aa460c0b534220c6dba",
   "service": "shop-db",
   "steps": [
     {
@@ -61,7 +61,7 @@
       "op": "createTable",
       "phase": "expand",
       "statements": [
-        "CREATE TABLE \"product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+        "CREATE TABLE \"product\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"price\" INTEGER NOT NULL,\n  \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"title\", '')) VIRTUAL,\n  PRIMARY KEY (\"id\")\n)"
       ],
       "subject": "table/product",
       "transactional": true
@@ -77,7 +77,7 @@
       "transactional": true
     }
   ],
-  "to": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "to": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
   "toModel": null,
   "version": 1
 }

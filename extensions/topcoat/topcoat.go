@@ -5,13 +5,18 @@
 // The crate mounts the service's JSON API in the app's router, calls each
 // operation in-process from a page, a shard or a procedure by its route's
 // rules (the caller admitted as the route admits it, the arguments checked
-// as the router checks them, D43), offers a guard per operation, and
-// mirrors each type an operation returns as a Topcoat record, which a
-// page can hand the browser. A form per input type whose fields a form
-// holds parses what the browser sends by the input type's rules (D14) and
-// renders its fields with the attributes those rules give them. A
-// procedure per operation lets browser code call it, its arguments and its
-// result records, its refusal a record the browser reads.
+// as the router checks them, D43), save a webhook and one the service
+// mounts itself, offers a guard per operation, and mirrors each type such
+// a call returns as a Topcoat record, which a page can hand the browser. A
+// form per input type such a call takes whose fields a form holds parses
+// what the browser sends by the input type's rules (D14) and renders its
+// fields with the attributes those rules give them. A procedure per
+// operation lets browser code call it, its arguments and its result
+// records, its refusal a record the browser reads, under its route's
+// traffic controls. An operation whose route a browser's request cannot
+// meet, a webhook's or one only a service may call, has none. A detail and
+// a table component per record render it as HTML, labeled by the schema's
+// titles and its types' @display.
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.
@@ -102,20 +107,22 @@ var OutputSchema = json.RawMessage(`{
   "additionalProperties": false,
   "properties": {
     "enabled": {"type": "boolean"},
-    "records": {"type": "boolean", "description": "Mirror each type an operation returns as a Topcoat record (default true)."},
-    "forms": {"type": "boolean", "description": "A form per input type whose fields a form holds (default true)."},
-    "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."}
+    "records": {"type": "boolean", "description": "Mirror each type an in-process call returns as a Topcoat record (default true)."},
+    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes whose fields a form holds (default true)."},
+    "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."},
+    "views": {"type": "boolean", "description": "Components that render each record as a description list and a table (default true; needs records)."}
   }
 }`)
 
 // Config is the decoded outputs.topcoat.
 type Config struct {
 	Enabled bool `json:"enabled"`
-	// Records and Forms are nil when the section leaves them out, which is
-	// on.
+	// Records, Forms, Procedures and Views are nil when the section leaves
+	// them out, which is on.
 	Records    *bool `json:"records,omitempty"`
 	Forms      *bool `json:"forms,omitempty"`
 	Procedures *bool `json:"procedures,omitempty"`
+	Views      *bool `json:"views,omitempty"`
 }
 
 // WritesRecords reports whether the crate mirrors the operations' result
@@ -131,6 +138,12 @@ func (c Config) WritesForms() bool { return c.Forms == nil || *c.Forms }
 // them.
 func (c Config) WritesProcedures() bool {
 	return c.WritesRecords() && (c.Procedures == nil || *c.Procedures)
+}
+
+// WritesViews reports whether the crate has the display components of
+// each record. They render records, so they need them.
+func (c Config) WritesViews() bool {
+	return c.WritesRecords() && (c.Views == nil || *c.Views)
 }
 
 // Dir is where the crate is written for a service.

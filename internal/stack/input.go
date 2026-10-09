@@ -62,6 +62,12 @@ type Service struct {
 	// Config is the service's `@envVars` type, or nil when it has none.
 	Config *Config
 
+	// Identity reports that an API service's server authenticates with the
+	// identity runtime (D50): its authDb, or a public API's one DB-kind
+	// dependency, declares the user model. Each server that serves it
+	// binds its identity config field (ir.IdentityConfigField).
+	Identity bool
+
 	// Operations are an API service's operations, each with what admits a
 	// caller to it (docs/stack-model.md, section 9.3): every calls edge to
 	// the API must reach one its caller may invoke. OperationsOf reads them

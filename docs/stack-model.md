@@ -188,6 +188,17 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   issuers it accepts, with their keys and audience, and the deployable
   each caller identity is, which the connectors of the http edges to the
   API write together (section 9.2);
+- an identity config field per served API whose server authenticates with
+  the identity runtime (D50: its `authDb` declares the user model),
+  `<API>_IDENTITY` (`SHOP_API_IDENTITY`), named as the callers field is.
+  It holds the identity runtime's config as one JSON string: the
+  session's lifetime, the cookie, the trusted origins and the password
+  hash's cost. The environment sets it with its `env` settings, a literal
+  or a parameter; without one the server's platform gives its identity
+  config (`PlatformSpec.IdentityConfig`), as the `local` platform's turns
+  the session cookie's `Secure` off over plain HTTP; without either it is
+  unbound, and the server runs with the runtime's defaults. Its binding
+  names the API in `identityOf`. A job has none (section 8.7);
 - a CORS field per served API that a site calls, `<API>_CORS`
   (`SHOP_API_CORS`), named by the core's rule over the API's own name as
   the callers field is. It lists the public origin of each site whose site
@@ -674,6 +685,10 @@ registers a `PlatformSpec`:
   language, or `Dialects` for a database platform (`postgres`, `sqlite`),
   in order of preference;
 - `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
+- `IdentityConfig`, for a server platform, the identity config (a JSON
+  object) a server on it runs each API over the user model with unless its
+  environment sets the API's identity config field (section 3.4, D50); the
+  `local` platform's turns the session cookie's `Secure` off;
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
   (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
@@ -1018,7 +1033,8 @@ the core registers the local target), and one CI renderer, `github`
   unknown deployable kind, a server platform without languages or a
   database platform without dialects (or either with the other's list), an
   unknown or repeated language or dialect, a settings schema that does not
-  compile, and a missing `NameOf`, `AddressOf` or `Lower`.
+  compile, an identity config that is not a server platform's JSON object,
+  and a missing `NameOf`, `AddressOf` or `Lower`.
 - `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
   an unknown edge kind, a missing platform or `Connect`, and a second
   connector for one edge kind between the same two platforms.
@@ -1472,7 +1488,19 @@ authenticator, a `serviceauth.Verifier` over the API's callers field
 (section 9.2), which `serviceAuthenticator` in `serviceauth.go`, beside
 `main.go`, builds with `stackconfig.LoadCallers`. The server refuses to
 start without the field, and where no other server calls the API it starts
-with no issuers and refuses every service credential. OpenTelemetry export
+with no issuers and refuses every service credential.
+
+An API whose server authenticates with the identity runtime (D50) takes
+the identity service in place of an auth middleware. The entrypoint builds
+one identity store per database such an API reads, over the database's
+pool (`database/sql` through `stdlib.OpenDBFromPool`, the Postgres
+dialect, the descriptor constant of the database's Go types), and each
+API's service with its generated `NewIdentity`, from the config
+`identityConfig` in `identity.go` reads from the API's identity config
+field: JSON, the runtime's defaults when unset, and a refused config stops
+the server. The implementation writes no auth middleware. A preflight
+goes to the router that registers the method it asks about, whose CORS
+middleware answers the trusted origins. OpenTelemetry export
 is not set up: the runtime records spans through the global tracer, and an
 exporter would add the OTLP client's dependencies to every server.
 
@@ -1893,8 +1921,9 @@ as they are, with no build step (D51). The pieces mirror Go's:
   pass that writes the Go ones (section 8.1): `package.json`
   (`<npm_scope>/<stack>-<server>-server`, a workspace member that depends
   with `workspace:*` on each served API package, each implementation by
-  the name its `package.json` gives it, and each callee's SDK, and on the
-  runtime, Hono and, with a database, `pg`), `tsconfig.json` and
+  the name its `package.json` gives it, each callee's SDK and the types
+  package of each database an identity store reads, and on the runtime,
+  Hono and, with a database, `pg`), `tsconfig.json` and
   `main.ts`. `main.ts` does what Go's `main` does:
   - reads `$PORT`, 8080 when unset, and logs JSON lines through the HTTP
     runtime's `createLogger`, bound to the stack and the server;
@@ -1906,14 +1935,26 @@ as they are, with no build step (D51). The pieces mirror Go's:
   - builds one SDK client per API called, with the endpoint's URL and
     `serviceCredentialFor` its credential, and calls each implementation's
     `create(deps)`, and its `authenticate(deps)` where a route needs an end
-    user. The end user travels per call, `{ forward: ctx }` (D37), so no
-    handler captures it as Go's `CaptureAuthorization` does;
+    user. An API whose server authenticates with the identity runtime
+    (D50) has no `authenticate`: `main.ts` builds one identity store per
+    database such an API reads, `postgresIdentityStore` over its pool and
+    the `identityDescriptor` the database's TypeScript types export, and
+    the API's service with its generated `identityService()`, from the
+    config `identityConfig` reads from the API's identity config field
+    with `parseIdentityConfigJSON`, the runtime's defaults when unset; a
+    refused config stops the server. The router takes it as `identity`.
+    The end user travels per call, `{ forward: ctx }` (D37), so no handler
+    captures it as Go's `CaptureAuthorization` does;
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
     an API with a service clause, then the runtime's `notFoundHandler` and
-    `errorHandler`. The build refuses two served APIs that register one
-    method and path, a manually routed operation included, which a
-    TypeScript router mounts;
+    `errorHandler`. Hono merges the routers' routes, so an identity API's
+    router registers its CORS on each of its own routes: a request gets
+    the CORS of the API that serves it alone, and a preflight that of the
+    API that registers the method it asks for, as Go's dispatch does.
+    The build refuses two served APIs that register one method and path,
+    a manually routed operation included, which a TypeScript router
+    mounts;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, through `Bun.serve`, which it hands Hono as the
@@ -2003,8 +2044,10 @@ export abstract class ShipOrders {}
   server's. Its config fields are its API's `@envVars` fields and the
   fields its edges derive, and it takes the `env` its API's server is
   given, under its own; a key the server takes for another API it serves
-  does not reach it. It reads the API's secrets, and has no callers field,
-  since it serves no request. It rolls out after its callees, as a server
+  does not reach it. It reads the API's secrets, and has no callers field
+  and no identity config field, since it serves no request: its entrypoint
+  builds no identity service (D50), and its `Deps` reach the user model's
+  tables through the ORM. It rolls out after its callees, as a server
   does (section 5.3).
 - **Identity.** A job serves its API in a callee's callers field. A
   callee's `from: [ShopOrders]` therefore admits ShopOrders' server and

@@ -50,7 +50,14 @@ func TestToolSchemasGoldenNestedArrays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
+	compareToolSchemasGolden(t, "fixture-nested-arrays-api", buildToolSchemas(t, output))
+}
 
+// buildToolSchemas builds each operation's tool schemas the way the SDK
+// tool generators build them, with the argument's list shape passed
+// through.
+func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
+	t.Helper()
 	inputTypeFields := toolsutil.BuildInputTypeFieldsMap(output)
 	var tools []toolSchema
 	for _, endpoint := range output.Endpoints {
@@ -98,13 +105,19 @@ func TestToolSchemasGoldenNestedArrays(t *testing.T) {
 			Returns:           toolsutil.BuildReturnSchemaAtDepth(endpoint.OutputType, endpoint.OutputArrayDepth(), output.Scalars),
 		})
 	}
+	return tools
+}
 
+// compareToolSchemasGolden compares tools with the fixture's tools.json
+// golden, or rewrites it with -update.
+func compareToolSchemasGolden(t *testing.T, fixture string, tools []toolSchema) {
+	t.Helper()
 	got, err := json.MarshalIndent(tools, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = append(got, '\n')
-	goldenPath := filepath.Join("testdata", "golden", "fixture-nested-arrays-api", "tools.json")
+	goldenPath := filepath.Join("testdata", "golden", fixture, "tools.json")
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
 			t.Fatal(err)

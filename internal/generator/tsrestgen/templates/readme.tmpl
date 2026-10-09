@@ -22,6 +22,15 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   validators, applies the `@requirePermission` / `@publicRoute` gate, wraps
   results in the `{data, meta: {requestId}}` envelope and failures in
   RFC 9457 `application/problem+json`. `operationSpecs` is the operation table.
+{{- if .Identity }}
+  The API's authDb, `{{ .Identity.AuthDB }}`, has a `User` table (D50), so
+  `options.identity`, the identity runtime's `IdentityService`, authenticates
+  every route, and `identityService(options)` builds it with capabilities over
+  `operationSpecs`.
+{{- if .Identity.Routes }} The user model's operations are mounted with the
+  runtime's handlers, behind the same rate limit and body limit.
+{{- end }}
+{{- end }}
 {{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling
   service: `authenticateService` verifies its `Service-Authorization`
@@ -54,10 +63,67 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
 {{- end }}
 
 ## Usage
+{{- if .Identity }}
+
+The identity store reads the authDb's tables through its identity
+descriptor, `identityDescriptor`, from the authDb's generated TypeScript types
+(`{{ .Identity.DescriptorModule }}`). The service depends on that package
+beside this one, so the authDb's config enables TypeScript types. The tables
+are the authDb's DDL: Postgres's `create.sql`, or SQLite's `sqlite/create.sql`
+when the authDb's `outputs.sql.dialects` lists `sqlite`. The config is the
+identity config's JSON, which `parseIdentityConfig` reads and checks.
+
+```ts
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { Hono } from 'hono';
+{{- if .HasServiceCallers }}
+import { serviceAuthenticator } from '{{ .RuntimePackage }}';
+{{- end }}
+import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
+import { nodeSqlite, parseIdentityConfig, sqliteIdentityStore } from '{{ .RuntimePackage }}/identity';
+import { identityDescriptor } from '{{ .Identity.DescriptorModule }}';
+import { buildRouter, identityService, type Implementations } from '{{ .PackageName }}';
+
+const identity = identityService({
+  // Over Postgres: postgresIdentityStore(new pg.Pool({ connectionString }), identityDescriptor).
+  store: sqliteIdentityStore(nodeSqlite(new DatabaseSync('users.db')), identityDescriptor),
+  config: parseIdentityConfig(JSON.parse(readFileSync('identity.json', 'utf8'))),
+});
+{{ if .WebhookProviders -}}
+const implementations: Implementations = {
+  /* one object per operation class */
+  webhookVerifiers: {
+{{- range .WebhookProviders }}
+    {{ tsString . }}: async (c, next) => { /* refuse a bad signature, else */ await next(); },
+{{- end }}
+  },
+};
+{{ else -}}
+const implementations: Implementations = { /* one object per operation class */ };
+{{ end -}}
+const app = new Hono();
+app.route('/', buildRouter(implementations, {
+  identity,
+{{- if .HasServiceCallers }}
+  authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
+{{- end }}
+{{- if .HasManualRoutes }}
+  manualRoutes: {
+{{- range .ManualEndpoints }}
+    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
+{{- end }}
+  },
+{{- end }}
+}));
+app.notFound(notFoundHandler());
+app.onError(errorHandler());
+```
+{{- else }}
 
 ```ts
 import { Hono } from 'hono';
@@ -96,6 +162,7 @@ app.route('/', buildRouter(implementations, {
 app.notFound(notFoundHandler());
 app.onError(errorHandler());
 ```
+{{- end }}
 
 Peer dependencies (`{{ .RuntimePackage }}`, the generated types packages,
 `hono`) are resolved by the consuming service, the way it resolves the scalar

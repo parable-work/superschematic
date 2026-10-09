@@ -91,6 +91,54 @@ sdk.setToken('new-jwt-token');
 sdk.clearToken();
 ```
 {{- end}}
+{{- if .CookieSessions}}
+
+### Sessions
+
+A user signs in with the user model's login (D50), and the login chooses
+how the session travels.
+{{- if .LoginNamespace}} This API's login is
+`sdk.{{toCamelCase .LoginNamespace}}.login`.
+{{- else}} This API has no login: its users sign in through
+another API of the same authDb, whose sessions it verifies.
+{{- end}}
+
+A bearer session's login answers its token, which the client sends once it
+is set (or passed as `auth.token`):
+
+```typescript
+{{- if .LoginNamespace}}
+const { token } = await sdk.{{toCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password });
+sdk.setToken(token!);
+{{- else}}
+sdk.setToken(tokenFromLogin);
+{{- end}}
+```
+
+A browser app takes a cookie session: with `credentials: 'include'` the
+client passes the credentials mode to `fetch`, so the browser sends and
+receives the session cookie, across origins too, and a login with session
+`cookie` answers no token. Without `auth`, the client sends no
+`Authorization`, which the server would read before the cookie:
+
+```typescript
+{{- if .LoginNamespace}}
+import { SessionTransport } from '{{.TypesPackage}}';
+{{ end}}
+const sdk = new {{.SDKClassName}}({
+  baseUrl: 'https://api.example.com',
+  credentials: 'include',
+});
+{{- if .LoginNamespace}}
+await sdk.{{toCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password, session: SessionTransport.Cookie });
+{{- end}}
+```
+
+A cross-origin app's origin is one of the identity config's
+`trustedOrigins`: the server refuses a cookie login, and every cookie
+request but `GET`, `HEAD` and `OPTIONS`, from another origin, with 403
+`cross_origin`. A session has no refresh: after a 401, sign in again.
+{{- end}}
 
 ### Making API Calls
 

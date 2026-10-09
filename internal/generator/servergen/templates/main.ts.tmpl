@@ -18,10 +18,19 @@
 {{- range .APIs }}
 //   - {{ .Service }}: {{ .ImplPackage }}{{ if .ImplDir }}, at {{ .ImplDir }}{{ end }}
 {{- end }}
+{{- if .Identity }}
+//
+// An API whose authDb has a User table authenticates its end users with
+// the identity runtime over that database (D50), with the identity config
+// its identity config field holds.
+{{- end }}
 
 import { Hono } from 'hono';
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
+{{- if .Identity }}
+import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+{{- end }}
 {{- if .Databases }}
 import { connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
@@ -32,6 +41,11 @@ import * as {{ .Impl }} from '{{ .ImplPackage }}';
 {{- end }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
+{{- end }}
+{{- range .Databases }}
+{{- if .Store }}
+import { identityDescriptor as {{ .Descriptor }} } from '{{ .DescriptorModule }}';
+{{- end }}
 {{- end }}
 
 /** The port the server listens on when $PORT is unset. */
@@ -100,6 +114,14 @@ async function main(): Promise<void> {
     { name: {{ tsQuote .Service }}, pool: {{ .Var }} },
 {{- end }}
   ];
+{{- range .Databases }}
+{{- if .Store }}
+
+  // The identity store of the user model in {{ .Service }} (D50), over the
+  // same pool, for every API that authenticates its users against it.
+  const {{ .Store }} = postgresIdentityStore({{ .Var }}, {{ .Descriptor }});
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .Clients }}
 
@@ -149,6 +171,13 @@ async function main(): Promise<void> {
   const {{ .Implementations }} = await construct({{ tsQuote .Service }}, 'implementation', () => {{ .Impl }}.create({{ .Deps }}));
 {{- if .Authenticate }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
+{{- end }}
+{{- if .Identity }}
+  // The identity runtime authenticates its callers and serves its user
+  // model's routes, with the config its identity config field holds.
+  const {{ .Identity }} = await construct({{ tsQuote .Service }}, 'identity', () =>
+    {{ .Module }}.identityService({ store: {{ .Database.Store }}, config: identityConfig({{ tsQuote .IdentityField }}) })
+  );
 {{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- end }}
@@ -232,6 +261,26 @@ function configure<T>(api: string, load: () => T): T {
     throw new Error(`configuration of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
+{{- if .Identity }}
+
+/**
+ * Reads the identity config of an API over the user model (D50) from the
+ * environment variable field, the API's identity config field: the JSON
+ * the identity runtimes read alike, which parseIdentityConfigJSON reads
+ * strictly. Unset or empty, it is the runtime's defaults. The platform sets
+ * the field (docs/stack-model.md, section 3.4): the local target turns the
+ * session cookie's Secure off, since it serves plain HTTP.
+ */
+function identityConfig(field: string): IdentityConfig | undefined {
+  const value = process.env[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    return parseIdentityConfigJSON(value);
+  } catch (error) {
+    throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+{{- end }}
 
 /** Builds what an API's implementation exports, naming the API when it fails. */
 async function construct<T>(api: string, what: string, build: () => T | Promise<T>): Promise<T> {

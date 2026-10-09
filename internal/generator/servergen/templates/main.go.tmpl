@@ -86,7 +86,18 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("implementation of {{ .Service }}: %w", err)
 	}
-{{- if .Public }}
+{{- if .Identity }}
+	// The identity runtime authenticates its callers and serves its user
+	// model's routes, with the config its identity config field holds.
+	{{ .Var }}IdentityConfig, err := identityConfig({{ quote .IdentityField }})
+	if err != nil {
+		return fmt.Errorf("identity config of {{ .Service }}: %w", err)
+	}
+	{{ .Var }}Identity, err := {{ .Package }}.NewIdentity({{ .Database.Var }}IdentityStore, {{ .Var }}IdentityConfig)
+	if err != nil {
+		return fmt.Errorf("identity of {{ .Service }}: %w", err)
+	}
+{{- else if .Public }}
 	{{ .Var }}Auth, err := {{ .Impl }}.AuthMiddleware({{ .Var }}Deps)
 	if err != nil {
 		return fmt.Errorf("auth middleware of {{ .Service }}: %w", err)
@@ -110,8 +121,13 @@ func run(logger *zap.Logger) error {
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{
 {{- if .Public }}
-		DB:             {{ .Database.Var }},
+		DB: {{ .Database.Var }},
+{{- if not .Identity }}
 		AuthMiddleware: {{ .Var }}Auth,
+{{- end }}
+{{- end }}
+{{- if .Identity }}
+		Identity: {{ .Var }}Identity,
 {{- end }}
 {{- if .ServiceAuth }}
 		ServiceAuthenticator: {{ .Var }}ServiceAuthenticator,
@@ -215,6 +231,10 @@ func newHandler(logger *zap.Logger, draining *atomic.Bool, apis []served, depend
 // one, so only the routes every API registers go to the first: its index,
 // its OpenAPI document and its docs. A request no API registers goes to
 // the first API's router too, which answers it 404 or 405.
+{{- if anyIdentity .APIs }} A preflight
+// goes to the router that registers the method it asks about, whose CORS
+// middleware answers it for the identity config's trusted origins.
+{{- end }}
 func dispatch(apis []served) http.Handler {
 	if len(apis) == 1 {
 		return apis[0].router
@@ -224,8 +244,14 @@ func dispatch(apis []served) http.Handler {
 		if path == "" {
 			path = r.URL.Path
 		}
+{{- if anyIdentity .APIs }}
+		method := r.Method
+		if requested := r.Header.Get("Access-Control-Request-Method"); method == http.MethodOptions && requested != "" {
+			method = requested
+		}
+{{- end }}
 		for _, api := range apis {
-			if api.router.Match(chi.NewRouteContext(), r.Method, path) {
+			if api.router.Match(chi.NewRouteContext(), {{ if anyIdentity .APIs }}method{{ else }}r.Method{{ end }}, path) {
 				api.router.ServeHTTP(w, r)
 				return
 			}

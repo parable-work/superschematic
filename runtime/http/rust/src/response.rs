@@ -90,11 +90,17 @@ pub fn problem_body(err: &ApiError, request_id: Option<&str>) -> Value {
 }
 
 /// The response of a refusal: err's problem, `application/problem+json`,
-/// not to be cached. The router's request-id middleware ([`crate::request_ids`])
-/// adds the request's id to the body and the `x-request-id` header.
+/// not to be cached, with the headers err carries. The router's request-id
+/// middleware ([`crate::request_ids`]) adds the request's id to the body and
+/// the `x-request-id` header.
 pub fn error_response(err: ApiError) -> Response {
     let mut response = (err.status, problem_body(&err, None).to_string()).into_response();
     let headers = response.headers_mut();
+    if let Some(carried) = err.headers {
+        for (name, value) in carried.iter() {
+            headers.append(name, value.clone());
+        }
+    }
     headers.insert(CONTENT_TYPE, HeaderValue::from_static(PROBLEM_CONTENT_TYPE));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
@@ -161,5 +167,24 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_CONTENT_TYPE);
         assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+    }
+
+    #[test]
+    fn a_refusal_carries_its_headers_outside_the_body() {
+        let set_cookie = axum::http::header::SET_COOKIE;
+        let err = ApiError::unauthorized("Authentication required")
+            .with_header(
+                set_cookie.clone(),
+                HeaderValue::from_static("a=; Max-Age=0"),
+            )
+            .with_header(
+                set_cookie.clone(),
+                HeaderValue::from_static("b=; Max-Age=0"),
+            );
+        assert!(problem_body(&err, None).get("headers").is_none());
+        let response = error_response(err);
+        let cookies: Vec<_> = response.headers().get_all(set_cookie).iter().collect();
+        assert_eq!(cookies, ["a=; Max-Age=0", "b=; Max-Age=0"]);
+        assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_CONTENT_TYPE);
     }
 }

@@ -1,0 +1,90 @@
+# A shop's stock: a webhook a payment provider signs, whose input a form
+# would hold, a run only a service may start, a release a user or a service
+# may make, and an order whose route limits its rate, its body and its
+# time.
+name: fixture-controls-api
+kind: API
+types:
+  PaymentEvent:
+    name: PaymentEvent
+    role: APIInput
+    fields:
+      - name: eventId
+        typeRef: { name: string }
+        required: true
+  Receipt:
+    name: Receipt
+    role: APIView
+    fields:
+      - name: eventId
+        typeRef: { name: string }
+        required: true
+  StockRun:
+    name: StockRun
+    role: APIView
+    fields:
+      - name: done
+        typeRef: { name: boolean }
+        required: true
+  Reservation:
+    name: Reservation
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: held
+        typeRef: { name: boolean }
+        required: true
+  OrderView:
+    name: OrderView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: HookMutations
+    operations:
+      # A payment provider's event, signed with the provider's key.
+      - name: receivePayment
+        typeRef: { name: Receipt }
+        required: true
+        httpMethod: POST
+        restPath: hooks/payment
+        webhook: true
+        hmacVerifiedProvider: stripe
+        arguments:
+          - name: input
+            typeRef: { name: PaymentEvent }
+            required: true
+  - name: StockMutations
+    operations:
+      # Reindexes the stock, for a service that calls this API.
+      - name: reindexStock
+        typeRef: { name: StockRun }
+        required: true
+        httpMethod: POST
+        restPath: stock/reindex
+        serviceCallers: { mode: require }
+      # Releases a reservation, for a signed-in user or a service.
+      - name: releaseReservation
+        typeRef: { name: Reservation }
+        required: true
+        httpMethod: POST
+        restPath: "stock/reservations/{id}/release"
+        auth: true
+        serviceCallers: { mode: allow }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: OrderMutations
+    operations:
+      # Places an order: two a minute, three megabytes, a second.
+      - name: placeOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: orders
+        middleware: { rateLimit: 2, bodyLimit: 3, timeout: 1 }

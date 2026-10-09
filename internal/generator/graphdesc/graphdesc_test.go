@@ -457,8 +457,9 @@ func TestEveryElementClassIsDerived(t *testing.T) {
 
 // TestValueClassRefusesAStorageWithoutARule checks that a member column
 // whose value is stored in a way no rule reads fails the descriptor, naming
-// the field and the SQL type the sql generator writes: a string scalar
-// stored as POINT or as the BIGINT its name infers, a scalar holding JSON
+// the field, what its value holds and the SQL type the sql generator
+// writes: the catalog's Geo.Location, a JSON object stored as POINT, a
+// string scalar stored as the BIGINT its name infers, a scalar holding JSON
 // (an array, an object or any value) stored as TEXT rather than JSONB,
 // the catalog's Embedding.Vector, which has no sql type mapping and is
 // stored as TEXT, and a boolean stored as TEXT.
@@ -476,17 +477,16 @@ func TestValueClassRefusesAStorageWithoutARule(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		scalar func(t *testing.T) *ir.ScalarDef
+		holds  string
 		sql    string
 	}{
-		{"string scalar as POINT", func(*testing.T) *ir.ScalarDef {
-			return scalar("Test.Location", `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$`, "object", "POINT")
-		}, "POINT"},
-		{"string scalar as an inferred BIGINT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Duration", "", "", "") }, "BIGINT"},
-		{"JSON array scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Vector", "", ir.JSONSchemaArrayType, "TEXT") }, "TEXT"},
-		{"JSON object scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.StringMap", "", ir.JSONSchemaObjectType, "TEXT") }, "TEXT"},
-		{"any JSON scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.AnyJSON", "", ir.JSONSchemaAnyType, "TEXT") }, "TEXT"},
-		{"Embedding.Vector from the catalog", func(t *testing.T) *ir.ScalarDef { return catalogScalar(t, "Embedding.Vector") }, "TEXT"},
-		{"boolean scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Checked", "", "boolean", "") }, "TEXT"},
+		{"Geo.Location from the catalog", func(t *testing.T) *ir.ScalarDef { return catalogScalar(t, "Geo.Location") }, "object", "POINT"},
+		{"string scalar as an inferred BIGINT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Duration", "", "", "") }, "string", "BIGINT"},
+		{"JSON array scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Vector", "", ir.JSONSchemaArrayType, "TEXT") }, "array", "TEXT"},
+		{"JSON object scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.StringMap", "", ir.JSONSchemaObjectType, "TEXT") }, "object", "TEXT"},
+		{"any JSON scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.AnyJSON", "", ir.JSONSchemaAnyType, "TEXT") }, "value", "TEXT"},
+		{"Embedding.Vector from the catalog", func(t *testing.T) *ir.ScalarDef { return catalogScalar(t, "Embedding.Vector") }, "array", "TEXT"},
+		{"boolean scalar as TEXT", func(*testing.T) *ir.ScalarDef { return scalar("Test.Checked", "", "boolean", "") }, "boolean", "TEXT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := withShelf(loadFixture(t), tc.scalar(t))
@@ -494,8 +494,9 @@ func TestValueClassRefusesAStorageWithoutARule(t *testing.T) {
 				t.Fatalf("the sql generator stores shelf as %s, want %s", got, tc.sql)
 			}
 			_, err := graphdesc.Graphs(schema)
-			if err == nil || !strings.Contains(err.Error(), "Utensil.shelf") || !strings.Contains(err.Error(), "stored as "+tc.sql+",") {
-				t.Fatalf("Graphs = %v, want a refusal naming Utensil.shelf and %s", err, tc.sql)
+			want := "holds a JSON " + tc.holds + " but is stored as " + tc.sql + ","
+			if err == nil || !strings.Contains(err.Error(), "Utensil.shelf") || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Graphs = %v, want a refusal naming Utensil.shelf and saying it %s", err, want)
 			}
 		})
 	}

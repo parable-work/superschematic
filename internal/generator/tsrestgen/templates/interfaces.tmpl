@@ -6,6 +6,10 @@
 // success envelope by the router) or an OperationResult to choose the status.
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
+{{- if and .Identity .Identity.Routes }}
+// Nor are the user model's operations (D50), which the identity runtime
+// serves.
+{{- end }}
 
 import type { OperationResult, RequestContext } from '{{ .RuntimePackage }}';
 {{- if .WebhookProviders }}

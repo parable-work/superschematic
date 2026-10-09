@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
-  "hash": "7f1f40eaf4f9b7f5eb68f1ab45716582c884a484d1943718431e76791c6ddbce",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "dcbe4589ef6419e9adc794290ddc87b232ed70df0b04247d0a2b652a8a3f2c35",
   "renames": [
     "order=purchase"
   ],
@@ -106,7 +106,7 @@
       "transactional": true
     }
   ],
-  "to": "f0252318bfd1a7c9310c7c1c291966a22362bf557e8f0c16a6719bff3fa4925a",
+  "to": "8eb6ab05fbfab4a109e454da533d8c08918dd2d2432f0d1046c06ab90301788b",
   "toModel": null,
   "version": 1
 }
