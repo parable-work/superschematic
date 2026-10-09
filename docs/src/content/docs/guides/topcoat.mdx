@@ -132,7 +132,10 @@ renders again exactly as it was sent.
 ### An input form
 
 An input type gets a form when an operation a page can call takes it and
-the service declares it; the build log names any other and why.
+the service declares it; the build log names any other and why. The user
+model's operations are not among them: the identity runtime serves them,
+so login's input has no form, and a page signs a user in through the
+identity service ([Mount it](#mount-it)).
 `forms::WriteReviewInputForm` holds `WriteReviewInput`'s fields, each an
 `Option<String>`. `parse()` reads them by the type's rules, and
 `FormErrors::from_api` turns the operation's refusal into the same field
@@ -249,6 +252,7 @@ A `Temporal.Date` field or argument is `type="date"` and a
 `type="datetime-local"`, which carries no offset, so the form reads it as
 UTC and its label says so. A `@secret` field is `type="password"` and is
 never rendered with its value, so a refused form asks for it again. A
+record leaves the field out, but a form holds what a reader types. A
 value no control holds, a union, any JSON value or a map, is a
 `<textarea>` of its JSON text.
 

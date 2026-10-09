@@ -87,6 +87,28 @@ func TestWhatHasNoArgumentForm(t *testing.T) {
 	}
 }
 
+// TestIdentityOperationsHaveNoForm builds fixture-user-routes-api, whose
+// operations, but for one that takes nothing, the identity runtime serves
+// (D50). Those have no in-process call, so neither an input, login's with
+// its password or register's, nor an administration route's arguments
+// get a form, and the crate writes no forms.rs; the build log says why.
+func TestIdentityOperationsHaveNoForm(t *testing.T) {
+	root := testpaths.TempDir(t)
+	var log bytes.Buffer
+	if _, err := buildWithNaming(t, registry.DefaultNaming(), userRoutesService, root, rustOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, userRoutesService), "src", "forms.rs")); !os.IsNotExist(err) {
+		t.Errorf("forms.rs written for the user model's operations: %v", err)
+	}
+	for _, op := range []string{"account.login", "account.register", "account-admin.createUser", "account-admin.disableUser"} {
+		want := "no in-process call for " + op + ": the identity runtime serves it"
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
 // argsAppTest is tests/app.rs of fixture-args-api's Topcoat crate.
 const argsAppTest = `use std::sync::Arc;
 

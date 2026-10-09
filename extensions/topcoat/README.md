@@ -190,7 +190,10 @@ decoding and their errors:
 
 - an **input form**, `<Input>Form`, per input type an operation with an
   in-process call takes, declared by the service itself, parsed by the
-  input type's rules ([D14](../../docs/DECISIONS.md));
+  input type's rules ([D14](../../docs/DECISIONS.md)). The user model's
+  operations have no in-process call, so login's input and the
+  administration routes' arguments get none: a page signs a user in
+  through the identity service, as above;
 - an **argument form**, `<Ns><Op>ArgsForm`, per operation a form submits:
   a GET operation with a query argument, whose form is a filter (a GET
   whose path carries its arguments alone is a link, and gets none), and
@@ -335,7 +338,8 @@ attributes its rules give it:
   carries no offset, so the form reads it as UTC
   (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in
   "(UTC)";
-- `type="password"` for a `@secret` field, never rendered with its value;
+- `type="password"` for a `@secret` field, never rendered with its value:
+  a form holds what a reader types, though a record leaves the field out;
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
