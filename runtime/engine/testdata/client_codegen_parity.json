@@ -59,7 +59,7 @@
     {
       "kind": "General",
       "name": "Task",
-      "description": "A task of a project: its kind picks the shape of its detail, it pins the spec it builds, and it waits for its blockers.",
+      "description": "A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, and it waits for its blockers.",
       "scalars": {
         "Generic.JSON": {
           "name": "Generic.JSON",
@@ -159,6 +159,11 @@
                   "spec": {
                     "schema": "Spec",
                     "pinned": true
+                  },
+                  "related": {
+                    "schema": "Task",
+                    "many": true,
+                    "max": 5
                   }
                 }
               }
@@ -813,6 +818,30 @@
                 "object"
               ]
             },
+            "related": {
+              "description": "The Task instances related points at, in order, each once.",
+              "items": {
+                "additionalProperties": false,
+                "description": "The Task instance related points at: its id.",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+                "properties": {
+                  "id": {
+                    "description": "The target's id.",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": [
+                  "string",
+                  "object"
+                ]
+              },
+              "maxItems": 5,
+              "type": "array"
+            },
             "spec": {
               "additionalProperties": false,
               "description": "The Spec instance spec points at: its id, or an object with its id and the revision to record.",
@@ -867,7 +896,7 @@
           "targets": {
             "schema": {
               "additionalProperties": false,
-              "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none.",
+              "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.",
               "properties": {
                 "parent": {
                   "additionalProperties": false,
@@ -908,6 +937,31 @@
                     "id"
                   ],
                   "type": "object"
+                },
+                "related": {
+                  "description": "The Task instances related points at, in the order they were linked.",
+                  "items": {
+                    "additionalProperties": false,
+                    "description": "The Task instance related points at.",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "schema": {
+                        "enum": [
+                          "Task"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "schema",
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 5,
+                  "type": "array"
                 },
                 "spec": {
                   "additionalProperties": false,

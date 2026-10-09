@@ -45,6 +45,7 @@ export type {
   LeaseDirectOn,
   LeaseTransition,
   LinkConfig,
+  LinkTarget,
   LinksConfig,
   PresenceConfig,
   PresenceTransition,

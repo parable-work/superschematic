@@ -193,6 +193,7 @@ export {
   SEARCH_SCHEMAS_PARAMS,
   SIMILAR_TERMS,
   isTerminalState,
+  linkMany,
   linkPin,
   linkedTo,
   movedOn,

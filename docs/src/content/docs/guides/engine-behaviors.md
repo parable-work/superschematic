@@ -474,16 +474,16 @@ engine.instances.get(alice, 'Task', 't1')?.behaviors;
 ## Links
 
 Typed links from an instance to instances of other schemas, or its own:
-a task's project, its parent, the spec it implements.
+a task's project, its parent, the spec it implements, its reviewers.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches` |
-| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, absent when the instance holds none |
-| Operations | `link({ name, id, revision?, release? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
-| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link |
-| Guard | deleting the target of a required link is `vetoed` (`required_target`) |
-| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `required_link`, unlinking a required link; `required_target` |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned?, many?, max? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches`. `many: true` holds a list of up to `max` targets, from 1 to 100 |
+| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, a list of those for a many-valued link; absent when the instance holds none |
+| Operations | `link({ name, id, revision?, release? })`, `unlink({ name, id? })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
+| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link; a list of them for a many-valued link |
+| Guard | deleting the target of a required link is `vetoed` (`required_target`), for a many-valued link only its last target |
+| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `too_many`, a new target of a many-valued link that holds `max`; `not_linked`, unlinking a target the link does not hold; `required_link`, unlinking a required link or the last target of a required many-valued one; `required_target` |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p1' });
@@ -493,12 +493,24 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
 ```
 
 - `link` again moves a link to another target.
+- A **many-valued** link (`many: true` with a `max`) holds a list of
+  targets, a ticket's reviewers or a stylist's services, in the order they
+  were linked: `link` adds one, or pins again one it holds,
+  `unlink({ name, id })` removes one, and a create gives a list, each
+  target once. A deleted target leaves every list that holds it. While
+  the schema has instances, a link keeps whether it holds a list, and its
+  `max` may rise, not fall. What reads one target of a link, Reactions'
+  `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`
+  say, refuses a many-valued one; `listLinked`, Rollups and `revised`
+  read across the list.
 - A **required** link is given at every create, so every instance holds
   it: a create without it is refused, it can be moved but not unlinked,
-  and its target cannot be deleted while it points there. While the
-  schema has instances, a new version cannot make a link required, as it
-  cannot make a field required; with none, in any namespace that reads
-  it, a new version may change its links in any way.
+  and its target cannot be deleted while it points there. A required
+  many-valued link keeps at least one target: its last can be neither
+  unlinked nor deleted. While the schema has instances, a new version
+  cannot make a link required, as it cannot make a field required; with
+  none, in any namespace that reads it, a new version may change its
+  links in any way.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, or with `pinned:

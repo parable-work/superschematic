@@ -334,8 +334,8 @@ for (const driver of drivers) {
       assert.deepEqual(issues({ Links: { owner: 'p1', spec: { id: 's1', revision: 2 } } }), [
         { path: '/behaviors/Links/spec/revision', message: 'Spec s1 has revisions 1 to 1, not 2' },
       ]);
-      // Its createParamsSchema: a name is camelCase, a target an id or { id, revision? }.
-      assert.deepEqual(issues({ Links: { owner: 7 } }), [{ path: '/behaviors/Links/owner', message: 'must be string,object' }]);
+      // Its createParamsSchema: a name is camelCase, a target an id or { id, revision? }, or a list of them.
+      assert.deepEqual(issues({ Links: { owner: 7 } }), [{ path: '/behaviors/Links/owner', message: 'must be string,object,array' }]);
       assert.deepEqual(
         issues({ Links: { owner: { id: 'p1', pin: 1 } } }).map((issue) => issue.path),
         ['/behaviors/Links/owner']

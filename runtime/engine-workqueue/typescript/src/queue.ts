@@ -28,8 +28,9 @@ that can move them (afterReferenceChange, which invokes refresh). They
 are the status, the blocked field of Dependencies, the assignee of
 Assignment, the expiries of Lease, the priority field's value, and until
 when the instance is excluded: until a change while Retries' exhausted
-field shows it exhausted, or while a link excludeStale names is stale
-(Links' targets field), and, when Budget's checkReserve says the
+field shows it exhausted, or while a link excludeStale names, a pinned
+link that holds one target, is stale (Links' targets field), and, when
+Budget's checkReserve says the
 reservation a claim makes does not fit, until the next UTC day when that
 day alone makes it fit, else until a change does. The status, the
 expiries and the rest are copied as facts, not as booleans of the
@@ -86,6 +87,7 @@ import {
   behaviorField,
   defineBehavior,
   fieldPath,
+  linkMany,
   linkPin,
   type ConfigTarget,
   type FrozenJSON,
@@ -296,9 +298,9 @@ function exclusionOf(config: QueueConfig, record: InstanceFields | undefined, ch
     const link = own(links, name);
     // Links gives stale while the target has a revision or a release to
     // compare: a link without it pins nothing, or points at a target being
-    // deleted.
+    // deleted. A list, which parseConfig refuses, has none.
     const pin = typeof link?.revision === 'number' ? 'revision' : typeof link?.release === 'number' ? 'release' : undefined;
-    if (link === undefined || pin === undefined || typeof link.stale !== 'boolean' || typeof link.schema !== 'string' || typeof link.id !== 'string') {
+    if (link === undefined || Array.isArray(link) || pin === undefined || typeof link.stale !== 'boolean' || typeof link.schema !== 'string' || typeof link.id !== 'string') {
       continue;
     }
     if (link.stale === true) {
@@ -494,7 +496,8 @@ function checkField(target: ConfigTarget, at: string, field: string, types: read
   }
 }
 
-// checkStale holds excludeStale to pinned links of the type's Links config.
+// checkStale holds excludeStale to pinned links of the type's Links config
+// that hold one target.
 function checkStale(target: ConfigTarget, names: readonly string[]): void {
   if (names.length === 0) {
     return;
@@ -514,6 +517,9 @@ function checkStale(target: ConfigTarget, names: readonly string[]): void {
     }
     if (linkPin(link) === undefined) {
       throw new BehaviorConfigError(`excludeStale names "${name}", a link that is not pinned, so it is never stale`);
+    }
+    if (linkMany(link)) {
+      throw new BehaviorConfigError(`excludeStale names "${name}", a link that holds a list of targets; it reads links that hold one`);
     }
   }
 }

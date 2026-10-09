@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -341,6 +342,10 @@ type linkSpec struct {
 	// pin is what the link pins of its target, "revision" or "release",
 	// or "" for a link that pins nothing (the engine's linkPin).
 	pin string
+	// many is whether the link holds a list of targets, of at most max
+	// (the engine's linkMany).
+	many bool
+	max  int
 }
 
 func linksOf(config map[string]any) []linkSpec {
@@ -350,7 +355,9 @@ func linksOf(config map[string]any) []linkSpec {
 		spec, _ := links[name].(map[string]any)
 		schema, _ := spec["schema"].(string)
 		required, _ := spec["required"].(bool)
-		out = append(out, linkSpec{name: name, schema: schema, required: required, pin: linkPin(spec["pinned"])})
+		many, _ := spec["many"].(bool)
+		most, _ := spec["max"].(float64)
+		out = append(out, linkSpec{name: name, schema: schema, required: required, pin: linkPin(spec["pinned"]), many: many, max: int(most)})
 	}
 	return out
 }
@@ -371,9 +378,11 @@ func linkPin(pinned any) string {
 // Links: the names are the config's; the create parameters are the
 // engine's narrowing (linksCreateParams): a property per link, the
 // required ones required, the revision or release it records only for a
-// pinned link; the targets field holds each link the instance has, with
-// its target's schema, and for a pinned link its pin, the target's latest
-// of that kind and whether the target has moved past the pin.
+// pinned link, and a list of at most max targets for a many-valued link,
+// at least one when it is required; the targets field holds each link the
+// instance has, with its target's schema, and for a pinned link its pin,
+// the target's latest of that kind and whether the target has moved past
+// the pin, a list of them for a many-valued link.
 func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error {
 	links := linksOf(config)
 	names := make([]string, 0, len(links))
@@ -402,7 +411,7 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 			recordProperties["stale"] = map[string]any{"description": fmt.Sprintf("Whether the target has moved past that %s.", pin), "type": "boolean"}
 			description = fmt.Sprintf("The %s instance %s points at: its id, or an object with its id and the %s to record.", link.schema, link.name, pin)
 		}
-		createProperties[link.name] = map[string]any{
+		entry := map[string]any{
 			"description":          description,
 			"type":                 []any{"string", "object"},
 			"pattern":              idPattern,
@@ -410,13 +419,19 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 			"required":             []any{"id"},
 			"properties":           targetProperties,
 		}
-		fieldProperties[link.name] = map[string]any{
+		record := map[string]any{
 			"description":          fmt.Sprintf("The %s instance %s points at.", link.schema, link.name),
 			"type":                 "object",
 			"additionalProperties": false,
 			"required":             []any{"schema", "id"},
 			"properties":           recordProperties,
 		}
+		if link.many {
+			entry = listOf(entry, fmt.Sprintf("The %s instances %s points at, in order, each once.", link.schema, link.name), link)
+			record = listOf(record, fmt.Sprintf("The %s instances %s points at, in the order they were linked.", link.schema, link.name), link)
+		}
+		createProperties[link.name] = entry
+		fieldProperties[link.name] = record
 		if link.required {
 			required = append(required, link.name)
 		}
@@ -452,6 +467,16 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 		}
 	}
 	return nil
+}
+
+// listOf is a many-valued link's list of what items describes one target
+// with: at most its max, and at least one when it is required.
+func listOf(items map[string]any, description string, link linkSpec) map[string]any {
+	list := map[string]any{"description": description, "type": "array", "maxItems": json.Number(strconv.Itoa(link.max)), "items": items}
+	if link.required {
+		list["minItems"] = json.Number("1")
+	}
+	return list
 }
 
 // Rollups: the values field holds each rollup's value by its function, or

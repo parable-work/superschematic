@@ -2521,24 +2521,31 @@ Typed links from the instance to instances of other schemas, or its own.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one. `pinned` is `true` or `"revision"`, a revision of the target's `Revisions`; `"release"`, a release of its `Branches`; `false` or absent, nothing |
-| Fields | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, the links the instance holds; absent when it holds none |
-| Operations | `link({ name, id, revision?, release? })` -> `{ name, schema, id, revision?, release? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, release?, latest?, stale? }`, read-only |
-| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision?, release? } }`: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
-| Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`required_target`, by `guardReference`) |
-| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), unlinking a required link (`required_link`), all `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
-| Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
-| Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `targets` under `Links` |
-| `configChange` | while the schema has instances, every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned?, many?, max? }`; at least one. `pinned` is `true` or `"revision"`, a revision of the target's `Revisions`; `"release"`, a release of its `Branches`; `false` or absent, nothing. `many: true` holds a list of targets, and needs `max`, from 1 to 100; `max` needs `many` |
+| Fields | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, the links the instance holds, a list of those for a many-valued link in the order its targets were linked; absent when it holds none |
+| Operations | `link({ name, id, revision?, release? })` -> `{ name, schema, id, revision?, release? }`, writes; `unlink({ name, id? })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, release?, latest?, stale? }`, read-only |
+| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision?, release? } }`, a list of them for a many-valued link: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
+| Guards | the delete of an instance a required link points at, whoever the caller, and of a required many-valued link's last target: `vetoed` (`required_target`, by `guardReference`) |
+| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), a new target of a many-valued link that holds `max` (`too_many`), unlinking a required link or the last target of a required many-valued one (`required_link`), unlinking an `id` the link does not hold (`not_linked`), all `vetoed`; unlinking a link the instance does not hold, and a many-valued link without `id` (`invalid_argument`). A create without a required link, with a list for a link that holds one, one target for a many-valued link, a list past `max`, an empty list for a required one or a target twice, and a create's link that `link` would refuse, at `/behaviors/Links`, `/behaviors/Links/<name>` or `/behaviors/Links/<name>/<index>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` (`<name>/<index>` for an item of a list) |
+| Deletes | a deleted target leaves every link that holds it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that holds it, `{ name }`, or `{ name, id }` for a many-valued link, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
+| Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `targets` under `Links`, a many-valued link's whole list |
+| `configChange` | while the schema has instances, every link keeps its name and schema and whether it holds a list, and a many-valued link's `max` does not fall; `pinned` may change, to the other kind too, a required link may become optional, `max` may rise, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
 A link holds one target, an instance of its schema in the same namespace
 (the schema looked up as any name is: the namespace, then the shared
-one); `link` again moves it. A pinned link pins a revision or a release:
+one); `link` again moves it, and `unlink` clears it, or with `id` only
+while it holds that target. A many-valued link (`many`, with `max`)
+holds a list of up to `max` targets, a ticket's reviewers or a stylist's
+services, in the order they were linked: `link` adds a target, or pins
+again one it holds, which keeps its place, and `unlink({ name, id })`
+removes one. A create gives it a list, each target once. A pinned link
+pins a revision or a release:
 
 ```json
 { "name": "Links", "config": { "links": {
     "spec": { "schema": "documents", "pinned": true },
-    "recipe": { "schema": "recipes", "pinned": "release" } } } }
+    "recipe": { "schema": "recipes", "pinned": "release" },
+    "reviewers": { "schema": "people", "many": true, "max": 5 } } } }
 ```
 
 - **What it records.** A link pinned to a revision records the target's
@@ -2549,7 +2556,9 @@ one); `link` again moves it. A pinned link pins a revision or a release:
   column of its own in the row.
 - **What it reports.** `targets` gives the pin, the target's latest of the
   same kind beside it (`latest`), and `stale` when the latest has moved
-  past the pin, so a client shows "pinned 3, latest 5" with one read.
+  past the pin, so a client shows "pinned 3, latest 5" with one read. A
+  many-valued link reports each target so; the latest come from one read
+  per target schema.
 - **The other way round.** `listLinked` answers on the schema: which
   instances point a link at a target, each with its pin and the latest,
   and with `stale: true` only the pinned ones the target has moved past,
@@ -2560,7 +2569,9 @@ A required link is one every instance holds: every create gives it,
 which refuses an instance without it, it can be moved, never unlinked,
 and its target cannot be deleted while it points there; the refusal
 names the linking schema, not the instance, which the caller may not be
-able to read. A required link to the instance's own schema, a task's
+able to read. A required many-valued link holds at least one target: a
+create gives one or more, and its last target can be neither unlinked
+nor deleted, while every other one can. A required link to the instance's own schema, a task's
 parent task say, would leave a root nothing to point at, so a tree makes
 its parent link optional. A pinned link is read as the caller: without
 read on its target's schema, `targets` cannot be read. `stale` is computed
@@ -2568,6 +2579,20 @@ at each read, so a target's new revision or release shows in the next
 read of the instances that link to it, with no event on them. A link made
 before its spec was pinned, or while it was pinned to the other kind,
 records no pin of the kind until it is linked again.
+
+What reads one target of a link refuses a many-valued one, when its
+schema is defined or published and again at run time, since another
+schema's Links config can change after (D56): Reactions' `then.link` and
+the links of `allTerminal`, `anyTerminal` and `holds`, Blueprint's
+`parentLink`, `from.link` and `copyLinks`, Budget's `scope` and Queue's
+`excludeStale`; `linkMany`, exported, reads whether a link of a config,
+as a schema holds it, holds a list, as `linkPin` reads what it pins.
+`listLinked`, Rollups, Reactions' `revised` and Lease's `directOn` read
+across the list: an instance counts toward each target it holds, and
+each target's move reaches the instances that hold it. A file made
+before many-valued links keeps its links: Links' third migration builds
+its table again, keyed by the target as well as the name, with every
+row and its order.
 
 #### Rollups
 
@@ -2900,8 +2925,8 @@ Rules that move Workflow statuses after a change commits.
 | Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
 | Fields, operations | none |
 | Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `holds`: a change of an instance of the rollup's schema made an `all` or `any` rollup of the type's `Rollups` hold over at least one linked instance. `revised`: the instance `link` points to gained a revision of `Revisions`, or a release of `Branches`. `then` moves this instance, or the one its `link` points to, to the state |
-| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` or a `revised` link the type's Links lacks, or Links absent; a `holds` rollup the type's Rollups lacks, one that is not an `all` or an `any`, or Rollups absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
-| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`, a `revised` link to a schema that composes neither Revisions nor Branches: the subscription retries, then halts |
+| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` or a `revised` link the type's Links lacks, or Links absent; a `holds` rollup the type's Rollups lacks, one that is not an `all` or an `any`, or Rollups absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle; a `then.link`, or an `allTerminal`, `anyTerminal` or `holds` rollup's link of the type or of a live linked schema, that holds a list of targets |
+| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`, a `revised` link to a schema that composes neither Revisions nor Branches, a link a rule reads one target of that holds a list: the subscription retries, then halts |
 | Events | each move is Workflow's `transition` operation event on the target, actor the runner's principal, `cause` the event that set it off |
 | `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
 

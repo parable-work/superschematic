@@ -112,7 +112,7 @@ describe('the generated client', () => {
       { id: 't1', behaviors: { Links: { project: 'p1', spec: { id: 's1' } }, Dependencies: { blockers: [{ schema: 'Spec', id: 's1' }] } } }
     );
     engine.instances.create(editor, 'Task', { title: 'Review', kind: 'review', detail: { pullRequest: 7 } }, { id: 't2', behaviors: { Links: { project: 'p1', parent: 't1' } } });
-    engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore' }, { id: 't3', behaviors: { Links: { project: 'p1' } } });
+    engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore' }, { id: 't3', behaviors: { Links: { project: 'p1', related: ['t1', 't2'] } } });
     engine.instances.invoke(editor, 'Task', 't2', 'transition', { to: 'doing' });
     engine.instances.invoke(editor, 'Task', 't3', 'comment', { body: 'Soon' });
     engine.instances.create(editor, 'Spec', { title: 'Ranking' }, { id: 's2', behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } });
@@ -147,6 +147,11 @@ describe('the generated client', () => {
     assert.deepEqual(project.Rollups.values, { tasks: 3, byStatus: { todo: 2, doing: 1 }, hours: 3, longest: 3, finished: false });
     const task = engine.instances.get(editor, 'Task', 't1')?.behaviors as Record<string, any>;
     assert.deepEqual(task.Links.targets, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true } });
+    const tidy = engine.instances.get(editor, 'Task', 't3')?.behaviors as Record<string, any>;
+    assert.deepEqual(tidy.Links.targets.related, [
+      { schema: 'Task', id: 't1' },
+      { schema: 'Task', id: 't2' },
+    ]);
   });
 
   test('wraps the client with the schemas types, and the engine takes what they allow', async () => {
