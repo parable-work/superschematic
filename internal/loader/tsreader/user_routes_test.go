@@ -155,6 +155,17 @@ export class Admin extends Encrypted {}
 			want: []string{`a.schema.ts:3:28: Admin: a @userAdministration class is not Encrypted: the identity runtime reads its routes' bodies as plain JSON`},
 		},
 		{
+			name: "an @encrypted class",
+			kind: "API",
+			source: `import { encrypted, userSessions } from "@superschematic/api";
+@userSessions()
+// @ts-expect-error @encrypted is a method's decorator
+@encrypted
+export class Account {}
+`,
+			want: []string{`a.schema.ts:4:1: decorator @encrypted is not valid on an operation set`},
+		},
+		{
 			name: "a service clause",
 			kind: "API",
 			source: imports + `@userSessions()
