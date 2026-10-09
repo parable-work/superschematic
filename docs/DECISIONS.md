@@ -5001,7 +5001,35 @@ backing by picking the database.
 | A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
 | On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
 
-Status: not built.
+Status: built, as narrowed below.
+- #336 adds:
+  - `@queue` in `@superschematic/db` and the queue's table in every
+    dialect, carried by the migration plan;
+  - the Go ORM's typed `Enqueue`, with claim, complete, fail, extend and
+    release on Postgres;
+  - `@worker` in `@superschematic/api` with the generated `Workers`
+    interface and scaffold;
+  - the `worker` kind and its settings (`{ of, worker, instances,
+    concurrency, enabled }`);
+  - the Go worker loop and its shutdown, and `stack dev`'s worker
+    processes.
+- #339 adds gcp's `gcp.cloudrunworker` platform, a Cloud Run worker pool
+  scaled by hand to the worker's instances, and its connectors.
+- The merge of D54 gave workers their API's bucket edges, through
+  `local.worker-gcs`, `gcp.cloudrunworker-storage` and the fake target's
+  connector.
+
+acme-shop's `PlaceOrder` enqueues `OrderPlaced` in its transaction, and
+its `FulfilOrders` worker moves the order to fulfilled, which
+`TestStackDevRunsTheShop` sees. No worker has run on Google Cloud.
+
+Not built:
+- claims on SQLite and D1 (amendment below);
+- TypeScript and Rust workers;
+- removing done messages;
+- a command to read and retry dead ones;
+- a growing backoff;
+- scaling a worker with its queue's depth.
 
 The rule is reversible until the first release.
 
@@ -5020,7 +5048,29 @@ can see it.
 | `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
 | On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
 
-Status: not built.
+Status: built, as amended below.
+- #334 adds:
+  - the `Bucket` kind and an API's `buckets`;
+  - the `bucket` deployable and edge;
+  - `ir.BucketConnection`, read by `LoadBucket` and `loadBucket` under
+    the shared vectors;
+  - the Go and TypeScript `Bucket` interfaces in `Deps`;
+  - fake-gcs-server under `stack dev`, with containers that take a
+    command and a readiness check per image, and `--remove-data`.
+- #338 adds gcp's `gcp.storage` platform and its connectors, the
+  `buckets-never-public` policy rule, and `deployer`'s
+  `roles/storage.admin`.
+
+acme-shop's `shop-api` returns a signed upload URL for a product image,
+and `TestStackDevRunsTheShop` uploads through it to the emulator and reads
+the object back. No bucket has run on Google Cloud. A first run should
+check whether a new bucket keeps the project's legacy viewer binding,
+which would let `planner` read objects. A project bootstrapped before
+#338 needs `stack bootstrap` again for `deployer`'s new role.
+
+Not built:
+- a Bucket for Rust, whose bucket edge gcp refuses;
+- buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5041,7 +5091,32 @@ is a TypeScript or Rust server, not a site.
 | `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
 | superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
 
-Status: not built.
+Status: built, as amended below.
+- #333 adds:
+  - the `Site` kind, its scaffold and its typed browser config;
+  - `site` edges, with `PlatformSpec.PublicAddressOf`;
+  - the derived CORS origins and the Go and TypeScript CORS handlers,
+    under parity vectors;
+  - the `TargetSpec.Sites` publisher, `PinSites` and the manifest's
+    sites;
+  - `stack dev`'s file server.
+- #337 adds gcp's `gcp.site` platform, sharing the load balancer's
+  frontend with exposed servers.
+
+acme-shop's `shop-web` lists products from shop-api with `fetch`, and
+`TestStackDevRunsTheShop` checks its page, its config and a CORS
+preflight from its origin and from another. No site has run on Google
+Cloud.
+
+Not built:
+- SDK clients in the browser, which wait on superscalar (amendment
+  below);
+- long caching for content-hashed files;
+- a site in the generated CI.
+
+A follow-up handles the site CORS handler shadowing an identity
+provider's trusted-origin preflights on an API that is both called by a
+site and on the user model.
 
 The rule is reversible until the first release.
 
@@ -5105,3 +5180,30 @@ Google Cloud, where the anchor and the rewrite of the root path are the
 first things to check.
 
 The rule is reversible until the first release.
+
+### D53, amended: a worker's queue claims only on Postgres for now
+
+D53 named Postgres, SQLite and D1 as a queue's backings. The Go ORM speaks
+only Postgres through pgx, and D1 exists only in the migration runner. So
+SQLite gets a queue's table and its migrations, but no claim.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
+
+Status: built in #336.
+
+### D54, amended: a workload links the GCS client whenever its APIs list a bucket
+
+D54 said only a workload some environment places on gcp links the GCS
+client, as the Cloud SQL connector is linked. The local storage emulator
+speaks the same API, and the runtimes reach it through the same client
+(`STORAGE_EMULATOR_HOST`), so a workload that uses a bucket anywhere needs
+it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The `server` generator writes `buckets.go` into a Go server's, job's or worker's entrypoint, and adds `cloud.google.com/go/storage` to its `go.mod`, when its APIs list a bucket. A TypeScript server depends on `@google-cloud/storage` then. Against the emulator, the runtimes sign real V4 URLs with a key the process generates, since the emulator checks that a signature is present but not what it signs. | A filesystem implementation for local runs, a second code path the emulator choice (D54) set out to avoid. Linking per environment, which gives the local build a client it would not have. |
+| `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
+
+Status: built in #334.
