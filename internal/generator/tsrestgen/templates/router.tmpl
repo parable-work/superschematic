@@ -5,11 +5,23 @@
 // operation table below is the schema's declaration of paths, parameters,
 // strict body parsers, auth requirements, and the @bodyLimit, @rateLimit
 // and @timeout directives, applied by {{ .RuntimePackage }}.
+{{- if .Identity }}
+//
+// The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
+// service of {{ .RuntimePackage }}/identity authenticates every route
+{{- if .Identity.Routes }}, and
+// the user model's operations in the table are its own: the router mounts
+// each with the runtime's handler, behind the same route controls.
+{{- else }}. The
+// API declares no route set, so its users sign in through another API of
+// the same authDb, and every route verifies the session that login made.
+{{- end }}
+{{- end }}
 
 import { Hono, type Env } from 'hono';
 import type { OperationSpec } from '{{ .RuntimePackage }}';
 import {
-{{- if .HasManualRoutes }}
+{{- if .HasManualMounts }}
   mountManualOperation,
 {{- end }}
   mountOperation,
@@ -18,6 +30,18 @@ import {
 {{- end }}
   type RouterRuntimeOptions,
 } from '{{ .RuntimePackage }}/hono';
+{{- if .Identity }}
+import {
+  IdentityService,
+  identityCors,
+{{- if .Identity.Routes }}
+  identityHandler,
+{{- end }}
+  identityRouterOptions,
+  routesOf,
+  type IdentityServiceOptions,
+} from '{{ .RuntimePackage }}/identity';
+{{- end }}
 {{- if .ScalarImports }}
 import type {
 {{- range .ScalarImports }}
@@ -80,13 +104,26 @@ export const operationSpecs = {
 {{- if .WebhookProvider }}
     webhookProvider: {{ tsString .WebhookProvider }},
 {{- end }}
-    manual: {{ .ManualRouteRegistration }},
+    manual: {{ .Manual }},
   },
 {{- end }}
 } as const satisfies Record<OperationName, OperationSpec>;
 
+{{ if .Identity -}}
+export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'> {
+  /**
+   * The identity service (D50), which authenticates every route: the
+   * principal is the user, with their roles' permissions. Build it with
+   * identityService, so capabilities answers for operationSpecs.
+   */
+  identity: IdentityService;
+  /** Refused: the identity service authenticates every route. */
+  authenticate?: never;
+  /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
+{{- else -}}
 export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions {
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
+{{- end }}
   bodyLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation requests per minute; overrides the schema's @rateLimit (0 disables). The store and key are `rateLimit`. */
   rateLimits?: Partial<Record<OperationName, number>>;
@@ -107,7 +144,38 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 {{- end }}
 }
 
-{{ if or .WebhookProviders .HasServiceCallers -}}
+{{ if .Identity -}}
+/**
+ * The identity service of this API (D50), whose capabilities answers for
+ * the operations of operationSpecs. options are the service's but routes:
+ *
+ * - store: the identity store over the authDb's tables, built from the
+ *   identityDescriptor {{ .Identity.DescriptorModule }} exports:
+ *   postgresIdentityStore(pool, identityDescriptor) over a pg Pool, or
+ *   sqliteIdentityStore(nodeSqlite(db), identityDescriptor) over an open
+ *   node:sqlite database (bunSqlite for bun:sqlite).
+ * - config: the identity config's JSON value, or what parseIdentityConfig
+ *   returns for it; absent is every default.
+ */
+export function identityService(options: Omit<IdentityServiceOptions, 'routes'>): IdentityService {
+  return new IdentityService({ ...options, routes: routesOf(operationSpecs) });
+}
+
+/**
+ * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
+ * options.identity authenticates every route, and identityCors answers the trusted origins' CORS in front of them.
+{{- if .Identity.Routes }}
+ * The user model's operations are mounted with the identity runtime's handlers.
+{{- end }}
+ * Throws without options.identity, or with options.authenticate beside it.
+{{- if .WebhookProviders }}
+ * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
+{{- end }}
+{{- if .HasServiceCallers }}
+ * Without options.authenticateService (serviceAuthenticator, say), every @requireService or @allowService operation answers 401 service_unauthorized.
+{{- end }}
+ */
+{{ else if or .WebhookProviders .HasServiceCallers -}}
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
 {{- if .WebhookProviders }}
@@ -120,7 +188,14 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 {{ else -}}
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
 {{ end -}}
+{{ $runtime := "options" -}}
+{{ if .Identity -}}
+{{ $runtime = "runtime" -}}
+export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
+  const runtime = identityRouterOptions(options);
+{{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
+{{- end }}
 {{- if .WebhookProviders }}
   for (const provider of [{{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}{{ tsString $p }}{{ end }}] as const) {
     if (!implementations.webhookVerifiers?.[provider]) {
@@ -129,9 +204,18 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   }
 {{- end }}
   const router = new Hono<E>();
+{{- if .Identity }}
+  router.use('/api/*', identityCors(runtime.identity));
+{{- end }}
 {{- range .Endpoints }}
-{{- if .ManualRouteRegistration }}
-  mountManualOperation(router, operationSpecs.{{ .Name }}, options.manualRoutes?.{{ .Name }}, options, {
+{{- if .IdentityOperation }}
+  mountManualOperation(router, operationSpecs.{{ .Name }}, identityHandler(runtime.identity, {{ tsString .IdentityOperation }}), runtime, {
+    bodyLimitBytes: options.bodyLimits?.{{ .Name }},
+    rateLimitPerMinute: options.rateLimits?.{{ .Name }},
+    timeoutSeconds: options.timeouts?.{{ .Name }},
+  });
+{{- else if .ManualRouteRegistration }}
+  mountManualOperation(router, operationSpecs.{{ .Name }}, options.manualRoutes?.{{ .Name }}, {{ $runtime }}, {
     rateLimitPerMinute: options.rateLimits?.{{ .Name }},
     timeoutSeconds: options.timeouts?.{{ .Name }},
 {{- if .WebhookProvider }}
@@ -164,7 +248,7 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
         ctx
       ),
-    options,
+    {{ $runtime }},
     {
       bodyLimitBytes: options.bodyLimits?.{{ .Name }},
       rateLimitPerMinute: options.rateLimits?.{{ .Name }},

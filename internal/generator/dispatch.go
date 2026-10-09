@@ -537,11 +537,17 @@ func (r run) generateTypeScriptAPI() error {
 		return err
 	}
 
+	authDB, err := r.authDBSchema()
+	if err != nil {
+		return err
+	}
+
 	output, err := tsrestgen.Generate(r.Schema, apiOutput, tsrestgen.Options{
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
+		AuthDB:       authDB,
 	})
 	if err != nil {
 		return fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
