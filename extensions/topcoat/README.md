@@ -274,6 +274,9 @@ renders any component:
   `<table class="ss-table">`: a header row of labels, then a row per
   record, each cell `data-field="<json key>"`.
 
+A procedure's argument record has them too. A type without a record has
+none: a webhook's result, say ([what has no procedure](#what-has-no-procedure)).
+
 ```rust
 #[page("/orders")]
 async fn orders(cx: &Cx) -> topcoat::Result<impl View> {

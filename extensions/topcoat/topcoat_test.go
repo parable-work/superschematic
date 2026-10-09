@@ -427,9 +427,10 @@ func TestViewsOff(t *testing.T) {
 
 // TestWhatHasNoProcedure builds fixture-controls-api. Its signed webhook
 // has a guard and neither an in-process call nor a procedure, and its
-// result, which no other operation returns, no record. Its @requireService
-// operation keeps its in-process call, whose doc says it applies the
-// end-user step alone, and has no procedure; its @allowService one has
+// result, which no other operation returns, no record and so no display
+// components. Its @requireService operation keeps its in-process call,
+// whose doc says it applies the end-user step alone, and has no procedure;
+// its result keeps its record and components. Its @allowService one has
 // both. A procedure whose route has traffic controls gets a layer with
 // them, and the build log says why each item is left out.
 func TestWhatHasNoProcedure(t *testing.T) {
@@ -445,7 +446,7 @@ func TestWhatHasNoProcedure(t *testing.T) {
 		}
 		return string(data)
 	}
-	operations, procedures, records := read("operations.rs"), read("procedures.rs"), read("records.rs")
+	operations, procedures, records, views := read("operations.rs"), read("procedures.rs"), read("records.rs"), read("views.rs")
 	for _, want := range []string{
 		"pub async fn can_hook_receive_payment(",
 		"/// It has no in-process call: a third party calls it (@webhook), and its route\n/// checks the third party's signature first (@hmacVerified).",
@@ -479,6 +480,12 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	}
 	if strings.Contains(records, "ReceiptRecord") {
 		t.Error("records.rs mirrors the webhook's result, which no page receives")
+	}
+	if strings.Contains(views, "pub async fn receipt_") {
+		t.Error("views.rs renders the webhook's result, which has no record")
+	}
+	if !strings.Contains(views, "pub async fn stock_run_detail(") {
+		t.Error("views.rs lacks stock_run_detail, the @requireService operation's result, which a page calls")
 	}
 	for _, want := range []string{
 		"no in-process call for hook.receivePayment: a third party calls it (@webhook)",

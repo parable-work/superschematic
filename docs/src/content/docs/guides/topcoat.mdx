@@ -59,9 +59,9 @@ display components, which are built on records.
 
 `shop_orders` keeps the API's `Implementations` for the in-process calls
 and mounts the JSON API at `/api`, giving its routes the client's address
-as Topcoat reads it, by which their rate limits count clients. It also takes a `PageAuthenticator`,
-which establishes a page's caller. Here that caller comes from a Topcoat
-session:
+as Topcoat reads it, by which their rate limits count clients. It also
+takes a `PageAuthenticator`, which establishes a page's caller. Here that
+caller comes from a Topcoat session:
 
 <Snippet file="topcoat/src/lib.rs" symbol={['app', 'sign_in']} />
 
@@ -173,7 +173,9 @@ service mounts itself (`@manualRouteRegistration`). An operation only a
 service may call (`@requireService`) keeps its in-process call but has
 no procedure, since a browser holds no service credential; an
 `@allowService` one keeps both, since its route admits an end user too.
-Each guard's or call's doc says why, and so does the build log.
+Each guard's or call's doc says why, and so does the build log. The
+result of an operation without a call reaches no page, so it has no
+record and no display components.
 
 A procedure keeps its route's traffic controls, in the route's order, and
 refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
@@ -181,9 +183,9 @@ allows a client 60 calls a minute (429 with `Retry-After`), a body of a
 megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
 them on the procedure's path. Its limiter is its own, at the route's
 rate, and counts clients by the IP address Topcoat reads for them; the
-JSON API's route keeps its own, counting by the same address. A page's in-process call applies none of
-them: the page is a route of the app, under the controls the app gives
-it.
+JSON API's route keeps its own, counting by the same address. A page's
+in-process call applies none of them: the page is a route of the app,
+under the controls the app gives it.
 
 ## Keep the shop in SQLite
 
