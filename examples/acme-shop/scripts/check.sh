@@ -16,9 +16,9 @@
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first, and the stack, shop-stack, last of
 #      the services it deploys, which writes the entrypoint of each server
-#      and of shop-orders' job;
+#      and of shop-orders' job and worker;
 #   2. every generated Go module builds and vets, the entrypoints of
-#      shop-stack's servers and job included;
+#      shop-stack's servers, job and worker included;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
@@ -41,14 +41,15 @@
 #      runs, `superschematic stack dev` runs shop-stack's Dev environment,
 #      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
 #      servers and the storefront's TypeScript server on Bun, each on its
-#      generated entrypoint, and the site shop-web, and the test calls each
-#      Go API through its SDK and the storefront over HTTP, uploads a
-#      product's image to shop-media through the URL shop-api signs and
-#      reads it back (D54), reads the site and its config, and checks
-#      shop-api's CORS for the site's origin (milestones 1 and 7 of
-#      docs/stack-model.md), then sees shop-orders' job ship an order with
-#      `superschematic stack run` and on the every-minute schedule stack dev
-#      runs (D52);
+#      generated entrypoint, shop-orders' worker and the site shop-web, and
+#      the test calls each Go API through its SDK and the storefront over
+#      HTTP, uploads a product's image to shop-media through the URL
+#      shop-api signs and reads it back (D54), sees shop-orders' worker
+#      fulfil each order placed from shop-db's queue (D53), reads the site
+#      and its config, and checks shop-api's CORS for the site's origin
+#      (milestones 1 and 7 of docs/stack-model.md), then sees shop-orders'
+#      job ship an order with `superschematic stack run` and on the
+#      every-minute schedule stack dev runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password, and its pages call shop-orders in-process
 #      through the crate the Topcoat extension writes into
@@ -170,7 +171,7 @@ done
 # superschematic writes no go.sum for an entrypoint, and go mod tidy would
 # resolve the imports of go/'s tests too; -mod=mod fills it as the build
 # reads each module, as stack dev's build does.
-for entrypoint in shop-api shop-orders shop-orders-ship-orders; do
+for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-fulfil-orders; do
   echo "    server/shop-stack/$entrypoint"
   (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done

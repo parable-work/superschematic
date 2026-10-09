@@ -57,11 +57,16 @@ func shop() *ir.Stack {
 				{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"port": float64(8080)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "debug"}}},
 				{Of: orders, Values: map[string]any{"port": float64(8081)}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "eu"}}},
 				{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "* * * * *"},
+				{Of: stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders"), Concurrency: &pinnedConcurrency},
 			},
 		},
 	}
 	return s
 }
+
+// pinnedConcurrency is the concurrency Pinned gives shop-orders' worker,
+// which its process reads from WORKER_CONCURRENCY (D53).
+var pinnedConcurrency = 2
 
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
@@ -227,7 +232,7 @@ func TestWiring(t *testing.T) {
 		t.Errorf("the job's SHOP_API_SERVICE = %v, want %v", got, wantAPI)
 	}
 
-	clause := resolve(t, reg, shop(), stacktest.WithoutJobs(stacktest.RequireServiceShop()), "Dev")
+	clause := resolve(t, reg, stacktest.WithoutWorkerSettings(shop()), stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.RequireServiceShop())), "Dev")
 	var callers *ir.Binding
 	for _, b := range clause.Deployable("shop-api").Bindings {
 		if b.Field == "SHOP_API_CALLERS" {

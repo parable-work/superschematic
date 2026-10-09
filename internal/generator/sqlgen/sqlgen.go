@@ -247,7 +247,8 @@ const DefaultMetadataKeyPrefix = "superschematic."
 const DefaultHistoryActorSetting = "superschematic.history_actor_id"
 
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
-// the schema declares no database tables.
+// the schema declares no database tables and no queues. A queue's table
+// follows the tables (queues.go, D53).
 func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
@@ -262,11 +263,12 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(tableTypes) == 0 {
+	queueTypes := schema.Queues()
+	if len(tableTypes) == 0 && len(queueTypes) == 0 {
 		return nil, nil
 	}
 
-	tables := make([]Table, 0, len(tableTypes))
+	tables := make([]Table, 0, len(tableTypes)+len(queueTypes))
 	usedScalars := make(map[string]bool)
 	for _, typeDef := range tableTypes {
 		table, err := convertTypeToTable(typeDef, schema, scalarMapping, compositeDefaults)
@@ -416,7 +418,26 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		historyTables = append(historyTables, historyTable)
 	}
 
+	// Each queue's table, after the tables, whose history and version
+	// columns are in place: no table references it, and it references none
+	// (D53).
+	for _, typeDef := range queueTypes {
+		table, err := convertQueueToTable(typeDef, schema, scalarMapping, compositeDefaults)
+		if err != nil {
+			return nil, err
+		}
+		for _, other := range tables {
+			if other.Name == table.Name {
+				return nil, fmt.Errorf("queue %s's table is %s, the name of the table of %s; rename one of them", typeDef.Name, table.Name, other.OriginalName)
+			}
+		}
+		tables = append(tables, table)
+		for _, col := range table.Columns {
+			usedScalars[col.Type] = true
+		}
+	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
+
 	if err != nil {
 		return nil, err
 	}

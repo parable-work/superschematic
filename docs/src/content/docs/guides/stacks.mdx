@@ -12,7 +12,7 @@ servers and databases, and the environments they run in. Its build wires
 each server to its database and to the APIs it calls, checks the result
 offline, and writes three things: each environment as `environment.json`,
 an entrypoint and Dockerfile for each Go and TypeScript server and each Go
-job, and a
+job and worker, and a
 scaffold of each API implementation that is missing. Wiring the schemas already say,
 such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
@@ -39,6 +39,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server or job; a bucket on another provider |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, each worker's entrypoint and image, and `stack dev`'s worker processes | workers on gcp; a TypeScript or Rust worker; claims on SQLite and D1 |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -51,11 +52,12 @@ A stack has three tiers:
 - **Schemas** are your DB and API services, as they are today.
 - **Deployables** are what runs. A database hosts DB schemas, a server
   serves API schemas, a job runs one of an API's `@job` classes to
-  completion, a site serves a Site service's built files, and a bucket
-  keeps a Bucket service's objects. With nothing declared, each API
-  service is one server, each of its jobs one job, each DB service one
-  database, each Site service one site, and each Bucket service an API
-  lists one bucket.
+  completion, a worker handles the messages of a queue for one of an API's
+  `@worker` classes until it is stopped, a site serves a Site service's
+  built files, and a bucket keeps a Bucket service's objects. With nothing
+  declared, each API service is one server, each of its jobs one job, each
+  of its workers one worker, each DB service one database, each Site
+  service one site, and each Bucket service an API lists one bucket.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -65,13 +67,13 @@ most of them:
 
 | Edge | From | To | Comes from |
 | --- | --- | --- | --- |
-| sql | a server or a job | a database | each served API's `authDb`, or its one DB-kind dependency |
-| http | a server or a job | a server | `calls` in the config of each API the calling server serves |
+| sql | a server, a job or a worker | a database | each served API's `authDb`, or its one DB-kind dependency |
+| http | a server, a job or a worker | a server | `calls` in the config of each API the calling server serves |
 | site | a site | an exposed server | `calls` in a Site service's config ([static sites](/superschematic/guides/static-sites/)) |
 | bucket | a server or a job | a bucket | `buckets` in the config of each API the server serves |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
-one server restates nothing. A job's are its API's.
+one server restates nothing. A job's are its API's, and so are a worker's.
 
 ## Wire the services
 
@@ -387,7 +389,7 @@ TypeScript twin.
 | `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort, storageImage, storagePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)) |
+| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -419,7 +421,7 @@ on a class of the API's schema, which holds no fields:
 // schemas/services/shop-orders/src/jobs.schema.ts
 import { job } from "@superschematic/api";
 
-// The warehouse's pick run: ships each placed order.
+// The warehouse's pick run: it ships every order FulfilOrders fulfilled.
 @job({ schedule: "*/15 * * * *", timeout: "5m", retries: 1 })
 export abstract class ShipOrders {}
 ```
@@ -496,7 +498,7 @@ output with the job's name in front:
 job shop-orders-ship-orders runs on * * * * * (UTC)
 ...
 job shop-orders-ship-orders: start the run due at 2026-10-07T12:01:00Z, try 1 of 2
-[shop-orders-ship-orders] {"level":"info",...,"msg":"shipped the placed orders",...,"orders":1}
+[shop-orders-ship-orders] {"level":"info",...,"msg":"shipped the fulfilled orders",...,"orders":1}
 job shop-orders-ship-orders: the run due at 2026-10-07T12:01:00Z, try 1 of 2 succeeded in 412ms
 ```
 
@@ -518,6 +520,40 @@ refuses to start. On a cloud environment it runs the deployed job, with
 the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
+
+## Queues and workers
+
+A queue is a table of a DB service's database, and a worker is a
+deployable that handles its messages with an API's `Deps`.
+[Queues and workers](/superschematic/guides/queues/) walks both; in short:
+
+```ts
+// shop-db: the message, whose fields are columns of the queue's table
+@queue({ retries: 5, backoff: "30s" })
+export abstract class OrderPlaced {
+  orderId: Identity.UUID;
+}
+
+// shop-orders: handles each message, four at a time
+@worker({ queue: OrderPlaced, concurrency: 4 })
+export abstract class FulfilOrders {}
+```
+
+Your code enqueues a message in the transaction that writes what caused
+it, `orm.EnqueueOrderPlaced(ctx, tx, msg)`, and implements the worker's
+method of the API's generated `Workers`, `FulfilOrders(ctx, msg)`, beside
+`NewWorkers(deps)`. In a stack each worker is a deployable of its own,
+named as a job is, `shop-orders-fulfil-orders`, with its API's edges,
+config and identity. It rolls out after its callees, and an environment
+sets how many instances run and how many messages each handles at a time:
+
+```ts
+settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 2, concurrency: 8 }]
+```
+
+`instances` is one unless set, and `enabled: false` runs none. The
+queue must be a queue of the database the API connects to, which the
+environment runs on Postgres.
 
 ## Static sites
 
@@ -553,7 +589,7 @@ Under the output root, `schemas/dist` by default, the build writes:
 - `stack/shop-stack/<environment>/environment.json` for each environment;
 - `server/shop-stack/<server>/`, a Go module for each Go server, holding
   `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`, one
-  the same for each job of a Go API, under the job's name, and a package
+  the same for each job and each worker of a Go API, under its name, and a package
   for each TypeScript server, holding `main.ts`, `package.json`,
   `tsconfig.json`, a `Dockerfile` and `Dockerfile.dockerignore`, a member
   of the output root's Bun workspace.
@@ -627,10 +663,11 @@ malformed declarations and names nothing registers.
 `shop-api` and `shop-orders`, each on a default Go server, and
 `shop-storefront`, on a default TypeScript server, and exposes all three;
 `shop-db`, the `authDb` of both Go APIs, joins as their database,
-`shop-media`, the bucket `shop-api` lists, as a bucket, `shop-orders`' job
-`ShipOrders` as a job, and `shop-web`, a static site whose browser code
-calls `shop-api`, as a site. Its one environment, `Dev`, is on the core's
-`local` target, and runs the job every minute:
+`shop-media`, the bucket `shop-api` lists, as a bucket, `shop-orders`'
+worker `FulfilOrders` as a worker, which handles `shop-db`'s queue
+`OrderPlaced`, its job `ShipOrders` as a job, and `shop-web`, a static
+site whose browser code calls `shop-api`, as a site. Its one environment,
+`Dev`, is on the core's `local` target, and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -649,15 +686,19 @@ the storefront's.
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
 `shop-media`, both Go servers on their generated entrypoints, the
-storefront's on Bun, the job on its schedule, and the site, built once
-and served with its config. `go/stack_dev_test.go` runs it in the
-example's check whenever Docker is running, calls each Go server through
-its SDK, uploads a product's image to `shop-media` through the URL
-`shop-api` signs, reads a cart from the storefront, reads the site and its
-config, checks that `shop-api` answers CORS for the site's origin and no
-other, and sees the job ship the order it placed, once with `stack run`
-and once on the schedule. The job's code is `NewJobs` in
+storefront's on Bun, the worker as a process, the job on its schedule,
+and the site, built once and served with its config.
+`go/stack_dev_test.go` runs it in the example's check whenever Docker is
+running, calls each Go server through its SDK, uploads a product's image
+to `shop-media` through the URL `shop-api` signs, reads a cart from the
+storefront, sees the worker fulfil the order it placed, reads the site and
+its config, checks that `shop-api` answers CORS for the site's origin and
+no other, and sees the job ship the order, once with `stack run` and once
+on the schedule. The worker's code is `NewWorkers` in
+`go/shop-orders/workers.go`, and the job's `NewJobs` in
 `go/shop-orders/jobs.go`:
+
+<Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
 
@@ -692,7 +733,9 @@ says how to install it). It then:
    install would, starts each server with its resolved config and `PORT`,
    callees first, a TypeScript one as `bun main.ts`, and waits until it
    answers `/readyz`. Each line a server prints carries its name;
-5. builds each job's entrypoint module the same way, and runs each job
+5. builds each worker's entrypoint module the same way and starts it with
+   the servers of its wave, a process with no port;
+6. builds each job's entrypoint module the same way, and runs each job
    with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the containers, which keep
@@ -702,6 +745,7 @@ their data for the next run; `--remove-data` removes them instead.
 | --- | --- |
 | server | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs. Rust servers do not run locally yet |
 | job | a Go process per run, built from its entrypoint module, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
+| worker | a Go process, built from its entrypoint module, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
 | database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
 | bucket | a bucket on the environment's one fake-gcs-server container, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
 | bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |

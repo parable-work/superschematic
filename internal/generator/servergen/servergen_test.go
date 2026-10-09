@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -82,6 +83,10 @@ var apis = order[:len(order)-1]
 // expireOrders is the deployable of shop-orders' job ExpireOrders, whose
 // entrypoint each stack's build writes beside the servers' (D52).
 const expireOrders = "shop-orders-expire-orders"
+
+// fulfilOrders is the deployable of shop-orders' worker FulfilOrders, whose
+// entrypoint each stack's build writes beside the servers' too (D53).
+const fulfilOrders = "shop-orders-fulfil-orders"
 
 // fixture is the loaded fixture services.
 type fixture struct {
@@ -178,7 +183,7 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 	files := map[string]string{}
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
-		for _, server := range []string{"Storefront", "shop-api", expireOrders} {
+		for _, server := range []string{"Storefront", "shop-api", expireOrders, fulfilOrders} {
 			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.CORSFile, servergen.BucketsFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
@@ -197,8 +202,9 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 // server, Storefront serving two APIs on one database and calling
 // shop-api, and shop-api's default server, and one per job, shop-orders'
 // ExpireOrders, which builds shop-orders' Deps as Storefront does and runs
-// the job (D52); and scaffolds each API's implementation with a module of
-// its own. shop-stack's entrypoints never run on Cloud SQL and link no
+// the job (D52), and one per worker, shop-orders' FulfilOrders, which
+// builds the same Deps and claims shop-db's queue OrderPlaced (D53); and
+// scaffolds each API's implementation with a module of its own. shop-stack's entrypoints never run on Cloud SQL and link no
 // Cloud SQL connector; cloudStack's, whose Staging places shop-db on Cloud
 // SQL, do. Regenerate with:
 //
@@ -224,8 +230,8 @@ func TestEntrypointGolden(t *testing.T) {
 		for _, e := range entries {
 			servers = append(servers, e.Name())
 		}
-		if got := strings.Join(servers, " "); got != "Storefront shop-api "+expireOrders {
-			t.Errorf("%s: entrypoints = %s, want Storefront, shop-api and %s", stack, got, expireOrders)
+		if got := strings.Join(servers, " "); got != "Storefront shop-api "+expireOrders+" "+fulfilOrders {
+			t.Errorf("%s: entrypoints = %s, want Storefront, shop-api, %s and %s", stack, got, expireOrders, fulfilOrders)
 		}
 	}
 }
@@ -447,7 +453,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' constructor.\nfunc NewJobs() {}\n")
+	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' and the workers' constructors.\nfunc NewJobs() {}\n\nfunc NewWorkers() {}\n")
 	if err := os.WriteFile(file, edited, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -502,6 +508,36 @@ func TestAnImplementationThatPredatesItsJobsFails(t *testing.T) {
 		"func NewJobs(deps api.Deps) (api.Jobs, error)",
 		"ExpireOrders(ctx context.Context) error",
 		"where api is example.com/schemas/api/shop-orders",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
+		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
+	}
+}
+
+// TestAnImplementationThatPredatesItsWorkersFails: shop-orders declares a
+// worker, and its implementation, which exists and so is the engineer's,
+// declares NewJobs and no NewWorkers. The build writes nothing into it and
+// fails, saying what to add, the message's type included (D53).
+func TestAnImplementationThatPredatesItsWorkersFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
+	file := filepath.Join(dir, apigen.ImplementationFile)
+	before := []byte("package shoporders\n\n// The engineer's code, from before the worker.\nfunc New() {}\n\nfunc NewJobs() {}\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack shop-stack: shop-orders declares workers, and its implementation at " + dir + ", which the build no longer writes into, declares no NewWorkers",
+		"func NewWorkers(deps api.Deps) (api.Workers, error)",
+		"FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced) error",
+		"and shopdb is example.com/schemas/types/go/shop-db",
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build = %v, want it to say %q", err, want)
@@ -917,6 +953,57 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	if output, err := runJob(); err != nil || !strings.Contains(output, `"msg":"expired no order"`) || !strings.Contains(output, `"msg":"job done"`) {
 		t.Errorf("the implemented job = %v, want exit 0 after the method's log:\n%s", err, output)
 	}
+
+	// shop-orders' worker builds the same Deps and claims shop-db's queue
+	// with the concurrency WORKER_CONCURRENCY sets (D53). With the database
+	// down its claims fail, which it logs and retries; SIGTERM stops it,
+	// and it exits 0 saying so.
+	workerDir := servergen.ServerDir(out, "shop-stack", fulfilOrders)
+	goCommand(t, workerDir, "mod", "tidy")
+	goCommand(t, workerDir, "vet", ".")
+	workerBinary := filepath.Join(t.TempDir(), fulfilOrders)
+	goCommand(t, workerDir, "build", "-o", workerBinary, ".")
+	cmd = exec.Command(workerBinary)
+	cmd.Env = append(os.Environ(), append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "WORKER_CONCURRENCY=3"}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+	workerOutput := &syncBuffer{}
+	cmd.Stdout, cmd.Stderr = workerOutput, workerOutput
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(workerOutput.String(), `"msg":"claim failed"`) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	err = cmd.Wait()
+	for _, want := range []string{`"msg":"worker started"`, `"concurrency":3`, `"queue":"OrderPlaced"`, `"msg":"claim failed"`, `"msg":"worker stopped"`} {
+		if !strings.Contains(workerOutput.String(), want) {
+			t.Errorf("the worker printed no %s:\n%s", want, workerOutput.String())
+		}
+	}
+	if err != nil {
+		t.Errorf("the worker stopped with %v, want exit 0:\n%s", err, workerOutput.String())
+	}
+}
+
+// syncBuffer is a buffer a process writes while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // bucketVariables are the variables of the bucket field named field

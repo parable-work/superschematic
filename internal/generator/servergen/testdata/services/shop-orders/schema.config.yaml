@@ -4,6 +4,8 @@
 name: shop-orders
 kind: API
 authDb: shop-db
+dependencies:
+  - { name: shop-db, kind: DB }
 calls:
   - { name: shop-api, kind: API }
 buckets:

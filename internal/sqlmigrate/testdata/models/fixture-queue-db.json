@@ -1,0 +1,234 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "service": "fixture-queue-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Order.id",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "placed_at",
+          "origin": "Order.placedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An order of the shop.",
+      "kind": "entity",
+      "name": "order",
+      "origin": "Order",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "order_id",
+          "origin": "OrderPlaced.orderId",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "placed_at",
+          "origin": "OrderPlaced.placedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "priority",
+          "origin": "OrderPlaced.priority",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "OrderPlaced.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "OrderPlaced.note",
+          "type": "TEXT"
+        },
+        {
+          "name": "ship_to",
+          "origin": "OrderPlaced.shipTo",
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "name": "tags",
+          "origin": "OrderPlaced.tags",
+          "type": "TEXT[]"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Placed when an order is: the worker that fulfils orders handles it.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_placed_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_placed_queue_due_at",
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_placed_queue",
+      "origin": "OrderPlaced",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_placed_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "sent_at",
+          "nullable": true,
+          "origin": "Ping.sentAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when nobody asked for anything in particular.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_ping_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_ping_queue_due_at",
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "ping_queue",
+      "origin": "Ping",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ping_queue_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

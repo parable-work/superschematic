@@ -25,17 +25,26 @@ func assemble(t *testing.T, exts ...registry.Extension) *registry.Registry {
 }
 
 // shop returns the acceptance stack and services for an edit, without
-// shop-orders' job, which jobShop keeps (jobs_test.go), and without
-// shop-api's bucket, which bucketShop keeps (buckets_test.go).
+// shop-orders' job, which jobShop keeps (jobs_test.go), without its
+// worker, which workerShop keeps (workers_test.go), and without shop-api's
+// bucket, which bucketShop keeps (buckets_test.go).
 func shop() (*ir.Stack, []stack.Service) {
-	s := stacktest.WithoutBucketSettings(stacktest.WithoutJobSettings(stacktest.Shop()))
-	return s, stacktest.WithoutBuckets(stacktest.WithoutJobs(stacktest.AcmeShop()))
+	s := stacktest.WithoutBucketSettings(stacktest.WithoutWorkerSettings(stacktest.WithoutJobSettings(stacktest.Shop())))
+	return s, stacktest.WithoutBuckets(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop())))
 }
 
 // jobShop returns the acceptance stack and services with shop-orders' job,
-// ShipOrders, and the settings of it each environment makes.
+// ShipOrders, and the settings of it each environment makes, without its
+// worker.
 func jobShop() (*ir.Stack, []stack.Service) {
-	return stacktest.Shop(), stacktest.AcmeShop()
+	return stacktest.WithoutWorkerSettings(stacktest.Shop()), stacktest.WithoutWorkers(stacktest.AcmeShop())
+}
+
+// workerShop returns the acceptance stack and services with shop-orders'
+// worker, FulfilOrders, shop-db's queue, OrderPlaced, and the settings of
+// the worker each environment makes, without the job.
+func workerShop() (*ir.Stack, []stack.Service) {
+	return stacktest.WithoutJobSettings(stacktest.Shop()), stacktest.WithoutJobs(stacktest.AcmeShop())
 }
 
 func service(services []stack.Service, name string) *stack.Service {

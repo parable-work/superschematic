@@ -141,7 +141,7 @@ func TestAcceptanceWiring(t *testing.T) {
 	for _, d := range env.Deployables {
 		names = append(names, string(d.Kind)+" "+d.Name+" on "+d.Platform)
 	}
-	if got, want := strings.Join(names, "; "), "server Orders on fake.run; server shop-api on fake.run; database shop-db on fake.sql; bucket shop-media on fake.storage; job shop-orders-ship-orders on fake.job"; got != want {
+	if got, want := strings.Join(names, "; "), "server Orders on fake.run; server shop-api on fake.run; database shop-db on fake.sql; bucket shop-media on fake.storage; worker shop-orders-fulfil-orders on fake.worker; job shop-orders-ship-orders on fake.job"; got != want {
 		t.Errorf("deployables = %s, want %s", got, want)
 	}
 	var edges []string
@@ -150,13 +150,15 @@ func TestAcceptanceWiring(t *testing.T) {
 	}
 	if got, want := strings.Join(edges, "; "), "bucket:shop-api->shop-media by fake.run-storage into SHOP_MEDIA_BUCKET; "+
 		"http:Orders->shop-api by fake.run-run into SHOP_API_SERVICE; "+
+		"http:shop-orders-fulfil-orders->shop-api by fake.worker-run into SHOP_API_SERVICE; "+
 		"http:shop-orders-ship-orders->shop-api by fake.job-run into SHOP_API_SERVICE; "+
 		"sql:Orders->shop-db by fake.run-sql into SHOP_DB_DATABASE; sql:shop-api->shop-db by fake.run-sql into SHOP_DB_DATABASE; "+
+		"sql:shop-orders-fulfil-orders->shop-db by fake.worker-sql into SHOP_DB_DATABASE; "+
 		"sql:shop-orders-ship-orders->shop-db by fake.job-sql into SHOP_DB_DATABASE"; got != want {
 		t.Errorf("edges = %s, want %s", got, want)
 	}
-	if len(env.Secrets) != 1 || env.Secrets[0].ID != "PaymentsSecrets.STRIPE_KEY" || strings.Join(env.Secrets[0].Readers, ",") != "Orders,shop-api,shop-orders-ship-orders" {
-		t.Errorf("secrets = %+v, want PaymentsSecrets.STRIPE_KEY read by Orders, shop-api and the job", env.Secrets)
+	if len(env.Secrets) != 1 || env.Secrets[0].ID != "PaymentsSecrets.STRIPE_KEY" || strings.Join(env.Secrets[0].Readers, ",") != "Orders,shop-api,shop-orders-fulfil-orders,shop-orders-ship-orders" {
+		t.Errorf("secrets = %+v, want PaymentsSecrets.STRIPE_KEY read by Orders, shop-api, the worker and the job", env.Secrets)
 	}
 	var order []string
 	for _, step := range env.DeployOrder {
@@ -172,7 +174,7 @@ func TestAcceptanceWiring(t *testing.T) {
 		}
 		order = append(order, s)
 	}
-	if got, want := strings.Join(order, "; "), "infrastructure; migrate expand (shop-db); rollout 1 (shop-api); rollout 2 (Orders, shop-orders-ship-orders); migrate contract (shop-db); exposure"; got != want {
+	if got, want := strings.Join(order, "; "), "infrastructure; migrate expand (shop-db); rollout 1 (shop-api); rollout 2 (Orders, shop-orders-fulfil-orders, shop-orders-ship-orders); migrate contract (shop-db); exposure"; got != want {
 		t.Errorf("deploy order = %s, want %s", got, want)
 	}
 	if env.DNS == nil || env.DNS.Platform != stacktest.DNSPlatform || len(env.DNS.Records) != 1 || env.DNS.Records[0].Deployable != "shop-api" {

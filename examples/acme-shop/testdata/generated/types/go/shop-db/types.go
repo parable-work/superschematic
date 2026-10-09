@@ -1429,6 +1429,240 @@ func OrderLineFromYAMLNonStrict(data []byte) (*OrderLine, error) {
 	return decoded, nil
 }
 
+// OrderPlaced - Placed with each order, in the transaction that writes it: shop-orders'
+// worker FulfilOrders handles each message, and a message whose handler
+// fails is retried every half minute, five times at most.
+type OrderPlaced struct {
+	OrderId IdentityUUID `json:"orderId"`
+}
+
+// MaskSecrets returns a copy of OrderPlaced with secret fields cleared.
+func (t *OrderPlaced) MaskSecrets() *OrderPlaced {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OrderPlaced{}
+
+	masked.OrderId = t.OrderId
+
+	return masked
+}
+
+// JSONFieldNames are the keys OrderPlaced's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OrderPlaced) JSONFieldNames() []string {
+	return []string{"orderId"}
+}
+
+// Validate validates all fields in OrderPlaced
+func (t *OrderPlaced) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate orderId (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.OrderId, true); !valid {
+		errors.SetFieldErrors("orderId", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OrderPlaced to JSON
+func (t *OrderPlaced) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OrderPlaced
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals OrderPlaced from JSON with validation
+func (t *OrderPlaced) UnmarshalJSON(data []byte) error {
+	type Alias OrderPlaced
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OrderPlaced into a map representation.
+func (t *OrderPlaced) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OrderPlaced to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OrderPlaced to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OrderPlaced from a map using lenient decoding.
+func (t *OrderPlaced) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OrderPlaced from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OrderPlaced from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OrderPlaced from a map and rejects unknown fields.
+func (t *OrderPlaced) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OrderPlaced from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OrderPlaced from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OrderPlaced from JSON and rejects unknown fields.
+func (t *OrderPlaced) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OrderPlaced from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OrderPlaced from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OrderPlaced from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OrderPlaced from JSON using lenient decoding.
+func (t *OrderPlaced) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OrderPlaced from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OrderPlaced from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OrderPlaced from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OrderPlaced from YAML and rejects unknown fields.
+func (t *OrderPlaced) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OrderPlaced from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OrderPlaced from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OrderPlaced from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OrderPlaced from YAML using lenient decoding.
+func (t *OrderPlaced) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OrderPlaced from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OrderPlaced from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OrderPlaced from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OrderPlacedFromMap builds OrderPlaced from a map using lenient decoding.
+func OrderPlacedFromMap(value map[string]any) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OrderPlacedFromMapStrict builds OrderPlaced from a map and rejects unknown fields.
+func OrderPlacedFromMapStrict(value map[string]any) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OrderPlacedFromJSON builds OrderPlaced from JSON and rejects unknown fields.
+func OrderPlacedFromJSON(data []byte) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OrderPlacedFromJSONNonStrict builds OrderPlaced from JSON using lenient decoding.
+func OrderPlacedFromJSONNonStrict(data []byte) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OrderPlacedFromYAML builds OrderPlaced from YAML and rejects unknown fields.
+func OrderPlacedFromYAML(data []byte) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OrderPlacedFromYAMLNonStrict builds OrderPlaced from YAML using lenient decoding.
+func OrderPlacedFromYAMLNonStrict(data []byte) (*OrderPlaced, error) {
+	decoded := &OrderPlaced{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Product - Something the shop sells.
 type Product struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`

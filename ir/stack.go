@@ -13,8 +13,8 @@ import "sort"
 // EnvironmentDecl), and StackOf assembles a schema's declarations into its
 // Stack. A service handle is a ServiceRef, a declared deployable's class is
 // its name, and the keys of one `settings` element other than `of`, `job`,
-// `platform`, `env`, `schedule`, `timeZone` and `enabled` are the platform
-// settings.
+// `worker`, `platform`, `env`, `schedule`, `timeZone`, `enabled`,
+// `instances` and `concurrency` are the platform settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -44,18 +44,23 @@ const (
 	// needs nothing. The server and jobs of each API that lists it reach it
 	// over a bucket edge (D54).
 	DeployableBucket DeployableKind = "bucket"
+
+	// DeployableWorker runs one `@worker` of an API schema until it is
+	// stopped: it claims the messages of a queue of the API's database and
+	// handles each. Its needs are its API's, as a job's are (D53).
+	DeployableWorker DeployableKind = "worker"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker
 }
 
 // HasImage reports whether a deployable of kind k runs code the stack's
 // build writes an entrypoint for, and so has an image a deploy builds,
-// pins and records: a server or a job (D52).
+// pins and records: a server, a job (D52) or a worker (D53).
 func (k DeployableKind) HasImage() bool {
-	return k == DeployableServer || k == DeployableJob
+	return k == DeployableServer || k == DeployableJob || k == DeployableWorker
 }
 
 // RollsOut reports whether a deployable of kind k rolls out in the deploy
@@ -67,7 +72,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -76,11 +81,12 @@ type EdgeKind string
 
 const (
 	// EdgeSQL runs from a server to the database that hosts a served API's
-	// database schema, and from a job to its API's.
+	// database schema, and from a job or a worker to its API's.
 	EdgeSQL EdgeKind = "sql"
 
 	// EdgeHTTP runs from a server to the server that serves an API it
-	// calls, and from a job to the server of each API its API calls.
+	// calls, and from a job or a worker to the server of each API its API
+	// calls.
 	EdgeHTTP EdgeKind = "http"
 
 	// EdgeSite runs from a site to the server of each API it calls, which
@@ -104,7 +110,8 @@ func (k EdgeKind) Valid() bool {
 // DeployableRef names a deployable: by a service handle, which means the
 // deployable that hosts or serves that service, or by the name of a
 // declared deployable's class. Exactly one is set. With Job beside an API
-// service's handle, it names that job of the API (D52).
+// service's handle, it names that job of the API (D52), and with Worker
+// that worker (D53).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
@@ -115,6 +122,10 @@ type DeployableRef struct {
 	// Job names a job of the API service Service names: the name of its
 	// `@job` class (`{of: ShopOrders, job: "ExpireCarts"}`).
 	Job string `json:"job,omitempty" yaml:"job,omitempty"`
+
+	// Worker names a worker of the API service Service names: the name of
+	// its `@worker` class (`{of: ShopOrders, worker: "FulfilOrders"}`).
+	Worker string `json:"worker,omitempty" yaml:"worker,omitempty"`
 }
 
 // String renders the reference the way resolution errors quote it.
@@ -122,6 +133,9 @@ func (r DeployableRef) String() string {
 	if r.Service != nil {
 		if r.Job != "" {
 			return r.Service.Name + " job " + r.Job
+		}
+		if r.Worker != "" {
+			return r.Service.Name + " worker " + r.Worker
 		}
 		return r.Service.Name
 	}
@@ -254,8 +268,16 @@ type DeployableSettings struct {
 	// Enabled turns a job's schedule on or off. Unset, a schedule runs,
 	// except in a parameterized environment, whose members run none unless
 	// their settings turn it on. A job whose schedule is off runs only on
-	// demand.
+	// demand. A worker's turns it on or off: one that is off runs no
+	// instance, and its queue's messages wait (D53).
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+
+	// Instances is how many instances of a worker the environment runs,
+	// one unless set, and Concurrency how many messages each handles at a
+	// time, its `@worker` concurrency unless set. Only an element whose
+	// `of` names a worker sets them (D53).
+	Instances   *int `json:"instances,omitempty" yaml:"instances,omitempty"`
+	Concurrency *int `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 }
 
 // EnvValue is the value an environment gives one config field: a literal,

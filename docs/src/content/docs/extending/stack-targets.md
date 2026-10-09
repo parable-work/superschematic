@@ -128,6 +128,20 @@ bucket, `stack/stacktest`'s `fake.storage` to a private bucket in the
 environment's region; the core's `local.gcs` to a bucket on the
 environment's fake-gcs-server container.
 
+A worker platform (`Kind: ir.DeployableWorker`) places an API's workers
+(D53). It declares `Languages` as a job platform does, and its
+`AddressOf` may return nil: nothing reaches a worker. Its `Lower` reads
+what runs from the deployable's `Worker`, an `ir.ResolvedWorker`: the API
+and the `@worker` class, the queue and the database that holds it, how
+many instances run, zero when the environment turns the worker off, the
+concurrency of each and the grace it gives running handlers when it
+stops. It sets `WORKER_CONCURRENCY` on the process to the concurrency,
+which the worker's entrypoint reads. A worker has a server's bindings,
+from its API's config and its own edges, and no callers field.
+`stack/stacktest`'s `fake.worker` lowers one to a pool with its own
+account, and the local target's `local.worker` to a process with no port,
+ready once it starts.
+
 ## A connector
 
 `Connect` receives a `registry.ConnectorContext`: the environment, the
@@ -151,23 +165,25 @@ server serves runs from the server to itself, and its connector derives
 the server's own address. Return an error for an edge the platforms
 cannot serve, as the gcp sql connector does for a Rust server.
 
-A connector's `From` is a server or a job platform, and its `To` a
-database platform for a sql edge, a server platform for an http edge and a
-bucket platform for a bucket edge. A job takes its API's
-edges, so a target with a job platform registers a connector from it for
-each edge its server platform has; it may share the server connector's
-`Connect`, which sees the job as `From`, as gcp's do. For an http edge,
-the callee's issuer lists the job as a caller that serves its API.
+A connector's `From` is a server, a job or a worker platform, and its
+`To` a database platform for a sql edge, a server platform for an http
+edge and a bucket platform for a bucket edge. A job or a worker takes its
+API's edges, so a target with a job or a worker platform registers a
+connector from it for each edge its server platform has; it may share the
+server connector's `Connect`, which sees the job or the worker as `From`,
+as gcp's do. For an http edge, the callee's issuer lists the job or the
+worker as a caller that serves its API.
 
 ## A target
 
 A `TargetSpec` names a platform for each deployable kind (`server`,
-`database`, `job` and `bucket`), the JSON Schema of an environment's values under
-the target's name, its default DNS platform, its provisioner, the schema
-of every resource type its platforms, connectors and default DNS platform
-emit, and its policy rules. A kind it names no platform for is refused in
-its environments, so a stack whose APIs declare jobs resolves on it only
-with each job placed on another target's platform.
+`database`, `job`, `worker` and `bucket`), the JSON Schema of an
+environment's values under the target's name, its default DNS platform,
+its provisioner, the schema of every resource type its platforms,
+connectors and default DNS platform emit, and its policy rules. A kind it
+names no platform for is refused in its environments, so a stack whose
+APIs declare jobs or workers resolves on it only with each placed on
+another target's platform.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:

@@ -86,6 +86,14 @@ type Service struct {
 	// default filled in (D55); nil for every other kind. Its Calls are the
 	// APIs its code calls from the browser.
 	Site *ir.ResolvedSite
+
+	// Workers are an API service's workers, its `@worker` classes (D53), as
+	// ir.Schema.Workers holds them. Each is a deployable of the stack.
+	Workers []ir.Worker
+
+	// Queues are the names of a DB service's queues, its `@queue` classes
+	// (D53), sorted. A worker's queue is one of its API's database.
+	Queues []string
 }
 
 // Operation is what admits a caller to one operation of an API service.

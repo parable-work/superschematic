@@ -84,10 +84,10 @@ type PlatformSpec struct {
 	// Kind is the deployable kind the platform realizes.
 	Kind ir.DeployableKind
 
-	// Languages are the server languages a server or job platform runs,
-	// as `outputs.api.language` spells them (APILanguageGo, ...): a job is
-	// written in its API's language. Required for a server or job
-	// platform, refused for a database platform.
+	// Languages are the server languages a server, job or worker platform
+	// runs, as `outputs.api.language` spells them (APILanguageGo, ...): a
+	// job or a worker is written in its API's language. Required for a
+	// server, job or worker platform, refused for a database platform.
 	Languages []string
 
 	// Dialects are the SQL dialects a database platform runs
@@ -187,13 +187,13 @@ type ConnectorSpec struct {
 	// Edge is the edge kind the connector realizes.
 	Edge ir.EdgeKind
 
-	// From and To name the platforms at the two ends. From is a server or
-	// a job platform; To is a database platform for sql, a server platform
-	// for http and a bucket platform for bucket (D54). A job's edges are
-	// its API's (D52), so a target
-	// that places jobs registers a connector from its job platform for
-	// each edge its servers take. A site edge runs from a site platform to
-	// a server platform (D55).
+	// From and To name the platforms at the two ends. From is a server, a
+	// job or a worker platform; To is a database platform for sql, a
+	// server platform for http and a bucket platform for bucket (D54). A
+	// job's edges are its API's (D52), and so are a worker's (D53), so a
+	// target that places jobs or workers registers a connector from its
+	// job or worker platform for each edge its servers take. A site edge
+	// runs from a site platform to a server platform (D55).
 	From string
 	To   string
 
@@ -511,7 +511,7 @@ func checkStackKey(what, name string) error {
 var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeScript}
 
 // RegisterPlatform adds a platform. It refuses a malformed or duplicate
-// name, an unknown kind, a server or job platform without languages or a
+// name, an unknown kind, a server, job or worker platform without languages or a
 // database platform without dialects (or either with the other's list), an
 // unknown or repeated language or dialect, a settings schema that does not
 // compile, an identity config that is not a server platform's JSON object,
@@ -527,7 +527,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return fmt.Errorf("registry: platform %q is already registered", spec.Name)
 	}
 	switch spec.Kind {
-	case ir.DeployableServer, ir.DeployableJob:
+	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 		if len(spec.Languages) == 0 {
 			return fmt.Errorf("registry: %s platform %q declares no languages", spec.Kind, spec.Name)
 		}
@@ -542,7 +542,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: database platform %q declares no SQL dialects", spec.Name)
 		}
 		if len(spec.Languages) > 0 {
-			return fmt.Errorf("registry: database platform %q declares server languages; only a server or job platform does", spec.Name)
+			return fmt.Errorf("registry: database platform %q declares server languages; only a server, job or worker platform does", spec.Name)
 		}
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
@@ -814,7 +814,7 @@ func (r *Registry) checkStackReferences() error {
 		if spec.Edge == ir.EdgeSQL {
 			toKind = ir.DeployableDatabase
 		}
-		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob}
+		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker}
 		if spec.Edge == ir.EdgeSite {
 			// A site edge runs from a site to a server (D55).
 			fromKinds = []ir.DeployableKind{ir.DeployableSite}

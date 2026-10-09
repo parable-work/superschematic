@@ -140,19 +140,29 @@ type Migration struct {
 // Server is a process node: the server's entrypoint, started with its
 // environment, then probed until it is ready. A Go server's module is
 // built into Binary first; a TypeScript server's main.ts runs on Bun, with
-// no binary.
+// no binary. A worker's process (Kind "worker", D53) has no port and no
+// URL, and is ready once it starts (ReadinessStarted).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
 	Name       string   `json:"name"`
+	Kind       string   `json:"kind,omitempty"`
 	Wave       int      `json:"wave"`
 	Language   string   `json:"language"`
 	Module     string   `json:"module"`
 	Binary     string   `json:"binary,omitempty"`
-	Port       int      `json:"port"`
-	URL        string   `json:"url"`
+	Port       int      `json:"port,omitempty"`
+	URL        string   `json:"url,omitempty"`
 	Readiness  string   `json:"readiness"`
 	Env        []EnvVar `json:"env,omitempty"`
+}
+
+// what names the process's kind in messages: a server or a worker.
+func (s *Server) what() string {
+	if s.Kind == "" {
+		return "server"
+	}
+	return s.Kind
 }
 
 // Job is a job node (D52): the job's entrypoint module, built with the
@@ -592,13 +602,27 @@ func serverOf(res *ir.Resource) (*Server, error) {
 	default:
 		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s servers", s.Language, LanguageGo, LanguageTypeScript)
 	}
-	if s.Port, ok = intValue(res.Properties["port"]); !ok {
-		return nil, fmt.Errorf("its port is not a number")
+	if kind, set := res.Properties["kind"]; set {
+		if s.Kind, ok = kind.(string); !ok || s.Kind != "worker" {
+			return nil, fmt.Errorf("its kind is %v; a process is a server's, or a worker's", kind)
+		}
 	}
-	if s.Readiness, ok = res.Properties["readiness"].(string); !ok || !strings.HasPrefix(s.Readiness, "/") {
-		return nil, fmt.Errorf("its readiness path is not a path")
+	s.Readiness, _ = res.Properties["readiness"].(string)
+	switch port, set := res.Properties["port"]; {
+	case !set:
+		// A process with no port, a worker's, is ready once it starts.
+		if s.Readiness != ReadinessStarted {
+			return nil, fmt.Errorf("it has no port, and its readiness is %q; a process with no port is ready once %s", s.Readiness, ReadinessStarted)
+		}
+	default:
+		if s.Port, ok = intValue(port); !ok {
+			return nil, fmt.Errorf("its port is not a number")
+		}
+		if !strings.HasPrefix(s.Readiness, "/") {
+			return nil, fmt.Errorf("its readiness path is not a path")
+		}
+		s.URL = ServerURL(s.Port)
 	}
-	s.URL = ServerURL(s.Port)
 	env, err := envOf(res.Properties["env"])
 	if err != nil {
 		return nil, err

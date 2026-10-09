@@ -1,0 +1,184 @@
+---
+title: Queues and workers
+description: Declare a queue on a DB service, enqueue messages in the transaction that causes them, and handle them in a worker that a stack runs as a deployable of its own.
+sidebar:
+  order: 5.6
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A queue holds messages for later work: an order placed now is fulfilled
+by a worker a moment later, outside the request that placed it. A queue
+is a table of a DB service's database, so a message commits with the
+writes that caused it, or not at all, and the database a stack places the
+service on is the queue's backing. A worker is a deployable that claims
+the queue's messages and handles each with an API's `Deps`, as a
+[job](/superschematic/guides/stacks/#jobs) runs with them.
+
+This page is about queues your stack runs. The engine's
+[work queues](/superschematic/guides/work-queues/), which turn an engine
+schema's instances into claimable work, are another thing.
+
+| Built | Not built yet |
+| --- | --- |
+| `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
+| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
+| `@worker` on an API, Go's `Workers` and `NewWorkers`, the `worker` deployable, its entrypoint and image | a TypeScript or Rust worker |
+| `stack dev`'s worker processes | workers on gcp |
+
+D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
+the design.
+
+## Declare a queue
+
+Put `@queue` from `@superschematic/db` on a class of a DB service's
+schema. The class is the message: its fields are the message's, and it
+stays a type, which every language's types declare. In the acme shop,
+`shop-db` declares `OrderPlaced`:
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="OrderPlaced" />
+
+Every argument is optional:
+
+| Argument | What it sets |
+| --- | --- |
+| `retries` | how many times a message whose handler fails is handled again before it is dead; five unless set |
+| `backoff` | how long a failed message waits before it is due again, as `30s` or `5m`; thirty seconds unless set |
+| `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
+
+A message's fields are values a column holds: a scalar, an enum, a list
+or map of them, or a JSON value such as a `@jsonField` type. A message
+names an order by its key, not by a relation to its table. The build
+refuses a `@key`, a generated field, a relation, an index, and a field
+named like a column the queue keeps.
+
+The DB service's build writes the queue's table, after its tables, named
+after the class with `_queue`. It holds a column per field, and the
+columns the queue keeps: the message's `id`, its `state` (`ready`,
+`claimed`, `done` or `dead`), its `attempts`, when it is next due, when
+its claim expires and the claim's token, its last error, and when it was
+enqueued and last changed:
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="CREATE TABLE order_placed_queue" to=");" />
+
+A partial index on `due_at` of the ready messages and one on
+`claim_expires_at` of the claimed ones serve the claims.
+[Schema migrations](/superschematic/reference/migrations/) plan the table
+as any table, in each dialect the service lists.
+
+## Enqueue a message
+
+The DB service's Go ORM writes a typed `Enqueue` per queue, which takes
+the transaction you write in. `shop-orders`' `PlaceOrder` writes the order
+and its lines, then enqueues the order's message in the same transaction:
+
+<Snippet file="go/shop-orders/orders.go" from="placed = order" to="return orm.EnqueueOrderPlaced" />
+
+A field reaches its column as a table's field does through the ORM, and
+an optional field you leave unset takes its column's default.
+
+## Write a worker
+
+Put `@worker` from `@superschematic/api` on a class of an API's schema,
+which holds nothing, naming the queue's class, which the API imports from
+its database:
+
+<Snippet file="schemas/services/shop-orders/src/workers.schema.ts" symbol="FulfilOrders" />
+
+| Argument | What it sets |
+| --- | --- |
+| `queue` | the `@queue` class whose messages the worker handles; required. It is a queue of the database the API connects to, its `authDb` or its one DB dependency |
+| `concurrency` | how many messages an instance handles at a time; one unless set |
+| `grace` | how long a stopping worker lets its running handlers finish before it gives their messages back; eight seconds unless set |
+
+The API's Go package gets `Workers`, a method per worker that handles one
+message, typed from the database's Go types, and the signature of the
+constructor your implementation writes beside `New`:
+
+```go
+type Workers interface {
+	FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced) error
+}
+
+type WorkersConstructor func(deps Deps) (Workers, error)
+```
+
+The scaffold writes `NewWorkers`, and each method returns the
+not-implemented error, which fails every message, until you write it. A
+build never writes into an implementation that exists, so one that
+predates its workers fails the stack's build, which says what to add.
+The acme shop's worker marks the order fulfilled:
+
+<Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
+
+A method that returns nil completes its message. One that returns an
+error, or panics, fails it: the message is due again after the queue's
+backoff, until its retries are spent, and then it is dead, where its
+last error stays. Delivery is at least once: a worker that dies holding
+a message gives it back when its claim expires, and another worker
+handles it again, so write each method to be safe to run twice for one
+message.
+
+## Run it
+
+In a stack each worker is a deployable of its own, named after its API
+and its class as a job is: `shop-orders-fulfil-orders`. Its edges, config,
+secrets and identity are its API's, so it connects to the database that
+holds its queue, and an operation whose `from` lists `ShopOrders` admits
+it. It rolls out after the migrations and after its callees.
+
+The build writes each worker an entrypoint module beside the servers',
+`server/shop-stack/shop-orders-fulfil-orders/`, whose `main` builds the
+API's `Deps`, calls your `NewWorkers`, and claims and handles messages
+until it is stopped:
+
+- it claims for its free slots, as many as its concurrency, with
+  `FOR UPDATE SKIP LOCKED`, so workers that claim at once take different
+  messages;
+- it extends each message's claim while the method runs;
+- it logs each message's outcome;
+- on SIGTERM it claims no more, lets the running methods finish within
+  the grace, then cancels them and gives their messages back, due at once
+  for another worker, and exits.
+
+Its Dockerfile builds an image as a server's does, and `stack build` and
+`stack deploy` build and pin it beside the servers'.
+
+`stack dev` runs each worker as a process with no port, started with the
+servers of its wave, each line of its output with its name in front. Its
+exit stops the environment, as a server's does:
+
+```text
+  worker   shop-orders-fulfil-orders handles OrderPlaced of shop-db, 4 at a time
+...
+[shop-orders-fulfil-orders] {"level":"info",...,"msg":"fulfilled the order",...}
+[shop-orders-fulfil-orders] {"level":"info",...,"msg":"message handled","queue":"OrderPlaced","attempt":1,...}
+```
+
+## Change it per environment
+
+An environment sets how many instances of a worker run, and how many
+messages each handles at a time, beside the worker's platform settings:
+
+```ts
+@environment({
+  target: "local",
+  settings: [{ of: ShopOrders, worker: "FulfilOrders", concurrency: 8 }],
+})
+export abstract class Dev {}
+```
+
+| Setting | What it sets |
+| --- | --- |
+| `instances` | how many instances run; one unless set. `stack dev` runs one process whatever it says |
+| `concurrency` | replaces the `@worker` decorator's |
+| `enabled` | `false` runs none, and the queue's messages wait |
+
+`worker` takes only a worker the API declares, which its handle names.
+The worker's entrypoint reads its concurrency from `WORKER_CONCURRENCY`,
+which the platform sets.
+
+The claims run on Postgres, the Go ORM's dialect, so an environment that
+places the queue's database on a platform of another dialect does not
+resolve.

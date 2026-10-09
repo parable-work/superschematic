@@ -33,7 +33,7 @@ func TestBucketPlatform(t *testing.T) {
 			`"name":{"$concat":["acme-staging-shop-shop-media-pr",{"$parameter":"pr"}]},"project":"acme-staging","publicAccessPrevention":"enforced","uniformBucketLevelAccess":true,"versioning":{"enabled":false}}`},
 	} {
 		t.Run(c.env, func(t *testing.T) {
-			env := resolve(t, reg, shop(), stacktest.AcmeShop(), c.env)
+			env := resolve(t, reg, shop(), acmeShop(), c.env)
 			d := env.Deployable("shop-media")
 			if d == nil || d.Kind != ir.DeployableBucket || d.Platform != gcp.Storage {
 				t.Fatalf("shop-media is %+v, want a bucket on %s", d, gcp.Storage)
@@ -58,7 +58,7 @@ func TestBucketRefusals(t *testing.T) {
 	reg := assemble(t)
 	refused := func(t *testing.T, s *ir.Stack, code stack.Code, want string) {
 		t.Helper()
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: acmeShop(), Environment: "Staging"})
 		var errs *stack.Errors
 		if !errors.As(err, &errs) || !slices.ContainsFunc(errs.List, func(e stack.Error) bool {
 			return e.Code == code && strings.Contains(e.Error(), want)
@@ -97,7 +97,7 @@ func TestBucketRefusals(t *testing.T) {
 // the buckets given, beside its own, and a Bucket service for each bucket
 // none had.
 func withBuckets(apis []string, buckets ...ir.ServiceRef) []stack.Service {
-	services := stacktest.AcmeShop()
+	services := acmeShop()
 	for i := range services {
 		if slices.Contains(apis, services[i].Name) {
 			for _, b := range buckets {
@@ -122,7 +122,7 @@ func withBuckets(apis []string, buckets ...ir.ServiceRef) []stack.Service {
 // emulator's endpoint, which the server's service carries as its one
 // variable.
 func TestBucketConnectorGrants(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, assemble(t), shop(), acmeShop(), "Staging")
 	edge := "bucket:shop-api->shop-media"
 	if got, want := strings.Join(ownedBy(env, edge), ", "), "shop-api.sign-as-self, shop-api.storage.shop-media"; got != want {
 		t.Errorf("%s produces %s, want %s", edge, got, want)
@@ -205,7 +205,7 @@ func TestBucketConnectorFromAJob(t *testing.T) {
 // TestBucketConnectorRefusesRust checks that a Rust server's bucket edge
 // fails to lower: the Rust runtime has no Bucket.
 func TestBucketConnectorRefusesRust(t *testing.T) {
-	services := stacktest.AcmeShop()
+	services := acmeShop()
 	for i := range services {
 		if services[i].Name == "shop-api" {
 			services[i].Language = registry.APILanguageRust
@@ -227,7 +227,7 @@ func TestPolicyPrivateBuckets(t *testing.T) {
 	reg := assemble(t)
 	rule := policy(t, reg, gcp.PolicyPrivateBuckets)
 	resolved := func() *ir.ResolvedEnvironment {
-		return resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+		return resolve(t, reg, shop(), acmeShop(), "Staging")
 	}
 	if findings := rule.Check(resolved()); len(findings) > 0 {
 		t.Fatalf("Staging as resolved has findings: %v", findings)

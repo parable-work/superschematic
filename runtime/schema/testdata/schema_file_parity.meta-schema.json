@@ -1848,6 +1848,10 @@
         },
         "service": {
           "$ref": "#/$defs/ServiceRef"
+        },
+        "worker": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"
@@ -1855,6 +1859,9 @@
     "DeployableSettings": {
       "additionalProperties": false,
       "properties": {
+        "concurrency": {
+          "type": "integer"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -1864,6 +1871,9 @@
           },
           "default": {},
           "type": "object"
+        },
+        "instances": {
+          "type": "integer"
         },
         "of": {
           "$ref": "#/$defs/DeployableRef"
@@ -2039,6 +2049,13 @@
           },
           "default": {},
           "type": "object"
+        },
+        "workers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Worker"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -3258,6 +3275,23 @@
       ],
       "type": "object"
     },
+    "QueueDef": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff": {
+          "default": "",
+          "type": "string"
+        },
+        "lease": {
+          "default": "",
+          "type": "string"
+        },
+        "retries": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "RawHeritage": {
       "additionalProperties": false,
       "properties": {
@@ -3756,6 +3790,9 @@
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
+        "queue": {
+          "$ref": "#/$defs/QueueDef"
+        },
         "rawHeritage": {
           "$ref": "#/$defs/RawHeritage"
         },
@@ -4062,6 +4099,34 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "Worker": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "concurrency": {
+          "default": 0,
+          "type": "integer"
+        },
+        "grace": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "queue": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "queue"
+      ],
       "type": "object"
     }
   },

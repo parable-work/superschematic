@@ -6,6 +6,9 @@
 {{- if .HasJobs }} Each job fails
 // until you implement it.
 {{- end }}
+{{- if .HasWorkers }} Each worker fails
+// every message until you implement it.
+{{- end }}
 package {{ toPackageName .SchemaName }}
 
 import (
@@ -30,6 +33,9 @@ import (
 	api "{{ .ModulePath }}"
 {{- if .NeedsTypesImport }}
 	types "{{ .TypesModule }}"
+{{- end }}
+{{- if .HasWorkers }}
+	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
 {{- end }}
 )
 
@@ -68,6 +74,28 @@ type jobs struct {
 // {{ .Method }} runs the job {{ .Name }}.
 func (j *jobs) {{ .Method }}(ctx context.Context) error {
 	return api.NotImplementedError("job {{ .Name }}")
+}
+{{- end }}
+{{- end }}
+{{- if .HasWorkers }}
+
+// NewWorkers builds the workers of {{ .SchemaName }} from the API's dependencies.
+// Its signature is the generated one, api.WorkersConstructor.
+func NewWorkers(deps api.Deps) (api.Workers, error) {
+	return &workers{deps: deps}, nil
+}
+
+var _ api.WorkersConstructor = NewWorkers
+
+// workers implements api.Workers.
+type workers struct {
+	deps api.Deps
+}
+{{- range .Workers }}
+
+// {{ .Method }} handles a message of the queue {{ .Queue }}.
+func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error {
+	return api.NotImplementedError("worker {{ .Name }}")
 }
 {{- end }}
 {{- end }}

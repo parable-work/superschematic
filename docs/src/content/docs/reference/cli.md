@@ -533,7 +533,13 @@ design is section 8.3 of
    line a server prints is printed with its name in front. Go servers need
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
    run locally yet, and the environment does not resolve.
-6. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
+6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
+   the same way, and start it with the servers of its wave: a process with
+   no port, ready once it starts, with `WORKER_CONCURRENCY` set to the
+   concurrency the environment gives it, each line it prints with its name
+   in front. One process runs whatever the worker's `instances`, and none
+   for a worker the environment turns off.
+7. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
    same way, and run each job that has a schedule in the environment on
    it, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
@@ -546,10 +552,11 @@ design is section 8.3 of
    The summary prints each site's URL. A rebuilt site needs another `stack
    dev`.
 
-Dev stays in the foreground until Ctrl-C or until a server exits, then
-stops the sites, the servers, callers first, and the containers, which
-keep their data for the next run: the databases, and the buckets'
-objects. `--remove-data` removes the containers and their data instead.
+Dev stays in the foreground until Ctrl-C or until a server or a worker
+exits, then stops the sites, the servers and the workers, callers first,
+and the containers, which keep their data for the next run: the
+databases, and the buckets' objects. `--remove-data` removes the
+containers and their data instead.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -712,7 +719,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--image` | the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
+| `--image` | the manifest's | a server's, job's or worker's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
 | `--site` | the manifest's | the files a site serves, `<site>=sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
@@ -745,9 +752,9 @@ A build writes no deploy manifest.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--deployable` | every server and job with a Dockerfile, and every site | build this server, job or site only; repeatable |
-| `--server` | none | build this server only; repeatable. `--deployable` takes a job or a site too |
-| `--force` | false | build a server or job whose context did not change, and upload a site's files that are there |
+| `--deployable` | every server, job and worker with a Dockerfile, and every site | build this server, job, worker or site only; repeatable |
+| `--server` | none | build this server only; repeatable. `--deployable` takes a job, a worker or a site too |
+| `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image` and `--site` flags (`text`) or the result as `json` |
 

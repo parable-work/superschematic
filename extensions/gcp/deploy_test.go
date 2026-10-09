@@ -435,7 +435,7 @@ func shopPlanner(service, dialect string, _ json.RawMessage) (*stack.DatabasePla
 // manifest lands in the state bucket.
 func TestDeployShopOnGCP(t *testing.T) {
 	f := newDeployFixture(t, true)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
 	ctx := context.Background()
 	// The infrastructure step creates the secret; the fake provisioner
 	// creates nothing, so the test does.
@@ -482,7 +482,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 // TestStores covers the state bucket and Secret Manager names.
 func TestStores(t *testing.T) {
 	f := newDeployFixture(t, false)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
+	env := resolve(t, f.reg, shop(), acmeShop(), "Preview")
 	target, _ := f.reg.Target(gcp.Target)
 	ctx := context.Background()
 	backend, err := target.State.Backend(ctx, env)
@@ -547,7 +547,7 @@ func TestStores(t *testing.T) {
 // same graph and returns the same number.
 func TestBootstrap(t *testing.T) {
 	f := newDeployFixture(t, false)
-	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, f.reg, shop(), acmeShop(), "Staging")
 	target, _ := f.reg.Target(gcp.Target)
 	ctx := context.Background()
 	cred := registry.Credential{Secret: "shop-cloudflare-dns-acme_dev", Env: "CLOUDFLARE_API_TOKEN", Description: "A token"}
@@ -610,7 +610,7 @@ func TestBootstrap(t *testing.T) {
 // what a graph without a repository leaves out.
 func TestBootstrapGraph(t *testing.T) {
 	reg := assemble(t)
-	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, reg, shop(), acmeShop(), "Staging")
 	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
 	if err != nil {
 		t.Fatal(err)
@@ -667,7 +667,7 @@ func TestBootstrapGraph(t *testing.T) {
 // TestNoDeprecatedProperties walks the environments'.
 func TestBootstrapGraphNoDeprecatedProperties(t *testing.T) {
 	reg := assemble(t)
-	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, reg, shop(), acmeShop(), "Staging")
 	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
 	if err != nil {
 		t.Fatal(err)

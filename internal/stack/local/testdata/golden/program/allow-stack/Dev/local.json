@@ -90,6 +90,11 @@
       "callee": "shop-api"
     },
     {
+      "id": "shop-orders-fulfil-orders.calls.shop-api.key",
+      "caller": "shop-orders-fulfil-orders",
+      "callee": "shop-api"
+    },
+    {
       "id": "shop-orders-ship-orders.calls.shop-api.key",
       "caller": "shop-orders-ship-orders",
       "callee": "shop-api"
@@ -124,7 +129,7 @@
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS",
-          "value": "2"
+          "value": "3"
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS",
@@ -185,7 +190,7 @@
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE",
-          "value": "shop-orders-ship-orders"
+          "value": "shop-orders-fulfil-orders"
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SERVES",
@@ -193,11 +198,11 @@
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT",
-          "value": "shop-orders-ship-orders"
+          "value": "shop-orders-fulfil-orders"
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_ISSUER",
-          "value": "shop-orders-ship-orders"
+          "value": "shop-orders-fulfil-orders"
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS",
@@ -207,13 +212,58 @@
           "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS_0_JWK",
           "value": {
             "$output": {
-              "resource": "shop-orders-ship-orders.calls.shop-api.key",
+              "resource": "shop-orders-fulfil-orders.calls.shop-api.key",
               "name": "publicJwk"
             }
           }
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS",
+          "value": "300"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_ALGORITHMS",
+          "value": "EdDSA"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_AUDIENCE",
+          "value": "shop-api"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_CALLERS",
+          "value": "1"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_CALLERS_0_DEPLOYABLE",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_CALLERS_0_SERVES",
+          "value": "shop-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_CALLERS_0_SUBJECT",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_ISSUER",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_KEYS",
+          "value": "1"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_KEYS_0_JWK",
+          "value": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.calls.shop-api.key",
+              "name": "publicJwk"
+            }
+          }
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_2_MAX_LIFETIME_SECONDS",
           "value": "300"
         },
         {
@@ -290,6 +340,64 @@
         {
           "name": "STRIPE_KEY",
           "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "id": "shop-orders-fulfil-orders.process",
+      "deployable": "shop-orders-fulfil-orders",
+      "name": "shop-orders-fulfil-orders",
+      "kind": "worker",
+      "wave": 2,
+      "language": "go",
+      "module": "server/allow-stack/shop-orders-fulfil-orders",
+      "binary": "bin/shop-orders-fulfil-orders",
+      "readiness": "started",
+      "env": [
+        {
+          "name": "FULFILLMENT_REGION",
+          "value": "us"
+        },
+        {
+          "name": "MAX_LINE_ITEMS",
+          "value": "50"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+          "value": "shop-api"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+          "value": "shop-orders-fulfil-orders"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+          "value": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.calls.shop-api.key",
+              "name": "privateJwk"
+            }
+          }
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+          "value": "signed-token"
+        },
+        {
+          "name": "SHOP_API_SERVICE_URL",
+          "value": "http://127.0.0.1:21829"
+        },
+        {
+          "name": "SHOP_DB_DATABASE_URL",
+          "value": "postgres://postgres@127.0.0.1:31452/shop_db?sslmode=disable"
+        },
+        {
+          "name": "STRIPE_KEY",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        },
+        {
+          "name": "WORKER_CONCURRENCY",
+          "value": "4"
         }
       ]
     }

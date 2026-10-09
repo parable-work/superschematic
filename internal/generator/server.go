@@ -118,6 +118,26 @@ func (r run) generateServers() error {
 		}
 		plans = append(plans, planned{server: job})
 	}
+	workers, err := stack.Workers(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	if err := r.checkWorkers(st.Name, workers, services, scaffolding); err != nil {
+		return err
+	}
+	for _, w := range workers {
+		if w.Language != APILanguageGo {
+			r.Logf("  - worker %s: a %s worker, which gets no generated entrypoint yet\n", w.Name, w.Language)
+			continue
+		}
+		// The servers' plans scaffold the worker's API, which a server
+		// serves (D53).
+		worker, _, err := r.planEntrypoint(st.Name, w, cloudSQL[w.Name], nil)
+		if err != nil {
+			return err
+		}
+		plans = append(plans, planned{server: worker})
+	}
 
 	for _, p := range plans {
 		for _, sc := range p.scaffold {
@@ -229,6 +249,58 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 	return nil
 }
 
+// checkWorkers refuses a stack one of whose Go APIs declares workers while
+// its implementation declares no NewWorkers (D53), as checkJobs refuses one
+// without NewJobs: the implementation is the engineer's, and the build
+// writes into it no more.
+func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding map[string]bool) error {
+	checked := map[string]bool{}
+	for _, w := range workers {
+		api := w.Worker.API
+		if checked[api] || scaffolding[api] || w.Language != APILanguageGo {
+			continue
+		}
+		checked[api] = true
+		impl, _, err := r.implementation(api)
+		if err != nil {
+			return err
+		}
+		exists, err := apigen.ImplementationExists(impl.Dir)
+		if err != nil || !exists {
+			return err
+		}
+		declares, err := apigen.DeclaresFunc(impl.Dir, apigen.WorkersFunc)
+		if err != nil || declares {
+			return err
+		}
+		db := w.Worker.Database
+		var methods []string
+		for _, svc := range services {
+			if svc.Name != api {
+				continue
+			}
+			if db == "" && svc.AuthDB != nil {
+				db = svc.AuthDB.Name
+			}
+			for _, dep := range svc.Dependencies {
+				if db == "" && dep.Kind == ir.SchemaKindDB {
+					db = dep.Name
+				}
+			}
+			for _, worker := range svc.Workers {
+				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
+			}
+		}
+		return fmt.Errorf("stack %s: %s declares workers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+			"\tfunc %s(deps api.Deps) (api.Workers, error)\n\n"+
+			"returning a value with a method per worker:\n\n%s\n\n"+
+			"where api is %s, whose api.WorkersConstructor is %s's signature, and %s is %s, the Go types of the database that declares each queue (docs/stack-model.md, section 8.8)",
+			stackName, api, impl.Dir, apigen.WorkersFunc, apigen.WorkersFunc, strings.Join(methods, "\n"), r.Options.Naming.GoAPIModule(api), apigen.WorkersFunc,
+			toGoPackageName(db), r.Options.Naming.GoTypesModule(db))
+	}
+	return nil
+}
+
 // scaffold is an implementation a server's build writes because it is
 // missing, and the module it writes beside it when no go.mod holds it.
 type scaffold struct {
@@ -274,6 +346,9 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	}
 	if s.Job != nil {
 		in.Job = &servergen.JobInput{Name: s.Job.Name}
+	}
+	if s.Worker != nil {
+		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
 	var scaffolds []scaffold
 	var versionGraph bool

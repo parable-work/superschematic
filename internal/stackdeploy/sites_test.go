@@ -15,10 +15,11 @@ import (
 )
 
 // siteEnv resolves an environment of the shop stack with its site,
-// shop-web (D55).
+// shop-web (D55), without shop-orders' worker, whose image the site tests
+// do not build.
 func (f *fixture) siteEnv(t *testing.T, name string) *ir.ResolvedEnvironment {
 	t.Helper()
-	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.WithSite(stacktest.Shop()), Services: stacktest.SiteShop(), Environment: name})
+	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.WithoutWorkerSettings(stacktest.WithSite(stacktest.Shop())), Services: stacktest.WithoutWorkers(stacktest.SiteShop()), Environment: name})
 	if err != nil {
 		t.Fatal(err)
 	}

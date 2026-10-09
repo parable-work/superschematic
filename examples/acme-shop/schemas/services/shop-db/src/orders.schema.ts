@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate, jsonField } from "@superschematic/schema";
-import { AutoGenerate, HasMany, Relation, index, key, searchField } from "@superschematic/db";
+import { AutoGenerate, HasMany, Relation, index, key, queue, searchField } from "@superschematic/db";
 
 import { Auditable, Product, User } from "./shop.schema";
 
@@ -18,8 +18,11 @@ export abstract class ShippingAddress {
   phone: Nullable<Contact.PhoneNumber>;
 }
 
+// An order is placed, fulfilled once its lines are picked, then shipped,
+// unless it is cancelled while it is still placed.
 export enum OrderStatus {
   Placed = "placed",
+  Fulfilled = "fulfilled",
   Shipped = "shipped",
   Cancelled = "cancelled"
 }
@@ -43,6 +46,14 @@ export abstract class Order extends Auditable {
   cancelReason: Nullable<Validate<string, { maxLength: 500 }>>;
 
   lines: HasMany<OrderLine>;
+}
+
+// Placed with each order, in the transaction that writes it: shop-orders'
+// worker FulfilOrders handles each message, and a message whose handler
+// fails is retried every half minute, five times at most.
+@queue({ retries: 5, backoff: "30s" })
+export abstract class OrderPlaced {
+  orderId: Identity.UUID;
 }
 
 // One product on an order, at the price the shopper paid.

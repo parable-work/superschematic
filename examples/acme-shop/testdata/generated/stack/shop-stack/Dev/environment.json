@@ -127,6 +127,38 @@
       ]
     },
     {
+      "name": "shop-orders-fulfil-orders",
+      "kind": "worker",
+      "platform": "local.worker",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "worker": {
+        "api": "shop-orders",
+        "name": "FulfilOrders",
+        "queue": "OrderPlaced",
+        "database": "shop-db",
+        "instances": 1,
+        "concurrency": 4,
+        "graceSeconds": 8
+      },
+      "resourceName": "shop-orders-fulfil-orders",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-orders-fulfil-orders->shop-db"
+        }
+      ]
+    },
+    {
       "name": "shop-orders-ship-orders",
       "kind": "job",
       "platform": "local.job",
@@ -258,6 +290,18 @@
         "kind": "DB"
       },
       "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-orders-fulfil-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.worker-postgres",
       "field": "SHOP_DB_DATABASE"
     },
     {
@@ -395,6 +439,31 @@
         "phase": "infrastructure",
         "owners": [
           "shop-media"
+        ]
+      },
+      {
+        "id": "shop-orders-fulfil-orders.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            },
+            {
+              "name": "WORKER_CONCURRENCY",
+              "value": "4"
+            }
+          ],
+          "kind": "worker",
+          "language": "go",
+          "module": "server/shop-stack/shop-orders-fulfil-orders",
+          "name": "shop-orders-fulfil-orders",
+          "readiness": "started"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-fulfil-orders"
         ]
       },
       {
@@ -552,11 +621,13 @@
       "deployables": [
         "shop-api",
         "shop-orders",
+        "shop-orders-fulfil-orders",
         "shop-orders-ship-orders",
         "shop-storefront"
       ],
       "resources": [
         "shop-api.process",
+        "shop-orders-fulfil-orders.process",
         "shop-orders-ship-orders.job",
         "shop-orders.process",
         "shop-storefront.process"

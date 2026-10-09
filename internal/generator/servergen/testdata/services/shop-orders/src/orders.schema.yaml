@@ -1,5 +1,8 @@
 name: shop-orders
 kind: API
+imports:
+  - package: "@schemas/shop-db"
+    types: [OrderPlaced]
 types:
   OrdersConfig:
     name: OrdersConfig
@@ -49,3 +52,9 @@ jobs:
   - name: ExpireOrders
     schedule: "0 * * * *"
     timeout: 2m
+# A worker is a deployable of its own too, with the same Deps: it claims
+# the messages of shop-db's queue OrderPlaced, two at a time (D53).
+workers:
+  - name: FulfilOrders
+    queue: OrderPlaced
+    concurrency: 2

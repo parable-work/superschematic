@@ -141,6 +141,23 @@ CREATE TABLE user_role_grant (
 
 COMMENT ON TABLE user_role_grant IS 'A role a user holds.';
 
+CREATE TABLE order_placed_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  order_id UUID NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transaction that writes it: shop-orders''
+worker FulfilOrders handles each message, and a message whose handler
+fails is retried every half minute, five times at most.';
+
 -- Add foreign key constraints
 
 ALTER TABLE "order"
@@ -214,3 +231,7 @@ CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_op
 CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
 
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);
+
+CREATE INDEX idx_order_placed_queue_due_at ON order_placed_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_order_placed_queue_claim_expires_at ON order_placed_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';

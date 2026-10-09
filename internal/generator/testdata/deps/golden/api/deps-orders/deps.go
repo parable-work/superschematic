@@ -7,6 +7,10 @@
 // It also defines Jobs, a method per job of deps-orders, and JobsConstructor,
 // the signature of the implementation's constructor of its jobs (section
 // 8.7).
+//
+// It also defines Workers, a method per worker of deps-orders, and
+// WorkersConstructor, the signature of the implementation's constructor of
+// its workers (section 8.8).
 
 package depsorders
 
@@ -15,6 +19,7 @@ import (
 
 	orm "example.com/schemas/orm/deps-db"
 	depscatalogsdk "example.com/schemas/sdk/go/deps-catalog"
+	depsdb "example.com/schemas/types/go/deps-db"
 	"github.com/parable-work/superschematic/runtime/http/go/bucket"
 	"go.uber.org/zap"
 )
@@ -65,3 +70,22 @@ type Jobs interface {
 // with the API's Deps. The scaffolded implementation asserts it:
 // var _ depsorders.JobsConstructor = NewJobs.
 type JobsConstructor func(deps Deps) (Jobs, error)
+
+// Workers are the workers of deps-orders, a method per @worker class,
+// each of which handles one message of its queue. A worker's entrypoint
+// calls its method once per message it claims, with a context that ends
+// when the worker stops and its grace is over. The message is done when
+// the method returns nil; an error, or a panic, fails it, and the queue
+// retries it after its backoff until its retries are spent. A message may
+// come again after a worker dies holding it, so a method is idempotent.
+type Workers interface {
+	// FulfilOrders handles a message of the queue OrderPlaced, 4 at a time
+	// unless an environment changes the worker's concurrency.
+	FulfilOrders(ctx context.Context, msg depsdb.OrderPlaced) error
+}
+
+// WorkersConstructor is the signature of the implementation's constructor
+// of its workers, NewWorkers(deps Deps) (Workers, error), which a worker's
+// entrypoint calls with the API's Deps. The scaffolded implementation
+// asserts it: var _ depsorders.WorkersConstructor = NewWorkers.
+type WorkersConstructor func(deps Deps) (Workers, error)

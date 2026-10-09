@@ -66,7 +66,9 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 			order.Lines = append(order.Lines, *line)
 		}
 		placed = order
-		return nil
+		// FulfilOrders, shop-orders' worker, fulfils the order. The message
+		// commits with the order, or not at all (D53).
+		return orm.EnqueueOrderPlaced(ctx, tx, &db.OrderPlaced{OrderId: *order.Id})
 	})
 	if err != nil {
 		return nil, err

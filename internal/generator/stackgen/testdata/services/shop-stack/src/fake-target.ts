@@ -10,6 +10,7 @@ declare module "@superschematic/stack" {
       database: { tier?: "small" | "large"; highAvailability?: boolean };
       job: { cpu?: string };
       bucket: { versioning?: boolean };
+      worker: { memory?: string };
     };
   }
 }

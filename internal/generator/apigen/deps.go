@@ -37,6 +37,12 @@ type DepsInfo struct {
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 
+	// DatabaseTypes is Database's Go types module, which declares the
+	// messages of its queues, and DatabaseTypesAlias the name deps.go and
+	// the scaffold import it as. Set for an API with workers (D53).
+	DatabaseTypes      string
+	DatabaseTypesAlias string
+
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 }
@@ -101,6 +107,50 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 // HasJobs reports whether the API declares a job, for which deps.go
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
+
+// WorkerInfo is a worker of the API (D53): a method of the generated
+// Workers interface, which handles one message of its queue.
+type WorkerInfo struct {
+	// Name is the worker's `@worker` class.
+	Name string
+
+	// Method is the Workers method that handles a message.
+	Method string
+
+	// Queue is the `@queue` class of the API's database whose messages the
+	// worker handles: the message's type in the database's Go types.
+	Queue string
+
+	// Concurrency is the decorator's concurrency, for the method's
+	// comment: how many messages an instance handles at a time unless an
+	// environment changes it.
+	Concurrency int
+}
+
+// workersOf reads the API's workers, sorted by name.
+func workersOf(schema *ir.Schema) []WorkerInfo {
+	var workers []WorkerInfo
+	for _, worker := range schema.Workers {
+		if worker == nil {
+			continue
+		}
+		concurrency := worker.Concurrency
+		if concurrency <= 0 {
+			concurrency = ir.DefaultWorkerConcurrency
+		}
+		workers = append(workers, WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency})
+	}
+	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
+	return workers
+}
+
+// HasWorkers reports whether the API declares a worker, for which deps.go
+// declares Workers and WorkersConstructor.
+func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+
+// HasBackgroundWork reports whether deps.go declares Jobs or Workers, which
+// take a context.
+func (o *APIOutput) HasBackgroundWork() bool { return o.HasJobs() || o.HasWorkers() }
 
 // SetDeps sets what Deps holds, refusing a client or a bucket whose field
 // would take the name of another of its fields.
@@ -177,6 +227,10 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 // JobsFunc is the function an implementation of an API with jobs
 // declares, of the generated JobsConstructor's signature.
 const JobsFunc = "NewJobs"
+
+// WorkersFunc is the function an implementation of an API with workers
+// declares, of the generated WorkersConstructor's signature (D53).
+const WorkersFunc = "NewWorkers"
 
 // DeclaresFunc reports whether the Go package at dir declares a function
 // named name, in a file that is not a test.

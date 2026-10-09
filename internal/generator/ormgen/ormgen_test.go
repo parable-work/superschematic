@@ -73,6 +73,7 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_role.go", "repository_session.go", "repository_user.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
+		{"fixture-queue-db", []string{"repository_order.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

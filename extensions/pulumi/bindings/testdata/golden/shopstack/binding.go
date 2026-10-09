@@ -17,6 +17,8 @@ type Environment struct {
 	ShopDB ShopDB
 	// ShopMedia is bucket shop-media.
 	ShopMedia ShopMedia
+	// ShopOrdersFulfilOrders is worker shop-orders-fulfil-orders.
+	ShopOrdersFulfilOrders ShopOrdersFulfilOrders
 	// ShopOrdersShipOrders is job shop-orders-ship-orders.
 	ShopOrdersShipOrders ShopOrdersShipOrders
 }
@@ -99,6 +101,31 @@ type ShopMedia struct {
 	Address string
 	// Bucket is node shop-media.bucket, a fake:storage/bucket:Bucket.
 	Bucket ShopMediaBucket
+}
+
+// ShopOrdersFulfilOrders is worker shop-orders-fulfil-orders: its name and
+// address in an environment, and the outputs of the nodes it owns.
+type ShopOrdersFulfilOrders struct {
+	// Name is the worker's name in the environment.
+	Name string
+	// Account is node shop-orders-fulfil-orders.account, a
+	// fake:iam/account:Account.
+	Account ShopOrdersFulfilOrdersAccount
+	// InvokesShopAPI is node shop-orders-fulfil-orders.invokes.shop-api, a
+	// fake:iam/grant:Grant.
+	InvokesShopAPI ShopOrdersFulfilOrdersInvokesShopAPI
+	// Pool is node shop-orders-fulfil-orders.pool, a fake:run/pool:Pool.
+	Pool ShopOrdersFulfilOrdersPool
+	// ReadsPaymentsSecretsStripeKey is node
+	// shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY, a
+	// fake:iam/grant:Grant.
+	ReadsPaymentsSecretsStripeKey ShopOrdersFulfilOrdersReadsPaymentsSecretsStripeKey
+	// SQLShopDB is node shop-orders-fulfil-orders.sql.shop-db, a
+	// fake:iam/grant:Grant.
+	SQLShopDB ShopOrdersFulfilOrdersSQLShopDB
+	// SecretPaymentsSecretsStripeKey is node secret.PaymentsSecrets.STRIPE_KEY, a
+	// fake:secrets/secret:Secret.
+	SecretPaymentsSecretsStripeKey SecretPaymentsSecretsStripeKey
 }
 
 // ShopOrdersShipOrders is job shop-orders-ship-orders: its name and address in
@@ -247,6 +274,43 @@ type ShopMediaBucket struct {
 	Name string
 }
 
+// ShopOrdersFulfilOrdersAccount holds the outputs of node
+// shop-orders-fulfil-orders.account.
+type ShopOrdersFulfilOrdersAccount struct {
+	// Email is the node's email output.
+	Email string
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersFulfilOrdersInvokesShopAPI holds the outputs of node
+// shop-orders-fulfil-orders.invokes.shop-api.
+type ShopOrdersFulfilOrdersInvokesShopAPI struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersFulfilOrdersPool holds the outputs of node
+// shop-orders-fulfil-orders.pool.
+type ShopOrdersFulfilOrdersPool struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersFulfilOrdersReadsPaymentsSecretsStripeKey holds the outputs of
+// node shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY.
+type ShopOrdersFulfilOrdersReadsPaymentsSecretsStripeKey struct {
+	// ID is the node's id output.
+	ID string
+}
+
+// ShopOrdersFulfilOrdersSQLShopDB holds the outputs of node
+// shop-orders-fulfil-orders.sql.shop-db.
+type ShopOrdersFulfilOrdersSQLShopDB struct {
+	// ID is the node's id output.
+	ID string
+}
+
 // ShopOrdersShipOrdersAccount holds the outputs of node
 // shop-orders-ship-orders.account.
 type ShopOrdersShipOrdersAccount struct {
@@ -363,6 +427,12 @@ var Staging = Environment{
 	ShopMedia: ShopMedia{
 		Name: "acme-staging-shop-stack-shop-media",
 	},
+	ShopOrdersFulfilOrders: ShopOrdersFulfilOrders{
+		Name: "shop-orders-fulfil-orders",
+		SecretPaymentsSecretsStripeKey: SecretPaymentsSecretsStripeKey{
+			ID: "staging:secret.PaymentsSecrets.STRIPE_KEY.id",
+		},
+	},
 	ShopOrdersShipOrders: ShopOrdersShipOrders{
 		Name: "shop-orders-ship-orders",
 		SecretPaymentsSecretsStripeKey: SecretPaymentsSecretsStripeKey{
@@ -442,6 +512,12 @@ var Production = Environment{
 	},
 	ShopMedia: ShopMedia{
 		Name: "acme-prod-shop-stack-shop-media",
+	},
+	ShopOrdersFulfilOrders: ShopOrdersFulfilOrders{
+		Name: "shop-orders-fulfil-orders",
+		SecretPaymentsSecretsStripeKey: SecretPaymentsSecretsStripeKey{
+			ID: "production:secret.PaymentsSecrets.STRIPE_KEY.id",
+		},
 	},
 	ShopOrdersShipOrders: ShopOrdersShipOrders{
 		Name: "shop-orders-ship-orders",

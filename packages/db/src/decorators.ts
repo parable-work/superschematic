@@ -205,6 +205,33 @@ export const optimistic: ClassDecorator = noopClassDecorator;
 /** A schema class, referenced as a value in a decorator argument. */
 export type SchemaClass = abstract new (...args: never[]) => unknown;
 
+/** The options of a queue: how often a failed message is retried, and when. */
+export type QueueOptions = {
+  /** How many times a message whose handler fails is handled again before it is dead; five unless set. */
+  readonly retries?: number;
+  /** How long a failed message waits before it is due again, a duration of whole seconds (`"30s"`, `"5m"`); thirty seconds unless set. */
+  readonly backoff?: string;
+  /** How long a claim holds a message unless its worker extends it, a duration of whole seconds; a minute unless set. */
+  readonly lease?: string;
+};
+
+/**
+ * Declares a queue of the DB service whose class is its message
+ * (docs/stack-model.md, section 8.8). The class's fields are the message's;
+ * the database holds the queue in a table of its own, and an API's
+ * `@worker` handles its messages:
+ *
+ * ```ts
+ * @queue({ retries: 5, backoff: "30s" })
+ * export abstract class OrderPlaced {
+ *   orderId: Identity.UUID;
+ * }
+ * ```
+ */
+export function queue(_options?: QueueOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 export interface VersionGraphOptions {
   /**
    * Prefixes the generated graph tables (snake_case) and types (PascalCase).

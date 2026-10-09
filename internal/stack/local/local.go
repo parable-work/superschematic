@@ -58,6 +58,10 @@ const (
 	// fake-gcs-server, which speaks GCS's API (D54).
 	BucketPlatform = "local.gcs"
 
+	// WorkerPlatform runs a worker as a process with no port, ready once it
+	// starts, beside the servers (D53).
+	WorkerPlatform = "local.worker"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -71,6 +75,13 @@ const (
 	// to a bucket on the storage emulator (D54).
 	BucketConnector    = "local.process-gcs"
 	JobBucketConnector = "local.job-gcs"
+
+	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
+	// connect a worker, whose edges are its API's, as a job's connectors
+	// do.
+	WorkerSQLConnector    = "local.worker-postgres"
+	WorkerHTTPConnector   = "local.worker-process"
+	WorkerBucketConnector = "local.worker-gcs"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -107,8 +118,10 @@ const (
 	// references.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
-	// TypeProcess is a server process run from its entrypoint: built from
-	// its module, or run by Bun.
+	// TypeProcess is a process run from its entrypoint: built from its
+	// module, or run by Bun. A server's listens on its port and is ready
+	// once its readiness path answers; a worker's has no port and is ready
+	// once it starts (ReadinessStarted, D53).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -176,6 +189,14 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      WorkerPlatform,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageGo},
+			NameOf:    processName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerWorker,
+		},
+		{
 			Name:      DatabasePlatform,
 			Kind:      ir.DeployableDatabase,
 			Dialects:  []string{registry.SQLDialectPostgres},
@@ -203,6 +224,9 @@ func Register(r *registry.Registry) error {
 		{Name: SiteConnector, Edge: ir.EdgeSite, From: SitePlatform, To: ServerPlatform, Connect: connectSite},
 		{Name: BucketConnector, Edge: ir.EdgeBucket, From: ServerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: JobBucketConnector, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: WorkerSQLConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: WorkerBucketConnector, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -223,6 +247,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableJob:      JobPlatform,
 			ir.DeployableSite:     SitePlatform,
 			ir.DeployableBucket:   BucketPlatform,
+			ir.DeployableWorker:   WorkerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -323,13 +348,14 @@ var resourceTypes = map[string]string{
 	}`,
 	TypeProcess: `{
 	  "type": "object",
-	  "required": ["name", "module", "language", "port", "readiness"],
+	  "required": ["name", "module", "language", "readiness"],
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript"]},
+	    "kind": {"enum": ["worker"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-	    "readiness": {"type": "string", "pattern": "^/"},
+	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
 	    "env": {"type": "array", "items": {
 	      "type": "object",
 	      "required": ["name"],

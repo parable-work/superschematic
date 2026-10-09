@@ -352,6 +352,11 @@ type APIOutput struct {
 	// API's Deps (D52).
 	Jobs []JobInfo `json:"-"`
 
+	// Workers are the API's workers, sorted by name: a method each of the
+	// generated Workers interface, which handles one message of the
+	// worker's queue with the API's Deps (D53). SetDeps types each message.
+	Workers []WorkerInfo `json:"-"`
+
 	// Naming supplies the module root and runtime module paths the templates
 	// import; the SDK generators derive their package names from it.
 	Naming naming.Naming
@@ -684,6 +689,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
 	output.Jobs = jobsOf(schema)
+	output.Workers = workersOf(schema)
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	if opts.IsPublic && opts.UpstreamSchema != "" {

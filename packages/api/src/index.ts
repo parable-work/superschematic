@@ -22,7 +22,8 @@ export {
   userAdministration,
   userSessions,
   virtual,
-  webhook
+  webhook,
+  worker
 } from "./decorators";
 export type {
   BodyLimitConfig,
@@ -42,7 +43,8 @@ export type {
   ServiceHandleRef,
   TimeoutConfig,
   UserAdministrationConfig,
-  UserSessionsConfig
+  UserSessionsConfig,
+  WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";
 export type { EncryptedField, QueryParam } from "./wrappers";

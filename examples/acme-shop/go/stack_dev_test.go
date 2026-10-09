@@ -42,13 +42,17 @@ import (
 // calls each Go API through its generated Go SDK with the session and the
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
-// would, and reads back from shop-media. It reads the static site
-// shop-web, which stack dev built and serves with its config, and asks
-// shop-api, as a browser would, whether the site's origin may call it, and
-// another origin (D55). Then shop-orders' job ShipOrders, on its generated
-// entrypoint with the implementation's NewJobs, ships the order placed:
-// once on demand with `superschematic stack run`, and again on the
-// every-minute schedule Dev's settings give it, which stack dev runs
+// would, and reads back from shop-media. PlaceOrder enqueues an
+// OrderPlaced message on shop-db's queue in the order's transaction, and
+// shop-orders' worker FulfilOrders, a process of its own on its generated
+// entrypoint with the implementation's NewWorkers, claims it and fulfils
+// the order (section 8.8, D53). It reads the static site shop-web, which
+// stack dev built and serves with its config, and asks shop-api, as a
+// browser would, whether the site's origin may call it, and another origin
+// (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
+// the implementation's NewJobs, ships the order fulfilled: once on demand
+// with `superschematic stack run`, and again on the every-minute schedule
+// Dev's settings give it, which stack dev runs
 // (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
 // with --remove-data removes the containers.
 //
@@ -219,6 +223,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("PlaceOrder returned %+v", order)
 	}
 
+	// shop-orders' worker FulfilOrders claims the OrderPlaced message
+	// PlaceOrder enqueued with the order, and fulfils the order (D53).
+	if !strings.Contains(output.String(), "worker   "+fulfilOrders+" handles OrderPlaced of shop-db, 4 at a time") {
+		t.Fatalf("stack dev did not run %s", fulfilOrders)
+	}
+	waitForStatus(ctx, t, orders, order.Id, orderstypes.OrderStatus_Fulfilled, time.Minute)
+	for _, want := range []string{"[" + fulfilOrders + "] ", `"msg":"worker started"`, `"msg":"fulfilled the order"`, `"msg":"message handled"`} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("stack dev printed no %q", want)
+		}
+	}
+
 	// shop-storefront, on Bun: a shopper puts two green teas in a cart,
 	// and a viewer reads the cart back. Its implementation keeps carts in
 	// memory and knows its callers by static tokens.
@@ -281,7 +297,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("shop-api allowed another origin: %v", refused)
 	}
 
-	// shop-orders' job ShipOrders ships every placed order (D52).
+	// shop-orders' job ShipOrders ships every fulfilled order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
 	run := runJob(t, binary, outputRoot)
@@ -299,7 +315,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// Dev's settings run the job every minute, so stack dev ships an order
-	// placed now within about one.
+	// placed now within about one, once the worker fulfils it.
 	if !strings.Contains(output.String(), "job "+shipOrders+" runs on * * * * * (UTC)") {
 		t.Fatalf("stack dev did not schedule %s", shipOrders)
 	}
@@ -310,13 +326,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlaceOrder: %v", err)
 	}
-	deadline = time.Now().Add(3 * time.Minute)
-	for orderStatus(ctx, t, orders, next.Id) != orderstypes.OrderStatus_Shipped {
-		if time.Now().After(deadline) {
-			t.Fatalf("stack dev's schedule did not ship order %s in 3 minutes", next.Id)
-		}
-		time.Sleep(time.Second)
-	}
+	waitForStatus(ctx, t, orders, next.Id, orderstypes.OrderStatus_Shipped, 3*time.Minute)
 	for _, want := range []string{"job " + shipOrders + ": start the run due at ", "[" + shipOrders + "] "} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("stack dev printed no %q", want)
@@ -351,6 +361,27 @@ func TestStackDevRunsTheShop(t *testing.T) {
 // shipOrders is the deployable of shop-orders' job ShipOrders: the API's
 // name, then the job's class in kebab case.
 const shipOrders = "shop-orders-ship-orders"
+
+// fulfilOrders is the deployable of shop-orders' worker FulfilOrders,
+// named as a job's is (D53).
+const fulfilOrders = "shop-orders-fulfil-orders"
+
+// waitForStatus waits until order id has status want, or fails the test
+// after within.
+func waitForStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrdersSDK, id orderstypes.IdentityUUID, want orderstypes.OrderStatus, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		got := orderStatus(ctx, t, orders, id)
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("order %s is %s after %s, want %s", id, got, within, want)
+		}
+		time.Sleep(time.Second)
+	}
+}
 
 // runJob runs shop-orders' job once with `superschematic stack run`, from
 // the example's directory as a person would, and returns what it printed.

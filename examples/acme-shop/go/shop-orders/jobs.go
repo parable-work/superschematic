@@ -26,18 +26,18 @@ type Jobs struct {
 	Logger *zap.Logger
 }
 
-// ShipOrders is the warehouse's pick run: it marks every placed order
-// shipped, in one statement, so a run that fails part-way ships none and
-// its retry starts over.
+// ShipOrders is the warehouse's pick run: it marks every order the worker
+// FulfilOrders fulfilled shipped, in one statement, so a run that fails
+// part-way ships none and its retry starts over.
 func (j *Jobs) ShipOrders(ctx context.Context) error {
-	placed := string(db.OrderStatus_Placed)
+	fulfilled := string(db.OrderStatus_Fulfilled)
 	shipped := db.OrderStatus_Shipped
 	n, err := j.DB.GetOrderRepository().UpdateMany(ctx,
-		&orm.OrderFilter{Status: &orm.StringFilter{Eq: &placed}},
+		&orm.OrderFilter{Status: &orm.StringFilter{Eq: &fulfilled}},
 		&orm.OrderUpdate{Status: &shipped})
 	if err != nil {
-		return fmt.Errorf("ship the placed orders: %w", err)
+		return fmt.Errorf("ship the fulfilled orders: %w", err)
 	}
-	j.Logger.Info("shipped the placed orders", zap.Int("orders", n))
+	j.Logger.Info("shipped the fulfilled orders", zap.Int("orders", n))
 	return nil
 }

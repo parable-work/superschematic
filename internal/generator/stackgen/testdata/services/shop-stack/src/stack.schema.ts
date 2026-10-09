@@ -22,7 +22,9 @@ export abstract class Orders {}
   settings: [
     { of: Orders, env: { FULFILLMENT_REGION: "us" } },
     // shop-orders' job runs hourly, in New York's time.
-    { of: ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone: "America/New_York" }
+    { of: ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone: "America/New_York" },
+    // shop-orders' worker handles eight messages at a time.
+    { of: ShopOrders, worker: "FulfilOrders", concurrency: 8 }
   ]
 })
 export abstract class Staging {}
@@ -36,7 +38,8 @@ export abstract class Staging {}
     { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
     { of: ShopOrders, env: { FULFILLMENT_REGION: "us" } },
     { of: ShopOrders, job: "ShipOrders", cpu: "2" },
-    { of: ShopMedia, versioning: true }
+    { of: ShopMedia, versioning: true },
+    { of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }
   ]
 })
 export abstract class Production {}

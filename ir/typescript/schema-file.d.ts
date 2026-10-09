@@ -80,11 +80,14 @@ export interface DeployableRef {
   deployable?: string;
   job?: string;
   service?: ServiceRef;
+  worker?: string;
 }
 
 export interface DeployableSettings {
+  concurrency?: number;
   enabled?: boolean;
   env?: { [key: string]: EnvValue };
+  instances?: number;
   of: DeployableRef;
   platform?: string;
   schedule?: string;
@@ -118,6 +121,7 @@ export interface Document {
   scalars?: { [key: string]: ScalarDef };
   types?: { [key: string]: TypeDef };
   unions?: { [key: string]: UnionDef };
+  workers?: Worker[];
 }
 
 export interface EnumDef {
@@ -422,6 +426,12 @@ export interface PruneReference {
   versionColumn: string;
 }
 
+export interface QueueDef {
+  backoff?: string;
+  lease?: string;
+  retries?: number;
+}
+
 export interface RawHeritage {
   extends?: string;
   implements?: string[];
@@ -545,6 +555,7 @@ export interface TypeDef {
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
+  queue?: QueueDef;
   rawHeritage?: RawHeritage;
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
   server?: ServerDecl;
@@ -627,4 +638,12 @@ export interface VersionedConfig {
   partitionBy?: string;
   pruneKeepReferencedBy?: PruneReference[];
   retentionDays?: number;
+}
+
+export interface Worker {
+  comment?: string;
+  concurrency?: number;
+  grace?: string;
+  name: string;
+  queue: string;
 }

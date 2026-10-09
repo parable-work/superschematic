@@ -17,3 +17,12 @@ types:
       - name: name
         typeRef: { name: string }
         required: true
+  # A queue's message (D53): shop-orders' worker FulfilOrders handles it.
+  OrderPlaced:
+    name: OrderPlaced
+    role: EmbeddedStruct
+    queue: { retries: 2, backoff: 10s }
+    fields:
+      - name: orderId
+        typeRef: { name: Identity.UUID }
+        required: true

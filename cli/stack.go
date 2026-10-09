@@ -492,7 +492,8 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 }
 
 // printLocalSummary prints where each server, site and database of a
-// running local environment is reached, and when each job runs.
+// running local environment is reached, when each job runs, and what each
+// worker handles.
 func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string) {
 	var lines []string
 	for _, d := range env.Deployables {
@@ -509,6 +510,10 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			if address, ok := d.PublicAddress.(string); ok {
 				lines = append(lines, fmt.Sprintf("  site     %-24s %s", d.Name, address))
 			}
+		case d.Kind == ir.DeployableWorker && d.Worker != nil && d.Worker.Instances == 0:
+			lines = append(lines, fmt.Sprintf("  worker   %-24s off: queue %s waits", d.Name, d.Worker.Queue))
+		case d.Kind == ir.DeployableWorker && d.Worker != nil:
+			lines = append(lines, fmt.Sprintf("  worker   %-24s handles %s of %s, %d at a time", d.Name, d.Worker.Queue, d.Worker.Database, d.Worker.Concurrency))
 		}
 	}
 	for _, res := range env.Resources.Resources {

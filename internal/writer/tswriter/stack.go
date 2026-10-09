@@ -80,13 +80,17 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 	return objectLiteral(parts)
 }
 
-// settingsLiteral renders one settings element: of, a job's name beside its
-// API's handle, platform, a job's schedule, timeZone and enabled, env, and
-// the platform settings in every other key.
+// settingsLiteral renders one settings element: of, a job's or a worker's
+// name beside its API's handle, platform, a job's schedule, timeZone and
+// enabled, a worker's instances, concurrency and enabled, env, and the
+// platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
 	if settings.Of.Job != "" {
 		parts = append(parts, "job: "+quote(settings.Of.Job))
+	}
+	if settings.Of.Worker != "" {
+		parts = append(parts, "worker: "+quote(settings.Of.Worker))
 	}
 	if settings.Platform != "" {
 		parts = append(parts, "platform: "+quote(settings.Platform))
@@ -100,9 +104,15 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	if settings.Enabled != nil {
 		parts = append(parts, fmt.Sprintf("enabled: %t", *settings.Enabled))
 	}
+	if settings.Instances != nil {
+		parts = append(parts, fmt.Sprintf("instances: %d", *settings.Instances))
+	}
+	if settings.Concurrency != nil {
+		parts = append(parts, fmt.Sprintf("concurrency: %d", *settings.Concurrency))
+	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
-		case "of", "job", "platform", "env", "schedule", "timeZone", "enabled":
+		case "of", "job", "worker", "platform", "env", "schedule", "timeZone", "enabled", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}
@@ -149,6 +159,8 @@ func (e *emitter) deployableRef(owner string, ref ir.DeployableRef) string {
 		return e.handle(*ref.Service)
 	case ref.Job != "":
 		e.failf("%s names job %s of no API service; the TypeScript form writes a job beside its API's handle", owner, ref.Job)
+	case ref.Worker != "":
+		e.failf("%s names worker %s of no API service; the TypeScript form writes a worker beside its API's handle", owner, ref.Worker)
 	case ref.Deployable != "":
 		return e.ident(ref.Deployable, "deployable")
 	default:

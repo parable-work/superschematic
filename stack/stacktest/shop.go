@@ -10,11 +10,12 @@ import (
 // (examples/acme-shop/schemas/services) as the resolver reads them. The
 // names, kinds, `authDb`, dependencies, `buckets` and languages are those
 // of the services' schema configs, and the operations, with their user
-// clauses, and shop-orders' job, ShipOrders, those of the services' schema
-// files. shop-api lists the Bucket service shop-media, where its product
-// images go (D54). The services declare no `calls` and no `@envVars` yet,
-// so the fixture adds them: shop-orders calls shop-api, and both APIs'
-// configs extend PaymentsSecrets, as in docs/stack-model.md, section 4.2.
+// clauses, shop-orders' job, ShipOrders, and worker, FulfilOrders, and
+// shop-db's queue, OrderPlaced, those of the services' schema files.
+// shop-api lists the Bucket service shop-media, where its product images
+// go (D54). The services declare no `calls` and no `@envVars` yet, so the
+// fixture adds them: shop-orders calls shop-api, and both APIs' configs
+// extend PaymentsSecrets, as in docs/stack-model.md, section 4.2.
 func AcmeShop() []stack.Service {
 	def := func(v string) *string { return &v }
 	user := func(name string) stack.Operation { return stack.Operation{Name: name, UserClause: true} }
@@ -22,7 +23,7 @@ func AcmeShop() []stack.Service {
 	shopDB := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	return []stack.Service{
 		{Name: "shop-common", Kind: ir.SchemaKindGeneral},
-		{Name: "shop-db", Kind: ir.SchemaKindDB},
+		{Name: "shop-db", Kind: ir.SchemaKindDB, Queues: []string{"OrderPlaced"}},
 		{Name: "shop-media", Kind: ir.SchemaKindBucket},
 		{
 			Name:     "shop-api",
@@ -62,7 +63,8 @@ func AcmeShop() []stack.Service {
 				user("OrderMutations.placeOrder"), user("OrderMutations.cancelOrder"),
 				open("ProductReviews.listReviews"), user("ProductReviews.writeReview"),
 			},
-			Jobs: []ir.Job{ShipOrders},
+			Jobs:    []ir.Job{ShipOrders},
+			Workers: []ir.Worker{FulfilOrders},
 		},
 		{
 			Name:         "shop-storefront",
@@ -153,6 +155,32 @@ func WithoutJobs(services []stack.Service) []stack.Service {
 	return out
 }
 
+// WithoutWorkers returns services with no workers and no queues: the shop
+// for a target that places no worker yet (D53).
+func WithoutWorkers(services []stack.Service) []stack.Service {
+	out := make([]stack.Service, len(services))
+	for i, svc := range services {
+		svc.Workers, svc.Queues = nil, nil
+		out[i] = svc
+	}
+	return out
+}
+
+// WithoutWorkerSettings returns s with no settings element that names a
+// worker, to resolve over services WithoutWorkers returns.
+func WithoutWorkerSettings(s *ir.Stack) *ir.Stack {
+	for _, env := range s.Environments {
+		var kept []*ir.DeployableSettings
+		for _, settings := range env.Settings {
+			if settings == nil || settings.Of.Worker == "" {
+				kept = append(kept, settings)
+			}
+		}
+		env.Settings = kept
+	}
+	return s
+}
+
 // WithoutJobSettings returns s with no settings element that names a job,
 // to resolve over services WithoutJobs returns.
 func WithoutJobSettings(s *ir.Stack) *ir.Stack {
@@ -211,12 +239,27 @@ var ShipOrders = ir.Job{Name: "ShipOrders", Schedule: "*/15 * * * *", Timeout: "
 
 const ShipOrdersJob = "shop-orders-ship-orders"
 
+// FulfilOrders is shop-orders' worker (D53): it handles each OrderPlaced
+// message of shop-db's queue, four at a time. FulfilOrdersWorker is its
+// deployable's name.
+var FulfilOrders = ir.Worker{Name: "FulfilOrders", Queue: "OrderPlaced", Concurrency: 4}
+
+const FulfilOrdersWorker = "shop-orders-fulfil-orders"
+
+// intp is a pointer to n, for a setting that takes one.
+func intp(n int) *int { return &n }
+
 // Of names the deployable that hosts or serves a service.
 func Of(ref ir.ServiceRef) ir.DeployableRef { return ir.DeployableRef{Service: &ref} }
 
 // JobOf names a job of an API service.
 func JobOf(ref ir.ServiceRef, job string) ir.DeployableRef {
 	return ir.DeployableRef{Service: &ref, Job: job}
+}
+
+// WorkerOf names a worker of an API service.
+func WorkerOf(ref ir.ServiceRef, worker string) ir.DeployableRef {
+	return ir.DeployableRef{Service: &ref, Worker: worker}
 }
 
 // Shop returns the stack of docs/stack-model.md, section 4.1, on the fake
@@ -229,7 +272,10 @@ func JobOf(ref ir.ServiceRef, job string) ir.DeployableRef {
 // Staging, on its decorator's schedule and two CPUs in Production, and on
 // none in Preview, whose members run no schedule they do not turn on.
 // shop-api's bucket, shop-media, joins the stack through its buckets, and
-// keeps its objects' versions in Production (D54).
+// keeps its objects' versions in Production (D54). shop-orders' worker
+// FulfilOrders handles eight messages at a time in Staging, and in
+// Preview, which extends it; Production runs three instances of it with a
+// gigabyte each.
 func Shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "shop-stack",
@@ -250,6 +296,7 @@ func Shop() *ir.Stack {
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: JobOf(ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
+					{Of: WorkerOf(ShopOrders, "FulfilOrders"), Concurrency: intp(8)},
 				},
 			},
 			{
@@ -263,6 +310,7 @@ func Shop() *ir.Stack {
 					{Of: Of(ShopOrders), Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: JobOf(ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2"}},
 					{Of: Of(ShopMedia), Values: map[string]any{"versioning": true}},
+					{Of: WorkerOf(ShopOrders, "FulfilOrders"), Instances: intp(3), Values: map[string]any{"memory": "1Gi"}},
 				},
 			},
 			{
