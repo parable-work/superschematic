@@ -1221,7 +1221,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | Stack concept | gcp |
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
 | job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or the job's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service or the job mounts |
@@ -1377,8 +1377,21 @@ The target sets defaults that `settings` can override:
 - one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
   `minInstances`, `maxInstances`, `concurrency`), and one CPU and 512 MiB
   per job's task (`cpu`, `memory`);
+- a server's CPU allocated only while an instance handles a request
+  (`cpuAlwaysAllocated`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
+
+Cloud Run allocates a service's CPU only while it handles a request, and
+bills its instances for that time and their starts and stops, unless the
+service sets its resources, as every server's does for `cpu` and
+`memory`: then only `cpuIdle` keeps that, and without it each instance
+keeps its CPU and is billed for its whole life. The Cloud Run platform
+sets `cpuIdle` unless the server's settings set `cpuAlwaysAllocated:
+true`, for a server that works between requests, in goroutines of its own
+or on the warm instances `minInstances` keeps. Cloud Run takes a `cpu`
+below 1 only with `cpuIdle`. A job's task always has its CPU (D30,
+amended).
 
 ### 7.6 Policy rules
 
