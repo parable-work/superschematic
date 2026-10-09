@@ -140,7 +140,7 @@ export function projectClient(client: EngineClient): ProjectClient {
 
 // The Spec schema.
 
-/** A Spec's own fields, as a create gives them. A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema. */
+/** A Spec's own fields, as a create gives them. A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema, and it is final once a principal with specs.approve signs off. */
 export type SpecFields = {
   /** What the spec specifies. */
   title: string;
@@ -165,6 +165,10 @@ export type SpecBehaviors = {
   readonly Dependencies: {
     /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
     readonly blocked: boolean;
+  };
+  readonly Approvals: {
+    /** The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent. */
+    readonly gates: { final?: { signedBy: string[] } };
   };
 };
 
@@ -432,6 +436,73 @@ export type SpecListDependentsResult = {
   next: string | null;
 };
 
+/** The parameters of Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+export type SpecSignOffParams = {
+  /** Why, for the others. */
+  note?: string;
+  /** The gated state to sign off for. */
+  state: 'final';
+};
+
+/** The sign-off, with the gate's sign-offs after it and the count it needs. */
+export type SpecSignOffResult = {
+  /** When, in epoch milliseconds. */
+  at: number;
+  /** How many the gate needs. */
+  count: number;
+  note?: string;
+  /** Every subject whose sign-off for the state is not yet consumed, in the order they signed. */
+  signedBy: string[];
+  /** The gated state. */
+  state: 'final';
+  /** The subject of the caller who signed. */
+  subject: string;
+};
+
+/** The parameters of Approvals' withdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. */
+export type SpecWithdrawSignOffParams = {
+  /** The gated state whose sign-off to withdraw. */
+  state: 'final';
+};
+
+/** The sign-off withdrawn. */
+export type SpecWithdrawSignOffResult = {
+  /** When it was signed, in epoch milliseconds. */
+  at: number;
+  note?: string;
+  /** The gated state. */
+  state: 'final';
+  /** The subject of the caller who signed. */
+  subject: string;
+};
+
+/** The parameters of Approvals' listSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
+export type SpecListSignOffsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** At most this many sign-offs; 50 when absent. */
+  limit?: number;
+  /** Only sign-offs for this state. */
+  state?: string;
+};
+
+/** What Approvals' listSignOffs returns. */
+export type SpecListSignOffsResult = {
+  items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** When a change of the own fields, entering the state or a new version without its gate consumed it; absent while it counts. */
+    consumedAt?: number;
+    note?: string;
+    /** The gated state. */
+    state: string;
+    /** The subject of the caller who signed. */
+    subject: string;
+  }>;
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
 /** Each operation a Spec's behaviors add: its scope, parameters and result. */
 export type SpecOperations = {
   transition: { scope: 'instance'; params: SpecTransitionParams; result: SpecTransitionResult };
@@ -445,16 +516,20 @@ export type SpecOperations = {
   removeBlocker: { scope: 'instance'; params: SpecRemoveBlockerParams; result: SpecRemoveBlockerResult };
   listBlockers: { scope: 'instance'; params: SpecListBlockersParams; result: SpecListBlockersResult };
   listDependents: { scope: 'instance'; params: SpecListDependentsParams; result: SpecListDependentsResult };
+  signOff: { scope: 'instance'; params: SpecSignOffParams; result: SpecSignOffResult };
+  withdrawSignOff: { scope: 'instance'; params: SpecWithdrawSignOffParams; result: SpecWithdrawSignOffResult };
+  listSignOffs: { scope: 'instance'; params: SpecListSignOffsParams; result: SpecListSignOffsResult };
 };
 
 /** The name of an operation on one Spec. */
-export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents' | 'signOff' | 'withdrawSignOff' | 'listSignOffs';
 
 /** The codes the vetoes of a Spec's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type SpecVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Revisions: 'no_review' | 'not_pending';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
+  Approvals: 'approvals_missing' | 'already_signed' | 'creator_cannot_sign' | 'in_state' | 'no_gate' | 'not_signed';
 };
 
 /** A Spec create's options: its id, and each behavior's create parameters. */
@@ -504,6 +579,12 @@ export interface SpecClient {
   listBlockers(id: string, params?: SpecListBlockersParams, options?: SpecWriteOptions): Promise<SpecListBlockersResult>;
   /** Dependencies' listDependents: Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time. */
   listDependents(id: string, params?: SpecListDependentsParams, options?: SpecWriteOptions): Promise<SpecListDependentsResult>;
+  /** Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+  signOff(id: string, params: SpecSignOffParams, options?: SpecWriteOptions): Promise<SpecSignOffResult>;
+  /** Approvals' withdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. */
+  withdrawSignOff(id: string, params: SpecWithdrawSignOffParams, options?: SpecWriteOptions): Promise<SpecWithdrawSignOffResult>;
+  /** Approvals' listSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
+  listSignOffs(id: string, params?: SpecListSignOffsParams, options?: SpecWriteOptions): Promise<SpecListSignOffsResult>;
 }
 
 /** specClient wraps an EngineClient with the Spec schema's types. */
@@ -559,6 +640,15 @@ export function specClient(client: EngineClient): SpecClient {
     },
     listDependents(id, params, options) {
       return client.instances.invoke<SpecListDependentsResult>('Spec', id, 'listDependents', params ?? {}, options);
+    },
+    signOff(id, params, options) {
+      return client.instances.invoke<SpecSignOffResult>('Spec', id, 'signOff', params, options);
+    },
+    withdrawSignOff(id, params, options) {
+      return client.instances.invoke<SpecWithdrawSignOffResult>('Spec', id, 'withdrawSignOff', params, options);
+    },
+    listSignOffs(id, params, options) {
+      return client.instances.invoke<SpecListSignOffsResult>('Spec', id, 'listSignOffs', params ?? {}, options);
     },
   };
 }

@@ -51,6 +51,7 @@ for (const driver of drivers) {
       assert.equal(DEFAULT_TTL_MS, 60000);
       const engine = openTestEngine({ driver });
       assert.deepEqual(engine.behaviors.names(), [
+        'Approvals',
         'Assignment',
         'Blueprint',
         'Branches',

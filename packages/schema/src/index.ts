@@ -25,6 +25,8 @@ export { display } from "./display";
 export type { DisplayConfig, DisplayState, DisplayTone } from "./display";
 export { behavior } from "./behavior";
 export type {
+  ApprovalsConfig,
+  ApprovalsGate,
   AssignmentConfig,
   BehaviorConfigArg,
   BehaviorConfigs,

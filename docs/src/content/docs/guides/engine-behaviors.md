@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches and Approvals behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares eighteen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements eleven itself
+The core declares nineteen behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements twelve itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -39,6 +39,7 @@ schema that composes one until a deployment registers that package.
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
+| `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -1003,6 +1004,56 @@ engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the re
   `releaseCommit`, not `release`, because `Lease` has `release`, so a
   type composes both. Lease's guard then holds `Branches`' writes to the
   lease's holder, as it holds any writing operation
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## Approvals
+
+Sign-offs that gate the type's Workflow: an expense is not approved
+until two managers have signed it off, and not paid until finance has.
+
+| | |
+| --- | --- |
+| Config | `gates`: by state of the type's Workflow, `{ count, permission, from?, excludeCreator? }`: how many distinct principals must sign off, the permission each needs, the states a move from is gated (every state when absent), and whether the instance's creator is refused (`true` when absent); `resetOnChange` (`true` when absent) |
+| Field | `gates`: `{ <state>: { signedBy } }`, the subjects whose sign-offs count, in the order they signed; a gate with none is absent |
+| Operations | `signOff({ state, note? })`, `withdrawSignOff({ state })`, and the read-only `listSignOffs({ state?, limit?, cursor? })`, which lists the consumed ones too, with `consumedAt` |
+| Guard | a transition into a gated state, from a state its `from` allows, with fewer sign-offs than `count` is `vetoed` (`approvals_missing`), with `{ state, required, count }` in `details.details` |
+| Vetoes | `no_gate`, a state the config does not gate; `in_state`, a sign-off for the state the instance is in; `creator_cannot_sign`; `already_signed`; `not_signed`, a withdrawal with no sign-off to withdraw. A caller without the gate's permission is `forbidden` (403) |
+
+On an `expenses` schema whose claims move from `submitted` to
+`approved` and on to `paid`:
+
+```json
+{ "name": "Approvals", "config": { "gates": {
+    "approved": { "count": 2, "permission": "expenses.approve" },
+    "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] } } } }
+```
+
+```ts
+engine.instances.invoke(ann, 'expenses', 'trip', 'signOff', { state: 'approved' });
+// { state: 'approved', subject: 'ann', at: 1760000000000, signedBy: ['ann'], count: 2 }
+engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals;
+// { gates: { approved: { signedBy: ['ann'] } } }
+```
+
+- **What consumes a sign-off.** A change of the instance's own fields, an
+  update or another behavior's write such as `Revisions`' `approve`,
+  consumes every gate's sign-offs, so what was signed is what moves;
+  `resetOnChange: false` keeps them. Entering a gated state consumes its
+  own, whoever moves the instance (a caller, `Reactions` on the runner,
+  another behavior), so a claim sent back to `submitted` is signed again
+  before it is approved again.
+- **Who signs.** A sign-off is the caller's, by subject, so one principal
+  counts once. Nobody signs for the state the instance is in, and the
+  instance's creator not at all unless `excludeCreator` is `false`. The
+  count a gate needs stays in the config: a new version that changes it
+  applies to the sign-offs already given.
+- **New versions.** Gates may be added, changed and removed; a removed
+  gate's sign-offs are consumed. `Approvals` can be added to a schema
+  with instances, and not removed from one.
+- **Deleting.** Deleting an instance deletes its sign-offs.
+- **Lease.** On a leased type, list `Approvals.signOff` and
+  `Approvals.withdrawSignOff` in `Lease`'s `exempt`, or the lease refuses
+  every principal but its holder
   ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ## Where to go next

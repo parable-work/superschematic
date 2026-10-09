@@ -45,6 +45,8 @@ export interface BehaviorConfigs {
   Variants: VariantsConfig;
   /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
   Branches: BranchesConfig;
+  /** Sign-offs by distinct principals that gate states of the type's Workflow; it requires Workflow. */
+  Approvals: ApprovalsConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -329,6 +331,29 @@ export interface BranchesSweep {
   readonly pruneBatch?: number;
   /** Discards a draft with no write for this many milliseconds; none when absent. */
   readonly abandonAfter?: number;
+}
+
+/** Approvals' config. */
+export interface ApprovalsConfig {
+  /** The gates, by the state of the type's Workflow each gates: a transition into it waits for its sign-offs. */
+  readonly gates: Readonly<Record<string, ApprovalsGate>>;
+  /**
+   * Whether a change of the instance's own fields, an update or an
+   * operation's, consumes every gate's sign-offs; true when absent.
+   */
+  readonly resetOnChange?: boolean;
+}
+
+/** One gate of an Approvals config. */
+export interface ApprovalsGate {
+  /** How many distinct principals must sign off before a transition into the state: 1 to 100. */
+  readonly count: number;
+  /** The permission a caller needs to sign off. */
+  readonly permission: string;
+  /** The states of the type's Workflow a transition from is gated; every state when absent. */
+  readonly from?: readonly string[];
+  /** Whether the principal who created the instance is refused a sign-off; true when absent. */
+  readonly excludeCreator?: boolean;
 }
 
 /** Lease's config. */

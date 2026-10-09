@@ -68,6 +68,79 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Approvals"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "gates": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "description": "How many distinct principals must sign off before a transition into the state.",
+                          "maximum": 100,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "excludeCreator": {
+                          "description": "Whether the principal who created the instance is refused a sign-off; true when absent.",
+                          "type": "boolean"
+                        },
+                        "from": {
+                          "description": "The states of the type's Workflow a transition from is gated; every state when absent.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "permission": {
+                          "description": "The permission a caller needs to sign off.",
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "permission"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "The gates, by the state of the type's Workflow each gates.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
+                  },
+                  "resetOnChange": {
+                    "description": "Whether a change of the instance's own fields, an update or an operation's, consumes every gate's sign-offs; true when absent.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "gates"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Assignment"
               }
             }
@@ -1775,6 +1848,7 @@
         },
         "name": {
           "enum": [
+            "Approvals",
             "Assignment",
             "Blueprint",
             "Branches",
