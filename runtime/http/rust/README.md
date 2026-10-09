@@ -8,7 +8,8 @@ This crate provides:
   (`principal`) on a route that needs one, the calling service
   (`service_caller`), and the end user's token to forward (`bearer_token`)
 - `ApiError` and `error_response`: a refusal as an RFC 9457 problem
-  (`application/problem+json`), with `details` and `errors` members
+  (`application/problem+json`), with `details` and `errors` members, and
+  the response headers it carries (`with_header`)
 - `request_ids`: the middleware the generated router runs around every
   route, which settles the request's id (`X-Request-ID` or a fresh UUID),
   echoes it in `x-request-id`, adds it to a problem body and marks every
