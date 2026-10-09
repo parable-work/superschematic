@@ -54,4 +54,21 @@ export class EngineValues {
   get thresholdBytes(): number {
     return valuesOf(this.storage).threshold;
   }
+
+  /** The longest value the store keeps (values.maxBytes); a write of a longer one is value_too_large. */
+  get maxBytes(): number {
+    return valuesOf(this.storage).maxBytes;
+  }
+
+  /**
+   * sweep removes each value the driver stores that no holder references,
+   * what a crash left between a write through a driver outside the file's
+   * transactions and the end of that transaction, and returns how many.
+   * It acts for no principal, as retention's prune does, so it takes none;
+   * it needs a driver that lists its hashes (ValueDriver.list, which the
+   * default has) and no open transaction.
+   */
+  sweep(): { removed: number } {
+    return valuesOf(this.storage).sweep();
+  }
 }

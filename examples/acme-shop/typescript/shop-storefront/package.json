@@ -1,0 +1,23 @@
+{
+  "name": "@acme/shop-storefront-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the shop-storefront API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@acme/shop-storefront-api": "workspace:*",
+    "@acme/shop-storefront-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@acme/shop-storefront-sdk": "workspace:*",
+    "@types/node": "22.19.9",
+    "hono": "4.13.8",
+    "typescript": "5.9.3"
+  }
+}

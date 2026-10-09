@@ -209,6 +209,27 @@
         ]
       },
       {
+        "id": "deployer.role.cloudscheduler-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudscheduler.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "deployer.role.cloudsql-admin",
         "type": "gcp:projects/iAMMember:IAMMember",
         "properties": {
@@ -325,6 +346,27 @@
           },
           "project": "acme-staging",
           "role": "roles/iam.serviceAccountUser"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.logging-viewer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/logging.viewer"
         },
         "dependsOn": [
           "deployer"
@@ -787,12 +829,14 @@
         "deployer.role.artifactregistry-writer",
         "deployer.role.certificatemanager-owner",
         "deployer.role.cloudbuild-builds-editor",
+        "deployer.role.cloudscheduler-admin",
         "deployer.role.cloudsql-admin",
         "deployer.role.compute-loadBalancerAdmin",
         "deployer.role.compute-networkAdmin",
         "deployer.role.dns-admin",
         "deployer.role.iam-serviceAccountAdmin",
         "deployer.role.iam-serviceAccountUser",
+        "deployer.role.logging-viewer",
         "deployer.role.resourcemanager-projectIamAdmin",
         "deployer.role.run-admin",
         "deployer.role.secretmanager-admin",

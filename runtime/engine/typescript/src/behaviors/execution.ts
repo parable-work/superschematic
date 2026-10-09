@@ -20,8 +20,11 @@ on other instances and create; a read-only operation gets one whose
 writes refuse and whose call() and invoke reach only read-only
 operations. An operation's context also has update(), which changes the
 instance's own fields with instances.update's checks and every guard,
-and validateUpdate(). A called operation runs in a savepoint, so a
-failure the caller catches leaves nothing of it behind.
+validateUpdate(), and unchanged(), with which a handler says the call
+changed nothing, so the engine appends no event for it; operate holds
+the claim to the rows the connection wrote meanwhile (Storage.changes),
+and one that wrote any is a BehaviorError. A called operation runs in a
+savepoint, so a failure the caller catches leaves nothing of it behind.
 
 A guard vetoes with a reason, or a Veto with a code its declaration lists
 (vetoes) and details; a handler, initialize and afterChange throw a
@@ -89,7 +92,7 @@ import type { EngineEvent, EventCause } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
 import { pointer } from '../registry/document.js';
-import { readOnlyIssue } from '../registry/validator.js';
+import { type NormalizeMode, type Normalized } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import type { SqlMode } from './sql.js';
@@ -124,6 +127,7 @@ import type {
   WritableColumns,
 } from './behavior.js';
 import type { BoundBehavior, Composition } from './composition.js';
+import { fieldPath, type BehaviorFields, type InstanceFields } from './fields.js';
 import { deepFreeze, jsonCopy } from './json.js';
 import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
 import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous, type InstanceRelation } from './storage.js';
@@ -144,6 +148,8 @@ export type Preconditions = ReadonlyMap<string, FrozenJSON>;
 /** Checks an instance's own fields against the live version (registry/validator.ts). */
 export interface InstanceValidator {
   validate(value: unknown): ValidationIssue[];
+  /** The own fields a write stores, as the schema's parse makes them, with what a scalar's parser refused (registry/validator.ts). */
+  normalize(value: unknown, mode: NormalizeMode): Normalized;
   /** Checks a value against one of the document's types besides the instance type, with issues under path. */
   validateType(type: string, value: unknown, path: string): ValidationIssue[];
 }
@@ -254,8 +260,8 @@ export interface Reach {
   ): InstanceRecord;
   /** Asks read on a schema, as a read of its instances does; throws forbidden on a refusal. */
   allowRead(chain: Chain, schema: string): void;
-  /** The instance of an event as the log had it just before the event; asks read on its schema. */
-  before(chain: Chain, from: string, event: EngineEvent): FrozenJSON | undefined;
+  /** The instance of an event as the log had it just before the event, { data, behaviors }; asks read on its schema. */
+  before(chain: Chain, from: string, event: EngineEvent): InstanceFields | undefined;
   /** The config of a behavior a schema's live version composes, as the schema holds it; asks read unless the schema is own. */
   config(chain: Chain, own: string, schema: string, behavior: string): unknown;
   /** Whether the principal may read a schema. */
@@ -416,24 +422,31 @@ export class Execution {
 
   /**
    * fields reads the behaviors' declared fields, every one or the ones
-   * named: a JSON value by field name, none for undefined or null.
+   * named by qualified name (`Workflow.status`): by behavior name, in the
+   * type's behavior order, an object of the behavior's fields that have a
+   * value, in its declaration's order, none for undefined or null. A
+   * behavior that declares no field, or none of the ones named, has no
+   * entry.
    */
-  fields(only?: readonly string[]): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
+  fields(only?: readonly string[]): BehaviorFields {
+    const out: Record<string, Record<string, unknown>> = {};
     for (const bound of this.composition.behaviors) {
-      const wanted = only === undefined ? bound.behavior.fields : bound.behavior.fields.filter((field) => only.includes(field.name));
+      const name = bound.behavior.name;
+      const wanted = only === undefined ? bound.behavior.fields : bound.behavior.fields.filter((field) => only.includes(fieldPath(name, field.name)));
       if (wanted.length === 0) {
         continue;
       }
-      const view = this.view(bound);
+      const view = this.fieldView(bound);
+      const entry: Record<string, unknown> = {};
       for (const field of wanted) {
         const value: unknown = field.read.call(bound.behavior.implementation.fields, view);
-        synchronous(bound.behavior.name, `field ${field.name}`, value);
+        synchronous(name, `field ${field.name}`, value);
         if (value === undefined || value === null) {
           continue;
         }
-        setMember(out, field.name, json(bound.behavior.name, `field ${field.name}`, value));
+        setMember(entry, field.name, json(name, `field ${field.name}`, value));
       }
+      setMember(out, name, entry);
     }
     return out;
   }
@@ -445,18 +458,37 @@ export class Execution {
    * its behavior as caller and has no preconditions.
    */
   invoke(operation: OperationSpec, params: FrozenJSON, caller?: string, preconditions?: Preconditions): unknown {
+    return this.operate(operation, params, caller, preconditions).result;
+  }
+
+  /**
+   * operate is invoke, saying also whether the handler said it changed
+   * nothing (OperationContext.unchanged), which the engine has held to the
+   * rows the call wrote: none.
+   */
+  operate(operation: OperationSpec, params: FrozenJSON, caller?: string, preconditions?: Preconditions): { result: unknown; unchanged: boolean } {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
       const request = { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, writes: operation.writes } as const;
       this.guard(caller === undefined ? request : { ...request, caller }, operation.writes, caller === undefined ? preconditions : undefined);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
+      const said = { unchanged: false };
+      // A read-only operation writes nothing, and its claim means nothing.
+      const before = operation.writes ? this.storage.changes() : 0;
       const result: unknown = declaredVetoes(this.composition, () =>
         (operation.handler as OperationHandler<unknown>).call(
           bound.behavior.implementation.operations,
-          this.operationContext(bound, operation.writes && this.writable),
+          this.operationContext(bound, operation.writes && this.writable, said),
           params
         )
       );
-      return checkResult(operation, result);
+      const checked = checkResult(operation, result);
+      if (said.unchanged && operation.writes && this.storage.changes() !== before) {
+        throw new BehaviorError(
+          operation.behavior.name,
+          `operation ${operation.name} said it changed nothing (unchanged()), and it wrote: a call that writes appends its event`
+        );
+      }
+      return { result: checked, unchanged: said.unchanged && operation.writes };
     });
   }
 
@@ -467,6 +499,19 @@ export class Execution {
    */
   view(bound: BoundBehavior): InstanceView<unknown> {
     return this.frozen(this.viewMembers(bound, false));
+  }
+
+  // fieldView is the view a read's field readers share: its columns are
+  // read once for all of them, since a reader writes nothing, and each
+  // get() returns its own copy.
+  private fieldView(bound: BoundBehavior): InstanceView<unknown> {
+    const columns = this.columns(bound, 'reading');
+    let read: Record<string, SqlValue> | undefined;
+    const once: WritableColumns = {
+      get: () => ({ ...(read ??= columns.get()) }),
+      set: (values) => columns.set(values),
+    };
+    return this.frozen({ ...this.viewMembers(bound, false), columns: once });
   }
 
   /** referenceContext is a view whose instances.invoke also runs writing operations: afterReferenceChange's. */
@@ -532,29 +577,22 @@ export class Execution {
   }
 
   // merge applies a behavior's merge patch to a copy of the instance's own
-  // fields and lists what update() would refuse: a behavior's field, then
-  // whatever the live version refuses in the result, then whatever the
-  // behaviors' validate refuses in it.
+  // fields and lists what update() would refuse: whatever the live version
+  // refuses in the result, then whatever the behaviors' validate refuses in
+  // it. A behavior's fields are no member of the patch's: they sit under
+  // the behavior's name, apart from the own fields.
   private merge(from: BoundBehavior, patch: unknown): { patch: Record<string, unknown>; merged: Record<string, unknown>; issues: ValidationIssue[] } {
     const copied = jsonCopy(patch);
     if (!('value' in copied) || !isPlainObject(copied.value)) {
       throw new BehaviorError(from.behavior.name, 'update() takes a JSON merge patch of the instance: a JSON object');
     }
-    const value = copied.value;
-    const issues: ValidationIssue[] = [];
-    for (const key of Object.keys(value)) {
-      const owner = this.composition.fields.get(key);
-      if (owner !== undefined) {
-        issues.push(readOnlyIssue(key, owner.behavior.name));
-      }
-    }
+    // The patch's values as the version stores them; it fills no default.
+    const normalized = this.runtime.validator.normalize(copied.value, 'patch');
+    const value = normalized.value as Record<string, unknown>;
     const merged = mergePatch(this.data, value) as Record<string, unknown>;
-    if (issues.length > 0) {
-      return { patch: value, merged, issues };
-    }
     const own = this.runtime.validator.validate(merged);
-    if (own.length > 0) {
-      return { patch: value, merged, issues: own };
+    if (own.length > 0 || normalized.issues.length > 0) {
+      return { patch: value, merged, issues: own.length > 0 ? own : normalized.issues };
     }
     const request: ValidationRequest = { kind: 'update', before: this.data, after: freezeCopy(merged), caller: from.behavior.name };
     return { patch: value, merged, issues: validationIssues(this.runtime, this.chain, this.target, request) };
@@ -596,13 +634,17 @@ export class Execution {
   }
 
   // operationContext is an operation handler's context: a context with
-  // update() and validateUpdate().
-  private operationContext(bound: BoundBehavior, writes: boolean): OperationContext<unknown> {
+  // update(), validateUpdate() and unchanged(), which records the claim
+  // in said for operate to hold to what the call wrote.
+  private operationContext(bound: BoundBehavior, writes: boolean, said: { unchanged: boolean }): OperationContext<unknown> {
     const writable = writes && this.writable;
     return this.frozen({
       ...this.contextMembers(bound, writable),
       update: (patch: FrozenJSON) => this.update(bound, writable, patch),
       validateUpdate: (patch: FrozenJSON) => this.merge(bound, patch).issues,
+      unchanged: () => {
+        said.unchanged = true;
+      },
     });
   }
 
@@ -947,8 +989,12 @@ function checkHears(behavior: string, hears: unknown): ReferenceHears {
   if (Object.keys(rest).length > 0) {
     throw refuse(`with no other member (${Object.keys(rest).join(', ')})`);
   }
-  if (typeof path !== 'string' || !/^(\/([^~/]|~[01])*)+$/.test(path)) {
-    throw refuse(`its path a JSON pointer to a member of the target's data, not ${JSON.stringify(path) ?? String(path)}`);
+  // A pointer into what a read returns of the target: /data/<field> or
+  // /behaviors/<behavior>/<field>, and on down.
+  if (typeof path !== 'string' || !/^(\/([^~/]|~[01])*)+$/.test(path) || !/^\/(data|behaviors\/([^~/]|~[01])+)\/./.test(path)) {
+    throw refuse(
+      `its path a JSON pointer into the target as a read returns it, /data/<field> or /behaviors/<behavior>/<field>, not ${JSON.stringify(path) ?? String(path)}`
+    );
   }
   if (crosses === undefined) {
     return { path };
@@ -970,8 +1016,10 @@ function fieldsOption(behavior: string, what: string, options: ReadOptions | und
   if (fields === undefined) {
     return undefined;
   }
-  if (!Array.isArray(fields) || fields.some((field) => typeof field !== 'string')) {
-    throw new BehaviorError(behavior, `${what}: fields is a list of behavior field names`);
+  // A behavior field's qualified name holds a dot, so a bare name, which
+  // names no behavior's field, is refused rather than read as none.
+  if (!Array.isArray(fields) || fields.some((field) => typeof field !== 'string' || !field.includes('.'))) {
+    throw new BehaviorError(behavior, `${what}: fields is a list of behavior fields by qualified name, <behavior>.<field> (Workflow.status)`);
   }
   return fields;
 }

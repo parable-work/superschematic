@@ -4,8 +4,8 @@
 // reservations settle lets its waiting work in at the next day; a scope
 // whose own scope link moves wakes what waits under it; a blocker is
 // heard only when its status moves; and excludeStale keeps work pinned to
-// a superseded revision out of claimNext and claim. Real SQLite, a real
-// engine, a clock the tests move.
+// a superseded revision or release out of claimNext and claim. Real
+// SQLite, a real engine, a clock the tests move.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -18,7 +18,21 @@ import {
 } from '@superschematic/engine';
 
 import { assignment, blueprint, budget, lease, presence, queue, retries } from '../dist/index.js';
-import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import {
+  Clock,
+  alice,
+  cleanup,
+  drivers,
+  fenced,
+  jobFlow,
+  jobsDocument,
+  openTestEngine,
+  publish,
+  recipesDocument,
+  releaseRecipe,
+  thrown,
+  type BehaviorRef,
+} from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -175,8 +189,12 @@ for (const driver of drivers) {
         engine.storage
           .all(`SELECT target_id, key, hears, crosses FROM engine_references WHERE source_id = ? AND behavior = 'Queue' ORDER BY rowid`, [id])
           .map((row) => ({ ...row }));
-      assert.deepEqual(heard('big1'), [{ target_id: 'p1', key: 'budget /budget/cpu/remaining 10', hears: '/budget/cpu/remaining', crosses: 10 }]);
-      assert.deepEqual(heard('small1'), [{ target_id: 'p1', key: 'budget /budget/cpu/remaining 5', hears: '/budget/cpu/remaining', crosses: 5 }]);
+      assert.deepEqual(heard('big1'), [
+        { target_id: 'p1', key: 'budget /behaviors/Budget/meters/cpu/remaining 10', hears: '/behaviors/Budget/meters/cpu/remaining', crosses: 10 },
+      ]);
+      assert.deepEqual(heard('small1'), [
+        { target_id: 'p1', key: 'budget /behaviors/Budget/meters/cpu/remaining 5', hears: '/behaviors/Budget/meters/cpu/remaining', crosses: 5 },
+      ]);
       // A claimed instance is no candidate, and hears nothing.
       claimNext(engine);
       assert.deepEqual(heard('a1'), []);
@@ -323,7 +341,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Job', 'j1', 'link', { name: 'spec', id: 'sp1' });
       assert.deepEqual(
         engine.storage.all(`SELECT key, hears, crosses FROM engine_references WHERE source_id = 'j1' AND behavior = 'Queue'`).map((row) => ({ ...row })),
-        [{ key: 'stale spec', hears: '/revision', crosses: 4 }]
+        [{ key: 'stale spec', hears: '/behaviors/Revisions/revision', crosses: 4 }]
       );
       assert.equal(claimNext(engine)?.id, 'j1');
     });
@@ -339,7 +357,7 @@ for (const driver of drivers) {
         ['Queue', 'Links']
       );
       assert.equal(engine.instances.delete(alice, 'Spec', 'sp1'), true);
-      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.links, undefined);
+      assert.deepEqual(engine.instances.get(alice, 'Job', 'j1')?.behaviors.Links, {});
       assert.deepEqual(engine.storage.all(`SELECT key FROM engine_references WHERE source_id = 'j1'`), []);
       assert.equal(claimNext(engine)?.id, 'j1');
     });
@@ -380,6 +398,44 @@ for (const driver of drivers) {
       assert.match(refusal([linked, queueOn(['plan'])]), /excludeStale names "plan", which is not a link of the type's Links config \(its links: spec, design\)/);
       assert.match(refusal([linked, queueOn(['design'])]), /excludeStale names "design", a link that is not pinned, so it is never stale/);
       engine.schemas.define(alice, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, linked, queueOn(['spec'])]));
+      const released: BehaviorRef = { name: 'Links', config: { links: { spec: { schema: 'Spec', pinned: 'release' } } } };
+      engine.schemas.define(alice, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, released, queueOn(['spec'])]));
+    });
+
+    test('a link pinned to a release keeps its instance out once the target is released again, hearing its release', () => {
+      const engine = openTestEngine({ driver, clock: new Clock(T0).now });
+      publish(engine, recipesDocument());
+      publish(
+        engine,
+        jobsDocument([
+          { name: 'Workflow', config: jobFlow },
+          { name: 'Lease', config: requeue },
+          { name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' } } } },
+          { name: 'Queue', config: { ...claimable, excludeStale: ['recipe'] } },
+        ])
+      );
+      engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      releaseRecipe(engine, 'soup');
+      create(engine, 'j1', { priority: 9 }, { Links: { recipe: 'soup' } });
+      create(engine, 'j2', { priority: 1 });
+      assert.deepEqual(
+        engine.storage.all(`SELECT key, hears, crosses FROM engine_references WHERE source_id = 'j1' AND behavior = 'Queue'`).map((row) => ({ ...row })),
+        [{ key: 'stale recipe', hears: '/behaviors/Branches/release', crosses: 2 }]
+      );
+      // The recipe's next release crosses the one j1 pins past it: j1 is refreshed out.
+      const from = cursorOf(engine);
+      assert.equal(releaseRecipe(engine, 'soup'), 2);
+      assert.deepEqual(refreshes(engine, from), ['j1']);
+      assert.equal(excludedUntil(engine, 'j1'), Number.MAX_SAFE_INTEGER);
+      const refused = thrown(() => engine.instances.invoke(worker, 'Job', 'j1', 'claim', {}), BehaviorVetoError);
+      assert.deepEqual(
+        [refused.reason, refused.vetoCode, refused.vetoDetails],
+        ['its link recipe is pinned to a release its target has moved past', 'stale_link', { links: ['recipe'] }]
+      );
+      assert.equal(claimNext(engine)?.id, 'j2');
+      // Pinned again, to release 2, it is back.
+      engine.instances.invoke(alice, 'Job', 'j1', 'link', { name: 'recipe', id: 'soup' });
+      assert.equal(claimNext(engine)?.id, 'j1');
     });
   });
 }

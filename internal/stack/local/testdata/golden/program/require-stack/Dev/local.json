@@ -36,6 +36,11 @@
       "id": "Orders.calls.shop-api.key",
       "caller": "Orders",
       "callee": "shop-api"
+    },
+    {
+      "id": "shop-orders-ship-orders.calls.shop-api.key",
+      "caller": "shop-orders-ship-orders",
+      "callee": "shop-api"
     }
   ],
   "migrations": [
@@ -54,6 +59,7 @@
       "deployable": "shop-api",
       "name": "shop-api",
       "wave": 1,
+      "language": "go",
       "module": "server/require-stack/shop-api",
       "binary": "bin/shop-api",
       "port": 21859,
@@ -66,7 +72,7 @@
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS",
-          "value": "1"
+          "value": "2"
         },
         {
           "name": "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS",
@@ -114,6 +120,51 @@
           "value": "300"
         },
         {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_ALGORITHMS",
+          "value": "EdDSA"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_AUDIENCE",
+          "value": "shop-api"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS",
+          "value": "1"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SERVES",
+          "value": "shop-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_ISSUER",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS",
+          "value": "1"
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS_0_JWK",
+          "value": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.calls.shop-api.key",
+              "name": "publicJwk"
+            }
+          }
+        },
+        {
+          "name": "SHOP_API_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS",
+          "value": "300"
+        },
+        {
           "name": "SHOP_DB_DATABASE_URL",
           "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
         },
@@ -128,6 +179,7 @@
       "deployable": "Orders",
       "name": "orders",
       "wave": 2,
+      "language": "go",
       "module": "server/require-stack/Orders",
       "binary": "bin/orders",
       "port": 21243,
@@ -155,6 +207,65 @@
           "value": {
             "$output": {
               "resource": "Orders.calls.shop-api.key",
+              "name": "privateJwk"
+            }
+          }
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+          "value": "signed-token"
+        },
+        {
+          "name": "SHOP_API_SERVICE_URL",
+          "value": "http://127.0.0.1:21859"
+        },
+        {
+          "name": "SHOP_DB_DATABASE_URL",
+          "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+        },
+        {
+          "name": "STRIPE_KEY",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    }
+  ],
+  "jobs": [
+    {
+      "id": "shop-orders-ship-orders.job",
+      "deployable": "shop-orders-ship-orders",
+      "name": "shop-orders-ship-orders",
+      "wave": 2,
+      "module": "server/require-stack/shop-orders-ship-orders",
+      "binary": "bin/shop-orders-ship-orders",
+      "api": "shop-orders",
+      "job": "ShipOrders",
+      "schedule": "*/15 * * * *",
+      "timeZone": "UTC",
+      "timeoutSeconds": 300,
+      "retries": 1,
+      "env": [
+        {
+          "name": "FULFILLMENT_REGION",
+          "value": "us"
+        },
+        {
+          "name": "MAX_LINE_ITEMS",
+          "value": "50"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+          "value": "shop-api"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+          "value": "shop-orders-ship-orders"
+        },
+        {
+          "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+          "value": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.calls.shop-api.key",
               "name": "privateJwk"
             }
           }

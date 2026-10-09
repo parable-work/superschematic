@@ -60,6 +60,12 @@ type walker struct {
 	// every file is walked (finishIdentityTraits).
 	identityTables map[string]*astNode
 
+	// environments counts the @environment classes walked so far. The
+	// files are walked in path order and a file's statements in source
+	// order, so the count numbers each class in declaration order
+	// (EnvironmentDecl.Order), which the decorator's handler cannot see.
+	environments int
+
 	errs SchemaErrorList
 }
 
@@ -744,6 +750,10 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 		}
 		w.addErr(w.applyDecorator(d, registry.TargetType, registry.Node{Schema: w.schema, Type: td}))
 	}
+	if td.Environment != nil {
+		w.environments++
+		td.Environment.Order = w.environments
+	}
 
 	if src := findDecorator(decorators, "source"); src != nil {
 		w.applySource(td, src)
@@ -751,6 +761,12 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 
 	// After the decorators, which settle the role and @jsonField.
 	w.checkIdentityTraitPlacement(node, td)
+
+	// A @job class declares a job of the API, which @job's Apply recorded
+	// in Schema.Jobs: it is no type (D52).
+	if findDecorator(decorators, "job") != nil {
+		return
+	}
 
 	if _, exists := w.schema.Types[name]; exists {
 		w.addErr(errorAtNode(node, "duplicate type %q", name))

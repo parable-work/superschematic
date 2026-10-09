@@ -57,8 +57,8 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v, Reactions %v; want [Workflow], none, none and [Workflow]",
 			dependencies.Requires, links.Requires, rollups.Requires, reactions.Requires)
 	}
-	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "rollups" {
-		t.Errorf("Rollups: operations %v, fields %v; want none and rollups", rollups.Operations, rollups.Fields)
+	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "values" {
+		t.Errorf("Rollups: operations %v, fields %v; want none and values", rollups.Operations, rollups.Fields)
 	}
 	// Reactions adds no field and no operation: the engine's runner runs it.
 	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
@@ -95,8 +95,8 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("Presence and Blueprint: config required %v, %v, requires %v, %v; want true, true, none, none",
 			presence.ConfigRequired(), blueprint.ConfigRequired(), presence.Requires, blueprint.Requires)
 	}
-	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "blueprint" {
-		t.Errorf("Blueprint = %+v, want no operation and one field, blueprint", blueprint)
+	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "children" {
+		t.Errorf("Blueprint = %+v, want no operation and one field, children", blueprint)
 	}
 	budget, _ := reg.Behavior("Budget")
 	retries, _ := reg.Behavior("Retries")
@@ -115,13 +115,14 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
 	}
-	// Branches makes each instance a version graph's root: no field, no
-	// requirement, and sixteen operations, all of instance scope, of which
-	// the nine that write the graph write and the seven that read it read.
+	// Branches makes each instance a version graph's root: one field, the
+	// release pointer's version, no requirement, and sixteen operations, all
+	// of instance scope, of which the nine that write the graph write and
+	// the seven that read it read.
 	branches, _ := reg.Behavior("Branches")
-	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 0 ||
+	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 1 || branches.Fields[0].Name != "release" ||
 		len(branches.PreconditionSchema) != 0 || len(branches.CreateParamsSchema) != 0 {
-		t.Errorf("Branches = %+v, want the engine's, a config, and no requirement, field or parameter", branches)
+		t.Errorf("Branches = %+v, want the engine's, a config, the field release, and no requirement or parameter", branches)
 	}
 	var branchOps []string
 	for _, op := range branches.Operations {
@@ -176,7 +177,7 @@ func TestCoreBehaviors(t *testing.T) {
 	}{
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
-		{links, []string{"no_revision", "required_link", "required_target"}},
+		{links, []string{"no_revision", "no_release", "required_link", "required_target"}},
 		{rollups, []string{"not_held"}},
 		{revisions, []string{"no_review", "not_pending"}},
 		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
@@ -235,6 +236,8 @@ func TestCoreBehaviors(t *testing.T) {
 		{dependencies, `{"satisfiedBy": ["done"]}`, "behavior Dependencies config: "},
 		{dependencies, `{"satisfiedBy": ["success", "success"]}`, "behavior Dependencies config: "},
 		{links, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}}}`, ""},
+		{links, `{"links": {"spec": {"schema": "documents", "pinned": "revision"}, "recipe": {"schema": "recipes", "pinned": "release"}, "note": {"schema": "notes", "pinned": false}}}`, ""},
+		{links, `{"links": {"spec": {"schema": "documents", "pinned": "tag"}}}`, "behavior Links config: "},
 		{links, ``, "behavior Links config: "},
 		{links, `{"links": {}}`, "behavior Links config: "},
 		{links, `{"links": {"Spec": {"schema": "documents"}}}`, "behavior Links config: "},
@@ -244,14 +247,16 @@ func TestCoreBehaviors(t *testing.T) {
 		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, ""},
-		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "status"},
+		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status"},
 			"estimate": {"schema": "tasks", "link": "project", "function": "sum", "field": "estimate"},
 			"smallest": {"schema": "tasks", "link": "project", "function": "min", "field": "estimate"},
 			"largest": {"schema": "tasks", "link": "project", "function": "max", "field": "estimate"},
 			"finished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]},
 			"started": {"schema": "tasks", "link": "project", "function": "any"},
 			"succeeded": {"schema": "tasks", "link": "project", "function": "all", "outcomes": ["success", "neutral"], "gatedStates": ["done"]},
-			"failed": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"]}}}`, ""},
+			"failed": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"]},
+			"lastResult": {"schema": "tasks", "link": "project", "function": "latest", "field": "result"}}}`, ""},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "latest"}}}`, "behavior Rollups config: "},
 		{rollups, ``, "behavior Rollups config: "},
 		{rollups, `{"rollups": {}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"Tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, "behavior Rollups config: "},
@@ -261,8 +266,8 @@ func TestCoreBehaviors(t *testing.T) {
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "average", "field": "estimate"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "sum"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "countBy"}}}`, "behavior Rollups config: "},
-		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "field": "status"}}}`, "behavior Rollups config: "},
-		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "field": "status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "field": "Workflow.status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "field": "Workflow.status"}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "gatedStates": ["done"]}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": []}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "filter": "open"}}}`, "behavior Rollups config: "},
@@ -361,6 +366,13 @@ func TestCoreBehaviors(t *testing.T) {
 		{lease, `{"exempt": ["Comments.Comment"]}`, "behavior Lease config: "},
 		{lease, `{"overridePermission": ""}`, "behavior Lease config: "},
 		{lease, `{"fenceExemptOps": ["comment"]}`, "behavior Lease config: "},
+		{lease, `{"directPermission": "jobs.direct", "directOn": [{"revised": {"link": "plan"}, "name": "rebase", "data": {"why": "moved"}}]}`, ""},
+		{lease, `{"directOn": []}`, "behavior Lease config: "},
+		{lease, `{"directOn": [{"revised": {"link": "plan"}}]}`, "behavior Lease config: "},
+		{lease, `{"directOn": [{"revised": {}, "name": "rebase"}]}`, "behavior Lease config: "},
+		{lease, `{"directOn": [{"revised": {"link": "Plan"}, "name": "rebase"}]}`, "behavior Lease config: "},
+		{lease, `{"directOn": [{"revised": {"link": "plan"}, "name": "re base"}]}`, "behavior Lease config: "},
+		{lease, `{"directOn": [{"on": {"link": "plan"}, "name": "rebase"}]}`, "behavior Lease config: "},
 		{assignment, ``, ""},
 		{assignment, `{"permission": "jobs.assign"}`, ""},
 		{assignment, `{"permission": ""}`, "behavior Assignment config: "},
@@ -406,7 +418,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{budget, `{"meters": {}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"CpuSeconds": {}}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"limit": 0}}}`, "behavior Budget config: "},
-		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, ""},
 		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused"}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {}}, "escalate": {"transition": "paused", "from": []}}`, "behavior Budget config: "},
 		{budget, `{"meters": {"cpuSeconds": {"reset": "weekly"}}}`, "behavior Budget config: "},

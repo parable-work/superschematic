@@ -264,7 +264,7 @@ func ParseableTypeNames(output *ModuleOutput) map[string]bool {
 // unset path leaves the spec empty so package.json names the published
 // version instead.
 func SetScalarLibSpec(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
-	rel, err := naming.RelPath(outputDir, paths.ScalarTypeScript)
+	rel, err := naming.PhysicalRelPath(outputDir, paths.ScalarTypeScript)
 	if err != nil {
 		return fmt.Errorf("scalar library package path: %w", err)
 	}

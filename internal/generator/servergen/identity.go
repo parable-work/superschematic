@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -26,13 +25,12 @@ func (a *API) IdentityField() string {
 }
 
 // writeIdentity writes identity.go into dir when an API of s authenticates
-// with the identity runtime.
+// with the identity runtime. A job's never does: it serves no request.
 func writeIdentity(s *Server, dir string) error {
 	if !slices.ContainsFunc(s.APIs, func(a *API) bool { return a.Identity }) {
 		return nil
 	}
-	gen := codegen.NewFileGenerator(templatesFS, templateFuncs())
-	if err := gen.GenerateFile(codegen.NewGoFileConfig(templatesFS, "identity.go.tmpl", filepath.Join(dir, IdentityFile), s, nil)); err != nil {
+	if err := render("identity.go.tmpl", filepath.Join(dir, IdentityFile), s); err != nil {
 		return fmt.Errorf("servergen: server %s: %w", s.Name, err)
 	}
 	return nil

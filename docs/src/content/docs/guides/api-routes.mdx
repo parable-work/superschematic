@@ -98,8 +98,11 @@ identity service of an API over the user model, and serves the result, as
 acme-shop. Without a stack, your own `main` does that, as the tutorial's
 tests do in-process
 ([Call it from Go](/superschematic/first-project/go-api/#call-it-from-go)).
-`Deps` and the entrypoint are not built for TypeScript and Rust servers
-yet.
+A TypeScript API package has its `Deps` too, with a `pg` Pool as its
+database, and its implementation is scaffolded at `typescript/<service>`
+([TypeScript](/superschematic/install/typescript/#serve-a-generated-api)).
+The TypeScript entrypoint is not built yet, and neither `Deps` nor the
+entrypoint is built for Rust servers.
 
 ## Arguments
 

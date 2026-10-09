@@ -26,7 +26,11 @@ schema_runtime_go = "../../runtime/schema/go"
 schema_runtime_rust = "../../runtime/schema/rust"
 http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
+http_runtime_typescript = "../../runtime/http/typescript"
 versiongraph_go = "../../runtime/versiongraph/go"
+# The servers' images build from the checkout's root, which holds the
+# runtime modules above as well as this example.
+build_context = "../.."
 
 # The Topcoat extension's table, read only by a binary that links it
 # (extensions/topcoat's superschematic-topcoat): shop-orders gets the crate

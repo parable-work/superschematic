@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 function notes(engine: Engine, schema: string, id: string): unknown {
-  return engine.instances.get(alice, schema, id)?.data.notes;
+  return engine.instances.get(alice, schema, id)?.behaviors['test.Ledger']?.notes;
 }
 
 function history(engine: Engine, schema: string, id: string): EngineEvent[] {
@@ -79,7 +79,7 @@ for (const driver of drivers) {
       };
       const created = engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
       assert.deepEqual(seen, []);
-      assert.equal(created.data.notes, undefined);
+      assert.deepEqual(created.behaviors, { 'test.Ledger': {} });
 
       assert.deepEqual(engine.runner.runDue(), { handled: 2, skipped: 0, failed: 0, scheduled: 0 });
       const [create, marked] = history(engine, 'Order', 'o1');
@@ -597,6 +597,39 @@ for (const driver of drivers) {
       assert.equal(subscription(engine, 'Order').state, 'active');
     });
 
+    test('a watches that returns null turns the reactions off on the schema; turned on, the subscription starts at that publish', () => {
+      const engine = openRunnerEngine({ driver });
+      const seen: string[] = [];
+      probe.react = (_context, event) => {
+        if (event.cause === undefined) {
+          seen.push(`${event.kind} ${event.instanceId}`);
+        }
+      };
+      publish(engine, ledgerDocument('Order', { off: true }));
+      engine.instances.create(alice, 'Order', { title: 'Off' }, { id: 'o1' });
+      assert.equal(engine.runner.runDue().handled, 0);
+      // Off and never run, it is not listed.
+      assert.deepEqual(engine.runner.status().subscriptions, []);
+
+      publish(engine, ledgerDocument('Order'));
+      engine.instances.create(alice, 'Order', { title: 'On' }, { id: 'o2' });
+      engine.runner.runDue();
+      assert.deepEqual(seen, ['create o2']);
+      assert.equal(subscription(engine, 'Order').state, 'active');
+
+      // Off again: the subscription that ran shows off and hears nothing.
+      publish(engine, ledgerDocument('Order', { off: true }));
+      engine.instances.create(alice, 'Order', { title: 'Off again' }, { id: 'o3' });
+      engine.runner.runDue();
+      assert.equal(subscription(engine, 'Order').state, 'off');
+      // On again, it starts at the publish that turned it on, past o3.
+      publish(engine, ledgerDocument('Order', { watch: [] }));
+      engine.instances.create(alice, 'Order', { title: 'Back' }, { id: 'o4' });
+      engine.runner.runDue();
+      assert.deepEqual(seen, ['create o2', 'create o4']);
+      assert.equal(subscription(engine, 'Order').state, 'active');
+    });
+
     test('a reaction reads an instance as the log had it before an event, and invokes schema-level operations', () => {
       const engine = openRunnerEngine({ driver });
       publish(engine, ledgerDocument('Order'));
@@ -613,7 +646,9 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Order', 'o1', 'mark', { note: 'kept' });
       engine.instances.delete(alice, 'Order', 'o1');
       engine.runner.runDue();
-      assert.deepEqual(before, [null, { title: 'Desk' }, { title: 'Lamp' }, { title: 'Lamp', notes: ['kept'] }]);
+      // As a read returns it: test.Ledger's entry is there, empty, while it holds no notes.
+      const order = (title: string, notes?: string[]) => ({ data: { title }, behaviors: { 'test.Ledger': notes === undefined ? {} : { notes } } });
+      assert.deepEqual(before, [null, order('Desk'), order('Lamp'), order('Lamp', ['kept'])]);
       assert.deepEqual(counted, [0, 0, 0, 0]);
 
       probe.react = (context) => {
@@ -659,7 +694,10 @@ for (const driver of drivers) {
       probe.watches = () => ['Order', 3 as unknown as string];
       clock.now += 1_000;
       engine.runner.runDue();
-      assert.equal(subscription(engine, 'Order').failure?.error, 'BehaviorError: behavior test.Ledger: reactions.watches returns a list of schema names');
+      assert.equal(
+        subscription(engine, 'Order').failure?.error,
+        'BehaviorError: behavior test.Ledger: reactions.watches returns a list of schema names, or null to turn the reactions off'
+      );
 
       delete probe.watches;
       clock.now += 2_000;

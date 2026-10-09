@@ -61,6 +61,8 @@ for (const driver of drivers) {
         version: 1,
         seq: 1,
         data: { title: 'Desk', quantity: 2 },
+        // An Order composes no behavior, so it holds no behavior's fields.
+        behaviors: {},
         createdAt: 5000,
         createdBy: 'alice',
         updatedAt: 5000,

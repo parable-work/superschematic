@@ -1,0 +1,11 @@
+# The TypeScript API deps-ts-shop calls: no database, no settings and no
+# calls, so its Deps holds the logger alone. The TypeScript Deps tests in
+# internal/generator build it.
+name: deps-ts-pricing
+kind: API
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }
+  sdk:
+    typescript: { enabled: true }

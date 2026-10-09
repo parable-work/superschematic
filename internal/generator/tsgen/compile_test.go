@@ -85,15 +85,14 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 			t.Fatalf("write %s: %v", tc.name, err)
 		}
 	}
-	// The directory holding the packages is a Bun workspace root, so a
-	// sibling file:../<name> dependency and the file: superscalar spec
-	// resolve for every package.
-	if err := WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
+	// The output root is the Bun workspace root, so a sibling's
+	// workspace:* dependency and superscalar resolve for every package.
+	if err := (WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 		t.Fatalf("write workspace root: %v", err)
 	}
 
 	install := exec.Command(bunPath, "install")
-	install.Dir = typesRoot
+	install.Dir = tempRoot
 	if out, err := install.CombinedOutput(); err != nil {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, out))
 	}
@@ -183,14 +182,14 @@ func TestNullableObjectMapParserCompiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(tempRoot, "fixture-maps")
+	dir := filepath.Join(tempRoot, "types", "typescript", "fixture-maps")
 	if err := SetScalarLibSpec(output, paths, dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteTypes(output, dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteWorkspaceRoot(tempRoot, naming.Naming{}); err != nil {
+	if err := (WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 		t.Fatal(err)
 	}
 	install := exec.Command(bunPath, "install")

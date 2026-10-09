@@ -36,7 +36,8 @@ func assemble(t *testing.T) *registry.Registry {
 
 // shop is stacktest's shop stack of docs/stack-model.md, section 4.1, with
 // local environments: Dev takes every default, and Pinned sets the
-// Postgres image and port and each server's port.
+// Postgres image and port, each server's port, and runs shop-orders' job
+// every minute.
 func shop() *ir.Stack {
 	s := stacktest.Shop()
 	orders := ir.DeployableRef{Deployable: "Orders"}
@@ -55,6 +56,7 @@ func shop() *ir.Stack {
 			Settings: []*ir.DeployableSettings{
 				{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"port": float64(8080)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "debug"}}},
 				{Of: orders, Values: map[string]any{"port": float64(8081)}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "eu"}}},
+				{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "* * * * *"},
 			},
 		},
 	}
@@ -128,6 +130,24 @@ func TestServiceAuthGolden(t *testing.T) {
 	}
 }
 
+// storefront is the shop with shop-storefront deployed and exposed too: a
+// TypeScript API, whose server Bun runs (D51).
+func storefront() *ir.Stack {
+	s := shop()
+	s.Name = "storefront-stack"
+	ref := ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}
+	s.Deploy = append(s.Deploy, ref)
+	s.Expose = append(s.Expose, stacktest.Of(ref))
+	return s
+}
+
+// TestTypeScriptGolden resolves the shop with its TypeScript storefront
+// in Dev: the storefront's process is a TypeScript one, which runs its
+// entrypoint's main.ts on Bun with no binary to build.
+func TestTypeScriptGolden(t *testing.T) {
+	checkGoldenEnvironment(t, assemble(t), storefront(), stacktest.AcmeShop(), "Dev")
+}
+
 // checkGoldenEnvironment resolves env of s and checks its environment.json
 // and the program the provisioner renders from it against the golden
 // files.
@@ -196,7 +216,18 @@ func TestWiring(t *testing.T) {
 		t.Errorf("Orders SHOP_API_SERVICE = %v, want %v", got, wantAPI)
 	}
 
-	clause := resolve(t, reg, shop(), stacktest.RequireServiceShop(), "Dev")
+	// shop-orders' job is a caller of its own, with a key pair of its own
+	// (D52).
+	for _, b := range dev.Deployable(stacktest.ShipOrdersJob).Bindings {
+		values[b.Field] = b.Value
+	}
+	wantAPI["credential"].(map[string]any)["issuer"] = stacktest.ShipOrdersJob
+	wantAPI["credential"].(map[string]any)["key"] = ir.Output{Resource: stacktest.ShipOrdersJob + ".calls.shop-api.key", Name: "privateJwk"}
+	if got := values["SHOP_API_SERVICE"]; !equalJSON(t, got, wantAPI) {
+		t.Errorf("the job's SHOP_API_SERVICE = %v, want %v", got, wantAPI)
+	}
+
+	clause := resolve(t, reg, shop(), stacktest.WithoutJobs(stacktest.RequireServiceShop()), "Dev")
 	var callers *ir.Binding
 	for _, b := range clause.Deployable("shop-api").Bindings {
 		if b.Field == "SHOP_API_CALLERS" {
@@ -288,14 +319,14 @@ func TestRefusals(t *testing.T) {
 		s.Environments[1].Settings[1].Values["port"] = float64(55432)
 		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and the Postgres container listen on one port, 55432")
 	})
-	t.Run("a TypeScript server", func(t *testing.T) {
+	t.Run("a Rust server", func(t *testing.T) {
 		services := stacktest.AcmeShop()
 		for i := range services {
 			if services[i].Name == "shop-api" {
-				services[i].Language = registry.APILanguageTypeScript
+				services[i].Language = registry.APILanguageRust
 			}
 		}
-		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO")
+		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO, TYPESCRIPT")
 	})
 	t.Run("a PORT field", func(t *testing.T) {
 		services := stacktest.AcmeShop()

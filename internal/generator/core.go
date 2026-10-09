@@ -3,6 +3,7 @@ package generator
 import (
 	"encoding/json"
 
+	"github.com/parable-work/superschematic/internal/generator/cigen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -22,22 +23,40 @@ var sqlOutputSchema = json.RawMessage(`{
 	}
 }`)
 
+// ciOutputSchema is the JSON Schema of outputs.ci: each key a CI
+// renderer's name, each value its options. registry.ParseOutputs checks the
+// names against the registered renderers, the branch and the install
+// directory.
+var ciOutputSchema = json.RawMessage(`{
+	"type": "object",
+	"minProperties": 1,
+	"additionalProperties": {
+		"type": "object",
+		"additionalProperties": false,
+		"properties": {
+			"branch": {"type": "string", "minLength": 1},
+			"install": {"type": "string", "minLength": 1}
+		}
+	}
+}`)
+
 // typesGenerator is the name of the core generator behind outputs.types.
 const typesGenerator = "types"
 
 // ormGenerator is the name of the core generator of the Go ORM.
 const ormGenerator = "orm"
 
-// RegisterCore adds the core generators to reg, and the core's one target,
+// RegisterCore adds the core generators to reg, the core's one target,
 // `local`, with its platforms, connectors and provisioner
 // (internal/stack/local), which a binary with no extension linked runs
-// `stack dev` on. The kinds are registered by registry.New; this half lives
-// here because the generator closures call the dispatch methods of this
-// package, and the local target's provisioner plans migrations with
-// sqlmigrate, which registry cannot import. Core registers no documents and
-// no build-all hooks; extensions do.
+// `stack dev` on, and the core's one CI renderer, `github` (D47). The kinds
+// are registered by registry.New; this half lives here because the
+// generator closures call the dispatch methods of this package, and the
+// local target's provisioner plans migrations with sqlmigrate, which
+// registry cannot import. Core registers no documents and no build-all
+// hooks; extensions do.
 //
-// Registration order fixes Registry.OutputKeys: types, sql, api, sdk is the
+// Registration order fixes Registry.OutputKeys: types, sql, api, sdk, ci is the
 // order the ParseOutputs error lists.
 func RegisterCore(reg *registry.Registry) error {
 	specs := []registry.GeneratorSpec{
@@ -153,11 +172,30 @@ func RegisterCore(reg *registry.Registry) error {
 				return r.measure("output.server", r.generateServers)
 			},
 		},
+		{
+			// The stack's CI, by each renderer outputs.ci names, at
+			// ci/<stack>/<renderer>, installed under the repository root
+			// (docs/stack-model.md, section 11.3).
+			Name:         cigen.Name,
+			Kinds:        []string{string(ir.SchemaKindStack)},
+			OutputKey:    cigen.Name,
+			OutputSchema: ciOutputSchema,
+			Dirs: func(c registry.GenerateContext) []string {
+				return []string{cigen.OutDir(c.Options.OutputRoot, c.Config.Name)}
+			},
+			Enabled: cigen.Enabled,
+			Generate: func(c registry.GenerateContext) error {
+				return run{c}.measure("output.ci", func() error { return cigen.Generate(c) })
+			},
+		},
 	}
 	for _, spec := range specs {
 		if err := reg.RegisterGenerator(spec); err != nil {
 			return err
 		}
+	}
+	if err := reg.RegisterCIRenderer(cigen.GitHub()); err != nil {
+		return err
 	}
 	return local.Register(reg)
 }

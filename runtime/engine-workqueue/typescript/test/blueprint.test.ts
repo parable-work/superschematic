@@ -24,7 +24,7 @@ import {
 } from '@superschematic/engine';
 
 import { MAX_STEPS } from '../dist/index.js';
-import { alice, cleanup, drivers, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, publish, recipesDocument, releaseRecipe, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -93,8 +93,12 @@ for (const driver of drivers) {
   }
 
   type Child = { key: string; id: string };
-  const childrenOf = (engine: Engine, id: string) => (engine.instances.get(alice, 'Run', id)?.data.blueprint as { children: Child[] } | undefined)?.children;
+  const childrenOf = (engine: Engine, id: string) => engine.instances.get(alice, 'Run', id)?.behaviors.Blueprint?.children as Child[] | undefined;
   const stepOf = (engine: Engine, id: string) => engine.instances.get(alice, 'Step', id)?.data as Record<string, unknown>;
+  // stepFieldsOf reads a step's behaviors' fields: its status, whether it is blocked, and its links.
+  const stepFieldsOf = (engine: Engine, id: string) =>
+    engine.instances.get(alice, 'Step', id)?.behaviors as { Workflow: { status?: string }; Dependencies: { blocked?: boolean }; Links: { targets?: unknown } };
+  const linksOf = (engine: Engine, id: string) => stepFieldsOf(engine, id).Links.targets;
   // edges maps each stamped step's key to the keys of the steps that block it.
   function edges(engine: Engine, run: string): Record<string, string[]> {
     const children = childrenOf(engine, run) ?? [];
@@ -118,17 +122,25 @@ for (const driver of drivers) {
         ['design', 'build', 'audit', 'docs', 'review', 'release']
       );
       const build = stepOf(engine, children[1].id);
-      assert.deepEqual([build.step, build.title, build.topic, build.status], ['build', 'Build it', 'public', 'todo']);
-      assert.deepEqual(build.links, { run: { schema: 'Run', id: 'r1' } });
+      assert.deepEqual([build.step, build.title, build.topic, stepFieldsOf(engine, children[1].id).Workflow.status], ['build', 'Build it', 'public', 'todo']);
+      assert.deepEqual(linksOf(engine, children[1].id), { run: { schema: 'Run', id: 'r1' } });
       assert.deepEqual(edges(engine, 'r1'), { design: [], build: ['design'], audit: ['build'], docs: ['build'], review: ['audit', 'docs'], release: ['review'] });
       // The children are the creator's, as engine.instances.create would make them.
       assert.deepEqual(new Set(children.map((child) => engine.instances.get(alice, 'Step', child.id)?.createdBy)), new Set(['nora']));
-      assert.equal(stepOf(engine, children[1].id).blocked, true);
+      assert.equal(stepFieldsOf(engine, children[1].id).Dependencies.blocked, true);
       // Each child holds its link and its edges from its create: one event each.
       const events = engine.events.read(alice, { schema: 'Step', instanceId: children[1].id }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.change]),
-        [['create', { step: 'build', title: 'Build it', topic: 'public', status: 'todo', blocked: true, links: { run: { schema: 'Run', id: 'r1' } } }]]
+        [
+          [
+            'create',
+            {
+              data: { step: 'build', title: 'Build it', topic: 'public' },
+              behaviors: { Workflow: { status: 'todo' }, Dependencies: { blocked: true }, Links: { targets: { run: { schema: 'Run', id: 'r1' } } } },
+            },
+          ],
+        ]
       );
     });
 
@@ -138,7 +150,7 @@ for (const driver of drivers) {
       assert.deepEqual(refused.issues, [{ path: '/behaviors/Links', message: 'link run is required, so a create of Step gives it' }]);
       engine.instances.create(nora, 'Run', { title: 'First' }, { id: 'r1' });
       const extra = engine.instances.create(nora, 'Step', { step: 'extra' }, { behaviors: { Links: { run: 'r1' } } });
-      assert.deepEqual(extra.data.links, { run: { schema: 'Run', id: 'r1' } });
+      assert.deepEqual(extra.behaviors.Links?.targets, { run: { schema: 'Run', id: 'r1' } });
       // A step created later is not among what was stamped.
       assert.equal((childrenOf(engine, 'r1') as Child[]).some((child) => child.id === extra.id), false);
     });
@@ -157,11 +169,11 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Area', { name: 'North' }, { id: 'a1' });
       engine.instances.create(nora, 'Run', { title: 'Mapped' }, { id: 'r1', behaviors: { Links: { area: 'a1' } } });
       for (const child of childrenOf(engine, 'r1') as Child[]) {
-        assert.deepEqual(stepOf(engine, child.id).links, { run: { schema: 'Run', id: 'r1' }, area: { schema: 'Area', id: 'a1' } });
+        assert.deepEqual(linksOf(engine, child.id), { run: { schema: 'Run', id: 'r1' }, area: { schema: 'Area', id: 'a1' } });
       }
       // A run that holds no area gives its children none.
       engine.instances.create(nora, 'Run', { title: 'Bare' }, { id: 'r2' });
-      assert.deepEqual(stepOf(engine, (childrenOf(engine, 'r2') as Child[])[0].id).links, { run: { schema: 'Run', id: 'r2' } });
+      assert.deepEqual(linksOf(engine, (childrenOf(engine, 'r2') as Child[])[0].id), { run: { schema: 'Run', id: 'r2' } });
     });
 
     test('when leaves out the steps whose field does not equal or include the value, and passes their edges on', () => {
@@ -301,7 +313,40 @@ for (const driver of drivers) {
       publish(engine, documentOf('Run', runFields, [{ name: 'Revisions' }, { name: 'Blueprint', config }]));
       engine.instances.create(nora, 'Run', { title: 'Pinned' }, { id: 'r1' });
       const [child] = childrenOf(engine, 'r1') as Child[];
-      assert.deepEqual(stepOf(engine, child.id).links, { run: { schema: 'Run', id: 'r1', revision: 1, stale: false } });
+      assert.deepEqual(linksOf(engine, child.id), { run: { schema: 'Run', id: 'r1', revision: 1, latest: 1, stale: false } });
+    });
+
+    test('a parentLink pinned to a release is refused: a run has none when it stamps its children', () => {
+      const engine = openTestEngine({ driver });
+      publish(engine, documentOf('Step', stepFields, stepBehaviors({ run: { schema: 'Run', pinned: 'release' } })));
+      assert.match(refusal(engine, { ...inline, steps: { only: {} } }), /schema Step's link run pins a release, which Run has none of when it stamps its children/);
+    });
+
+    test("copyLinks keeps the release a run's link pins where the child's link pins releases too", () => {
+      const engine = openTestEngine({ driver });
+      publish(engine, recipesDocument());
+      publish(
+        engine,
+        documentOf('Step', stepFields, stepBehaviors({ run: { schema: 'Run', required: true }, recipe: { schema: 'Recipe', pinned: 'release' }, menu: { schema: 'Recipe' } }))
+      );
+      publish(
+        engine,
+        documentOf('Run', runFields, [
+          { name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' }, menu: { schema: 'Recipe', pinned: 'release' } } } },
+          { name: 'Blueprint', config: { ...inline, steps: { a: {} }, copyLinks: ['recipe', 'menu'] } },
+        ])
+      );
+      engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      releaseRecipe(engine, 'soup');
+      releaseRecipe(engine, 'soup');
+      engine.instances.create(nora, 'Run', { title: 'Cook' }, { id: 'r1', behaviors: { Links: { recipe: { id: 'soup', release: 1 }, menu: 'soup' } } });
+      const [child] = childrenOf(engine, 'r1') as Child[];
+      // The child's recipe keeps the run's release 1; its menu link pins nothing, so it takes the id alone.
+      assert.deepEqual(linksOf(engine, child.id), {
+        run: { schema: 'Run', id: 'r1' },
+        recipe: { schema: 'Recipe', id: 'soup', release: 1, latest: 2, stale: true },
+        menu: { schema: 'Recipe', id: 'soup' },
+      });
     });
 
     test("keyField, copyFields, when's fields and data are held to the two types", () => {
@@ -377,11 +422,11 @@ for (const driver of drivers) {
       link(engine, nora, 'r1', 'area', 'a1');
       link(engine, nora, 'r1', 'plan', 'p1');
       assert.deepEqual(edges(engine, 'r1'), { first: [], second: ['first'], third: ['second'] });
-      const third = stepOf(engine, (childrenOf(engine, 'r1') as Child[])[2].id);
-      assert.equal(third.topic, 'public');
-      assert.deepEqual(third.links, {
+      const third = (childrenOf(engine, 'r1') as Child[])[2].id;
+      assert.equal(stepOf(engine, third).topic, 'public');
+      assert.deepEqual(linksOf(engine, third), {
         run: { schema: 'Run', id: 'r1' },
-        plan: { schema: 'Plan', id: 'p1', revision: 2, stale: false },
+        plan: { schema: 'Plan', id: 'p1', revision: 2, latest: 2, stale: false },
         area: { schema: 'Area', id: 'a1' },
       });
 
@@ -389,21 +434,21 @@ for (const driver of drivers) {
       engine.instances.create(nora, 'Run', { title: 'Old plan' }, { id: 'r2' });
       link(engine, nora, 'r2', 'plan', 'p1', 1);
       assert.deepEqual(edges(engine, 'r2'), { first: [], second: ['first'] });
-      const second = stepOf(engine, (childrenOf(engine, 'r2') as Child[])[1].id);
-      assert.deepEqual(second.links, { run: { schema: 'Run', id: 'r2' }, plan: { schema: 'Plan', id: 'p1', revision: 1, stale: true } });
+      const second = (childrenOf(engine, 'r2') as Child[])[1].id;
+      assert.deepEqual(linksOf(engine, second), { run: { schema: 'Run', id: 'r2' }, plan: { schema: 'Plan', id: 'p1', revision: 1, latest: 2, stale: true } });
     });
 
     test('a create that gives the from link stamps in the create; a map that breaks a rule refuses the create, and leaves nothing', () => {
       const engine = definitions();
       const created = engine.instances.create(nora, 'Run', { title: 'Run', topic: 'public' }, { id: 'r1', behaviors: { Links: { plan: 'p1', area: 'a1' } } });
       assert.deepEqual(
-        (created.data.blueprint as { children: Child[] }).children.map((child) => child.key),
+        (created.behaviors.Blueprint?.children as Child[]).map((child) => child.key),
         ['first', 'second', 'third']
       );
       assert.deepEqual(edges(engine, 'r1'), { first: [], second: ['first'], third: ['second'] });
-      assert.deepEqual(stepOf(engine, (childrenOf(engine, 'r1') as Child[])[0].id).links, {
+      assert.deepEqual(linksOf(engine, (childrenOf(engine, 'r1') as Child[])[0].id), {
         run: { schema: 'Run', id: 'r1' },
-        plan: { schema: 'Plan', id: 'p1', revision: 2, stale: false },
+        plan: { schema: 'Plan', id: 'p1', revision: 2, latest: 2, stale: false },
         area: { schema: 'Area', id: 'a1' },
       });
       // A create pinned to an earlier revision stamps that revision's map.
@@ -454,12 +499,12 @@ for (const driver of drivers) {
         'the steps of Plan none revision 1 are invalid: it has no steps',
         'the steps of Plan list revision 1 are invalid: a map of steps is a JSON object of steps by key',
       ]);
-      const run = engine.instances.get(alice, 'Run', 'r1')?.data as Record<string, unknown>;
-      assert.deepEqual([run.links, run.blueprint], [undefined, undefined]);
+      const run = engine.instances.get(alice, 'Run', 'r1')?.behaviors;
+      assert.deepEqual([run?.Links, run?.Blueprint], [{}, {}]);
       assert.equal(allSteps(engine).length, 0);
     });
 
-    test('from must be a pinned link of the type to a schema with Revisions and the field', () => {
+    test('from must be a link of the type pinned to a revision, to a schema with Revisions and the field', () => {
       const engine = definitions();
       const refusal = (config: Record<string, unknown>, links: Record<string, unknown> = { plan: { schema: 'Plan', pinned: true }, area: { schema: 'Area' } }) =>
         thrown(
@@ -468,6 +513,7 @@ for (const driver of drivers) {
         ).message;
       assert.match(refusal({ ...fromConfig, from: { link: 'spec', field: 'steps' } }), /from: the type's Links has no link spec/);
       assert.match(refusal(fromConfig, { plan: { schema: 'Plan' }, area: { schema: 'Area' } }), /from: link plan is not pinned/);
+      assert.match(refusal(fromConfig, { plan: { schema: 'Plan', pinned: 'release' }, area: { schema: 'Area' } }), /from: link plan pins a release, not the revision of the fields its steps are read from/);
       assert.match(refusal({ ...fromConfig, from: { link: 'plan', field: 'title' } }), /from: Plan's title holds string, not a map of steps/);
       assert.match(refusal({ ...fromConfig, from: { link: 'plan', field: 'body' } }), /from: Plan has no field body/);
       assert.match(refusal({ ...fromConfig, copyLinks: ['run'] }), /copyLinks names run, the link each child points at its parent through/);

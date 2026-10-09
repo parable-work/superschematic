@@ -1,8 +1,9 @@
 // Links, the core's typed links: link and unlink, links a create gives
-// (every required one among them), the links field, pinned links and
-// their staleness, the delete of a target (refused for a required link,
-// cleared for an optional one, as the caller), the schema-level
-// listLinked, reads as the caller, and its config rules.
+// (every required one among them), the targets field, links pinned to a
+// revision or a release, with the target's latest and their staleness,
+// the delete of a target (refused for a required link, cleared for an
+// optional one, as the caller), the schema-level listLinked, reads as the
+// caller, and its config rules.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -19,6 +20,7 @@ import {
   type EngineOptions,
   type Principal,
 } from '../dist/index.js';
+import { Calls, recipeDocument, type Commit } from './branches-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
@@ -78,10 +80,10 @@ for (const driver of drivers) {
 
   const link = (engine: Engine, id: string, params: Record<string, unknown>, principal: Principal = alice) =>
     engine.instances.invoke(principal, 'Task', id, 'link', params);
-  const linksOf = (engine: Engine, id: string) => engine.instances.get(alice, 'Task', id)?.data.links;
+  const linksOf = (engine: Engine, id: string) => engine.instances.get(alice, 'Task', id)?.behaviors.Links.targets;
 
   describe(`Links (${driver})`, () => {
-    test('link points a named link at an instance of its schema; links holds them all, by name; link again moves one', () => {
+    test('link points a named link at an instance of its schema; targets holds them all, by name; link again moves one', () => {
       const engine = world();
       assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p1' } });
       assert.deepEqual(link(engine, 't1', { name: 'owner', id: 'p1' }), { name: 'owner', schema: 'Person', id: 'p1' });
@@ -91,7 +93,7 @@ for (const driver of drivers) {
         behavior: 'Links',
         operation: 'link',
         params: { name: 'related', id: 't2' },
-        patch: { links: { related: { schema: 'Task', id: 't2' } } },
+        patch: { behaviors: { Links: { targets: { related: { schema: 'Task', id: 't2' } } } } },
       });
       link(engine, 't1', { name: 'owner', id: 'p2' });
       assert.deepEqual(linksOf(engine, 't1'), { owner: { schema: 'Person', id: 'p2' }, related: { schema: 'Task', id: 't2' } });
@@ -113,12 +115,12 @@ for (const driver of drivers) {
       const engine = world();
       const specOf = (id: string) => (linksOf(engine, id) as { spec?: unknown } | undefined)?.spec;
       assert.deepEqual(link(engine, 't1', { name: 'spec', id: 's1' }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
-      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, stale: false });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false });
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
-      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, stale: true });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true });
       assert.equal(engine.instances.get(alice, 'Task', 't1')?.seq, 2, 'read when read: no event on the task');
       link(engine, 't1', { name: 'spec', id: 's1' });
-      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 2, stale: false });
+      assert.deepEqual(specOf('t1'), { schema: 'Spec', id: 's1', revision: 2, latest: 2, stale: false });
       assert.deepEqual(link(engine, 't1', { name: 'spec', id: 's1', revision: 1 }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
       assert.equal((linksOf(engine, 't1') as { spec: { stale: boolean } }).spec.stale, true);
       assert.deepEqual(thrown(() => link(engine, 't1', { name: 'spec', id: 's1', revision: 3 }), OperationParamsError).issues, [
@@ -133,7 +135,7 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Spec', { title: 's1' }, { id: 's1' });
       engine.instances.create(alice, 'Task', { title: 't1' }, { id: 't1' });
       assert.deepEqual(thrown(() => link(engine, 't1', { name: 'spec', id: 's1' }), OperationParamsError).issues, [
-        { path: '/name', message: 'link spec is pinned, but Spec does not compose Revisions' },
+        { path: '/name', message: 'link spec is pinned to a revision, but Spec does not compose Revisions' },
       ]);
       // Revisions added to a schema with instances: s1 has none until it changes.
       publish(engine, schema('Spec', [{ name: 'Revisions' }]));
@@ -201,26 +203,26 @@ for (const driver of drivers) {
       const listed = (params: Record<string, unknown>) => engine.instances.invokeSchema(alice, 'Task', 'listLinked', params);
       assert.deepEqual(listed({ name: 'spec', id: 's1' }), {
         items: [
-          { id: 't1', revision: 1, stale: true },
-          { id: 't2', revision: 2, stale: false },
+          { id: 't1', revision: 1, latest: 2, stale: true },
+          { id: 't2', revision: 2, latest: 2, stale: false },
         ],
         next: null,
       });
-      assert.deepEqual(listed({ name: 'spec', id: 's1', stale: true }), { items: [{ id: 't1', revision: 1, stale: true }], next: null });
+      assert.deepEqual(listed({ name: 'spec', id: 's1', stale: true }), { items: [{ id: 't1', revision: 1, latest: 2, stale: true }], next: null });
       assert.deepEqual(listed({ name: 'related', id: 't1' }), { items: [{ id: 't3' }], next: null });
       assert.deepEqual(listed({ name: 'related', id: 't1', stale: true }), { items: [], next: null });
       const first = listed({ name: 'spec', id: 's1', limit: 1 }) as { items: unknown[]; next: string };
-      assert.deepEqual(listed({ name: 'spec', id: 's1', cursor: first.next }), { items: [{ id: 't2', revision: 2, stale: false }], next: null });
+      assert.deepEqual(listed({ name: 'spec', id: 's1', cursor: first.next }), { items: [{ id: 't2', revision: 2, latest: 2, stale: false }], next: null });
       assert.equal(thrown(() => listed({ name: 'boss', id: 'p1' }), OperationParamsError).code, 'invalid_argument');
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'listLinked', { name: 'spec', id: 's1' }), EngineError).code, 'not_found');
     });
 
-    test("pinned links are read as the caller: without read on the target's schema, links cannot be read", () => {
+    test("pinned links are read as the caller: without read on the target's schema, targets cannot be read", () => {
       const engine = world({ policy: policy(({ schema }) => schema === 'Task' || schema === 'Person') });
       link(engine, 't1', { name: 'spec', id: 's1' });
       link(engine, 't2', { name: 'owner', id: 'p1' });
       assert.equal(thrown(() => engine.instances.get(bob, 'Task', 't1'), EngineError).code, 'forbidden');
-      assert.deepEqual(engine.instances.get(bob, 'Task', 't2')?.data.links, { owner: { schema: 'Person', id: 'p1' } });
+      assert.deepEqual(engine.instances.get(bob, 'Task', 't2')?.behaviors.Links.targets, { owner: { schema: 'Person', id: 'p1' } });
       assert.equal(thrown(() => link(engine, 't3', { name: 'spec', id: 's1' }, bob), EngineError).code, 'forbidden');
     });
 
@@ -258,6 +260,25 @@ for (const driver of drivers) {
       assert.match(removed.message, /behavior Links cannot be removed from type Task, which has instances: the links and references its instances hold would stay behind/);
     });
 
+    test('with no instance in any namespace, the config may change in any way; the first instance holds it to the rules again', () => {
+      const engine = open();
+      publish(engine, schema('Person', []));
+      publish(engine, tasks({ owner: { schema: 'Person' }, related: { schema: 'Task' } }));
+      // A link made required, a new required one, a link gone and a link
+      // pointed at another schema: no instance holds a link or lacks one.
+      publish(engine, tasks({ owner: { schema: 'Person', required: true }, boss: { schema: 'Person', required: true } }));
+      engine.schemas.define(alice, tasks({ owner: { schema: 'Task' }, boss: { schema: 'Person', required: true } }));
+      assert.equal(engine.schemas.publish(alice, 'Task').version, 3);
+      engine.instances.create(alice, 'Person', { title: 'p1' }, { id: 'p1' });
+      engine.instances.create(alice, 'Task', { title: 't1' }, { id: 't1', behaviors: { Links: { boss: 'p1' } } });
+      const change = (links: Record<string, unknown>) => thrown(() => engine.schemas.define(alice, tasks(links)), IncompatibleChangeError).changes.map((c) => c.message);
+      assert.match(change({ owner: { schema: 'Task', required: true }, boss: { schema: 'Person', required: true } })[0], /link owner becomes required/);
+      assert.match(change({ boss: { schema: 'Person', required: true } })[0], /link owner is gone, and its instances may hold it/);
+      // Deleting the last instance frees the config again.
+      engine.instances.delete(alice, 'Task', 't1');
+      publish(engine, tasks({ boss: { schema: 'Person', required: true } }));
+    });
+
     test("a create gives links by name, a target's id or { id, revision }; they hold from its event, as link's do", () => {
       const engine = world();
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
@@ -270,18 +291,18 @@ for (const driver of drivers) {
       const links = {
         owner: { schema: 'Person', id: 'p1' },
         related: { schema: 'Task', id: 't1' },
-        spec: { schema: 'Spec', id: 's1', revision: 1, stale: true },
+        spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true },
       };
-      assert.deepEqual(created.data, { title: 't4', links });
+      assert.deepEqual([created.data, created.behaviors], [{ title: 't4' }, { Links: { targets: links } }]);
       // One event: the create, which carries the links.
       const events = engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.change]),
-        [['create', { title: 't4', links }]]
+        [['create', { data: { title: 't4' }, behaviors: { Links: { targets: links } } }]]
       );
       // A pinned link gets the target's latest revision when the create names none.
       engine.instances.create(alice, 'Task', { title: 't5' }, { id: 't5', behaviors: { Links: { owner: 'p2', spec: 's1' } } });
-      assert.deepEqual((linksOf(engine, 't5') as { spec: unknown }).spec, { schema: 'Spec', id: 's1', revision: 2, stale: false });
+      assert.deepEqual((linksOf(engine, 't5') as { spec: unknown }).spec, { schema: 'Spec', id: 's1', revision: 2, latest: 2, stale: false });
       // They are references as link's are: the required owner holds p1, and
       // t1's delete unlinks related on t4.
       assert.equal(thrown(() => engine.instances.delete(alice, 'Person', 'p1'), BehaviorVetoError).behavior, 'Links');
@@ -292,7 +313,7 @@ for (const driver of drivers) {
         behavior: 'Links',
         operation: 'unlink',
         params: { name: 'related' },
-        patch: { links: { related: null } },
+        patch: { behaviors: { Links: { targets: { related: null } } } },
       });
       assert.equal(thrown(() => engine.instances.delete(alice, 'Person', 'p1'), BehaviorVetoError).behavior, 'Links');
     });
@@ -351,7 +372,112 @@ for (const driver of drivers) {
       publish(engine, tasks({ ...taskLinks, owner: { schema: 'Person' } }));
       engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'owner' });
       assert.equal(linksOf(engine, 't1'), undefined);
+      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.behaviors, { Links: {} }, 'with no link, Links has an entry and no targets');
       assert.deepEqual(engine.instances.create(alice, 'Task', { title: 't4' }, { id: 't4' }).data, { title: 't4' });
+    });
+
+    // A Recipe composes Branches; a Cook task's recipe link pins its
+    // release, and soup is released when release() is called.
+    function kitchen(): { engine: Engine; release: () => Commit } {
+      const engine = open();
+      publish(engine, recipeDocument() as unknown as Record<string, unknown>);
+      publish(engine, schema('Cook', [{ name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' } } } }]));
+      engine.instances.create(alice, 'Recipe', { title: 'Soup' }, { id: 'soup' });
+      engine.instances.create(alice, 'Cook', { title: 'c1' }, { id: 'c1' });
+      engine.instances.create(alice, 'Cook', { title: 'c2' }, { id: 'c2' });
+      const soup = new Calls(engine, 'soup');
+      let changes = 0;
+      return {
+        engine,
+        release() {
+          changes += 1;
+          const commit = soup.change(`change${changes}`, { step: { upsert: [{ instruction: `Step ${changes}`, position: changes }] } });
+          const released = engine.instances.get(alice, 'Recipe', 'soup')?.behaviors.Branches.release;
+          soup.invoke('releaseCommit', { commit: commit.id, version: typeof released === 'number' ? released : 0 });
+          return commit;
+        },
+      };
+    }
+
+    const cook = (engine: Engine, id: string, params: Record<string, unknown>) => engine.instances.invoke(alice, 'Cook', id, 'link', params);
+    const recipeOf = (engine: Engine, id: string) => (engine.instances.get(alice, 'Cook', id)?.behaviors.Links.targets as { recipe?: unknown } | undefined)?.recipe;
+
+    test("a link pinned to a release records the target's release, its latest beside it, and stale once the target is released again", () => {
+      const { engine, release } = kitchen();
+      const none = thrown(() => cook(engine, 'c1', { name: 'recipe', id: 'soup' }), BehaviorVetoError);
+      assert.deepEqual([none.behavior, none.action, none.reason, none.vetoCode], ['Links', 'link', 'Recipe soup has no release to pin yet', 'no_release']);
+      release();
+      assert.equal(engine.instances.get(alice, 'Recipe', 'soup')?.behaviors.Branches.release, 1);
+      assert.deepEqual(cook(engine, 'c1', { name: 'recipe', id: 'soup' }), { name: 'recipe', schema: 'Recipe', id: 'soup', release: 1 });
+      assert.deepEqual(recipeOf(engine, 'c1'), { schema: 'Recipe', id: 'soup', release: 1, latest: 1, stale: false });
+      release();
+      assert.deepEqual(recipeOf(engine, 'c1'), { schema: 'Recipe', id: 'soup', release: 1, latest: 2, stale: true });
+      assert.equal(engine.instances.get(alice, 'Cook', 'c1')?.seq, 2, 'read when read: no event on the task');
+      assert.deepEqual(cook(engine, 'c2', { name: 'recipe', id: 'soup', release: 1 }), { name: 'recipe', schema: 'Recipe', id: 'soup', release: 1 });
+      cook(engine, 'c1', { name: 'recipe', id: 'soup' });
+      assert.deepEqual(recipeOf(engine, 'c1'), { schema: 'Recipe', id: 'soup', release: 2, latest: 2, stale: false });
+      const issues = (params: Record<string, unknown>) => thrown(() => cook(engine, 'c1', params), OperationParamsError).issues;
+      assert.deepEqual(issues({ name: 'recipe', id: 'soup', release: 3 }), [{ path: '/release', message: 'Recipe soup has releases 1 to 2, not 3' }]);
+      assert.deepEqual(issues({ name: 'recipe', id: 'soup', revision: 1 }), [
+        { path: '/revision', message: 'link recipe is pinned to a release, so it records no revision' },
+      ]);
+      // listLinked gives each pin and the latest, and with stale only the
+      // ones the target has been released past.
+      const listed = (params: Record<string, unknown>) => engine.instances.invokeSchema(alice, 'Cook', 'listLinked', params);
+      assert.deepEqual(listed({ name: 'recipe', id: 'soup' }), {
+        items: [
+          { id: 'c1', release: 2, latest: 2, stale: false },
+          { id: 'c2', release: 1, latest: 2, stale: true },
+        ],
+        next: null,
+      });
+      assert.deepEqual(listed({ name: 'recipe', id: 'soup', stale: true }), { items: [{ id: 'c2', release: 1, latest: 2, stale: true }], next: null });
+      // unlink returns the pin.
+      assert.deepEqual(engine.instances.invoke(alice, 'Cook', 'c2', 'unlink', { name: 'recipe' }), { name: 'recipe', schema: 'Recipe', id: 'soup', release: 1 });
+    });
+
+    test("a release pin needs a target schema that composes Branches; a create gives it as { id, release }, held to link's checks", () => {
+      const { engine, release } = kitchen();
+      publish(engine, schema('Note', []));
+      publish(engine, schema('Cook', [{ name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' }, note: { schema: 'Note', pinned: 'release' } } } }]));
+      engine.instances.create(alice, 'Note', { title: 'n1' }, { id: 'n1' });
+      assert.deepEqual(thrown(() => cook(engine, 'c1', { name: 'note', id: 'n1' }), OperationParamsError).issues, [
+        { path: '/name', message: 'link note is pinned to a release, but Note does not compose Branches' },
+      ]);
+      const vetoed = thrown(() => engine.instances.create(alice, 'Cook', { title: 'c3' }, { behaviors: { Links: { recipe: 'soup' } } }), BehaviorVetoError);
+      assert.deepEqual([vetoed.action, vetoed.vetoCode, vetoed.vetoDetails], ['create', 'no_release', { path: '/behaviors/Links/recipe' }]);
+      release();
+      release();
+      const created = engine.instances.create(alice, 'Cook', { title: 'c3' }, { id: 'c3', behaviors: { Links: { recipe: { id: 'soup', release: 1 } } } });
+      assert.deepEqual(created.behaviors.Links.targets, { recipe: { schema: 'Recipe', id: 'soup', release: 1, latest: 2, stale: true } });
+      assert.deepEqual(
+        thrown(() => engine.instances.create(alice, 'Cook', { title: 'c4' }, { behaviors: { Links: { recipe: { id: 'soup', release: 3 } } } }), CreateParamsError).issues,
+        [{ path: '/behaviors/Links/recipe/release', message: 'Recipe soup has releases 1 to 2, not 3' }]
+      );
+      // The create tool's parameters take a release, not a revision, for the link.
+      const create = engine.tools.describe(alice, 'Cook').operations[0];
+      const links = (create.params.properties as Record<string, { properties: Record<string, { properties: Record<string, { properties?: Record<string, unknown> }> }> }>).behaviors.properties.Links;
+      assert.deepEqual(Object.keys(links.properties.recipe.properties ?? {}), ['id', 'release']);
+      assert.deepEqual(Object.keys(links.properties.note.properties ?? {}), ['id', 'release']);
+    });
+
+    test('what a link pins may change: a row pinned to the other kind records no pin of the new kind until it is linked again', () => {
+      const engine = world();
+      link(engine, 't1', { name: 'spec', id: 's1' });
+      publish(engine, tasks({ ...taskLinks, spec: { schema: 'Spec', pinned: 'revision' } }));
+      assert.deepEqual((linksOf(engine, 't1') as { spec: unknown }).spec, { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false });
+      publish(engine, tasks({ ...taskLinks, spec: { schema: 'Spec' } }));
+      assert.deepEqual((linksOf(engine, 't1') as { spec: unknown }).spec, { schema: 'Spec', id: 's1' });
+      publish(engine, tasks({ ...taskLinks, spec: { schema: 'Spec', pinned: 'release' } }));
+      assert.deepEqual((linksOf(engine, 't1') as { spec: unknown }).spec, { schema: 'Spec', id: 's1' });
+      assert.deepEqual(thrown(() => link(engine, 't1', { name: 'spec', id: 's1' }), OperationParamsError).issues, [
+        { path: '/name', message: 'link spec is pinned to a release, but Spec does not compose Branches' },
+      ]);
+      // Back to a revision pin, the row's revision reads again.
+      publish(engine, tasks(taskLinks));
+      assert.deepEqual((linksOf(engine, 't1') as { spec: unknown }).spec, { schema: 'Spec', id: 's1', revision: 1, latest: 1, stale: false });
+      const refused = thrown(() => engine.schemas.define(alice, tasks({ ...taskLinks, spec: { schema: 'Spec', pinned: 'tag' } })), SchemaDocumentError);
+      assert.ok(refused.issues.some((issue) => issue.path === '/types/Task/behaviors/0/config/links/spec/pinned'));
     });
   });
 }

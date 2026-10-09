@@ -464,13 +464,35 @@ func (ctx GenerateContext) Skip(key string) {
 	ctx.Logf("  - %s: skipped (not applicable to this schema)\n", key)
 }
 
-// InstallTargetDir resolves a repo-root-relative install directory for
-// generators that write outside the output root. The repo root is the
+// GitRoot returns the repository root an install resolves against: the
 // nearest ancestor of Options.ServicePath containing .git (a directory in a
-// normal checkout, a file in a linked worktree). The target directory must
-// already exist: install never scaffolds it, and a typo'd path failing
-// loudly beats a junk tree under the repo root. kind names the directory's
-// role ("chart", "manifest") in errors.
+// normal checkout, a file in a linked worktree), or "" when there is none.
+func (ctx GenerateContext) GitRoot() (string, error) {
+	if ctx.Options.ServicePath == "" {
+		return "", fmt.Errorf("the repository root is resolved from the service path, and the build has none")
+	}
+	dir, err := filepath.Abs(ctx.Options.ServicePath)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", nil
+		}
+		dir = parent
+	}
+}
+
+// InstallTargetDir resolves a repo-root-relative install directory for
+// generators that write outside the output root. The repo root is GitRoot.
+// The target directory must already exist: install never scaffolds it, and
+// a typo'd path failing loudly beats a junk tree under the repo root; the
+// error is a *NoInstallDirError. kind names the directory's role ("chart",
+// "manifest") in errors.
 //
 // The empty return with a nil error means there is no repo above the
 // service path: a source-only build context (Docker codegen stages copy the
@@ -487,25 +509,28 @@ func (ctx GenerateContext) InstallTargetDir(relDir, kind string) (string, error)
 	if ctx.Options.ServicePath == "" {
 		return "", fmt.Errorf("install target %q needs a service path to resolve the repo root", relDir)
 	}
-	dir, err := filepath.Abs(ctx.Options.ServicePath)
-	if err != nil {
+	dir, err := ctx.GitRoot()
+	if err != nil || dir == "" {
 		return "", err
-	}
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil {
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", nil
-		}
-		dir = parent
 	}
 	targetDir := filepath.Join(dir, filepath.FromSlash(relDir))
 	if info, statErr := os.Stat(targetDir); statErr != nil || !info.IsDir() {
-		return "", fmt.Errorf("install target %q: %s directory %s does not exist", relDir, kind, targetDir)
+		return "", &NoInstallDirError{RelDir: relDir, Kind: kind, Dir: targetDir}
 	}
 	return targetDir, nil
+}
+
+// NoInstallDirError is InstallTargetDir's refusal of an install directory
+// that does not exist. A generator whose install is optional, such as the
+// Stack kind's ci (D47), skips the install on it.
+type NoInstallDirError struct {
+	RelDir string
+	Kind   string
+	Dir    string
+}
+
+func (e *NoInstallDirError) Error() string {
+	return fmt.Sprintf("install target %q: %s directory %s does not exist", e.RelDir, e.Kind, e.Dir)
 }
 
 // BuildAllHook runs in `superschematic build-all` once every service's

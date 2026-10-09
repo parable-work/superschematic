@@ -24,8 +24,14 @@ var update = flag.Bool("update", false, "rewrite golden files")
 const fixturesDir = "../../loader/tsreader/testdata/services"
 
 // goldenFiles are the generated files pinned by TestWriteAPIGolden; openapi.json
-// is apigen's and is pinned by apigen's own golden.
-var goldenFiles = []string{"package.json", "tsconfig.json", "index.ts", "interfaces.ts", "router.ts", "README.md"}
+// is apigen's and is pinned by apigen's own golden. The implementation
+// scaffold's files are pinned under implementation/ (scaffoldGoldenFiles).
+var goldenFiles = []string{"package.json", "tsconfig.json", "index.ts", "interfaces.ts", "router.ts", "deps.ts", "README.md"}
+
+// scaffoldGoldenFiles are the implementation scaffold's files pinned under
+// testdata/golden/<service>/implementation; its tsconfig.json is the same
+// for every API.
+var scaffoldGoldenFiles = []string{"package.json", ImplementationFile}
 
 // loadFixtureAPI loads fixture-api, without encryption, and its fixture-db
 // dependency. The TypeScript server refuses an encrypted operation that is
@@ -98,7 +104,8 @@ func TestWriteAPIGolden(t *testing.T) {
 	checkGolden(t, generateFixtureAPI(t), "fixture-api")
 }
 
-// checkGolden writes the package and compares goldenFiles with
+// checkGolden writes the package and the implementation scaffold, and
+// compares goldenFiles and scaffoldGoldenFiles with
 // testdata/golden/<service> (rewriting them under -update); openapi.json
 // only has to be a JSON document with paths.
 func checkGolden(t *testing.T, output *APIOutput, service string) {
@@ -107,9 +114,17 @@ func checkGolden(t *testing.T, output *APIOutput, service string) {
 	if err := WriteAPI(output, outDir); err != nil {
 		t.Fatalf("write api: %v", err)
 	}
+	implDir := filepath.Join(outDir, "implementation")
+	if written, err := WriteImplementationScaffold(output, implDir); err != nil || !written {
+		t.Fatalf("write implementation scaffold: %v, %v", written, err)
+	}
 
 	goldenDir := filepath.Join("testdata", "golden", service)
-	for _, name := range goldenFiles {
+	files := append([]string(nil), goldenFiles...)
+	for _, name := range scaffoldGoldenFiles {
+		files = append(files, filepath.Join("implementation", name))
+	}
+	for _, name := range files {
 		got, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
 			t.Fatalf("read generated %s: %v", name, err)

@@ -22,6 +22,8 @@ cloud.google.com/go/longrunning v1.2.0 h1:WjYH3YHBGCxGJP9M4dWGHBfXr/cFIjMkNgWcJj
 cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
 cloud.google.com/go/monitoring v1.30.0 h1:r/d+JUbyKmJ8b07iznuKfzVzrIXTWxHQ3lBRm3x2LlY=
 cloud.google.com/go/monitoring v1.30.0/go.mod h1:htlUR0QWVMrjFzZmN4LGnMAve9xB/eduwjmINxVZ8RM=
+cloud.google.com/go/resourcemanager v1.17.0 h1:XIM2tIYQ/x3BNn0+eWdRSiMLpErl4/WM4aezbHULR10=
+cloud.google.com/go/resourcemanager v1.17.0/go.mod h1:IQT7djVg7KWNzEUt8QVeoHQ3Y8IqizmuscnEswU4MAo=
 cloud.google.com/go/run v1.23.0 h1:JvTkOn+8h+QicGzBPWjgSrwpTcs2b6zJkusfEnmvkGo=
 cloud.google.com/go/run v1.23.0/go.mod h1:ZCGrir3QdVgAJsVChr2nlQTfaknro8nwpEZwJDRHHhI=
 cloud.google.com/go/secretmanager v1.22.0 h1:c9nPLiK4IZeT/zDyLjvNaBw1BHNkp0Ysybj1FfFIAPQ=
@@ -273,6 +275,8 @@ github.com/pulumi/pulumi/sdk/v3 v3.259.0 h1:mJP9tXF9oxcfwidBgteXkUUchIz2L59SbGS5
 github.com/pulumi/pulumi/sdk/v3 v3.259.0/go.mod h1:DPK83ZiPYy55hY0MoaFAbl95Yee/dCGc6cQAqI7/ctw=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
+github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
+github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

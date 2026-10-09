@@ -77,11 +77,13 @@ the closure are not built. A container image or CI job that needs one
 service's generated packages builds them with one command instead of
 listing the dependencies by hand.
 
-Use --scaffold to write the implementation of each Go API built whose
-package is missing: a package at the naming file's [implementation_paths]
-go template (go/{service} from the parent of the schemas root by default)
-whose New has the generated Deps constructor signature and whose methods
-answer 501 until implemented. It never writes into a package that exists.
+Use --scaffold to write the implementation of each Go or TypeScript API
+built whose package is missing: a package at the naming file's
+[implementation_paths] template of its language (go/{service} and
+typescript/{service} from the parent of the schemas root by default)
+whose New, or create, has the generated Constructor's type and whose
+methods answer 501 until implemented. It never writes into a package that
+exists.
 
 Examples:
   superschematic build ./schemas/services/shop-db
@@ -94,7 +96,7 @@ Examples:
 	}
 	cmd.Flags().BoolVar(&flags.emitIR, "emit-ir", false, "print the Schema IR as JSON to stdout")
 	cmd.Flags().BoolVar(&flags.withDeps, "with-deps", false, "also build the target's transitive dependencies (declared dependencies, authDb and calls), dependencies first")
-	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go API built whose package is missing, at the [implementation_paths] go template")
+	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go or TypeScript API built whose package is missing, at the [implementation_paths] template of its language")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <service-dir>/../../dist)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")

@@ -13,17 +13,26 @@ export type EngineErrorCode =
   | 'name_taken'
   | 'not_found'
   | 'unknown_namespace'
+  /** The namespace is archived: it is read as it was, and refuses every write. */
+  | 'namespace_archived'
+  /**
+   * A read of the event log from a cursor retention has pruned past: the
+   * events after it are no longer all there (CursorExpiredError).
+   */
+  | 'cursor_expired'
   | 'invalid_argument'
   /** The access policy refuses the call, or a behavior a caller without the permission its config names. */
   | 'forbidden'
   /** The instance, or an update's result, does not validate against the live version. */
   | 'invalid_instance'
-  /** An instance with the id already exists. */
+  /** An instance with the id already exists, or another instance holds the values of a unique field (UniqueConflictError). */
   | 'conflict'
   /** An update or delete named the instance's sequence, and the instance is no longer at it. */
   | 'seq_mismatch'
   /** A behavior's guard refuses the change. */
   | 'vetoed'
+  /** A value the write would store is longer than the engine stores (ValueTooLargeError, values.maxBytes). */
+  | 'value_too_large'
   /**
    * The schema's live version composes a behavior this engine cannot run:
    * no implementation is registered for it, or the registered one refuses
@@ -38,6 +47,51 @@ export class EngineError extends Error {
     super(message);
     this.name = 'EngineError';
     this.code = code;
+  }
+}
+
+/**
+ * A read of the event log, or a stream's resume, from a cursor before a
+ * namespace's floor: retention pruned events after the cursor, so the
+ * read would not be complete. floor is the earliest cursor a read of the
+ * namespace may start from, head the log's last; a client that can take
+ * the gap reads on from floor, and one that cannot starts again from
+ * head.
+ */
+export class CursorExpiredError extends EngineError {
+  readonly after: number;
+  readonly floor: number;
+  readonly head: number;
+
+  constructor(namespace: string, after: number, floor: number, head: number) {
+    super(
+      'cursor_expired',
+      `the event log of namespace ${namespace} no longer holds every event after cursor ${after}: retention pruned it through ${floor}; read from ${floor} to take what is left, or from head`
+    );
+    this.name = 'CursorExpiredError';
+    this.after = after;
+    this.floor = floor;
+    this.head = head;
+  }
+}
+
+/**
+ * A write that would store a value longer than the engine's values.maxBytes:
+ * a top-level member of an instance's own fields, of an event's change or
+ * of an object a behavior keeps, at path, a JSON pointer into what is
+ * stored (`/body`, `/params/result`), whose canonical JSON is bytes long.
+ */
+export class ValueTooLargeError extends EngineError {
+  readonly path: string;
+  readonly bytes: number;
+  readonly maxBytes: number;
+
+  constructor(path: string, bytes: number, maxBytes: number) {
+    super('value_too_large', `the value at ${path} is ${bytes} bytes of JSON, more than the engine stores, ${maxBytes} (values.maxBytes)`);
+    this.name = 'ValueTooLargeError';
+    this.path = path;
+    this.bytes = bytes;
+    this.maxBytes = maxBytes;
   }
 }
 
@@ -65,18 +119,50 @@ export interface SchemaChange {
   message: string;
 }
 
+/** What IncompatibleChangeError tells a definer to do, unless the caller says otherwise. */
+const INCOMPATIBLE_ADVICE =
+  'A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name';
+
 /** A new version the compatibility rule refuses. */
 export class IncompatibleChangeError extends EngineError {
   readonly changes: SchemaChange[];
 
-  constructor(namespace: string, name: string, liveVersion: number, changes: SchemaChange[]) {
+  /** advice replaces the closing sentence, for a change the stored instances refuse rather than the rule's diff (a new unique field). */
+  constructor(namespace: string, name: string, liveVersion: number, changes: SchemaChange[], advice = INCOMPATIBLE_ADVICE) {
     super(
       'incompatible_change',
-      `schema ${name} in namespace ${namespace}: a new version cannot replace version ${liveVersion}: ${changes.map((change) => change.message).join('; ')}. A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name`
+      `schema ${name} in namespace ${namespace}: a new version cannot replace version ${liveVersion}: ${changes.map((change) => change.message).join('; ')}. ${advice}`
     );
     this.name = 'IncompatibleChangeError';
     this.changes = changes;
   }
+}
+
+/**
+ * A create or an update that would give a second instance of a namespace
+ * the values of a unique field, or of a unique index's fields: fields
+ * names them by JSON key. The instance that holds them is not named, since
+ * the caller may write the schema without reading it.
+ */
+export class UniqueConflictError extends EngineError {
+  /** The JSON keys of the unique fields, in the index's order. */
+  readonly fields: string[];
+
+  constructor(namespace: string, schema: string, fields: readonly string[], values: readonly unknown[]) {
+    const held = fields.map((field, position) => `${field} ${shownValue(values[position])}`);
+    super(
+      'conflict',
+      `${schema} in namespace ${namespace}: another instance holds ${held.length < 2 ? held.join('') : `${held.slice(0, -1).join(', ')} and ${held[held.length - 1]}`}, and ${fields.length > 1 ? 'together they are' : 'it is'} unique`
+    );
+    this.name = 'UniqueConflictError';
+    this.fields = [...fields];
+  }
+}
+
+// shownValue writes a value for a message, cut short past 80 characters.
+function shownValue(value: unknown): string {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
 /** One reason an instance is refused, at a path such as `lines[2].sku`; an empty path is the instance itself. */
@@ -84,8 +170,9 @@ export interface ValidationIssue {
   path: string;
   /**
    * The rule it breaks: the schema runtime's (`required`, `type`, `pattern`,
-   * `enum`, ...), `unknown` for an undeclared key, or `readOnly` for a field
-   * a behavior adds, which only its operations change.
+   * `enum`, ...), `unknown` for an undeclared key, a behavior's field among
+   * them, since an instance's data holds its own fields only, or a rule a
+   * behavior's validate names.
    */
   rule: string;
   message: string;

@@ -35,6 +35,8 @@ var corpus = []string{
 	// The user model's route sets (D50), written as their keys over an
 	// empty operations list.
 	"internal/loader/tsreader/testdata/services/fixture-user-routes-api",
+	"internal/loader/tsreader/testdata/services/fixture-display",
+	"internal/loader/testdata/services/fixture-display-json",
 	"internal/loader/testdata/services/fixture-db-json",
 	"internal/loader/testdata/services/fixture-db-yaml",
 	"internal/loader/testdata/services/fixture-general-json",
@@ -72,8 +74,8 @@ export const renamedPolicy: OperationSetFile = {
 `
 
 // closedParts are documents the types refuse: an unknown key, a value
-// outside an enum, a missing required key and a single-definition file
-// without its discriminator.
+// outside an enum, a missing required key, a single-definition file
+// without its discriminator and a display of the wrong shape.
 const closedParts = `
 // @ts-expect-error an unknown key
 export const unknownKey: TypeDef = { name: 'Item', role: 'DBTable', colour: 'red' };
@@ -89,6 +91,12 @@ export const hiddenAsString: OperationMCP = { hidden: 'no' };
 export const behaviorWithoutName: BehaviorRef = { config: { aisles: 3 } };
 // @ts-expect-error an unknown key on a behavior
 export const behaviorExtraKey: TypeDef = { name: 'Item', role: 'DBTable', behaviors: [{ name: 'acme.Audited', extra: 1 }] };
+// @ts-expect-error a tone outside the set
+export const unknownTone: TypeDef = { name: 'Item', role: 'DBTable', display: { states: { todo: { tone: 'blue' } } } };
+// @ts-expect-error an unknown key on a display
+export const displayExtraKey: TypeDef = { name: 'Item', role: 'DBTable', display: { icon: 'box' } };
+// @ts-expect-error a transition label that is not a map by the state it enters
+export const flatTransition: TypeDef = { name: 'Item', role: 'DBTable', display: { transitions: { todo: 'Start' } } };
 `
 
 // TestTypesCheckTheCorpus type-checks the generated types with the

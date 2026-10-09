@@ -1,0 +1,58 @@
+// The implementation of the {{ .SchemaName }} API.
+//
+// superschematic wrote this package once, as a scaffold, because it was
+// missing. It never writes it again: the package is yours. Each method
+// answers 501 Not Implemented until you implement it.
+
+import { notImplemented{{ if .WebhookProviders }}, unauthorized{{ end }} } from '{{ .RuntimePackage }}';
+import type {
+{{- if .ChecksEndUsers }}
+  AuthenticatorFactory,
+{{- end }}
+  Constructor,
+  Deps,
+{{- range .Namespaces }}
+  {{ .InterfaceName }},
+{{- end }}
+} from '{{ .PackageName }}';
+
+/** Builds the implementation of {{ .SchemaName }} from its dependencies. Its type is the generated Constructor. */
+export const create: Constructor = deps => ({
+{{- range .Namespaces }}
+  {{ .Property }}: {{ .Property }}Implementation(deps),
+{{- end }}
+{{- if .WebhookProviders }}
+  // The verifier of each @hmacVerified provider, which checks the
+  // signature of its requests. The scaffold's refuses every request.
+  webhookVerifiers: {
+{{- range .WebhookProviders }}
+    {{ tsString . }}: async () => {
+      throw unauthorized({{ tsString (printf "%s verifies no %s signature yet" $.SchemaName .) }});
+    },
+{{- end }}
+  },
+{{- end }}
+});
+{{- if .ChecksEndUsers }}
+
+/**
+ * Builds the authenticator that establishes the end user on the routes
+ * that require one. The scaffold's establishes none, so each such route
+ * answers 401: verify the request's credential (ctx.bearerToken, or a
+ * header) with your identity provider and return its Principal.
+ */
+export const authenticate: AuthenticatorFactory = () => async () => null;
+{{- end }}
+{{- range .Namespaces }}
+
+function {{ .Property }}Implementation(deps: Deps): {{ .InterfaceName }} {
+  return {
+{{- $ns := . }}
+{{- range .Endpoints }}
+    async {{ .Name }}() {
+      throw notImplemented('{{ $ns.Property }}.{{ .Name }}');
+    },
+{{- end }}
+  };
+}
+{{- end }}

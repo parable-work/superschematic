@@ -1,19 +1,22 @@
-// Package servergen writes the Go entrypoint of a stack's server
-// (docs/stack-model.md, sections 8.1 and 8.2): a module at
-// `<output-root>/server/<stack>/<server>/` holding main.go, go.mod and a
-// Dockerfile. main.go loads each served API's config, connects one pool per
-// database, builds one SDK client per API called, builds each API's
-// implementation from its Deps and mounts every API's routes on one
+// Package servergen writes the entrypoint of a stack's server
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6). A Go server's is a
+// module at `<output-root>/server/<stack>/<server>/` holding main.go,
+// go.mod and a Dockerfile. main.go loads each served API's config, connects
+// one pool per database, builds one SDK client per API called, builds each
+// API's implementation from its Deps and mounts every API's routes on one
 // handler beside /healthz and /readyz. cloudsql.go beside it connects a
 // database through the Cloud SQL connector, on a server that some
-// environment places on Cloud SQL. The generator package plans what each
-// server serves from the stack and the APIs' Go server outputs; this
-// package turns that plan into files.
+// environment places on Cloud SQL. A TypeScript server's is a package at
+// the same place, whose main.ts does the same on Bun (typescript.go). The
+// generator package plans what each server serves from the stack and the
+// APIs' server outputs; this package turns that plan into files.
 package servergen
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"go/format"
 	"go/token"
 	"os"
 	"path"
@@ -21,12 +24,14 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -82,6 +87,12 @@ type Module struct {
 	// Dir is the module's directory, absolute, or "" for no replace.
 	Dir string
 
+	// Pinned replaces every version of the module with Version, which the
+	// module proxy serves: a module of the release that generates the
+	// server, which no [paths] key names a checkout of. The generated
+	// modules require it at a version only a checkout's replace resolves.
+	Pinned bool
+
 	// Direct is true for a module main.go imports a package of.
 	Direct bool
 }
@@ -134,15 +145,21 @@ type Input struct {
 	// main.go imports.
 	Naming naming.Naming
 
-	// RepositoryRoot is the Dockerfile's build context. Every directory
-	// a replace points at must lie under it, or no Dockerfile is written.
+	// RepositoryRoot is the Dockerfile's build context: the repository
+	// root, or the naming file's [paths] build_context. Every directory a
+	// replace points at must lie under it, or no Dockerfile is written.
 	RepositoryRoot string
 
 	// ScalarGo is the directory of the scalar library's Go binding, the
 	// naming file's [paths] scalar_go. The Dockerfile builds its static
-	// archive from the workspace that holds it; without it no Dockerfile is
-	// written.
+	// archive from the workspace that holds it. Without it the Dockerfile
+	// downloads the static archives Release ships, or, from a binary that
+	// names none, no Dockerfile is written.
 	ScalarGo string
+
+	// Release is the release of superschematic that generates the
+	// entrypoint (D47, amended).
+	Release release.Release
 
 	// VersionGraphGo is the directory of the version graph's Go binding,
 	// when a database the server connects to declares a version graph. The
@@ -154,9 +171,23 @@ type Input struct {
 	// links the Cloud SQL connector when one of them is a database it
 	// connects to.
 	CloudSQL []string
+
+	// manualRoutes counts a manually registered operation among an API's
+	// routes, as a router that mounts it does: a TypeScript one.
+	manualRoutes bool
+	// Job, when set, plans the entrypoint of a job of the one API in APIs
+	// rather than a server's (D52): Server is then the job's deployable.
+	Job *JobInput
 }
 
-// ServerDir is where the entrypoint of server in stack is written.
+// JobInput is the job a job's entrypoint runs.
+type JobInput struct {
+	// Name is the job's @job class.
+	Name string
+}
+
+// ServerDir is where the entrypoint of server in stack is written; a job's
+// is beside the servers', under the job's deployable name.
 func ServerDir(outputRoot, stack, server string) string {
 	return filepath.Join(StackDir(outputRoot, stack), server)
 }
@@ -171,12 +202,21 @@ func ModulePath(n naming.Naming, stack, server string) string {
 	return n.OrDefault().GoModuleRoot + "/server/" + stack + "/" + server
 }
 
-// Server is a planned entrypoint, what the templates read.
+// Server is a planned entrypoint, what the templates read: a server's, or
+// a job's when Job is set.
 type Server struct {
 	Stack  string
 	Name   string
 	Module string
 	Naming naming.Naming
+
+	// Kind is "server", or "job" for a job's entrypoint; Binary is the
+	// name the image builds the binary under.
+	Kind   string
+	Binary string
+
+	// Job is what a job's entrypoint runs, nil for a server.
+	Job *Job
 
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
@@ -205,16 +245,31 @@ type Server struct {
 	NoDocker string
 }
 
+// Pinned reports whether a replace takes a module of the release from the
+// module proxy.
+func (s *Server) Pinned() bool {
+	return slices.ContainsFunc(s.Replaces, func(r Replace) bool { return r.Version != "" })
+}
+
+// Job is the job a job's entrypoint runs: its @job class and the method of
+// the API's Jobs interface that runs it.
+type Job struct {
+	Name   string
+	Method string
+}
+
 // Require is a go.mod require line.
 type Require struct {
 	Path    string
 	Version string
 }
 
-// Replace is a go.mod replace line, its directory relative to the module.
+// Replace is a go.mod replace line: the module at its directory, relative
+// to the module, or, with a Version, the module at that version.
 type Replace struct {
-	Path string
-	Dir  string
+	Path    string
+	Dir     string
+	Version string
 }
 
 // API is a served API in main.go.
@@ -308,9 +363,38 @@ type Docker struct {
 	VersionGraphGo    string
 	VersionGraphCrate string
 
+	// Archives, when set, are the static archives of the release the
+	// build stage downloads, in place of the stages that build them from
+	// checkouts.
+	Archives *Archives
+
 	// Include are the paths the build context holds.
 	Include []string
 }
+
+// Archives are a release's static archives for the platforms an image
+// builds for, which the Dockerfile downloads.
+type Archives struct {
+	// Version is the release.
+	Version string
+
+	// Base is where the release's assets download from.
+	Base string
+
+	// Platforms are the image's platforms, by GOARCH.
+	Platforms []ArchivePlatform
+}
+
+// ArchivePlatform is the archives tarball for linux and one GOARCH, and
+// its hex SHA-256.
+type ArchivePlatform struct {
+	GOARCH string
+	Name   string
+	SHA256 string
+}
+
+// archiveArches are the architectures an image builds for, linux's.
+var archiveArches = []string{"amd64", "arm64"}
 
 // reserved are the names main.go and cloudsql.go declare or import beside
 // the served APIs' own: an API, database or client never takes one.
@@ -321,6 +405,7 @@ var reserved = []string{
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
 	"identity", "identityConfig", "stdlib", "method", "requested",
+	"jobs", "started",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -370,21 +455,38 @@ func packageName(service string) string {
 
 // Plan plans the entrypoint of one server. It refuses a server whose APIs
 // register one method and path between them, since one router answers
-// each once, and an API whose generated Config cannot be filled.
+// each once, and an API whose generated Config cannot be filled. With
+// in.Job it plans a job's entrypoint instead (D52): one API, the job's,
+// whose Deps it builds as a server does, and no routes.
 func Plan(in Input) (*Server, error) {
-	if len(in.APIs) == 0 {
-		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
-	}
-	if err := checkRoutes(in); err != nil {
-		return nil, err
-	}
 	s := &Server{
 		Stack:       in.Stack,
 		Name:        in.Server,
 		Module:      ModulePath(in.Naming, in.Stack, in.Server),
 		Naming:      in.Naming.OrDefault(),
+		Kind:        "server",
+		Binary:      "server",
 		GoVersion:   GoVersion,
 		RustVersion: RustVersion,
+	}
+	switch {
+	case in.Job != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: job %s runs a job of %d APIs; a job belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		i := slices.IndexFunc(o.Jobs, func(j apigen.JobInfo) bool { return j.Name == in.Job.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("stack %s: job %s runs %s of %s, which declares no such job", in.Stack, in.Server, in.Job.Name, o.SchemaName)
+		}
+		s.Kind, s.Binary = "job", "job"
+		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method}
+	case len(in.APIs) == 0:
+		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
+	default:
+		if err := checkRoutes(in); err != nil {
+			return nil, err
+		}
 	}
 	taken := newNames()
 	apis := make([]*API, len(in.APIs))
@@ -393,17 +495,23 @@ func Plan(in Input) (*Server, error) {
 		stem := taken.take(varStem(o.SchemaName))
 		pkg := taken.take(packageName(o.SchemaName))
 		apis[i] = &API{
-			Service:     o.SchemaName,
-			Var:         stem,
-			Package:     pkg,
-			Impl:        taken.take(pkg + "impl"),
-			Module:      o.ModulePath,
-			Import:      a.Implementation.Import,
-			Config:      o.HasEnvConfig(),
-			Public:      o.IsPublic,
-			Encrypted:   o.HasEncryptedEndpoints,
-			ServiceAuth: o.HasServiceCallers,
-			Identity:    o.Auth.Identity,
+			Service: o.SchemaName,
+			Var:     stem,
+			Package: pkg,
+			Impl:    taken.take(pkg + "impl"),
+			Module:  o.ModulePath,
+			Import:  a.Implementation.Import,
+			Config:  o.HasEnvConfig(),
+		}
+		if s.Job == nil {
+			// A job serves no request: it mounts no routes, verifies no end
+			// user or caller, and decrypts no payload. So it builds no
+			// identity service either, though its API's authDb holds the
+			// user model (D50): its Deps reach the tables through the ORM.
+			apis[i].Public = o.IsPublic
+			apis[i].Encrypted = o.HasEncryptedEndpoints
+			apis[i].ServiceAuth = o.HasServiceCallers
+			apis[i].Identity = o.Auth.Identity
 		}
 	}
 	databases := map[string]*Database{}
@@ -498,7 +606,10 @@ func Plan(in Input) (*Server, error) {
 // planModule plans go.mod: the third-party modules main.go and
 // cloudsql.go import, then in.Modules, each replaced by its directory.
 func (s *Server) planModule(in Input, dir string) error {
-	direct := []Require{{"github.com/go-chi/chi/v5", chiVersion}, {"go.uber.org/zap", zapVersion}}
+	direct := []Require{{"go.uber.org/zap", zapVersion}}
+	if s.Job == nil {
+		direct = append(direct, Require{"github.com/go-chi/chi/v5", chiVersion})
+	}
 	if len(s.Databases) > 0 {
 		direct = append(direct, Require{"github.com/jackc/pgx/v5", pgxVersion})
 	}
@@ -524,6 +635,10 @@ func (s *Server) planModule(in Input, dir string) error {
 		} else {
 			indirect = append(indirect, Require{m.Path, version})
 		}
+		if m.Pinned {
+			s.Replaces = append(s.Replaces, Replace{Path: m.Path, Version: version})
+			continue
+		}
 		if m.Dir == "" {
 			continue
 		}
@@ -543,14 +658,19 @@ func (s *Server) planModule(in Input, dir string) error {
 
 // planDocker plans the Dockerfile, or says why there is none: every
 // directory the build reads must lie under the repository root, the build
-// context, and the scalar library's Go binding must be a checkout the
-// image can build the static archive from.
+// context. The static archives come from the checkout of the scalar
+// library's Go binding the naming file names, which the image builds
+// them from, or, without one, from the release, which ships them.
 func planDocker(in Input, dir string) (*Docker, string, error) {
 	if in.RepositoryRoot == "" {
 		return nil, "no repository root to take as the build context", nil
 	}
+	var archives *Archives
 	if in.ScalarGo == "" {
-		return nil, "the naming file's [paths] scalar_go is unset, and the image builds superscalar's static archive from that checkout", nil
+		var why string
+		if archives, why = releaseArchives(in.Release); archives == nil {
+			return nil, why, nil
+		}
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {
@@ -573,11 +693,21 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		return nil, fmt.Sprintf("the output root holding %s lies outside the repository root %s, the build context", dir, root), nil
 	}
 	d.Dockerfile = path.Join(d.Context, DockerFile)
+	include := []string{d.Context}
+	if archives != nil {
+		d.Archives = archives
+		if in.VersionGraphGo != "" {
+			if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
+				return nil, fmt.Sprintf("the version graph's Go binding %s lies outside the repository root %s, the build context", in.VersionGraphGo, root), nil
+			}
+		}
+		return finish(d, in, root, include, rel)
+	}
 	if d.ScalarGo, ok = rel(in.ScalarGo); !ok {
 		return nil, fmt.Sprintf("superscalar's Go binding %s lies outside the repository root %s, the build context", in.ScalarGo, root), nil
 	}
 	d.ScalarWorkspace = path.Dir(d.ScalarGo)
-	include := []string{d.Context, d.ScalarGo, d.ScalarWorkspace + "/Cargo.toml", d.ScalarWorkspace + "/Cargo.lock", d.ScalarWorkspace + "/crates"}
+	include = append(include, d.ScalarGo, d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
 	if in.VersionGraphGo != "" {
 		if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
 			return nil, fmt.Sprintf("the version graph's Go binding %s lies outside the repository root %s, the build context", in.VersionGraphGo, root), nil
@@ -585,6 +715,13 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		d.VersionGraphCrate = path.Join(path.Dir(d.VersionGraphGo), "rust")
 		include = append(include, d.VersionGraphGo, d.VersionGraphCrate+"/Cargo.toml", d.VersionGraphCrate+"/Cargo.lock", d.VersionGraphCrate+"/src")
 	}
+	return finish(d, in, root, include, rel)
+}
+
+// finish adds the directory of every module a replace points at to the
+// paths the context holds, include, and sets d.Include, or says which
+// module lies outside the context, root, and plans no Dockerfile.
+func finish(d *Docker, in Input, root string, include []string, rel func(string) (string, bool)) (*Docker, string, error) {
 	for _, m := range in.Modules {
 		if m.Dir == "" {
 			continue
@@ -600,14 +737,36 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 	return d, "", nil
 }
 
+// releaseArchives are the static archives of r for the platforms an image
+// builds for, or nil and why the image cannot take them: a binary built
+// from a checkout is no release, and one its release workflow did not
+// build names no digests.
+func releaseArchives(r release.Release) (*Archives, string) {
+	const unset = "the naming file's [paths] scalar_go is unset, so the image links the static archives superschematic's release ships"
+	if r.Version == "" {
+		return nil, unset + ", and this superschematic is built from a checkout, which is no release; set [paths] scalar_go to a superscalar checkout to build them from"
+	}
+	a := &Archives{Version: r.Version, Base: strings.TrimSuffix(release.DownloadURL(r.Version, ""), "/")}
+	for _, arch := range archiveArches {
+		platform := release.Platform("linux", arch)
+		digest, ok := r.Archive(platform)
+		if !ok {
+			return nil, fmt.Sprintf("%s, and this superschematic %s, which its release workflow did not build, names no digest of them for %s", unset, r.Version, platform)
+		}
+		a.Platforms = append(a.Platforms, ArchivePlatform{GOARCH: arch, Name: release.ArchiveName(r.Version, platform), SHA256: digest})
+	}
+	return a, ""
+}
+
 // routeParam matches a path parameter, which a router matches whatever its
 // name.
 var routeParam = regexp.MustCompile(`\{[^}]*\}`)
 
 // checkRoutes refuses two served APIs that register one method and path:
 // one router answers each once. A manually registered operation is the
-// implementation's to route, so it is left out, as apigen leaves it out of
-// its own collision check.
+// implementation's to route on a Go server, so it is left out there, as
+// apigen leaves it out of its own collision check; a TypeScript router
+// mounts it (manualRoutes).
 func checkRoutes(in Input) error {
 	type route struct{ method, path string }
 	owner := map[route]string{}
@@ -615,7 +774,7 @@ func checkRoutes(in Input) error {
 	var problems []string
 	for _, a := range in.APIs {
 		for _, ep := range a.Output.Endpoints {
-			if ep.ManualRouteRegistration {
+			if ep.ManualRouteRegistration && !in.manualRoutes {
 				continue
 			}
 			key := route{ep.Method, routeParam.ReplaceAllString(ep.Path, "{}")}
@@ -641,13 +800,20 @@ func checkRoutes(in Input) error {
 // cloudsql.go when some environment places a database of the server on
 // Cloud SQL, and the Dockerfile with its ignore file when s.Docker is
 // planned.
+//
+// A job's module holds the same files but serviceauth.go and identity.go,
+// and its main.go runs the job (job.go.tmpl). Both main.go templates take
+// the wiring they share from wiring.tmpl.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
 	}
-	gen := codegen.NewFileGenerator(templatesFS, templateFuncs())
+	main := "main.go.tmpl"
+	if s.Job != nil {
+		main = "job.go.tmpl"
+	}
 	files := []struct{ template, name string }{
-		{"main.go.tmpl", MainFile},
+		{main, MainFile},
 		{"go.mod.tmpl", ModFile},
 	}
 	if len(s.CloudSQL) > 0 {
@@ -657,14 +823,43 @@ func Write(s *Server, dir string) error {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})
 	}
 	for _, f := range files {
-		if err := gen.GenerateFile(codegen.NewGoFileConfig(templatesFS, f.template, filepath.Join(dir, f.name), s, nil)); err != nil {
-			return fmt.Errorf("servergen: server %s: %w", s.Name, err)
+		if err := render(f.template, filepath.Join(dir, f.name), s); err != nil {
+			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 		}
 	}
 	if err := writeServiceAuth(s, dir); err != nil {
 		return err
 	}
 	return writeIdentity(s, dir)
+}
+
+// templates is every template of the package parsed into one set, so that
+// main.go's templates execute the named templates wiring.tmpl defines.
+var templates = sync.OnceValues(func() (*template.Template, error) {
+	return template.New("servergen").Funcs(codegen.BaseTemplateFuncs()).Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.tmpl")
+})
+
+// render executes the template named name with data into path, formatting
+// a Go file with gofmt.
+func render(name, path string, data any) error {
+	set, err := templates()
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := set.ExecuteTemplate(&buf, name, data); err != nil {
+		return err
+	}
+	out := buf.Bytes()
+	if strings.HasSuffix(path, ".go") {
+		formatted, err := format.Source(out)
+		if err != nil {
+			_ = os.WriteFile(path, out, 0o644)
+			return fmt.Errorf("format %s: %w (unformatted output written for debugging)", path, err)
+		}
+		out = formatted
+	}
+	return os.WriteFile(path, out, 0o644)
 }
 
 // ImplementationModule is the module the scaffold of an implementation
@@ -703,6 +898,10 @@ func WriteImplementationModule(n naming.Naming, service string, impl Implementat
 			m.Requires = append(m.Requires, Require{mod.Path, version})
 		} else {
 			m.Indirect = append(m.Indirect, Require{mod.Path, version})
+		}
+		if mod.Pinned {
+			m.Replaces = append(m.Replaces, Replace{Path: mod.Path, Version: version})
+			continue
 		}
 		if mod.Dir == "" {
 			continue
@@ -776,7 +975,8 @@ func ImportPath(module, moduleDir, dir string) (string, error) {
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"quote": func(s string) string { return fmt.Sprintf("%q", s) },
+		"quote":      func(s string) string { return fmt.Sprintf("%q", s) },
+		"capitalize": func(s string) string { return strings.ToUpper(s[:1]) + s[1:] },
 		"serviceList": func(apis []*API) string {
 			names := make([]string, len(apis))
 			for i, a := range apis {
@@ -799,5 +999,27 @@ func templateFuncs() template.FuncMap {
 		"anyIdentity": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
 		},
+		"tsQuote": func(s string) string {
+			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
+		},
+		"join": strings.Join,
+		"tsServiceList": func(apis []*TypeScriptAPI) string {
+			names := make([]string, len(apis))
+			for i, a := range apis {
+				names[i] = a.Service
+			}
+			return joinNames(names)
+		},
 	}
+}
+
+// joinNames joins names as a sentence lists them: a, b and c.
+func joinNames(names []string) string {
+	switch len(names) {
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }

@@ -2,6 +2,7 @@ package servergen_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -28,14 +29,16 @@ import (
 const (
 	// identityRoot holds the identity fixture (D50): users-db declares
 	// the user model; users-api, public, serves the session routes and a
-	// route of its own over it; users-admin, not public, the
-	// administration routes; and users-stack serves both from one
-	// server, Accounts, on the local target.
+	// route of its own over it, and declares a job, PurgeSessions;
+	// users-admin, not public, the administration routes; and users-stack
+	// serves both from one server, Accounts, on the local target.
 	identityRoot = "testdata/identity"
 
-	// identityStack is the fixture's stack and identityServer its server.
+	// identityStack is the fixture's stack and identityServer its server;
+	// identityJob is the deployable of users-api's job.
 	identityStack  = "users-stack"
 	identityServer = "Accounts"
+	identityJob    = "users-api-purge-sessions"
 
 	// identityDatabaseEnv names the Postgres the entrypoint also serves
 	// on, as the identity runtime's store tests read it.
@@ -70,7 +73,9 @@ func loadIdentityFixture(t *testing.T) fixture {
 // identity config field, which identity.go reads; neither API's
 // implementation writes an auth middleware. The local environment binds
 // each identity config field to the local platform's config, a cookie
-// without Secure. Regenerate with:
+// without Secure. users-api's job, which serves no request, builds no
+// identity store or service, has no identity.go and binds no identity
+// config field (D52). Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestIdentityEntrypointGolden -update
 func TestIdentityEntrypointGolden(t *testing.T) {
@@ -82,6 +87,9 @@ func TestIdentityEntrypointGolden(t *testing.T) {
 	files := map[string]string{}
 	for _, file := range []string{servergen.MainFile, servergen.IdentityFile, servergen.ModFile} {
 		files[filepath.Join("server", identityStack, identityServer, file)] = filepath.Join(servergen.ServerDir(out, identityStack, identityServer), file)
+	}
+	for _, file := range []string{servergen.MainFile, servergen.ModFile} {
+		files[filepath.Join("server", identityStack, identityJob, file)] = filepath.Join(servergen.ServerDir(out, identityStack, identityJob), file)
 	}
 	for _, service := range []string{"users-api", "users-admin"} {
 		files[filepath.Join("go", service, apigen.ImplementationFile)] = filepath.Join(naming.Default().GoImplementationDir(repoRoot, service), apigen.ImplementationFile)
@@ -118,6 +126,16 @@ func TestIdentityEntrypointGolden(t *testing.T) {
 			t.Errorf("the implementation scaffold of %s writes an auth middleware:\n%s", service, impl)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(servergen.ServerDir(out, identityStack, identityJob), servergen.IdentityFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the job %s has %s: %v", identityJob, servergen.IdentityFile, err)
+	}
+	job, err := os.ReadFile(files[filepath.Join("server", identityStack, identityJob, servergen.MainFile)])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(job), "identity") {
+		t.Errorf("the job %s builds the identity runtime:\n%s", identityJob, job)
+	}
 
 	data, err := os.ReadFile(filepath.Join(out, "stack", identityStack, "Local", "environment.json"))
 	if err != nil {
@@ -129,6 +147,13 @@ func TestIdentityEntrypointGolden(t *testing.T) {
 	}
 	bound := map[string]*ir.Binding{}
 	for _, d := range env.Deployables {
+		if d.Name == identityJob {
+			for _, b := range d.Bindings {
+				if b.IdentityOf != "" {
+					t.Errorf("the job %s binds the identity config field %s", identityJob, b.Field)
+				}
+			}
+		}
 		if d.Name != identityServer {
 			continue
 		}
@@ -168,6 +193,10 @@ func TestIdentityEntrypointServes(t *testing.T) {
 	goCommand(t, dir, "vet", ".")
 	binary := filepath.Join(t.TempDir(), identityServer)
 	goCommand(t, dir, "build", "-o", binary, ".")
+	// The job of users-api builds on its own, without the identity runtime.
+	jobDir := servergen.ServerDir(out, identityStack, identityJob)
+	goCommand(t, jobDir, "mod", "tidy")
+	goCommand(t, jobDir, "vet", ".")
 
 	identityConfig := `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
 	identity := []string{"USERS_API_IDENTITY=" + identityConfig, "USERS_ADMIN_IDENTITY=" + identityConfig}

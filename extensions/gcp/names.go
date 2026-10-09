@@ -109,16 +109,29 @@ func literalLength(name any) (n int, refs bool) {
 
 // checkLength refuses a name a GCP resource cannot take: shorter than min
 // or longer than max characters, or under a parameter longer than leaves
-// room for one character of the value.
-func checkLength(what string, name any, min, max int) error {
+// room for one character of the value. rename is what names it anew, which
+// the refusal tells the engineer to change: `the deployable`, or for a
+// job, whose name its API and class make (D52), `the job's class or its
+// API`.
+func checkLength(what string, name any, min, max int, rename string) error {
 	n, refs := literalLength(name)
 	switch {
 	case !refs && n < min:
-		return fmt.Errorf("%s %q is %d characters, and GCP needs at least %d; declare the deployable under a longer name", what, name, n, min)
+		return fmt.Errorf("%s %q is %d characters, and GCP needs at least %d; give %s a longer name", what, name, n, min, rename)
 	case !refs && n > max:
-		return fmt.Errorf("%s %q is %d characters, and GCP allows %d; declare the deployable under a shorter name", what, name, n, max)
+		return fmt.Errorf("%s %q is %d characters, and GCP allows %d; give %s a shorter name", what, name, n, max, rename)
 	case refs && n >= max:
-		return fmt.Errorf("%s is %d characters before its parameter values, and GCP allows %d in all; declare the deployable under a shorter name", what, n, max)
+		return fmt.Errorf("%s is %d characters before its parameter values, and GCP allows %d in all; give %s a shorter name", what, n, max, rename)
 	}
 	return nil
+}
+
+// renameOf is what names a deployable anew, for checkLength: a job's name
+// is its API's and its class's (ir.JobDeployableName), every other
+// deployable's its own.
+func renameOf(d ir.ResolvedDeployable) string {
+	if d.Kind == ir.DeployableJob {
+		return "the job's class or its API"
+	}
+	return "the deployable"
 }

@@ -33,19 +33,23 @@ export enum TargetLanguage {
 
 /**
  * A handle to a service: what service() returns and a generated sentinel
- * exports. K is the service's kind, as a string ("API"), and C the type of
- * its @envVars class. Both are phantom: the sentinel generator writes them
- * (`service<"API", ShopApiConfig>({...})`), and superschematic reads only
- * name and kind. A DB or General handle has no config type, nor has an API
- * without an @envVars class or a handle written by hand, so C keeps its
- * default.
+ * exports. K is the service's kind, as a string ("API"), C the type of its
+ * @envVars class, and J the names of its @job classes. All three are
+ * phantom: the sentinel generator writes them
+ * (`service<"API", ShopApiConfig, "ExpireCarts">({...})`), and
+ * superschematic reads only name and kind. A DB or General handle has no
+ * config type and no jobs, nor has an API without an @envVars class or a
+ * @job class, or a handle written by hand, so C and J keep their defaults:
+ * any config, and any job name.
  */
-export type ServiceHandle<K extends SchemaKindName = SchemaKindName, C = unknown> = {
+export type ServiceHandle<K extends SchemaKindName = SchemaKindName, C = unknown, J extends string = string> = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
   readonly kind: K;
   /** Phantom: carries C for the type checker and is never set. */
   readonly __config?: C;
+  /** Phantom: carries J for the type checker and is never set. */
+  readonly __jobs?: J;
 };
 
 export type TargetOutputConfig = {
@@ -99,11 +103,34 @@ export type SqlOutputConfig = {
   readonly dialects?: readonly SqlDialect[];
 };
 
+/**
+ * One CI renderer's options for a Stack service's generated workflow.
+ */
+export type CiRendererConfig = {
+  /**
+   * The branch pull requests target and a push deploys from: a branch name, not a pattern. Unset is "main".
+   */
+  readonly branch?: string;
+  /**
+   * The directory, relative to the repository root, the build installs the workflow into when it exists. Unset is the renderer's own, .github/workflows for github.
+   */
+  readonly install?: string;
+};
+
+/**
+ * The CI a Stack service's build writes, keyed by the renderer that writes it: github for GitHub Actions, or a renderer an extension registers. Only a Stack service sets it. The build writes each workflow under <out>/ci/<stack>/.
+ */
+export type CiOutputConfig = {
+  readonly github?: CiRendererConfig;
+  readonly [renderer: string]: CiRendererConfig | undefined;
+};
+
 export type SchemaOutputs = {
   readonly types?: TypesOutputConfig;
   readonly api?: ApiOutputConfig;
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
+  readonly ci?: CiOutputConfig;
 };
 
 /**
@@ -173,10 +200,10 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
  * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
  * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
  */
-export function service<K extends SchemaKindName, C = unknown>(cfg: {
+export function service<K extends SchemaKindName, C = unknown, J extends string = string>(cfg: {
   readonly name: string;
   readonly kind: K;
-}): ServiceHandle<`${K}`, C> {
+}): ServiceHandle<`${K}`, C, J> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,

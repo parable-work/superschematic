@@ -177,6 +177,40 @@ for (const driver of drivers) {
       assert.deepEqual(ran, ['outer', 'inner kept', 'after a failing hook']);
     });
 
+    test('afterTransaction runs once the outermost transaction ends, committed or rolled back, and a savepoint drops none', () => {
+      const storage = open();
+      const ran: string[] = [];
+      assert.throws(() => storage.afterTransaction(() => ran.push('outside')), /needs an open transaction/);
+      storage.transaction(() => {
+        storage.afterCommit(() => ran.push('committed'));
+        assert.throws(() =>
+          storage.transaction(() => {
+            storage.afterTransaction(() => ran.push('queued in a savepoint that rolled back'));
+            throw new Error('inner refused');
+          })
+        );
+        assert.deepEqual(ran, []);
+      });
+      assert.deepEqual(ran, ['committed', 'queued in a savepoint that rolled back']);
+      assert.throws(() =>
+        storage.transaction(() => {
+          storage.afterTransaction(() => ran.push('rolled back'));
+          throw new Error('refused');
+        })
+      );
+      assert.deepEqual(ran.at(-1), 'rolled back');
+    });
+
+    test('changes counts the rows written since the connection opened, rolled back ones included', () => {
+      const storage = open();
+      storage.exec('CREATE TABLE notes (id TEXT PRIMARY KEY) STRICT');
+      const before = storage.changes();
+      storage.transaction(() => storage.run('INSERT INTO notes VALUES (?)', ['n1']));
+      assert.equal(storage.changes(), before + 1);
+      storage.all('SELECT id FROM notes');
+      assert.equal(storage.changes(), before + 1, 'a read writes no row');
+    });
+
     test('a transaction whose function returns a promise is rolled back', () => {
       const storage = open();
       storage.exec('CREATE TABLE notes (id TEXT PRIMARY KEY) STRICT');

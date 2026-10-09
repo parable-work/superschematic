@@ -1,6 +1,6 @@
 {
   "name": "Revisions",
-  "description": "Immutable revisions of the instance's own fields: one when it is created and one each time they change, numbered 1, 2, 3, .... With review in its config, a caller can propose a change as a merge patch, and a caller who holds the review permission approves it, which applies the patch as an update, or rejects it. Deleting the instance deletes its revisions and proposals.",
+  "description": "Immutable revisions of the instance's own fields: one when it is created and one each time they change, numbered 1, 2, 3, ..., read a page at a time or one by its number. With review in its config, a caller can propose a change as a merge patch, citing instances as evidence, and a caller who holds the review permission approves it, which applies the patch as an update, or rejects it; pendingProposals counts the proposals waiting. Deleting the instance deletes its revisions and proposals.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -17,7 +17,8 @@
     }
   },
   "fields": [
-    { "name": "revision", "description": "The number of the instance's latest revision." }
+    { "name": "revision", "description": "The number of the instance's latest revision." },
+    { "name": "pendingProposals", "description": "With review in the config, how many of the instance's proposals are pending; absent without review." }
   ],
   "operations": [
     {
@@ -56,6 +57,31 @@
       }
     },
     {
+      "name": "getRevision",
+      "description": "Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision"],
+        "properties": {
+          "revision": { "description": "The revision's number.", "type": "integer", "minimum": 1 }
+        }
+      },
+      "resultSchema": {
+        "description": "The revision.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "data", "createdBy", "createdAt"],
+        "properties": {
+          "revision": { "description": "Its number: 1, 2, 3, ...", "type": "integer" },
+          "data": { "description": "The instance's own fields as the change left them.", "type": "object" },
+          "createdBy": { "description": "The subject of the caller whose change it records.", "type": "string" },
+          "createdAt": { "description": "When, in epoch milliseconds.", "type": "integer" },
+          "proposal": { "description": "The proposal whose approval made it.", "type": "integer" }
+        }
+      }
+    },
+    {
       "name": "propose",
       "description": "Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it.",
       "paramsSchema": {
@@ -64,7 +90,24 @@
         "required": ["patch"],
         "properties": {
           "patch": { "description": "A JSON merge patch (RFC 7386) of the instance's own fields.", "type": "object", "minProperties": 1 },
-          "note": { "description": "Why, for the reviewer.", "type": "string", "maxLength": 10000 }
+          "note": { "description": "Why, for the reviewer.", "type": "string", "maxLength": 10000 },
+          "evidence": {
+            "description": "Instances the proposal cites, for the reviewer: each one must exist and the proposer must be able to read its schema, and a revision must be one it has had, of a schema that composes Revisions. They are kept as given; a later change of an instance cited leaves them as they are.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["schema", "id"],
+              "properties": {
+                "schema": { "description": "The schema of the instance cited.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+                "id": { "description": "The instance's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+                "revision": { "description": "The revision of it the proposal rests on.", "type": "integer", "minimum": 1 }
+              }
+            }
+          }
         }
       },
       "resultSchema": {
@@ -76,6 +119,7 @@
           "id": { "description": "The proposal's number on the instance: 1, 2, 3, ...", "type": "integer" },
           "patch": { "type": "object" },
           "note": { "type": "string" },
+          "evidence": { "description": "The instances the proposal cites.", "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["schema", "id"], "properties": { "schema": { "type": "string" }, "id": { "type": "string" }, "revision": { "type": "integer" } } } },
           "base": { "description": "The instance's revision when it was proposed.", "type": "integer" },
           "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
           "createdBy": { "type": "string" },
@@ -108,6 +152,7 @@
           "id": { "type": "integer" },
           "patch": { "type": "object" },
           "note": { "type": "string" },
+          "evidence": { "description": "The instances the proposal cites.", "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["schema", "id"], "properties": { "schema": { "type": "string" }, "id": { "type": "string" }, "revision": { "type": "integer" } } } },
           "base": { "type": "integer" },
           "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
           "createdBy": { "type": "string" },
@@ -141,6 +186,7 @@
           "id": { "type": "integer" },
           "patch": { "type": "object" },
           "note": { "type": "string" },
+          "evidence": { "description": "The instances the proposal cites.", "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["schema", "id"], "properties": { "schema": { "type": "string" }, "id": { "type": "string" }, "revision": { "type": "integer" } } } },
           "base": { "type": "integer" },
           "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
           "createdBy": { "type": "string" },
@@ -180,6 +226,7 @@
                 "id": { "type": "integer" },
                 "patch": { "type": "object" },
                 "note": { "type": "string" },
+                "evidence": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["schema", "id"], "properties": { "schema": { "type": "string" }, "id": { "type": "string" }, "revision": { "type": "integer" } } } },
                 "base": { "type": "integer" },
                 "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
                 "createdBy": { "type": "string" },

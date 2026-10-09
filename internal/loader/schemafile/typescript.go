@@ -17,10 +17,12 @@ import (
 // documents, the schema kinds, the MCP invocation policy key, and a
 // behavior's name and config.
 //
-// The emitter reads the subset of JSON Schema the reflection produces.
-// Any other keyword or shape is an error that names where it sits, so a
-// change to the reflection that the types cannot express fails here rather
-// than writing a looser type.
+// The emitter reads the subset of JSON Schema the reflection produces,
+// and the value constraints a registered schema adds to it (@display's
+// argument, D48), which no TypeScript type carries. Any other keyword or
+// shape is an error that names where it sits, so a change to the
+// reflection that the types cannot express fails here rather than writing
+// a looser type.
 func TypeScriptDeclarations() ([]byte, error) {
 	reg := core()
 	data, err := DefinitionFor(reg)
@@ -158,7 +160,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 	if !ok {
 		return fmt.Errorf("%s: a definition must be an object schema", at)
 	}
-	keys := []string{"type", "properties", "required", "additionalProperties", "description", "title"}
+	keys := append([]string{"type", "properties", "required", "additionalProperties", "description", "title"}, valueConstraints...)
 	if name == "BehaviorRef" {
 		// allOf holds one branch per registered behavior, closing its
 		// config; the types leave the config open.
@@ -298,7 +300,7 @@ func (d *declarations) typeOf(schema any, at string) (string, error) {
 		}
 		return strings.Join(types, " | "), nil
 	}
-	if err := onlyKeys(node, at, "type", "enum", "const", "items", "additionalProperties", "description", "title", "default"); err != nil {
+	if err := onlyKeys(node, at, append([]string{"type", "enum", "const", "items", "additionalProperties", "description", "title", "default"}, valueConstraints...)...); err != nil {
 		return "", err
 	}
 	if value, ok := node["const"]; ok {
@@ -499,6 +501,11 @@ func wrap(text string, width int) string {
 	}
 	return strings.Join(append(lines, line), "\n")
 }
+
+// valueConstraints are the keywords that narrow a value without changing
+// its type: a string's pattern and length, a list's length and uniqueness,
+// an object's size and key names. The types leave them to the validators.
+var valueConstraints = []string{"pattern", "minLength", "maxLength", "minItems", "uniqueItems", "minProperties", "propertyNames"}
 
 // onlyKeys fails on any keyword of node outside allowed.
 func onlyKeys(node map[string]any, at string, allowed ...string) error {

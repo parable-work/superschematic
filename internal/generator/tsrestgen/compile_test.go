@@ -158,11 +158,11 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		}
 		typesDirs[names.NpmTypesPackage(tc.name)] = typesDir
 	}
-	if err := tsgen.WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
+	if err := (tsgen.WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 		t.Fatalf("write workspace root: %v", err)
 	}
 	install := exec.Command(bunPath, "install")
-	install.Dir = typesRoot
+	install.Dir = tempRoot
 	if out, err := install.CombinedOutput(); err != nil {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the type packages of %s (likely offline): %v\n%s", fixture.name, err, out))
 	}

@@ -2,14 +2,21 @@ package generator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
+	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
@@ -19,15 +26,17 @@ import (
 // entrypoints.
 const serverGenerator = "server"
 
-// generateServers writes the entrypoint of each Go server of the stack the
-// schema declares under servergen.StackDir (docs/stack-model.md, sections
-// 8.1 and 8.2), and scaffolds each served API's implementation that is
-// missing (section 8.5). No environment changes the servers, but the
+// generateServers writes the entrypoint of each Go and TypeScript server of
+// the stack the schema declares under servergen.StackDir (docs/stack-model.md,
+// sections 8.1, 8.2 and 8.6), and of each Go job beside them (section 8.7,
+// D52), and scaffolds each served API's implementation that is missing, a
+// Go server's in Go and a TypeScript server's in TypeScript (sections 8.5
+// and 8.6). No environment changes the servers or the jobs, but the
 // entrypoint of one that some environment connects to a database on Cloud
-// SQL links the Cloud SQL connector. It plans every server before it
-// writes anything, so a server it refuses leaves the last build's
-// entrypoints and every implementation as they were. A build without a
-// repository root writes none: the implementations live under it.
+// SQL links the Cloud SQL connector, or depends on the Node one. It plans
+// every entrypoint before it writes anything, so one it refuses leaves the
+// last build's entrypoints and every implementation as they were. A build
+// without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
 		r.Skip(serverGenerator)
@@ -55,16 +64,49 @@ func (r run) generateServers() error {
 		scaffold []scaffold
 	}
 	var plans []planned
+	var tsPlans []*servergen.TypeScriptServer
+	scaffolding := map[string]bool{}
+	var tsScaffolds []*tsrestgen.APIOutput
 	for _, s := range servers {
-		if s.Language != APILanguageGo {
+		switch s.Language {
+		case APILanguageGo:
+			server, scaffolds, err := r.planEntrypoint(st.Name, s, cloudSQL[s.Name])
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server, scaffolds})
+			for _, sc := range scaffolds {
+				scaffolding[sc.output.SchemaName] = true
+			}
+		case APILanguageTypeScript:
+			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name])
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, server)
+			tsScaffolds = append(tsScaffolds, scaffolds...)
+		default:
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
+		}
+	}
+	jobs, err := stack.Jobs(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	if err := r.checkJobs(st.Name, jobs, services, scaffolding); err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if j.Language != APILanguageGo {
+			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
 			continue
 		}
-		server, scaffolds, err := r.planServer(st.Name, s, cloudSQL[s.Name])
+		// The servers' plans scaffold the job's API, which a server serves.
+		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name])
 		if err != nil {
 			return err
 		}
-		plans = append(plans, planned{server, scaffolds})
+		plans = append(plans, planned{server: job})
 	}
 
 	for _, p := range plans {
@@ -74,11 +116,24 @@ func (r run) generateServers() error {
 			}
 		}
 	}
+	for _, output := range tsScaffolds {
+		if err := r.scaffoldTypeScriptImplementation(output, r.Options.RepositoryRoot); err != nil {
+			return err
+		}
+	}
+	if len(tsPlans) > 0 {
+		// The servers and the implementations join the output root's Bun
+		// workspace.
+		if err := r.writeTypeScriptWorkspace(); err != nil {
+			return fmt.Errorf("stack %s: %w", st.Name, err)
+		}
+		r.noteIgnoredLockfile()
+	}
 	dir := servergen.StackDir(r.Options.OutputRoot, st.Name)
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
-	if len(plans) == 0 {
+	if len(plans) == 0 && len(tsPlans) == 0 {
 		r.Skip(serverGenerator)
 		return nil
 	}
@@ -87,10 +142,80 @@ func (r run) generateServers() error {
 			return err
 		}
 		if p.server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", p.server.Name, p.server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", p.server.Kind, p.server.Name, p.server.NoDocker)
+		}
+	}
+	for _, server := range tsPlans {
+		if err := servergen.WriteTypeScript(server, servergen.ServerDir(r.Options.OutputRoot, st.Name, server.Name)); err != nil {
+			return err
+		}
+		if server.Docker == nil {
+			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
 		}
 	}
 	r.Done(serverGenerator, dir)
+	return nil
+}
+
+// noteIgnoredLockfile says, in one line, how to commit the lockfile of the
+// output root's Bun workspace when git ignores it (D51, amended): a
+// server's image and the generated CI install the versions it pins only
+// when the project commits it. The build leaves the project's ignore
+// rules as they are.
+func (r run) noteIgnoredLockfile() {
+	rule, ignored := tsgen.IgnoredLockfile(r.Options.OutputRoot)
+	if !ignored {
+		return
+	}
+	by := "git"
+	if rule != "" {
+		by = rule
+	}
+	r.Logf("  - %s is ignored by %s; commit it, so images and CI install the TypeScript versions it pins: ignore the output root's contents, not the directory (dist/* and !dist/%s in place of dist/; docs/stack-model.md, section 8.6)\n",
+		filepath.Join(r.Options.OutputRoot, tsgen.LockfileName), by, tsgen.LockfileName)
+}
+
+// checkJobs refuses a stack one of whose Go APIs declares jobs while its
+// implementation declares no NewJobs (D52). The implementation exists, so
+// it is the engineer's, and the build writes into it no more: an API that
+// predates its jobs fails here, saying what to add, rather than in the
+// compile of a job's entrypoint. An API whose scaffold this build writes,
+// scaffolding, gets NewJobs from it.
+func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding map[string]bool) error {
+	checked := map[string]bool{}
+	for _, job := range jobs {
+		api := job.Job.API
+		if checked[api] || scaffolding[api] || job.Language != APILanguageGo {
+			continue
+		}
+		checked[api] = true
+		impl, _, err := r.implementation(api)
+		if err != nil {
+			return err
+		}
+		exists, err := apigen.ImplementationExists(impl.Dir)
+		if err != nil || !exists {
+			return err
+		}
+		declares, err := apigen.DeclaresFunc(impl.Dir, apigen.JobsFunc)
+		if err != nil || declares {
+			return err
+		}
+		var methods []string
+		for _, svc := range services {
+			if svc.Name != api {
+				continue
+			}
+			for _, j := range svc.Jobs {
+				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context) error", goutil.GoPublicIdentifier(j.Name)))
+			}
+		}
+		return fmt.Errorf("stack %s: %s declares jobs, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+			"\tfunc %s(deps api.Deps) (api.Jobs, error)\n\n"+
+			"returning a value with a method per job:\n\n%s\n\n"+
+			"where api is %s, whose api.JobsConstructor is %s's signature (docs/stack-model.md, section 8.7)",
+			stackName, api, impl.Dir, apigen.JobsFunc, apigen.JobsFunc, strings.Join(methods, "\n"), r.Options.Naming.GoAPIModule(api), apigen.JobsFunc)
+	}
 	return nil
 }
 
@@ -120,21 +245,25 @@ func (sc scaffold) write(r run) error {
 	return nil
 }
 
-// planServer plans the entrypoint of server s of the stack: the Go server
-// output of each API it serves, read as that API's own build reads it,
-// where each implementation lives, and every module the build needs.
-// cloudSQL are the DB services some environment connects it to on Cloud
-// SQL. It returns the implementations that are missing, which the caller
-// scaffolds.
-func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
+// planEntrypoint plans the entrypoint of deployable s of the stack, a
+// server or a job: the Go server output of each API it serves, or of its
+// job's API, read as that API's own build reads it, where each
+// implementation lives, and every module the build needs. cloudSQL are the
+// DB services some environment connects it to on Cloud SQL. It returns the
+// implementations that are missing, which the caller scaffolds.
+func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, []scaffold, error) {
 	in := servergen.Input{
 		Stack:          stackName,
 		Server:         s.Name,
 		Dir:            servergen.ServerDir(r.Options.OutputRoot, stackName, s.Name),
 		Naming:         r.Options.Naming,
-		RepositoryRoot: r.Options.RepositoryRoot,
+		RepositoryRoot: r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
 		ScalarGo:       r.Options.Paths.ScalarGo,
+		Release:        r.Options.ReleaseInfo(),
 		CloudSQL:       cloudSQL,
+	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
 	}
 	var scaffolds []scaffold
 	var versionGraph bool
@@ -144,7 +273,7 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		if err != nil {
 			return nil, nil, err
 		}
-		apiModules := r.goServerModules(output)
+		apiModules := r.goServerModules(output, s.Job != nil)
 		impl, newModule, err := r.implementation(ref.Name)
 		if err != nil {
 			return nil, nil, err
@@ -171,6 +300,77 @@ func (r run) planServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []s
 		in.VersionGraphGo = r.Options.Paths.VersionGraphGo
 	}
 	server, err := servergen.Plan(in)
+	if err != nil {
+		return nil, nil, err
+	}
+	return server, scaffolds, nil
+}
+
+// planTypeScriptServer plans the entrypoint of the TypeScript server s of
+// the stack (D51): the TypeScript API package of each API it serves, as
+// that API's own build writes it, its EnvConfig, and where each
+// implementation lives, at the naming file's [implementation_paths]
+// typescript template. cloudSQL are the DB services some environment
+// connects it to on Cloud SQL. It returns the APIs whose implementation is
+// missing, which the caller scaffolds.
+func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
+	out := r.Options.OutputRoot
+	in := servergen.TypeScriptInput{
+		Stack:              stackName,
+		Server:             s.Name,
+		Dir:                servergen.ServerDir(out, stackName, s.Name),
+		OutputRoot:         out,
+		Naming:             r.Options.Naming,
+		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		ImplementationRoot: r.Options.RepositoryRoot,
+		PackageDirs:        map[string]string{},
+		Paths:              r.Options.Paths,
+		CloudSQL:           cloudSQL,
+	}
+	var scaffolds []*tsrestgen.APIOutput
+	for _, ref := range s.Services {
+		served, err := r.servedRun(stackName, s.Name, ref.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		output, config, err := served.typeScriptAPI()
+		if err != nil {
+			return nil, nil, err
+		}
+		if output == nil {
+			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		routes, err := served.APIOutput()
+		if err != nil {
+			return nil, nil, err
+		}
+		dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name)
+		exists, err := tsrestgen.ImplementationExists(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !exists {
+			scaffolds = append(scaffolds, output)
+		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
+		}
+		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		in.APIs = append(in.APIs, servergen.TypeScriptAPIInput{
+			Output:         output,
+			Routes:         routes,
+			Config:         config,
+			Implementation: servergen.TypeScriptImplementation{Dir: dir, Package: pkg},
+		})
+		in.PackageDirs[output.PackageName] = APIDir(out, ref.Name)
+		in.PackageDirs[pkg] = dir
+		for _, call := range output.Deps.Calls {
+			in.PackageDirs[call.Package] = SDKDir(out, LangTypeScript, call.Service)
+		}
+	}
+	server, err := servergen.PlanTypeScript(in)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -228,24 +428,10 @@ func derivesCloudSQL(value any) bool {
 // servedAPI is the Go server output of the API service a server serves, as
 // the API's own build prepares it.
 func (r run) servedAPI(stackName, server, service string) (*apigen.APIOutput, error) {
-	schema, err := r.LoadDependency(service)
+	served, err := r.servedRun(stackName, server, service)
 	if err != nil {
-		return nil, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+		return nil, err
 	}
-	cfg, err := r.Options.LoadDependencyConfig(service)
-	if err != nil {
-		return nil, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
-	}
-	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
-	if err != nil {
-		return nil, fmt.Errorf("schema config for %s: %w", service, err)
-	}
-	if !outputs.APIEnabled() {
-		return nil, fmt.Errorf("stack %s: server %s serves %s, whose config generates no API server; enable outputs.api in %s's config", stackName, server, service, service)
-	}
-	opts := r.Options
-	opts.Stage = registry.StageAll
-	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
 	output, err := served.goServerOutput()
 	if err != nil {
 		return nil, err
@@ -254,6 +440,30 @@ func (r run) servedAPI(stackName, server, service string) (*apigen.APIOutput, er
 		return nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, server, service)
 	}
 	return output, nil
+}
+
+// servedRun is the run of the API service a server serves, as the API's
+// own build makes it.
+func (r run) servedRun(stackName, server, service string) (run, error) {
+	schema, err := r.LoadDependency(service)
+	if err != nil {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+	}
+	cfg, err := r.Options.LoadDependencyConfig(service)
+	if err != nil {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s: %w", stackName, server, service, err)
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return run{}, fmt.Errorf("schema config for %s: %w", service, err)
+	}
+	if !outputs.APIEnabled() {
+		return run{}, fmt.Errorf("stack %s: server %s serves %s, whose config generates no API server; enable outputs.api in %s's config", stackName, server, service, service)
+	}
+	opts := r.Options
+	opts.Stage = registry.StageAll
+	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
+	return served, nil
 }
 
 // implementation finds the implementation of service: its package at the
@@ -282,9 +492,25 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // ORM of its database, the SDK of each API it calls, and the runtime
 // modules. The API module and the packages its Deps imports are direct,
 // and so are its database's Go types when it authenticates with the
-// identity runtime, whose store main.go builds from their descriptor.
-func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
+// identity runtime, whose store a server's main.go builds from their
+// descriptor; a job's, which builds none, reaches them through the ORM.
+// A runtime module no [paths] key names a checkout of is pinned to the
+// release that generates the server, which the module proxy serves
+// (releasePins).
+func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	out, paths, n := r.Options.OutputRoot, r.Options.Paths, r.Options.Naming
+	pins := r.releasePins()
+	runtimeModule := func(module, dir string, direct bool) servergen.Module {
+		m := servergen.Module{Path: module, Dir: dir, Direct: direct}
+		if version, ok := pins[module]; ok {
+			m.Version, m.Pinned = version, true
+		}
+		return m
+	}
+	scalar := runtimeModule(n.ScalarGoModule, paths.ScalarGo, false)
+	if !scalar.Pinned {
+		scalar.Version = "v1.0.0"
+	}
 	modules := []servergen.Module{
 		{Path: o.ModulePath, Dir: APIDir(out, o.SchemaName), Direct: true},
 		{Path: o.TypesModule, Dir: TypesDir(out, LangGo, o.SchemaName)},
@@ -292,7 +518,7 @@ func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 	if o.Auth.Identity && o.Deps.Database != "" {
 		// main.go builds the identity store from the descriptor constant of
 		// the database's Go types (D50).
-		modules = append(modules, servergen.Module{Path: n.GoTypesModule(o.Deps.Database), Dir: TypesDir(out, LangGo, o.Deps.Database), Direct: true})
+		modules = append(modules, servergen.Module{Path: n.GoTypesModule(o.Deps.Database), Dir: TypesDir(out, LangGo, o.Deps.Database), Direct: !job})
 	}
 	for _, m := range o.IndirectModules {
 		modules = append(modules, servergen.Module{Path: m, Dir: TypesDir(out, LangGo, path.Base(m))})
@@ -307,13 +533,13 @@ func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 		modules = append(modules, servergen.Module{Path: call.Module, Dir: SDKDir(out, LangGo, call.Service), Direct: true})
 	}
 	modules = append(modules,
-		servergen.Module{Path: n.HTTPRuntimeGoModule, Dir: paths.HTTPRuntimeGo, Direct: true},
-		servergen.Module{Path: n.SchemaRuntimeGoModule, Dir: paths.SchemaRuntimeGo},
-		servergen.Module{Path: n.SchemaIRGoModule, Dir: paths.SchemaIR},
-		servergen.Module{Path: n.ScalarGoModule, Dir: paths.ScalarGo, Version: "v1.0.0"},
+		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),
+		runtimeModule(n.SchemaRuntimeGoModule, paths.SchemaRuntimeGo, false),
+		runtimeModule(n.SchemaIRGoModule, paths.SchemaIR, false),
+		scalar,
 	)
 	if (o.IsPublic && o.UpstreamVersionGraph) || o.Deps.VersionGraph {
-		modules = append(modules, servergen.Module{Path: n.VersionGraphGoModule, Dir: paths.VersionGraphGo})
+		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
 	}
 	return modules
 }

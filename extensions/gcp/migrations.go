@@ -30,17 +30,20 @@ import (
 //  2. it finds the runner's image, or builds it with Cloud Build (below);
 //  3. it creates or updates the job to run that image, and runs it once
 //     with the job document's gs:// URL as its argument, waiting for the
-//     execution to finish.
+//     execution to finish. A failed execution fails the step with the
+//     runner's error, which it wrote to stderr and the deploy reads from
+//     Cloud Logging.
 //
 // The job reaches the Cloud SQL instance through the Cloud SQL Go connector
 // with IAM database authentication, as the migrator's IAM database user,
 // which the Cloud SQL platform gives each instance with the
 // cloudsqlsuperuser role, so the tables it creates are its own. After the
-// plan's phase the job gives each server that connects to the DB service,
-// by its IAM database user, read and write privileges on the DB service's
-// tables, and takes them back from a server that no longer connects. The
-// job is not a node of the graph (D45): it is made from the release the
-// binary pins, which the graph does not depend on.
+// plan's phase the job gives each server and each job (D52) that connects
+// to the DB service, by its IAM database user, read and write privileges on
+// the DB service's tables, and takes them back from one that no longer
+// connects. A job's IAM database user is its sql edge's, as a server's is
+// (connectSQL). The job is not a node of the graph (D45): it is made from
+// the release the binary pins, which the graph does not depend on.
 //
 // The runner's image is built from a generated Dockerfile that installs
 // the runner with `go install` from its module at the release's tag
@@ -197,7 +200,7 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 	if err != nil {
 		return err
 	}
-	name := kebab(env.Stack) + "-migrate"
+	name := migrationJobName(env.Stack)
 	changed, err := cloud.EnsureJob(ctx, v.project, v.region, JobSpec{
 		Name:           name,
 		Container:      migrateContainer,
@@ -219,10 +222,51 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 		return err
 	}
 	if !run.Succeeded {
-		return fmt.Errorf("gcp: the %s phase on %s failed in job %s, execution %s: %s (logs: %s)", req.Phase, req.Database, name, run.Name, run.Message, run.LogURI)
+		return fmt.Errorf("gcp: the %s phase on %s failed in job %s, execution %s: %s", req.Phase, req.Database, name, run.Name, failure(ctx, cloud, run, "", runnerError))
 	}
 	logf("execution %s finished", run.Name)
 	return nil
+}
+
+// runnerLogWait is how long a failed execution's stderr may take to reach
+// Cloud Logging.
+const runnerLogWait = 30 * time.Second
+
+// runnerPrefix begins the line the runner writes to stderr when it fails.
+const runnerPrefix = "superschematic-migrate: "
+
+// failure says why an execution failed, and where its logs are. Cloud Run
+// says only that the container exited with an error; the program's own
+// error is in what it wrote to stderr, which failure reads from Cloud
+// Logging: the lines match selects, a Cloud Logging filter, or every line
+// when it is empty, among which pick finds the error. When the program
+// wrote none, as when the task did not start, it is Cloud Run's message.
+// The migration job reads every line with runnerError; a job of the graph
+// its failure lines with jobError (D52).
+func failure(ctx context.Context, cloud Cloud, run *JobRun, match string, pick func(lines []string) string) string {
+	if run.Name == "" {
+		return fmt.Sprintf("%s (logs: %s)", run.Message, run.LogURI)
+	}
+	lines, err := cloud.ExecutionStderr(ctx, run, match, runnerLogWait)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s (logs: %s; its stderr is unread: %v)", run.Message, run.LogURI, err)
+	case len(lines) == 0:
+		return fmt.Sprintf("%s (logs: %s; Cloud Logging held no stderr of it after %s)", run.Message, run.LogURI, runnerLogWait)
+	}
+	return fmt.Sprintf("%s (logs: %s)", pick(lines), run.LogURI)
+}
+
+// runnerError is the error in what an execution wrote to stderr: the last
+// line that begins with the runner's name, else the first line, such as a
+// panic's. A failed step's statement follows the runner's line.
+func runnerError(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], runnerPrefix) {
+			return lines[i]
+		}
+	}
+	return lines[0]
 }
 
 // migrationJob returns the job document of req, its plans' paths relative
@@ -258,10 +302,12 @@ func migrationJob(req registry.MigrationRequest, v values) (*migrateJob, map[str
 			target.Plan = "plans/" + plan.Service + "-" + hex.EncodeToString(sum[:]) + ".json"
 			plans[target.Plan] = plan.Plan
 		}
+		// The servers and the jobs that connect (D52), each by the IAM
+		// database user its sql edge made.
 		for _, server := range plan.Servers {
 			user, err := nodeString(env, server+".database-user."+req.Database, "name", params)
 			if err != nil {
-				return nil, nil, fmt.Errorf("gcp: server %s connects to %s: %w", server, plan.Service, err)
+				return nil, nil, fmt.Errorf("gcp: %s connects to %s: %w", server, plan.Service, err)
 			}
 			target.Privileges.ReadWrite = append(target.Privileges.ReadWrite, user)
 		}
@@ -354,6 +400,10 @@ func (e Extension) migrateImage(ctx context.Context, env *ir.ResolvedEnvironment
 	object := buildPrefix + kebab(env.Stack) + "/" + migrateImage + "/" + version + ".tar.gz"
 	return e.build(ctx, v, env.Stack, repo, version, "Dockerfile", object, archive.Bytes(), log)
 }
+
+// migrationJobName is the name of the stack's migration job, which no
+// job of the graph may take (lowerJob).
+func migrationJobName(stack string) string { return kebab(stack) + "-migrate" }
 
 // migratorUser is the IAM database user of the stack's migrator account:
 // its email without `.gserviceaccount.com`.

@@ -58,12 +58,12 @@
         }
       },
       "from": {
-        "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
+        "description": "Where the steps are kept as an instance: a link of this type's Links config pinned to a revision, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
         "type": "object",
         "additionalProperties": false,
         "required": ["link", "field"],
         "properties": {
-          "link": { "description": "A pinned link of this type's Links config.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
+          "link": { "description": "A link of this type's Links config pinned to a revision.", "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
           "field": { "description": "The field of the linked instance's type that holds the steps.", "type": "string", "minLength": 1 }
         }
       },
@@ -74,7 +74,7 @@
         "items": { "type": "string", "minLength": 1 }
       },
       "copyLinks": {
-        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
+        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision or the release this instance's link records where the child's pins the same: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
         "type": "array",
         "uniqueItems": true,
         "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]{0,63}$" }
@@ -82,7 +82,7 @@
     }
   },
   "fields": [
-    { "name": "blueprint", "description": "What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped." }
+    { "name": "children", "description": "What was stamped: each step's key and its child's id, in the order they were created; absent until the instance is stamped." }
   ],
   "vetoes": [
     { "code": "stamped", "description": "Links' link moving the from link once the instance's children were stamped from the revision it pins." },

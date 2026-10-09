@@ -1,14 +1,15 @@
 /*
 The engine: one SQLite file, brought up to the engine's migrations when it
-opens, the namespaces the deployment configures, the access policy it
-supplies, the core's behaviors and the implementations it registers, the
+opens, the namespaces the deployment configures and the ones a create
+made while an engine ran, the access policy it supplies, the core's behaviors and the implementations it registers, the
 schema registry, instance store and event log, each of which asks that
 policy on every call, the value store, which keeps each large value once
 and serves it by hash to a caller who may read a schema that references
 it, the tool catalog, which reads and calls through them, the search
 across a namespace's schemas, which calls through them too, and the
 runner, which runs the behaviors' reactions and schedules after the
-commit as the principal the deployment names for it.
+commit as the principal the deployment names for it, and prunes the
+event log when the deployment gives it a retention.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
@@ -20,6 +21,7 @@ import { coreBehaviors, searchSchemas, type SchemaSearchHit } from './behaviors/
 import type { Page } from './behaviors/paging.js';
 import { BehaviorRegistry } from './behaviors/registry.js';
 import { EventLog } from './events/log.js';
+import { Retention, checkRetentionOptions, type RetentionOptions } from './events/retention.js';
 import { InstanceStore, defaultIds } from './instances/store.js';
 import { engineMigrations } from './migrations.js';
 import { Namespaces, type NamespaceOptions } from './namespaces.js';
@@ -49,6 +51,11 @@ export interface EngineOptions extends StorageOptions {
    * text. The default is the core registry's.
    */
   metaSchema?: Record<string, unknown> | string;
+  /**
+   * The configured namespaces besides `default`, and the shared one. A
+   * create makes more while the engine runs (engine.namespaces), which
+   * the file keeps.
+   */
   namespaces?: NamespaceOptions;
   /** Makes the id of an instance created without one; random UUIDs by default. */
   ids?: () => string;
@@ -93,17 +100,25 @@ export interface EngineOptions extends StorageOptions {
    * bytes of them the engine keeps parsed in memory.
    */
   values?: ValueOptions;
+  /**
+   * How long the event log keeps events (runtime/engine/README.md, "Retention"):
+   * by age, by count or both, pruned on the runner every everyMs, never
+   * past an event a subscription has yet to handle. Without it the log
+   * keeps every event.
+   */
+  retention?: RetentionOptions;
 }
 
 export class Engine {
   readonly storage: Storage;
+  /** The namespaces: resolved by every call, and created, archived and listed through the access policy's manage. */
   readonly namespaces: Namespaces;
   readonly behaviors: BehaviorRegistry;
   readonly schemas: SchemaRegistry;
   readonly instances: InstanceStore;
   readonly events: EventLog;
   readonly tools: ToolCatalog;
-  /** Runs reactions and schedules after the commit; the deployment starts and stops it. */
+  /** Runs reactions and schedules after the commit, and prunes the event log with a retention; the deployment starts and stops it. */
   readonly runner: Runner;
   /** Reads a value of the value store by its hash, as a caller who may read a schema that references it. */
   readonly values: EngineValues;
@@ -149,11 +164,13 @@ export class Engine {
     const runnerOptions = options.runner;
     Runner.check(runnerOptions);
     checkValueOptions(options.values);
+    const retention = checkRetentionOptions(options.retention);
     const storage = Storage.open(options.path, options);
     const behaviors = new BehaviorRegistry(storage, clock, tools.invocationPolicy);
     try {
       bindValues(storage, options.values);
       migrate(storage, engineMigrations, clock());
+      namespaces.bind(storage, access, clock);
       for (const implementation of [...coreBehaviors, ...(options.behaviors ?? [])]) {
         behaviors.register(implementation);
       }
@@ -174,7 +191,18 @@ export class Engine {
       instances,
       events,
       new ToolCatalog(namespaces, access, schemas, instances, tools, catalog, behaviors, values),
-      new Runner(storage, namespaces, catalog, behaviors, instances.reach, events, clock, permissionMatcher, runnerOptions),
+      new Runner(
+        storage,
+        namespaces,
+        catalog,
+        behaviors,
+        instances.reach,
+        events,
+        clock,
+        permissionMatcher,
+        runnerOptions,
+        retention === undefined ? undefined : new Retention(storage, clock, retention)
+      ),
       values,
       permissionMatcher
     );

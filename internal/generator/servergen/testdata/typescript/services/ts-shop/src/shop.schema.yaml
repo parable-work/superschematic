@@ -1,0 +1,43 @@
+name: ts-shop
+kind: API
+types:
+  ShopConfig:
+    name: ShopConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: STOREFRONT_REGION
+        typeRef: { name: string }
+        required: true
+        default: "eu"
+  CartView:
+    name: CartView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: cents
+        typeRef: { name: number }
+        required: true
+      - name: region
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Carts
+    operations:
+      - name: getCart
+        typeRef: { name: CartView }
+        required: true
+        httpMethod: GET
+        restPath: carts/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+      - name: getMyCart
+        typeRef: { name: CartView }
+        required: true
+        httpMethod: GET
+        restPath: me/cart
+        auth: true

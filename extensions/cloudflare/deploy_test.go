@@ -50,7 +50,7 @@ func TestBootstrapAndDeployReadTheToken(t *testing.T) {
 	options := stack.Options{Registry: reg, Run: registry.Run{Environment: env}, Dir: t.TempDir(), Log: log}
 
 	term := &terminal{answers: []string{"cf-token-value"}}
-	if err := stack.Bootstrap(ctx, stack.BootstrapOptions{Options: options, Repository: "acme/shop", Prompter: term}); err != nil {
+	if _, err := stack.Bootstrap(ctx, stack.BootstrapOptions{Options: options, Repository: "acme/shop", Prompter: term}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := ext.Provisioner.Calls(), []string{"bootstrap Staging: repository acme/shop, credentials " + secret}; !slices.Equal(got, want) {
@@ -69,7 +69,7 @@ func TestBootstrapAndDeployReadTheToken(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("1", 64)
 	_, err = stack.Deploy(ctx, stack.DeployOptions{
 		Options: options,
-		Images:  map[string]string{"shop-api": "shop-api@" + digest, "Orders": "orders@" + digest},
+		Images:  map[string]string{"shop-api": "shop-api@" + digest, "Orders": "orders@" + digest, stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest},
 		Planner: func(service, dialect string, _ json.RawMessage) (*stack.DatabasePlan, error) {
 			return &stack.DatabasePlan{
 				Service: service, Dialect: dialect,

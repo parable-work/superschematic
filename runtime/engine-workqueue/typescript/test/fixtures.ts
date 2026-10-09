@@ -122,8 +122,8 @@ export const budgetStandIn = defineBehavior({
       return { fits: context.data.title !== 'broke', until: null, scopes: [] };
     },
     reserve(context, params) {
-      const seen = context.instances.get(context.schema, context.id, { fields: ['lease', 'status'] })?.data;
-      reserved.push({ id: context.id, params, holder: (seen?.lease as { holder?: unknown } | undefined)?.holder, status: seen?.status });
+      const seen = context.instances.get(context.schema, context.id, { fields: ['Lease.holder', 'Workflow.status'] })?.behaviors;
+      reserved.push({ id: context.id, params, holder: seen?.Lease?.holder, status: seen?.Workflow?.status });
       if (context.data.title === 'broke') {
         throw new BehaviorVetoError('Budget', 'reserve', context.schema, context.id, 'the reservation does not fit');
       }

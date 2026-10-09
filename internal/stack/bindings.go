@@ -63,12 +63,12 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 
 // deriveEdges finds every edge: a sql edge from each server to the
 // database of each API it serves, and an http edge from each server to the
-// server of each API it calls. Each finds the connector between the two
-// platforms.
+// server of each API it calls. A job takes its API's edges, from itself
+// (D52). Each finds the connector between the two platforms.
 func (r *resolver) deriveEdges() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if d.res.Kind != ir.DeployableServer {
+		if !d.res.Kind.HasImage() {
 			continue
 		}
 		for _, served := range d.res.Services {
@@ -122,13 +122,15 @@ func (r *resolver) edgesFrom(name string) []*edge {
 	return out
 }
 
-// bindConfig binds every config field of every server: a secret for a
-// `Secret<T>` field, the environment's literal or parameter, the field's
-// default, or the value its edge's connector derives (section 5.1).
+// bindConfig binds every config field of every server and job: a secret
+// for a `Secret<T>` field, the environment's literal or parameter, the
+// field's default, or the value its edge's connector derives (section
+// 5.1). A job's fields are its API's, and so are its edges (D52); it
+// serves no request, so it has no callers field.
 func (r *resolver) bindConfig() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if d.res.Kind != ir.DeployableServer {
+		if !d.res.Kind.HasImage() {
 			for _, key := range sortedKeys(d.settings.env) {
 				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which has no config", d.settings.envFrom[key], key, d.res.Kind, name)
 			}
@@ -138,28 +140,39 @@ func (r *resolver) bindConfig() {
 		derived := map[string]*edge{}
 		for _, e := range r.edgesFrom(name) {
 			if other, clash := derived[e.res.Field]; clash {
-				r.fail(CodeFieldCollision, "server %s: edges %s and %s derive the same field %s", name, other.res.ID, e.res.ID, e.res.Field)
+				r.fail(CodeFieldCollision, "%s %s: edges %s and %s derive the same field %s", d.res.Kind, name, other.res.ID, e.res.ID, e.res.Field)
 			}
 			derived[e.res.Field] = e
 			for _, fieldName := range sortedKeys(d.fields) {
 				if f := d.fields[fieldName]; ir.DerivedFieldClaims(e.res.Field, f.name) {
-					r.fail(CodeFieldCollision, "server %s: config field %s of %s collides with %s, the field edge %s derives", name, f.name, f.declaring, e.res.Field, e.res.ID)
+					r.fail(CodeFieldCollision, "%s %s: config field %s of %s collides with %s, the field edge %s derives", d.res.Kind, name, f.name, f.declaring, e.res.Field, e.res.ID)
 				}
 			}
 		}
-		callers := r.callersFields(d)
-		refused := r.checkCallersFields(d, callers, derived)
-		identity := r.identityFields(d)
-		r.checkIdentityFields(d, identity, callers, derived)
+		var callers, identity map[string]string
+		refused := map[string]bool{}
+		if d.res.Kind == ir.DeployableServer {
+			callers = r.callersFields(d)
+			refused = r.checkCallersFields(d, callers, derived)
+			// A job serves no request: it builds no identity service, so
+			// it reads no identity config field (D50, D52).
+			identity = r.identityFields(d)
+			r.checkIdentityFields(d, identity, callers, derived)
+		}
 		for _, key := range sortedKeys(d.settings.env) {
 			if _, ok := d.fields[key]; ok || refused[key] || identity[key] != "" {
 				continue
 			}
-			if e, ok := derived[key]; ok {
-				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on server %s, the field edge %s derives", d.settings.envFrom[key], key, name, e.res.ID)
+			if d.settings.inherited[key] {
+				// The job's API's server takes it for another API it
+				// serves, and the server's own binding checked it.
 				continue
 			}
-			r.fail(CodeUnknownEnvKey, "environment %s sets env %s on server %s, which is not a field of %s", d.settings.envFrom[key], key, name, r.configTypes(d))
+			if e, ok := derived[key]; ok {
+				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, the field edge %s derives", d.settings.envFrom[key], key, d.res.Kind, name, e.res.ID)
+				continue
+			}
+			r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which is not a field of %s", d.settings.envFrom[key], key, d.res.Kind, name, r.configTypes(d))
 		}
 		var bindings []*ir.Binding
 		for _, fieldName := range sortedKeys(d.fields) {
@@ -221,32 +234,43 @@ func (r *resolver) configTypes(d *deployable) string {
 	return strings.Join(types, " or ")
 }
 
+// bindField binds one config field of a server or a job. A job's value
+// that it takes from its API's server was checked with the server's, and a
+// field a job leaves unbound its server leaves unbound too, so neither is
+// reported twice.
 func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 	value, set := d.settings.env[f.name]
+	fail := func(code Code, format string, args ...any) {
+		if !d.settings.inherited[f.name] {
+			r.fail(code, format, args...)
+		}
+	}
 	switch {
 	case f.secret:
 		if set {
-			r.fail(CodeSecretLiteral, "environment %s sets %s on server %s, a Secret<T> field of %s; a secret's value is entered with `stack secrets set`, never written in a file", d.settings.envFrom[f.name], f.name, d.res.Name, f.declaring)
-			return nil
+			fail(CodeSecretLiteral, "environment %s sets %s on %s %s, a Secret<T> field of %s; a secret's value is entered with `stack secrets set`, never written in a file", d.settings.envFrom[f.name], f.name, d.res.Kind, d.res.Name, f.declaring)
+			if !d.settings.inherited[f.name] {
+				return nil
+			}
 		}
 		return &ir.Binding{Field: f.name, Source: ir.BindingSecret, Secret: ir.SecretID(f.declaring, f.name)}
 	case set && value.Parameter != "" && value.Value != nil:
-		r.fail(CodeInvalidSettings, "environment %s sets %s on server %s to both a value and parameter %s", d.settings.envFrom[f.name], f.name, d.res.Name, value.Parameter)
+		fail(CodeInvalidSettings, "environment %s sets %s on %s %s to both a value and parameter %s", d.settings.envFrom[f.name], f.name, d.res.Kind, d.res.Name, value.Parameter)
 	case set && value.Parameter != "":
 		if !slices.Contains(r.env.parameters, value.Parameter) {
-			r.fail(CodeUnknownParameter, "environment %s binds %s on server %s to parameter %s, which environment %s does not declare", d.settings.envFrom[f.name], f.name, d.res.Name, value.Parameter, r.envName())
+			fail(CodeUnknownParameter, "environment %s binds %s on %s %s to parameter %s, which environment %s does not declare", d.settings.envFrom[f.name], f.name, d.res.Kind, d.res.Name, value.Parameter, r.envName())
 			return nil
 		}
 		return &ir.Binding{Field: f.name, Source: ir.BindingParameter, Parameter: value.Parameter}
 	case set:
 		if !isScalar(value.Value) {
-			r.fail(CodeInvalidSettings, "environment %s sets %s on server %s to %s; a literal is a string, a number or a boolean", d.settings.envFrom[f.name], f.name, d.res.Name, describe(value.Value))
+			fail(CodeInvalidSettings, "environment %s sets %s on %s %s to %s; a literal is a string, a number or a boolean", d.settings.envFrom[f.name], f.name, d.res.Kind, d.res.Name, describe(value.Value))
 			return nil
 		}
 		return &ir.Binding{Field: f.name, Source: ir.BindingLiteral, Value: value.Value}
 	case f.def != nil:
 		return &ir.Binding{Field: f.name, Source: ir.BindingLiteral, Value: *f.def, Default: true}
-	case f.required:
+	case f.required && d.res.Kind == ir.DeployableServer:
 		r.fail(CodeUnboundField, "server %s: required config field %s of %s has no binding and no default", d.res.Name, f.name, f.declaring)
 	}
 	return nil

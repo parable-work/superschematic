@@ -64,12 +64,12 @@ func (f *deployFixture) ready(t *testing.T) {
 }
 
 // shopSources writes a repository with the Dockerfile the shop's build
-// writes for each of its servers.
+// writes for each of its servers and its job.
 func shopSources(t *testing.T) *stack.Sources {
 	t.Helper()
 	root := t.TempDir()
 	src := &stack.Sources{OutputRoot: filepath.Join(root, "schemas", "dist"), RepositoryRoot: root}
-	for _, server := range []string{"shop-api", "Orders"} {
+	for _, server := range []string{"shop-api", "Orders", "shop-orders-ship-orders"} {
 		dockerfile := src.Dockerfile("Shop", server)
 		for path, content := range map[string]string{
 			dockerfile:                   "FROM scratch\n",
@@ -161,9 +161,9 @@ func (f *deployFixture) jobDocument(t *testing.T, args []string) (string, map[st
 }
 
 // TestDeployBuildsAndMigratesOnGCP deploys Staging on gcp with fakes and
-// no image: the deploy builds each server's image with Cloud Build before
-// it changes anything, pins the digests it pushed, and runs each
-// migration phase as an execution of the stack's Cloud Run job, whose
+// no image: the deploy builds each server's and the job's image with Cloud
+// Build before it changes anything, pins the digests it pushed, and runs
+// each migration phase as an execution of the stack's Cloud Run job, whose
 // image it builds from the release once. A deploy with nothing changed
 // builds and runs nothing.
 func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
@@ -183,7 +183,8 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	want := []string{
 		"cloud build " + shopRepo + "orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
-		"render 35 nodes",
+		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
+		"render 45 nodes",
 		"apply infrastructure",
 		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
@@ -222,8 +223,16 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		t.Errorf("Orders.service runs %v, want the image built, %s", got, orders)
 	}
 
+	// The job's image, pinned in its Cloud Run job as a server's is in its
+	// service (D52).
+	job := m.Images["shop-orders-ship-orders"]
+	task := f.prov.Rendered().Resources.Resource("shop-orders-ship-orders.job").Properties["template"].(map[string]any)["template"].(map[string]any)
+	if got := task["containers"].([]any)[0].(map[string]any)["image"]; !strings.HasPrefix(job, shopRepo+"shop-orders-ship-orders@sha256:") || got != job {
+		t.Errorf("shop-orders-ship-orders.job runs %v, want the image built, %s", got, job)
+	}
+
 	// The runner's image, from the release's module.
-	runner := f.cloud.builds[2]
+	runner := f.cloud.builds[3]
 	if runner.Image != migrateRepo+":1.2.3" || runner.Dockerfile != "Dockerfile" || runner.Object != "superschematic/builds/shop/superschematic-migrate/1.2.3.tar.gz" {
 		t.Errorf("the runner's build: %+v", runner)
 	}
@@ -239,11 +248,11 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		}
 	}
 
-	// The job: the runner's image, as the migrator.
-	job := f.cloud.jobs[jobKey]
-	if job.Image != migrateRepo+"@"+f.cloud.images[migrateRepo+":1.2.3"] || job.Container != "migrate" ||
-		job.ServiceAccount != "shop-migrator@acme-staging.iam.gserviceaccount.com" || job.Timeout != time.Hour {
-		t.Errorf("job %+v", job)
+	// The migration job: the runner's image, as the migrator.
+	migrate := f.cloud.jobs[jobKey]
+	if migrate.Image != migrateRepo+"@"+f.cloud.images[migrateRepo+":1.2.3"] || migrate.Container != "migrate" ||
+		migrate.ServiceAccount != "shop-migrator@acme-staging.iam.gserviceaccount.com" || migrate.Timeout != time.Hour {
+		t.Errorf("job %+v", migrate)
 	}
 
 	// The expand phase's job document, checked in as a golden the runner's
@@ -281,9 +290,10 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 }
 
 // TestMigrationJobGrantsAndRecovers: a deploy whose plan has no steps runs
-// the job for the servers that connect when they changed, with no plan in
-// the document; an execution that fails stops the deploy with its logs,
-// and the next deploy runs the phase again.
+// the job for the servers and jobs that connect when they changed, with no
+// plan in the document; an execution that fails stops the deploy with the
+// runner's error and its logs, and the next deploy runs the phase again. A
+// job of the graph connects by its own IAM database user (D52).
 func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
@@ -294,9 +304,9 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 		Images:  shopImages("acme-staging", 1),
 		Planner: firstPlanner,
 	}
-	f.cloud.failRun["expand"] = "the task exited 1"
+	f.cloud.failRun["expand"] = fakeFailure{message: cloudRunExited, stderr: []string{"superschematic-migrate: service shop-db: the task exited 1"}}
 	m, err := stack.Deploy(ctx, o)
-	if err == nil || !strings.Contains(err.Error(), "gcp: the expand phase on shop-db failed in job shop-migrate, execution "+jobKey+"/executions/1: the task exited 1 (logs: https://") {
+	if err == nil || !strings.Contains(err.Error(), "gcp: the expand phase on shop-db failed in job shop-migrate, execution "+jobKey+"/executions/1: superschematic-migrate: service shop-db: the task exited 1 (logs: https://") {
 		t.Fatalf("deploy = %v", err)
 	}
 	if applied := m.Databases["shop-db"]["shop-db"]; applied.Pending == nil || applied.Pending.Phase != ir.MigrationExpand {
@@ -319,12 +329,12 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	if name, _ := f.jobDocument(t, f.cloud.runs[n]); !strings.Contains(name, "/shop-db/expand-") {
 		t.Errorf("the next deploy ran %s first", name)
 	}
-	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api"}) {
+	if got := m.Databases["shop-db"]["shop-db"].Servers; !slices.Equal(got, []string{"Orders", "shop-api", "shop-orders-ship-orders"}) {
 		t.Errorf("the manifest records servers %v", got)
 	}
 
-	// A manifest from before Orders connected: the job runs for the
-	// servers alone.
+	// A manifest from before Orders and the job connected: the migration
+	// job runs for the privileges alone.
 	m.Databases["shop-db"]["shop-db"].Servers = []string{"shop-api"}
 	data, err := m.Marshal()
 	if err != nil {
@@ -342,13 +352,117 @@ func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	}
 	_, doc := f.jobDocument(t, f.cloud.runs[n])
 	got, _ := json.Marshal(doc["databases"])
-	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
+	if want := `[{"database":"shop_db","privileges":{"readWrite":["orders@acme-staging.iam","shop-api@acme-staging.iam","shop-orders-ship-orders@acme-staging.iam"]},"service":"shop-db"}]`; string(got) != want {
 		t.Errorf("the job's databases: %s\nwant %s", got, want)
 	}
 }
 
+// cloudRunExited is all Cloud Run says of a task that exited 1.
+const cloudRunExited = "Task shop-migrate-x7k2p-task0 failed with exit code: 1 and message: The container exited with an error."
+
+// TestMigrationJobReportsTheRunnerError: a failed execution's error is the
+// runner's, from what its task wrote to stderr, which the deploy reads
+// once Cloud Run says it failed: the last line that begins with the
+// runner's name, else the first line, as a panic writes; Cloud Run's
+// message, saying why, when there is none or it cannot be read. A wait that fails is no failed execution: it
+// reads nothing, the phase stays pending, and the next deploy runs it.
+func TestMigrationJobReportsTheRunnerError(t *testing.T) {
+	const logs = "(logs: https://console.cloud.google.com/logs/x"
+	for _, c := range []struct {
+		name       string
+		stderr     []string
+		failStderr error
+		failWait   error
+		want       string
+	}{{
+		name: "the runner's error",
+		stderr: []string{
+			"2026/10/07 18:02:11 cloudsqlconn: refreshing the certificate of acme-staging:us-east1:shop-db",
+			"superschematic-migrate: read gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-0123.json: file does not exist",
+		},
+		want: "execution " + jobKey + "/executions/1: superschematic-migrate: read gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-0123.json: file does not exist " + logs + ")",
+	}, {
+		name: "a step's error",
+		stderr: []string{
+			`superschematic-migrate: service shop-db: step 2 (order.note) failed: ERROR: column "note" of relation "order" already exists (SQLSTATE 42701)`,
+			"statement:",
+			`ALTER TABLE "order" ADD COLUMN "note" text`,
+		},
+		want: `/executions/1: superschematic-migrate: service shop-db: step 2 (order.note) failed: ERROR: column "note" of relation "order" already exists (SQLSTATE 42701) ` + logs + ")",
+	}, {
+		name: "a usage error",
+		stderr: []string{
+			"flag provided but not defined: -jb",
+			"Usage of superschematic-migrate job:",
+			"superschematic-migrate: flag provided but not defined: -jb",
+			"usage:",
+			"superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]",
+		},
+		want: "/executions/1: superschematic-migrate: flag provided but not defined: -jb " + logs + ")",
+	}, {
+		name: "a panic",
+		stderr: []string{
+			"panic: runtime error: invalid memory address or nil pointer dereference",
+			"[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x5d1a2c]",
+			"goroutine 1 [running]:",
+		},
+		want: "/executions/1: panic: runtime error: invalid memory address or nil pointer dereference " + logs + ")",
+	}, {
+		name: "no stderr",
+		want: "/executions/1: " + cloudRunExited + " " + logs + "; Cloud Logging held no stderr of it after 30s)",
+	}, {
+		name:       "stderr unread",
+		stderr:     []string{"superschematic-migrate: never read"},
+		failStderr: errors.New("rpc error: code = PermissionDenied desc = Permission denied for all log views"),
+		want:       "/executions/1: " + cloudRunExited + " " + logs + "; its stderr is unread: rpc error: code = PermissionDenied desc = Permission denied for all log views)",
+	}, {
+		name:     "the wait fails",
+		failWait: errors.New("rpc error: code = Unavailable desc = connection reset by peer"),
+		want:     "gcp: job " + jobKey + ": waiting for execution " + jobKey + "/executions/1, which may still be running: rpc error: code = Unavailable desc = connection reset by peer",
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
+			f.ready(t)
+			env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+			ctx := context.Background()
+			o := stack.DeployOptions{
+				Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
+				Images:  shopImages("acme-staging", 1),
+				Planner: firstPlanner,
+			}
+			f.cloud.failRun["expand"] = fakeFailure{message: cloudRunExited, stderr: c.stderr}
+			f.cloud.failWait, f.cloud.failStderr = c.failWait, c.failStderr
+			m, err := stack.Deploy(ctx, o)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("deploy = %v\nwant it to hold %s", err, c.want)
+			}
+			if applied := m.Databases["shop-db"]["shop-db"]; applied.Pending == nil || applied.Pending.Phase != ir.MigrationExpand {
+				t.Fatalf("shop-db: %+v", applied)
+			}
+			if c.failWait != nil {
+				if strings.Contains(err.Error(), "failed in job") || len(f.cloud.stderrReads) > 0 {
+					t.Errorf("a wait that failed is read as a failed execution: %v, %d stderr read(s)", err, len(f.cloud.stderrReads))
+				}
+				f.cloud.failRun = map[string]fakeFailure{}
+				if _, err := stack.Deploy(ctx, o); err != nil {
+					t.Fatal(err)
+				}
+				if name, _ := f.jobDocument(t, f.cloud.runs[1]); !strings.Contains(name, "/shop-db/expand-") {
+					t.Errorf("the next deploy ran %s first", name)
+				}
+				return
+			}
+			want := []stderrRead{{execution: jobKey + "/executions/1", wait: 30 * time.Second}}
+			if !slices.Equal(f.cloud.stderrReads, want) {
+				t.Errorf("stderr reads %+v, want %+v", f.cloud.stderrReads, want)
+			}
+		})
+	}
+}
+
 // TestMigrationJobOfAMember: a run of the parameterized Preview migrates
-// its own database on the parent's instance, for its own servers' users.
+// its own database on the parent's instance, for its own servers' and
+// job's users.
 func TestMigrationJobOfAMember(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 	f.ready(t)
@@ -374,7 +488,7 @@ func TestMigrationJobOfAMember(t *testing.T) {
 	got, _ := json.Marshal(map[string]any{"cloudSql": doc["cloudSql"], "privileges": doc["databases"].([]any)[0].(map[string]any)["privileges"],
 		"database": doc["databases"].([]any)[0].(map[string]any)["database"]})
 	want := `{"cloudSql":{"instance":"acme-staging:us-east1:shop-db","user":"shop-migrator@acme-staging.iam"},"database":"shop_db_pr7",` +
-		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam"]}}`
+		`"privileges":{"readWrite":["orders-pr7@acme-staging.iam","shop-api-pr7@acme-staging.iam","shop-orders-ship-orders-pr7@acme-staging.iam"]}}`
 	if string(got) != want {
 		t.Errorf("the member's job: %s\nwant %s", got, want)
 	}
@@ -423,12 +537,12 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 2 {
+	if len(f.cloud.builds) != 3 {
 		t.Fatalf("stack build ran %d builds", len(f.cloud.builds))
 	}
 	f.cloud.failBuild[migrateRepo+":1.2.3"] = "step 0 exited 1"
 	_, err = stack.Deploy(context.Background(), o)
-	if len(f.cloud.builds) != 3 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
+	if len(f.cloud.builds) != 4 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
 		t.Fatalf("deploy = %v after %d builds", err, len(f.cloud.builds))
 	}
 	data, rerr := f.cloud.ReadObject(context.Background(), stateBucket, "superschematic/manifests/shop/Staging.json")
@@ -447,7 +561,7 @@ func TestBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cloud.builds) != 4 || m2.Images["Orders"] != built.Images["Orders"] {
+	if len(f.cloud.builds) != 5 || m2.Images["Orders"] != built.Images["Orders"] {
 		t.Errorf("the next deploy ran %d builds in all and runs Orders at %s, want stack build's %s", len(f.cloud.builds), m2.Images["Orders"], built.Images["Orders"])
 	}
 

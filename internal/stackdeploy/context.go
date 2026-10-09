@@ -51,7 +51,8 @@ type Context struct {
 // file is `<Dockerfile>.dockerignore` beside the Dockerfile, else
 // `.dockerignore` at root, else none. As Docker's client does, the context
 // always holds the Dockerfile and its ignore file, whatever the ignore
-// file says.
+// file says. It refuses a context that lacks a path the ignore file takes
+// in by name (checkTakenIn).
 func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -85,6 +86,9 @@ func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
 		r, _ := filepath.Rel(root, ignorePath)
 		always[filepath.ToSlash(r)] = true
 	case !errors.Is(err, fs.ErrNotExist):
+		return nil, err
+	}
+	if err := checkTakenIn(root, ignorePath, patterns); err != nil {
 		return nil, err
 	}
 	m, err := newIgnoreMatcher(patterns)
@@ -142,6 +146,38 @@ func WriteContext(w io.Writer, root, dockerfile string) (*Context, error) {
 	out.Digest = "sha256:" + hex.EncodeToString(sum.Sum(nil))
 	out.Size = counter.n
 	return out, nil
+}
+
+// checkTakenIn refuses a context that lacks a path an exception pattern of
+// the ignore file at ignorePath names with no wildcard, as a generated
+// ignore file names each directory its Dockerfile builds from, or that
+// holds the path under a symbolic link, which a context carries as a link
+// and not the files it points at. Either way the build would fail at a
+// COPY in the target's builder, after the upload; a superscalar checkout
+// that a CI runner never made, or one linked in from outside the
+// repository, is the usual cause.
+func checkTakenIn(root, ignorePath string, patterns []string) error {
+	for _, p := range patterns {
+		name, ok := strings.CutPrefix(p, "!")
+		if !ok || name == "" || name == "." || strings.ContainsAny(name, `*?[\`) {
+			continue
+		}
+		at := root
+		for _, part := range strings.Split(name, "/") {
+			at = filepath.Join(at, part)
+			info, err := os.Lstat(at)
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				return fmt.Errorf("the build context %s holds no %s, which %s takes in for the Dockerfile to build from", root, name, ignorePath)
+			case err != nil:
+				return err
+			case info.Mode()&fs.ModeSymlink != 0:
+				link, _ := filepath.Rel(root, at)
+				return fmt.Errorf("%s, which %s takes in for the Dockerfile to build from, lies under %s, a symbolic link, and a build context holds a link and not the files it points at; put the files in %s itself", name, ignorePath, filepath.ToSlash(link), root)
+			}
+		}
+	}
+	return nil
 }
 
 // holdsAny reports whether a path of always lies under dir.

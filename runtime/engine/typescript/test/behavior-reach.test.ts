@@ -89,9 +89,17 @@ for (const driver of drivers) {
       const engine = world();
       const peek = (fields?: string[]) =>
         engine.instances.invoke(alice, 'Note', 'n1', 'peek', { schema: 'Item', id: 'i1', ...(fields ? { fields } : {}) });
-      assert.deepEqual(peek(), { title: 'Desk', count: 1, flagged: false });
-      assert.deepEqual(peek(['count', 'noSuchField']), { title: 'Desk', count: 1 });
-      assert.deepEqual(peek([]), { title: 'Desk' });
+      assert.deepEqual(peek(), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 1 }, 'test.Flag': { flagged: false } } });
+      // A read names a field by its qualified name; one no behavior of the
+      // schema declares is left out, and a bare name, which names no
+      // behavior's field, is refused.
+      assert.deepEqual(peek(['test.Counter.count', 'test.Counter.noSuchField', 'test.Ghost.count']), {
+        data: { title: 'Desk' },
+        behaviors: { 'test.Counter': { count: 1 } },
+      });
+      const bare = thrown(() => peek(['count']), BehaviorError);
+      assert.match(bare.message, /fields is a list of behavior fields by qualified name, <behavior>\.<field> \(Workflow\.status\)/);
+      assert.deepEqual(peek([]), { data: { title: 'Desk' }, behaviors: {} });
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'peek', { schema: 'Item', id: 'gone' }), null);
       const missing = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peek', { schema: 'Nothing', id: 'x' }), EngineError);
       assert.deepEqual([missing.code, missing.message], ['not_found', 'schema Nothing has no live version in namespace default']);
@@ -102,8 +110,11 @@ for (const driver of drivers) {
       const engine = world({ policy });
       asked.length = 0;
       assert.deepEqual(
-        engine.instances.invoke(bob, 'Note', 'n1', 'peekMany', { schema: 'Item', ids: ['i2', 'gone', 'i1', 'i2'], fields: ['count'] }),
-        { i2: { title: 'Lamp', count: 1 }, i1: { title: 'Desk', count: 1 } }
+        engine.instances.invoke(bob, 'Note', 'n1', 'peekMany', { schema: 'Item', ids: ['i2', 'gone', 'i1', 'i2'], fields: ['test.Counter.count'] }),
+        {
+          i2: { data: { title: 'Lamp' }, behaviors: { 'test.Counter': { count: 1 } } },
+          i1: { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 1 } } },
+        }
       );
       assert.deepEqual(
         asked.map(({ action, schema, operation }) => [action, schema, operation]),
@@ -128,7 +139,7 @@ for (const driver of drivers) {
       asked.length = 0;
       thrown(() => engine.instances.invoke(bob, 'Note', 'n1', 'peek', { schema: 'Item', id: 'i1' }), EngineError);
       assert.equal(asked.filter((request) => request.schema === 'Item').length, 1);
-      assert.deepEqual(engine.instances.invoke(bob, 'Note', 'n1', 'peek', { schema: 'Note', id: 'n2', fields: [] }), { title: 'Second' });
+      assert.deepEqual(engine.instances.invoke(bob, 'Note', 'n1', 'peek', { schema: 'Note', id: 'n2', fields: [] }), { data: { title: 'Second' }, behaviors: {} });
     });
 
     test('a field reader reads as the caller: without read on the partner schema, the instance cannot be read', () => {
@@ -138,17 +149,18 @@ for (const driver of drivers) {
       publish(engine, 'Note', [{ name: 'test.Reader', config: { partnerSchema: 'Item' } }]);
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
       engine.instances.create(alice, 'Note', { title: 'First', partner: 'i1' }, { id: 'n1' });
-      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.echo, 'Desk');
+      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.behaviors['test.Reader']?.echo, 'Desk');
       const refused = thrown(() => engine.instances.get(bob, 'Note', 'n1'), EngineError);
       assert.equal(refused.code, 'forbidden');
       engine.instances.create(alice, 'Note', { title: 'Alone' }, { id: 'n2' });
-      assert.deepEqual(engine.instances.get(bob, 'Note', 'n2')?.data, { title: 'Alone', pokes: 0 });
+      const alone = engine.instances.get(bob, 'Note', 'n2');
+      assert.deepEqual([alone?.data, alone?.behaviors], [{ title: 'Alone' }, { 'test.Reader': { pokes: 0 } }]);
     });
 
     test('reads nest at most 16 deep: a cycle of field reads ends with a BehaviorError', () => {
       const engine = world();
       engine.instances.update(alice, 'Note', 'n1', { partner: 'n2' });
-      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.echo, 'Second');
+      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.behaviors['test.Reader']?.echo, 'Second');
       const cycle = thrown(() => engine.instances.update(alice, 'Note', 'n2', { partner: 'n1' }), BehaviorError);
       assert.match(cycle.message, /^behavior test\.Reader: instances\.get: calls nest more than 16 deep$/);
       assert.equal(engine.instances.get(alice, 'Note', 'n2')?.data.partner, undefined, 'the update rolled back');
@@ -179,8 +191,8 @@ for (const driver of drivers) {
       }
       engine.instances.create(alice, 'Item', { title: 'East desk' }, { id: 'i1', namespace: 'east' });
       assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'peek', { schema: 'Item', id: 'i1' }, { namespace: 'east' }), {
-        title: 'East desk',
-        count: 1,
+        data: { title: 'East desk' },
+        behaviors: { 'test.Counter': { count: 1 } },
       });
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'peek', { schema: 'Item', id: 'i1' }, { namespace: 'west' }), null);
       const refused = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1' }, { namespace: 'west' }), EngineError);
@@ -205,7 +217,7 @@ for (const driver of drivers) {
         ]
       );
       const item = engine.instances.get(alice, 'Item', 'i1');
-      assert.deepEqual([item?.data.count, item?.seq, item?.updatedBy], [3, 2, 'bob']);
+      assert.deepEqual([item?.behaviors['test.Counter']?.count, item?.seq, item?.updatedBy], [3, 2, 'bob']);
       // The target's event first, as its operation finished first; both are bob's.
       assert.deepEqual(eventsOf(engine, from), [
         ['operation', 'Item', 'i1', 'increment'],
@@ -214,8 +226,8 @@ for (const driver of drivers) {
       assert.deepEqual(
         engine.events.read(alice, { after: from }).events.map((event) => [event.actor, (event.change as { patch: unknown }).patch]),
         [
-          ['bob', { count: 3 }],
-          ['bob', { pokes: 1 }],
+          ['bob', { behaviors: { 'test.Counter': { count: 3 } } }],
+          ['bob', { behaviors: { 'test.Reader': { pokes: 1 } } }],
         ]
       );
     });
@@ -233,22 +245,22 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Item', 'i1', 'unflag');
       assert.equal(thrown(() => poke(alice, 'increment', { by: 0 }), OperationParamsError).code, 'invalid_argument');
       assert.equal(thrown(() => poke(bob, 'increment', {}), EngineError).message, 'bob may not call increment (write) on Item in namespace default');
-      assert.deepEqual(engine.instances.get(alice, 'Note', 'n1')?.data.pokes, 0, 'every refusal rolled the poke back');
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
+      assert.deepEqual(engine.instances.get(alice, 'Note', 'n1')?.behaviors['test.Reader']?.pokes, 0, 'every refusal rolled the poke back');
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 1);
     });
 
     test('a failure rolls back every instance the call changed; one the behavior catches rolls back the invoked operation alone', () => {
       const engine = world();
       const from = lastCursor(engine);
       thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'poke', { schema: 'Item', id: 'i1', operation: 'increment', fail: true }), EngineError);
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 1);
       assert.deepEqual(eventsOf(engine, from), []);
 
       assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'pokeCatch', { schema: 'Note', id: 'n2', operation: 'failAfterWrite' }), {
         threw: 'EngineError',
       });
       const [first, second] = [engine.instances.get(alice, 'Note', 'n1'), engine.instances.get(alice, 'Note', 'n2')];
-      assert.deepEqual([first?.data.pokes, second?.data.pokes, second?.seq], [1, 0, 1]);
+      assert.deepEqual([first?.behaviors['test.Reader']?.pokes, second?.behaviors['test.Reader']?.pokes, second?.seq], [1, 0, 1]);
       assert.deepEqual(eventsOf(engine, from), [['operation', 'Note', 'n1', 'pokeCatch']]);
     });
 
@@ -260,7 +272,7 @@ for (const driver of drivers) {
       assert.equal(read.message, "behavior test.Reader: a read cannot invoke increment of Item, which writes; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can");
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'guarded', { schema: 'Item', id: 'i1', operation: 'history' }), 'ran');
       thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'guarded', { schema: 'Item', id: 'i1', operation: 'increment' }), BehaviorError);
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 2);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 2);
     });
 
     test('invoking a writing operation of an instance whose write runs up the call is a cycle, refused', () => {
@@ -280,8 +292,8 @@ for (const driver of drivers) {
       assert.match(around.message, /invoking failAfterWrite of Note n1 is a cycle/);
       // A read-only operation of an instance being written runs: it reads what the call has written so far.
       assert.deepEqual(
-        engine.instances.invoke(alice, 'Note', 'n1', 'poke', { schema: 'Note', id: 'n2', operation: 'pokeRead', params: { schema: 'Note', id: 'n1', operation: 'peek', params: { schema: 'Note', id: 'n1', fields: ['pokes'] } } }),
-        { title: 'First', pokes: 1 }
+        engine.instances.invoke(alice, 'Note', 'n1', 'poke', { schema: 'Note', id: 'n2', operation: 'pokeRead', params: { schema: 'Note', id: 'n1', operation: 'peek', params: { schema: 'Note', id: 'n1', fields: ['test.Reader.pokes'] } } }),
+        { data: { title: 'First' }, behaviors: { 'test.Reader': { pokes: 1 } } }
       );
     });
 
@@ -296,7 +308,7 @@ for (const driver of drivers) {
       assert.deepEqual(ok, { count: 2 });
       const deep = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'poke', chain(1, 16)), BehaviorError);
       assert.match(deep.message, /operation (poke|increment): calls nest more than 16 deep/);
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 2);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 2);
     });
   });
 
@@ -319,7 +331,7 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n2', 'holding'), [], "a behavior's references are its instance's own");
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'release', { schema: 'Item', id: 'i2', key: 'b' }), true);
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'release', { schema: 'Item', id: 'i2', key: 'b' }), false);
-      assert.deepEqual(engine.instances.get(alice, 'Note', 'n1')?.data.held, ['Item/i1/a', 'Note/n2/']);
+      assert.deepEqual(engine.instances.get(alice, 'Note', 'n1')?.behaviors['test.Holder']?.held, ['Item/i1/a', 'Note/n2/']);
     });
 
     test("a referencing behavior's guard vetoes the changes of a held instance it names, whoever the caller", () => {
@@ -446,9 +458,11 @@ for (const driver of drivers) {
 
     test('one that hears a value runs its hook when a change moves it, with crosses when it moves across the number, and at the delete', () => {
       const engine = world();
-      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count', crosses: 3 } });
-      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count' } });
-      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [{ schema: 'Item', id: 'i1', key: '', hears: { path: '/count', crosses: 3 } }]);
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/behaviors/test.Counter/count', crosses: 3 } });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i1', hears: { path: '/behaviors/test.Counter/count' } });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [
+        { schema: 'Item', id: 'i1', key: '', hears: { path: '/behaviors/test.Counter/count', crosses: 3 } },
+      ]);
       // The count starts at 1. A change that leaves it is heard by neither.
       engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
       engine.instances.invoke(alice, 'Item', 'i1', 'flag', { reason: 'checking' });
@@ -478,8 +492,8 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Box', { title: 'Crate' }, { id: 'b1' });
       engine.instances.create(alice, 'Note', { title: 'Low' }, { id: 'n1' });
       engine.instances.create(alice, 'Note', { title: 'High' }, { id: 'n2' });
-      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/size', crosses: 1 } });
-      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/size', crosses: 100 } });
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/data/size', crosses: 1 } });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Box', id: 'b1', hears: { path: '/data/size', crosses: 100 } });
       engine.instances.update(alice, 'Box', 'b1', { size: 50 });
       engine.instances.update(alice, 'Box', 'b1', { size: 60 });
       engine.instances.update(alice, 'Box', 'b1', { size: null });
@@ -490,7 +504,7 @@ for (const driver of drivers) {
     test("one that hears less than every change is asked by guardReference before a delete only", () => {
       const engine = world({}, { veto: ['update', 'delete', 'operation'] });
       engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears: 'delete' });
-      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i2', hears: { path: '/count' } });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i2', hears: { path: '/behaviors/test.Counter/count' } });
       engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
       engine.instances.invoke(alice, 'Item', 'i1', 'increment');
       engine.instances.invoke(alice, 'Item', 'i2', 'increment');
@@ -516,15 +530,20 @@ for (const driver of drivers) {
       assert.deepEqual(notes(engine, 'n1'), ['operation Item i2']);
     });
 
-    test("add refuses what is neither 'delete' nor a JSON pointer with a finite number to cross", () => {
+    test("add refuses what is neither 'delete' nor a JSON pointer into data or behaviors with a finite number to cross", () => {
       const engine = world();
+      const pointer = (path: string) => `its path a JSON pointer into the target as a read returns it, /data/<field> or /behaviors/<behavior>/<field>, not ${JSON.stringify(path)}`;
       for (const [hears, what] of [
         ['all', 'not "all"'],
-        [{ path: 'count' }, 'its path a JSON pointer to a member of the target\'s data, not "count"'],
-        [{ path: '' }, 'its path a JSON pointer to a member of the target\'s data, not ""'],
-        [{ path: '/count/~2' }, 'its path a JSON pointer to a member of the target\'s data, not "/count/~2"'],
-        [{ path: '/count', crosses: '3' }, 'its crosses a finite number, not "3"'],
-        [{ path: '/count', over: 3 }, 'with no other member (over)'],
+        [{ path: 'count' }, pointer('count')],
+        [{ path: '' }, pointer('')],
+        [{ path: '/behaviors/test.Counter/count/~2' }, pointer('/behaviors/test.Counter/count/~2')],
+        // A pointer into neither part, or to a part or a behavior whole.
+        [{ path: '/count' }, pointer('/count')],
+        [{ path: '/data' }, pointer('/data')],
+        [{ path: '/behaviors/test.Counter' }, pointer('/behaviors/test.Counter')],
+        [{ path: '/behaviors/test.Counter/count', crosses: '3' }, 'its crosses a finite number, not "3"'],
+        [{ path: '/behaviors/test.Counter/count', over: 3 }, 'with no other member (over)'],
       ] as Array<[unknown, string]>) {
         const refused = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', hears } as FrozenJSON), BehaviorError);
         assert.equal(refused.message, `behavior test.Holder: references.add: hears is 'delete' or { path, crosses? }, ${what}`);
@@ -535,7 +554,7 @@ for (const driver of drivers) {
       const engine = world();
       for (let at = 1; at <= 60; at += 1) {
         engine.instances.create(alice, 'Note', { title: `n${at}` }, { id: `h${at}` });
-        engine.instances.invoke(alice, 'Note', `h${at}`, 'hold', { schema: 'Item', id: 'i1', hears: { path: '/count', crosses: at + 0.5 } });
+        engine.instances.invoke(alice, 'Note', `h${at}`, 'hold', { schema: 'Item', id: 'i1', hears: { path: '/behaviors/test.Counter/count', crosses: at + 0.5 } });
       }
       const from = lastCursor(engine);
       engine.instances.invoke(alice, 'Item', 'i1', 'increment');
@@ -564,9 +583,9 @@ for (const driver of drivers) {
         ]
       );
       engine.instances.invoke(alice, 'Item', 'i1', 'transition', { to: 'done' });
-      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.blocked, false);
+      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.behaviors.Dependencies?.blocked, false);
       engine.instances.delete(alice, 'Item', 'i1');
-      assert.equal(engine.instances.get(alice, 'Note', 'n1')?.data.links, undefined);
+      assert.deepEqual(engine.instances.get(alice, 'Note', 'n1')?.behaviors.Links, {});
     });
   });
 
@@ -640,7 +659,7 @@ for (const driver of drivers) {
         ['operation', 'Note', 'n2', 'release'],
         ['operation', 'Note', 'n1', 'pokeSchema'],
       ]);
-      assert.equal(engine.instances.get(alice, 'Note', 'n2')?.data.held, undefined);
+      assert.deepEqual(engine.instances.get(alice, 'Note', 'n2')?.behaviors['test.Holder'], {});
       const scope = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', { schema: 'Note', operation: 'notes' }), EngineError);
       assert.deepEqual([scope.code, scope.message], ['not_found', "Note's notes is an instance operation: call it on an instance"]);
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', { schema: 'Note', operation: 'holders' }), OperationParamsError).code, 'invalid_argument');

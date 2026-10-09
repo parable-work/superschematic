@@ -1,26 +1,31 @@
 /*
 What the engine serves about a namespace's schemas besides their
-instances (D16): a describe document per schema, the tools document in
-the shape the SDK generators write to tools/schema.json (ir.ToolManifest),
-and the calls those tools make. The MCP endpoint (@superschematic/engine/mcp)
-and the HTTP routes read them from here; every read and call goes through
-the schema registry and the instance store, so the access policy answers
-each one.
+instances (D16): a describe document per schema, which carries the
+instance type's display and its fields' titles and icons (D48), the
+tools document in the shape the SDK generators write to
+tools/schema.json (ir.ToolManifest), and the calls those tools make. The
+MCP endpoint (@superschematic/engine/mcp) and the HTTP routes read them
+from here; every read and call goes through the schema registry and the
+instance store, so the access policy answers each one.
 
 A tool is one operation: create, get, list, update and delete of every
-live schema the namespace reaches (create takes the parameters its
-behaviors declare a createParamsSchema for, under behaviors, and create's
-data, update's patch and the describe document's instance carry what the
-behaviors' validate holds the fields to, as allOf entries their
-instanceSchema writes; get and list take valueRefs, for the refs of the
-fields the value store holds in place of their values), each operation
+live schema the namespace reaches, and lookup of one whose instance type
+has a unique field (create takes the parameters its behaviors declare a
+createParamsSchema for, under behaviors, and create's data, update's
+patch and the describe document's instance carry what the behaviors'
+validate holds the fields to, as allOf entries their instanceSchema
+writes; get, list and lookup take valueRefs, for the refs of the fields
+the value store holds in place of their values; list takes where, the
+values of the fields it filters on, and lookup key, the values of one
+unique index's fields), each operation
 its behaviors add (a schema-level one takes its parameters and no
 instance id), three tools for writing schemas: list, describe and define
 a draft, two that list and describe the behaviors a schema may compose
 (behaviors.ts), get_value, which reads a value of the value store by its
-hash (engine.values), and where a schema the caller may read composes
+hash (engine.values), where a schema the caller may read composes
 Search, search, the search across the namespace's schemas
-(engine.search). The
+(engine.search), and four that list, create, archive and unarchive
+namespaces (engine.namespaces), which the policy's manage answers. The
 update, delete and instance operation tools of a schema one of whose
 behaviors declares a preconditionSchema take `preconditions`, each such
 behavior's entry by its name, as the HTTP API's Preconditions header
@@ -42,15 +47,30 @@ method the operation's name, as `order.create` or `line-item.addNote`. An
 SDK tool's MCP handle is authored with @mcp; the engine derives it from
 the same two parts in snake case (codegen.ToSnakeCase), as `order_create`,
 and the engine's own tools are `list_schemas`, `describe_schema`,
-`define_schema`, `list_behaviors`, `describe_behavior`, `get_value` and
-`search`. A handle @mcp would refuse (not lowercase snake case, or
-longer than 48 characters) or one two tools derive hides both tools, with
-the reason; the engine's schema tools keep theirs. A tool the access
+`define_schema`, `list_behaviors`, `describe_behavior`, `get_value`,
+`search`, `list_namespaces`, `create_namespace`, `archive_namespace` and
+`unarchive_namespace`. A handle @mcp would refuse (not lowercase snake
+case, or longer than 48 characters) or one two tools derive hides both
+tools, with the reason; the engine's schema tools keep theirs. A tool the access
 policy refuses the caller is hidden too, with that reason, and can still
-be called by its handle: the call is refused.
+be called by its handle: the call is refused. So is every tool that
+writes in an archived namespace, the namespace tools aside, since the
+namespace refuses the write. The engine tools that name their schema or
+their namespace only when called, define_schema and the namespace tools,
+are asked about with a listing question (access.ts,
+ListingAccessRequest): a principal the policy would refuse them does not
+see them either.
+
+A mount, the MCP endpoint or the tools route, can narrow what a caller
+is offered further with a ToolFilter, asked per principal and tool: a
+tool it leaves out is hidden from that caller with its reason, and a
+call of it is a tool the namespace does not have (UnknownToolError), so
+an agent's session limited to one schema's operations reaches no other.
 */
 
-import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
+import type { TypeDisplay } from '@superschematic/schema-ir/schema-file';
+
+import { checkPrincipal, type Access, type NamespaceOperation, type Principal, type SchemaAction } from '../access.js';
 import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
 import { SEARCH_SCHEMAS_PARAMS, searchSchemas } from '../behaviors/core/index.js';
 import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclaration, type OperationScope } from '../behaviors/declaration.js';
@@ -59,11 +79,14 @@ import { jsonCopy } from '../behaviors/json.js';
 import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, EngineError } from '../errors.js';
 import { isPlainObject } from '../instances/patch.js';
+import { MAX_FILTER_VALUES, type Filterable } from '../instances/filters.js';
+import type { OwnIndex } from '../instances/indexes.js';
 import { INSTANCE_ID, type InstanceStore } from '../instances/store.js';
-import type { Namespaces } from '../namespaces.js';
+import { NAMESPACE_NAME, type Namespaces } from '../namespaces.js';
 import { MAX_PAGE_SIZE } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
-import { SCHEMA_NAME } from '../registry/document.js';
+import { describedDisplay } from '../registry/display.js';
+import { SCHEMA_NAME, jsonKey } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
 import { VALUE_HASH } from '../values/store.js';
 import type { EngineValues } from '../values/values.js';
@@ -102,11 +125,36 @@ export interface DescribeDocument {
   instanceType: string;
   /** The instance type's description, else the document's; absent without either. */
   description?: string;
-  /** The JSON Schema of an instance's data: closed, its behaviors' fields read-only. */
+  /**
+   * The instance type's display (@display, D48): what a UI calls an
+   * instance, its title and summary fields by their keys in an instance's
+   * data, and the labels of its Workflow's states and transitions. Absent
+   * when the type declares none.
+   */
+  display?: TypeDisplay;
+  /** The instance type's own fields, in declaration order, each with its title and icon where declared. */
+  fields: DescribedField[];
+  /** The JSON Schema of an instance's data: its own fields, closed. */
   instance: JSONSchemaObject;
+  /**
+   * The JSON Schema of an instance's behaviors: by behavior name, an
+   * object of each field the behavior declares, read-only, for every
+   * behavior on the type that declares one.
+   */
+  instanceBehaviors: JSONSchemaObject;
   behaviors: DescribedBehavior[];
-  /** create, get, list, update, delete, then each behavior's operations in the type's list order. */
+  /** create, get, list, update, delete, lookup when the type has a unique field, then each behavior's operations in the type's list order. */
   operations: DescribedOperation[];
+}
+
+/** One of the instance type's own fields, as a UI labels it. */
+export interface DescribedField {
+  /** Its key in an instance's data. */
+  name: string;
+  /** Its label, from @docs({ title }). */
+  title?: string;
+  /** The glyph a UI shows for it, from @icon. */
+  icon?: string;
 }
 
 /** A behavior a schema's instance type composes. */
@@ -133,6 +181,8 @@ export interface DescribedOperation {
   behavior?: string;
   /** For a behavior's operation, what it runs on: an instance, or the schema as a whole. */
   scope?: OperationScope;
+  /** Its tool's title, as the tools document writes it. */
+  title: string;
   description: string;
   writes: boolean;
   params: JSONSchemaObject;
@@ -187,7 +237,37 @@ export interface ToolManifest {
 /** Where a call looks: a namespace, `default` when absent. */
 export interface ToolTarget {
   namespace?: string;
+  /**
+   * The mount's narrowing of the tools a caller is offered: a tool it
+   * leaves out is hidden from the caller, and calling it is
+   * UnknownToolError. Absent, every tool the policy lets the caller see.
+   */
+  filter?: ToolFilter;
 }
+
+/** What a ToolFilter is told of one tool. */
+export interface ToolSummary {
+  /** Its MCP handle, `order_create`, `define_schema`. */
+  readonly handle: string;
+  /** Its name in the tools document, `order.create`, `engine.defineSchema`. */
+  readonly name: string;
+  /** The schema a schema's tool reaches; absent for the engine's own tools. */
+  readonly schema?: string;
+  /** The operation it runs: `create`, `get`, ..., a behavior's operation, or the engine tool's (`defineSchema`). */
+  readonly operation: string;
+  /** The behavior whose operation it runs; absent for the others. */
+  readonly behavior?: string;
+  /** Whether it writes. */
+  readonly writes: boolean;
+}
+
+/**
+ * ToolFilter narrows what one caller is offered: true keeps a tool, and
+ * anything else leaves it out of the caller's list and refuses its call.
+ * It runs synchronously, for every tool of every listing and call. It
+ * narrows only: a tool the access policy hides stays hidden.
+ */
+export type ToolFilter = (principal: Principal, tool: ToolSummary, namespace: string) => boolean;
 
 /** A tool call named a handle the namespace has no tool for, as the caller sees it. */
 export class UnknownToolError extends EngineError {
@@ -206,6 +286,7 @@ type ToolKind =
   | 'list'
   | 'update'
   | 'delete'
+  | 'lookup'
   | 'operation'
   | 'schemaOperation'
   | 'listSchemas'
@@ -214,7 +295,42 @@ type ToolKind =
   | 'listBehaviors'
   | 'describeBehavior'
   | 'search'
-  | 'getValue';
+  | 'getValue'
+  | 'listNamespaces'
+  | 'createNamespace'
+  | 'archiveNamespace'
+  | 'unarchiveNamespace';
+
+// The engine's tools that act on namespaces themselves, not in the
+// namespace whose tools they are among.
+const NAMESPACE_TOOLS: ReadonlySet<ToolKind> = new Set(['listNamespaces', 'createNamespace', 'archiveNamespace', 'unarchiveNamespace']);
+
+// The listing question each engine tool that names its schema or its
+// namespace only when called asks the policy (ListingAccessRequest).
+const LISTING_QUESTIONS: ReadonlyMap<ToolKind, { action: 'define' | 'manage'; operation?: NamespaceOperation }> = new Map([
+  ['defineSchema', { action: 'define' }],
+  ['listNamespaces', { action: 'manage', operation: 'list' }],
+  ['createNamespace', { action: 'manage', operation: 'create' }],
+  ['archiveNamespace', { action: 'manage', operation: 'archive' }],
+  ['unarchiveNamespace', { action: 'manage', operation: 'unarchive' }],
+]);
+
+// kept asks a mount's filter about one tool; only a literal true keeps it.
+function kept(filter: ToolFilter, principal: Principal, namespace: string, tool: ToolSpec): boolean {
+  const summary: ToolSummary = Object.freeze({
+    handle: tool.handle,
+    name: tool.name,
+    ...(tool.schema === undefined ? {} : { schema: tool.schema.name }),
+    operation: tool.methodName,
+    ...(tool.behavior === undefined ? {} : { behavior: tool.behavior.name }),
+    writes: tool.writes,
+  });
+  const answer: unknown = filter(principal, summary, namespace);
+  if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+    throw new TypeError('a tool filter is synchronous: it returned a promise');
+  }
+  return answer === true;
+}
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -240,6 +356,10 @@ interface ToolSpec {
   hidden?: string;
   /** The preconditions argument of an update, a delete or an instance operation; absent when no behavior declares one. */
   preconditions?: Property;
+  /** The where argument of a list; absent when the schema has no field a list filters on. */
+  where?: Property;
+  /** The key argument of a lookup. */
+  key?: Property;
 }
 
 const TOOL_SCHEMA = 'https://json-schema.org/draft/2020-12/schema';
@@ -316,6 +436,7 @@ export class ToolCatalog {
     const policyKey = this.options.invocationPolicy.key;
     const type = (record.document.types ?? {})[record.instanceType];
     const description = type?.description || record.document.description;
+    const display = type === undefined ? undefined : describedDisplay(type);
     const said = this.guidanceOf(record);
     return {
       namespace,
@@ -325,7 +446,14 @@ export class ToolCatalog {
       hash: record.hash,
       instanceType: record.instanceType,
       ...(description ? { description } : {}),
-      instance: this.instanceSchema(record, behaviors),
+      ...(display !== undefined ? { display } : {}),
+      fields: (type?.fields ?? []).map((field) => ({
+        name: jsonKey(field),
+        ...(field.title ? { title: field.title } : {}),
+        ...(field.icon ? { icon: field.icon } : {}),
+      })),
+      instance: this.instanceSchema(record),
+      instanceBehaviors: behaviorsSchema(behaviors),
       behaviors: behaviors.map((bound) => ({
         name: bound.name,
         ...(bound.declaration.description ? { description: bound.declaration.description } : {}),
@@ -344,6 +472,7 @@ export class ToolCatalog {
       operations: tools.map((tool) => ({
         name: tool.methodName,
         ...(tool.behavior ? { behavior: tool.behavior.name, scope: tool.kind === 'schemaOperation' ? 'schema' : 'instance' } : {}),
+        title: tool.title,
         description: tool.description,
         writes: tool.writes,
         [policyKey]: tool.policy,
@@ -368,7 +497,7 @@ export class ToolCatalog {
       $schema: TOOL_SCHEMA,
       title: `Namespace ${namespace} Tool Definitions`,
       description: `MCP tool bindings for the schemas namespace ${namespace} reaches`,
-      tools: tools.map((tool) => this.definition(principal, namespace, tool)),
+      tools: tools.map((tool) => this.definition(principal, namespace, tool, target.filter)),
     };
   }
 
@@ -386,7 +515,7 @@ export class ToolCatalog {
       typeof handle === 'string'
         ? this.toolSet(principal, namespace).find((candidate) => candidate.handle === handle && candidate.hidden === undefined)
         : undefined;
-    if (!tool) {
+    if (!tool || (target.filter !== undefined && !kept(target.filter, principal, namespace, tool))) {
       throw new UnknownToolError(String(handle), namespace);
     }
     const input = argumentsOf(tool, args);
@@ -436,18 +565,34 @@ export class ToolCatalog {
         return record;
       }
       case 'list': {
-        only(tool, input, ['limit', 'cursor', 'valueRefs']);
+        only(tool, input, ['limit', 'cursor', 'valueRefs', ...(tool.where === undefined ? [] : ['where'])]);
         const limit = input.limit ?? undefined;
         if (limit !== undefined && typeof limit !== 'number') {
           throw new EngineError('invalid_argument', `${tool.handle}: limit is an integer`);
         }
         const cursor = optionalString(tool, input, 'cursor');
+        const where = input.where ?? undefined;
+        if (where !== undefined && !isPlainObject(where)) {
+          throw new EngineError('invalid_argument', `${tool.handle}: where is a JSON object of field values, by field`);
+        }
         return this.instances.list(principal, schema, {
           namespace,
           ...(limit !== undefined ? { limit } : {}),
           ...(cursor !== undefined ? { cursor } : {}),
+          ...(where !== undefined ? { where } : {}),
           ...valueRefsOf(tool, input),
         });
+      }
+      case 'lookup': {
+        only(tool, input, ['key', 'valueRefs']);
+        if (!isPlainObject(input.key)) {
+          throw new EngineError('invalid_argument', `${tool.handle}: key, the values of one unique index's fields, is a JSON object, and required`);
+        }
+        const record = this.instances.lookup(principal, schema, input.key, { namespace, ...valueRefsOf(tool, input) });
+        if (!record) {
+          throw new EngineError('not_found', `no ${schema} in namespace ${namespace} holds ${JSON.stringify(input.key)}`);
+        }
+        return record;
       }
       case 'update': {
         only(tool, input, ['id', 'patch', 'expectedSeq', ...preconditionsArgument(tool)]);
@@ -484,6 +629,18 @@ export class ToolCatalog {
       case 'getValue':
         only(tool, input, ['hash']);
         return this.values.get(principal, requiredString(tool, input, 'hash'), { namespace });
+      case 'listNamespaces':
+        only(tool, input, []);
+        return this.namespaces.list(principal);
+      case 'createNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.create(principal, requiredString(tool, input, 'name'));
+      case 'archiveNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.archive(principal, requiredString(tool, input, 'name'));
+      case 'unarchiveNamespace':
+        only(tool, input, ['name']);
+        return this.namespaces.unarchive(principal, requiredString(tool, input, 'name'));
     }
   }
 
@@ -567,7 +724,7 @@ export class ToolCatalog {
         'describeSchema',
         'describe_schema',
         'Describe a schema',
-        "Returns a schema's describe document: the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
+        "Returns a schema's describe document: how a UI shows an instance (its display, and each field's title and icon), the JSON Schema of an instance, the behaviors its type composes with their config, and every operation with its parameters, its result and its tool.",
         false,
         'GET',
         `${base}/{name}/describe`
@@ -609,6 +766,42 @@ export class ToolCatalog {
         `/namespaces/${encodeURIComponent(namespace)}/values/{hash}`
       ),
       tool(
+        'listNamespaces',
+        'list_namespaces',
+        'List namespaces',
+        "Lists the namespaces the caller may see: each one's name, whether the engine's options configure it or a create made it, whether it is the shared namespace, and whether it is archived.",
+        false,
+        'GET',
+        '/namespaces'
+      ),
+      tool(
+        'createNamespace',
+        'create_namespace',
+        'Create a namespace',
+        'Creates a namespace, which holds schemas and instances of its own and looks schema names up in the shared namespace after itself. Its name is lowercase letters, digits and hyphens, starting with a letter.',
+        true,
+        'POST',
+        '/namespaces'
+      ),
+      tool(
+        'archiveNamespace',
+        'archive_namespace',
+        'Archive a namespace',
+        'Archives a namespace a create made: its schemas, instances and events stay readable, and it refuses every write, and runs no reaction or schedule, until it is unarchived.',
+        true,
+        'POST',
+        '/namespaces/{name}/archive'
+      ),
+      tool(
+        'unarchiveNamespace',
+        'unarchive_namespace',
+        'Unarchive a namespace',
+        'Lets an archived namespace be written again; its reactions and schedules pick up where they stopped.',
+        true,
+        'POST',
+        '/namespaces/{name}/unarchive'
+      ),
+      tool(
         'search',
         'search',
         'Search every schema',
@@ -621,7 +814,8 @@ export class ToolCatalog {
   }
 
   // schemaTools lists a live schema's tools: create, get, list, update,
-  // delete, then its behaviors' operations.
+  // delete, lookup when its instance type has a unique field, then its
+  // behaviors' operations.
   private schemaTools(namespace: string, record: SchemaRecord, behaviors: ComposedBehavior[]): ToolSpec[] {
     const name = record.name;
     const kebab = kebabCase(name);
@@ -641,6 +835,9 @@ export class ToolCatalog {
     const preconditions = preconditionsProperty(behaviors);
     const fenced = preconditions === undefined ? {} : { preconditions };
     const createParams = behaviors.filter((behavior) => behavior.declaration.createParamsSchema !== undefined);
+    const runtime = this.catalog.runtimeOf(record);
+    const where = this.whereProperty(record, behaviors);
+    const unique = runtime.indexes.filter((index) => index.unique);
     const tools: ToolSpec[] = [
       spec('create', 'create', {
         title: `Create ${name}`,
@@ -656,7 +853,7 @@ export class ToolCatalog {
       }),
       spec('get', 'get', {
         title: `Get ${name}`,
-        description: `Returns the ${name} with the id, its behaviors' fields included.`,
+        description: `Returns the ${name} with the id: its own fields in data, its behaviors' in behaviors.`,
         writes: false,
         policy: invocation.get,
         httpMethod: 'GET',
@@ -664,11 +861,15 @@ export class ToolCatalog {
       }),
       spec('list', 'list', {
         title: `List ${name}`,
-        description: `Lists ${name} instances in creation order, a page at a time: pass a page's next as cursor for the page after it.`,
+        description:
+          where === undefined
+            ? `Lists ${name} instances in creation order, a page at a time: pass a page's next as cursor for the page after it.`
+            : `Lists ${name} instances in creation order, a page at a time: pass a page's next as cursor for the page after it. where keeps the instances whose fields hold the values it gives, a list meaning any of them; a filtered page can hold fewer than limit while next is not null.`,
         writes: false,
         policy: invocation.list,
         httpMethod: 'GET',
         httpPath: instances,
+        ...(where === undefined ? {} : { where }),
       }),
       spec('update', 'update', {
         title: `Update ${name}`,
@@ -689,6 +890,19 @@ export class ToolCatalog {
         ...fenced,
       }),
     ];
+    if (unique.length > 0) {
+      tools.push(
+        spec('lookup', 'lookup', {
+          title: `Look up ${name}`,
+          description: `Returns the ${name} whose unique fields hold the values key gives (${unique.map((index) => index.keys.join(' and ')).join('; ')}), its own fields in data, its behaviors' in behaviors.`,
+          writes: false,
+          policy: invocation.lookup,
+          httpMethod: 'GET',
+          httpPath: `${schemaPath}/lookup`,
+          key: this.keyProperty(record, unique),
+        })
+      );
+    }
     for (const behavior of behaviors) {
       for (const operation of behavior.declaration.operations ?? []) {
         const schemaLevel = operation.scope === 'schema';
@@ -711,12 +925,17 @@ export class ToolCatalog {
   }
 
   // definition renders a tool as tools/schema.json writes it. A tool the
-  // policy refuses the principal is hidden with that reason.
-  private definition(principal: Principal, namespace: string, tool: ToolSpec): ToolDefinition {
+  // policy refuses the principal, or the mount's filter leaves out, is
+  // hidden with that reason.
+  private definition(principal: Principal, namespace: string, tool: ToolSpec, filter: ToolFilter | undefined): ToolDefinition {
     const keys = this.options.keys;
     const guidance = this.toolGuidance(tool);
     const refusal = tool.hidden === undefined ? this.refusal(principal, namespace, tool) : undefined;
-    const hidden = tool.hidden ?? refusal;
+    const filtered =
+      tool.hidden === undefined && refusal === undefined && filter !== undefined && !kept(filter, principal, namespace, tool)
+        ? `this mount's tool filter leaves it out of ${principal.subject}'s tools`
+        : undefined;
+    const hidden = tool.hidden ?? refusal ?? filtered;
     const mcp: ToolMCPRecord =
       hidden !== undefined
         ? { hidden: true, hiddenReason: hidden }
@@ -756,13 +975,27 @@ export class ToolCatalog {
   }
 
   // refusal is why the policy hides a tool from the principal: a schema
-  // tool asks the action its call asks. The schema tools name no schema
-  // until they are called, so the policy answers each call.
+  // tool asks the action its call asks. define_schema and the namespace
+  // tools name their schema or namespace only when called, so they ask a
+  // listing question (ListingAccessRequest): define, or manage with what
+  // the tool does. The other engine tools only read, and answer with what
+  // the policy lets the caller read, so they are in every list. In an
+  // archived namespace a tool that writes there is hidden: the namespace
+  // refuses the write.
   private refusal(principal: Principal, namespace: string, tool: ToolSpec): string | undefined {
+    if (tool.writes && !NAMESPACE_TOOLS.has(tool.kind) && this.namespaces.archived(namespace)) {
+      return `namespace ${namespace} is archived: it refuses every write until it is unarchived`;
+    }
+    const listing = LISTING_QUESTIONS.get(tool.kind);
+    if (listing !== undefined) {
+      return this.access.allowsListing(principal, listing.action, namespace, listing.operation)
+        ? undefined
+        : `the access policy refuses ${principal.subject} ${listing.operation === undefined ? `${listing.action} in namespace ${namespace}` : `${listing.action} (${listing.operation}) of namespaces`}`;
+    }
     if (!tool.schema) {
       return undefined;
     }
-    const action: Action = tool.writes ? 'write' : 'read';
+    const action: SchemaAction = tool.writes ? 'write' : 'read';
     const operation = tool.kind === 'operation' || tool.kind === 'schemaOperation' ? tool.methodName : undefined;
     return this.access.allows(principal, action, namespace, tool.schema.name, operation)
       ? undefined
@@ -808,6 +1041,12 @@ export class ToolCatalog {
           [['hash', { type: 'string', description: "The value's hash: the SHA-256 of its canonical JSON, as a ref's $value holds it", pattern: VALUE_HASH.source }]],
           ['hash']
         );
+      case 'listNamespaces':
+        return schema([], []);
+      case 'createNamespace':
+      case 'archiveNamespace':
+      case 'unarchiveNamespace':
+        return schema([['name', { type: 'string', description: 'The namespace name', pattern: NAMESPACE_NAME.source }]], ['name']);
       case 'create': {
         const properties: Array<[string, Property]> = [
           ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
@@ -832,9 +1071,18 @@ export class ToolCatalog {
           [
             ['limit', { type: 'integer', description: 'How many instances a page holds, 50 when absent', minimum: 1, maximum: MAX_PAGE_SIZE }],
             ['cursor', { type: 'string', description: "The previous page's next" }],
+            ...(tool.where === undefined ? [] : [['where', tool.where] as [string, Property]]),
             ['valueRefs', valueRefs],
           ],
           []
+        );
+      case 'lookup':
+        return schema(
+          [
+            ['key', tool.key as Property],
+            ['valueRefs', valueRefs],
+          ],
+          ['key']
         );
       case 'update': {
         const record = tool.schema as SchemaRecord;
@@ -895,18 +1143,72 @@ export class ToolCatalog {
     );
   }
 
-  // instanceSchema is an instance's data as reads return it: its own
-  // fields, then its behaviors' fields, read-only, with what the behaviors
-  // hold the own fields to.
-  private instanceSchema(record: SchemaRecord, behaviors: ComposedBehavior[]): JSONSchemaObject {
-    const { input, rules } = this.fieldsOf(record);
-    const properties = new Map(input.properties);
-    for (const behavior of behaviors) {
-      for (const field of behavior.declaration.fields ?? []) {
-        properties.set(field.name, { raw: { ...(field.description ? { description: field.description } : {}), readOnly: true } });
+  // whereProperty is a list's where argument: a member per field the
+  // version filters on, a value of its type or null or a list of them;
+  // undefined when it filters on none.
+  private whereProperty(record: SchemaRecord, behaviors: ComposedBehavior[]): Property | undefined {
+    const filters = this.catalog.runtimeOf(record).filters;
+    if (filters.size === 0) {
+      return undefined;
+    }
+    const properties: Record<string, unknown> = {};
+    for (const filterable of filters.values()) {
+      const one = this.filterValueSchema(record, behaviors, filterable, true);
+      properties[filterable.key] = {
+        anyOf: [one, { type: 'array', items: one, minItems: 1, maxItems: MAX_FILTER_VALUES }],
+      };
+    }
+    return {
+      raw: {
+        type: 'object',
+        description: `The values the instances hold, by field: a value, null for none, or a list of 1 to ${MAX_FILTER_VALUES} meaning any of them; every member must hold`,
+        additionalProperties: false,
+        properties,
+      },
+    };
+  }
+
+  // keyProperty is a lookup's key argument: the values of one unique
+  // index's fields, each required.
+  private keyProperty(record: SchemaRecord, unique: readonly OwnIndex[]): Property {
+    const filters = this.catalog.runtimeOf(record).filters;
+    const branches = unique.map((index) => ({
+      type: 'object',
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        index.keys.map((key) => [key, this.filterValueSchema(record, [], filters.get(key) as Filterable, false)])
+      ),
+      required: [...index.keys],
+    }));
+    const description = 'The values of the fields of one unique index of the instance type, by field';
+    return { raw: branches.length === 1 ? { ...branches[0], description } : { type: 'object', description, oneOf: branches } };
+  }
+
+  // filterValueSchema is the JSON Schema of one value of a field a filter
+  // or a key names: an own field's, or a behavior filter's type with its
+  // description or its declared field's; null among them for a filter,
+  // which keeps the instances that hold no value, and not for a key.
+  private filterValueSchema(record: SchemaRecord, behaviors: ComposedBehavior[], filterable: Filterable, nullable: boolean): unknown {
+    const { key, behavior, type } = filterable;
+    // A behavior filter's key is its qualified name: the behavior's, a dot, the filter's.
+    const name = behavior === undefined ? key : key.slice(behavior.length + 1);
+    if (behavior === undefined) {
+      const property = this.fieldsOf(record).input.properties.get(key);
+      if (property !== undefined) {
+        return renderProperty({ ...property, nullable }, this.options.keys.scalar);
       }
     }
-    const schema = renderArguments({ vendor: [], properties, required: input.required }, this.options.keys.scalar);
+    const description =
+      filterable.description ?? behaviors.find((candidate) => candidate.name === behavior)?.declaration.fields?.find((field) => field.name === name)?.description;
+    return { type: nullable ? [type, 'null'] : type, ...(description ? { description } : {}) };
+  }
+
+  // instanceSchema is an instance's data as reads return it: its own
+  // fields, with what the behaviors hold them to. Its behaviors' fields
+  // sit apart, under behaviors (behaviorsSchema).
+  private instanceSchema(record: SchemaRecord): JSONSchemaObject {
+    const { input, rules } = this.fieldsOf(record);
+    const schema = renderArguments({ vendor: [], properties: new Map(input.properties), required: input.required }, this.options.keys.scalar);
     return rules.instance.length > 0 ? { ...schema, allOf: [...rules.instance] } : schema;
   }
 
@@ -928,7 +1230,11 @@ export class ToolCatalog {
     const key = versionKey(record);
     let cached = this.guidance.get(key);
     if (!cached) {
-      cached = versionGuidance(record.name, this.catalog.runtimeOf(record).composition);
+      const runtime = this.catalog.runtimeOf(record);
+      cached = versionGuidance(record.name, runtime.composition, {
+        unique: runtime.indexes.filter((index) => index.unique).map((index) => index.keys),
+        filters: [...runtime.filters.keys()],
+      });
       this.guidance.set(key, cached);
     }
     return cached;
@@ -989,13 +1295,14 @@ export class ToolCatalog {
       case 'create':
       case 'get':
       case 'update':
-        return instanceRecordSchema(this.instanceSchema(record, behaviors));
+      case 'lookup':
+        return instanceRecordSchema(this.instanceSchema(record), behaviorsSchema(behaviors));
       case 'list':
         return {
           type: 'object',
           additionalProperties: false,
           properties: {
-            items: { type: 'array', items: instanceRecordSchema(this.instanceSchema(record, behaviors)) },
+            items: { type: 'array', items: instanceRecordSchema(this.instanceSchema(record), behaviorsSchema(behaviors)) },
             next: { type: ['string', 'null'], description: "The next page's cursor; null after the last page" },
           },
           required: ['items', 'next'],
@@ -1018,6 +1325,7 @@ export class ToolCatalog {
       case 'create':
       case 'get':
       case 'update':
+      case 'lookup':
         return { type: 'object', description: `${name} instance` };
       case 'list':
         return { type: 'object', description: `A page of ${name} instances` };
@@ -1037,6 +1345,12 @@ export class ToolCatalog {
         return { type: 'object', description: 'A page of hits across the schemas, best first' };
       case 'getValue':
         return { type: 'object', description: 'The value, with its hash and its canonical JSON\'s length in bytes' };
+      case 'listNamespaces':
+        return { type: 'array', description: 'Array of namespaces', items: { type: 'object', description: 'A namespace' } };
+      case 'createNamespace':
+      case 'archiveNamespace':
+      case 'unarchiveNamespace':
+        return { type: 'object', description: 'The namespace' };
       case 'operation':
       case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;
@@ -1096,8 +1410,40 @@ function paramsRequired(params: unknown): boolean {
   });
 }
 
+/**
+ * behaviorsSchema is the JSON Schema of an instance's behaviors as reads
+ * return them: by behavior name, for each behavior on the type that
+ * declares a field, an object of its fields, read-only, each absent while
+ * it holds no value.
+ */
+function behaviorsSchema(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
+  const properties: Record<string, unknown> = {};
+  for (const behavior of behaviors) {
+    const fields = behavior.declaration.fields ?? [];
+    if (fields.length === 0) {
+      continue;
+    }
+    properties[behavior.name] = {
+      type: 'object',
+      description: `The fields of behavior ${behavior.name}`,
+      additionalProperties: false,
+      readOnly: true,
+      properties: Object.fromEntries(
+        fields.map((field) => [field.name, { ...(field.description ? { description: field.description } : {}), readOnly: true }])
+      ),
+    };
+  }
+  return {
+    type: 'object',
+    description: "The instance's behaviors' fields, by behavior name, apart from its own fields",
+    additionalProperties: false,
+    properties,
+    required: Object.keys(properties),
+  };
+}
+
 /** The JSON Schema of an instance as the engine returns it. */
-function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
+function instanceRecordSchema(data: JSONSchemaObject, behaviors: JSONSchemaObject): JSONSchemaObject {
   return {
     type: 'object',
     additionalProperties: false,
@@ -1109,6 +1455,7 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
       version: { type: 'integer', description: 'The schema version the instance was last written with' },
       seq: { type: 'integer', description: "The sequence of the instance's last event: its entity tag" },
       data,
+      behaviors,
       createdAt: { type: 'integer', description: 'Epoch milliseconds' },
       createdBy: { type: 'string' },
       updatedAt: { type: 'integer', description: 'Epoch milliseconds' },
@@ -1119,7 +1466,7 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
         description: 'For a read with valueRefs: the JSON pointers into data of the fields that hold a ref, { "$value": <hash>, "bytes": <n> }, in place of a value the value store holds',
       },
     },
-    required: ['namespace', 'schema', 'id', 'schemaNamespace', 'version', 'seq', 'data', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    required: ['namespace', 'schema', 'id', 'schemaNamespace', 'version', 'seq', 'data', 'behaviors', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
   };
 }
 

@@ -4,10 +4,10 @@ bound to their configs. The engine checks a schema's list at define and at
 publish as the compiler's loader does (internal/loader/verify), with the
 same wording, and refuses what the loader would: a behavior listed twice,
 a config its configSchema rejects, a requirement the type does not list, a
-conflict it does, a field that collides with another behavior's or with
-one of the type's own, by its name or its JSON key (behavior fields sit
-beside the type's own in an instance), and two behaviors that add an
-operation of the same name. It refuses two things more:
+conflict it does, and two behaviors that add an operation of the same
+name. A behavior's field collides with nothing: an instance keeps it under
+the behavior's name, apart from the type's own fields and every other
+behavior's. It refuses two things more:
 
 - a behavior with no implementation registered with this engine, which
   covers one the deployment's binary does not declare;
@@ -35,7 +35,10 @@ registration refuses its declaration.
 configChanges is the behaviors' half of the compatibility rule: a new
 version keeps a behavior's config unless the implementation allows the
 change, and adds or removes a behavior on a schema with instances only
-when the implementation opts in. checkedTypes names the types a
+when the implementation opts in. configChange reads whether the schema
+has instances (ConfigChange.instances), in any namespace that reads the
+version, so a change only stored instances could break is refused only
+while there are some. checkedTypes names the types a
 behavior's validate holds values to under both versions, and readTypes
 the types the live version's behaviors read through ConfigTarget.types,
 which the rule (registry/compat.ts) then diffs as it diffs a type a field
@@ -48,9 +51,11 @@ import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
 import { arrayDepth, fieldTypeIssue, jsonKey, pointer, reachableTypes, refKind } from '../registry/document.js';
+import { fieldPath } from './fields.js';
 import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import {
   BehaviorConfigError,
+  type ConfigChange,
   type ConfigSchema,
   type ConfigSchemas,
   type ConfigTarget,
@@ -79,7 +84,11 @@ export interface BoundBehavior {
 
 /** The behaviors of a schema's instance type, in list order. */
 export class Composition {
-  /** Each behavior field's owner, by field name. */
+  /**
+   * Each behavior field's owner, by its qualified name,
+   * `<behavior>.<field>`: how a read, a list's filter, a rollup and a
+   * display name it.
+   */
   readonly fields: ReadonlyMap<string, BoundBehavior>;
   /** Every behavior operation on the type, by name. */
   readonly operations: ReadonlyMap<string, OperationSpec>;
@@ -99,7 +108,7 @@ export class Composition {
     const operations = new Map<string, OperationSpec>();
     for (const bound of behaviors) {
       for (const field of bound.behavior.fields) {
-        fields.set(field.name, bound);
+        fields.set(fieldPath(bound.behavior.name, field.name), bound);
       }
       for (const [name, operation] of bound.behavior.operations) {
         operations.set(name, operation);
@@ -154,11 +163,6 @@ export function compose(
   const typePath = pointer('types', target.instanceType);
   const refs = type.behaviors ?? [];
   const listed = refs.map((ref) => ref.name);
-  const own = new Set<string>();
-  for (const field of type.fields ?? []) {
-    own.add(field.name);
-    own.add(jsonKey(field));
-  }
   const typeNames = otherTypes(target);
 
   const bound: BoundBehavior[] = [];
@@ -222,7 +226,6 @@ export function compose(
     });
   }
 
-  const fieldOwner = new Map<string, string>();
   const operationOwner = new Map<string, string>();
   for (const { behavior, index } of bound) {
     const path = `${typePath}/behaviors/${index}`;
@@ -243,16 +246,6 @@ export function compose(
         });
       }
     }
-    for (const field of behavior.fields) {
-      const previous = fieldOwner.get(field.name);
-      if (own.has(field.name)) {
-        issues.push({ path, message: `type ${target.instanceType}: behavior ${name} adds field ${field.name}, which the type declares` });
-      } else if (previous !== undefined) {
-        issues.push({ path, message: `type ${target.instanceType}: behaviors ${previous} and ${name} both add field ${field.name}` });
-      } else {
-        fieldOwner.set(field.name, name);
-      }
-    }
     for (const operation of behavior.operations.keys()) {
       const previous = operationOwner.get(operation);
       if (previous !== undefined) {
@@ -269,7 +262,9 @@ export function compose(
 
 /**
  * configChanges lists what a new version does to the instance type's
- * behaviors that the rule refuses. hasInstances is asked at most once.
+ * behaviors that the rule refuses. hasInstances is asked at most once,
+ * and only when a behavior is added or removed or a configChange reads
+ * it.
  */
 export function configChanges(
   before: ComposeTarget,
@@ -292,7 +287,7 @@ export function configChanges(
       if (jsonEqual(earlier.config ?? {}, ref.config ?? {})) {
         continue;
       }
-      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change');
+      const reason = decide(behavior, earlier.config, before, ref.config, after, 'it allows no config change', populated);
       if (reason !== undefined) {
         changes.push({
           path,
@@ -300,7 +295,7 @@ export function configChanges(
         });
       }
     } else if (populated()) {
-      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances');
+      const reason = decide(behavior, undefined, undefined, ref.config, after, 'it cannot be added to a schema that has instances', populated);
       if (reason !== undefined) {
         changes.push({ path, message: `behavior ${ref.name} cannot be added to type ${type}, which has instances: ${reason}` });
       }
@@ -310,7 +305,7 @@ export function configChanges(
     if (afterRefs.some((candidate) => candidate.name === ref.name) || !populated()) {
       continue;
     }
-    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances');
+    const reason = decide(registry.lookup(ref.name), ref.config, before, undefined, undefined, 'it cannot be removed from a schema that has instances', populated);
     if (reason !== undefined) {
       changes.push({
         path: `${type}.behaviors.${ref.name}`,
@@ -604,13 +599,16 @@ function configsOf(refs: ReadonlyArray<{ readonly name: string; readonly config?
 }
 
 // decide asks an implementation's configChange; undefined allows.
+// populated says whether the schema has instances, asked only when the
+// implementation reads change.instances.
 function decide(
   behavior: RegisteredBehavior | undefined,
   beforeJSON: unknown,
   beforeTarget: ComposeTarget | undefined,
   afterJSON: unknown,
   afterTarget: ComposeTarget | undefined,
-  refusal: string
+  refusal: string,
+  populated: () => boolean
 ): string | undefined {
   if (!behavior) {
     return 'no implementation is registered to allow it';
@@ -628,10 +626,16 @@ function decide(
       return side.problem;
     }
   }
+  const change: ConfigChange = Object.freeze({
+    get instances(): boolean {
+      return populated();
+    },
+  });
   const answer: unknown = configChange.call(
     behavior.implementation,
     before === undefined ? undefined : (before as { config: unknown }).config,
-    after === undefined ? undefined : (after as { config: unknown }).config
+    after === undefined ? undefined : (after as { config: unknown }).config,
+    change
   );
   synchronous(behavior.name, 'configChange', answer);
   if (answer === undefined || answer === null) {

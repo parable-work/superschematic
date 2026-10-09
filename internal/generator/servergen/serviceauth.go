@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -29,13 +28,12 @@ func (a *API) CallersField() string {
 }
 
 // writeServiceAuth writes serviceauth.go into dir when an API of s has a
-// service clause.
+// service clause. A job's never has: it serves no request.
 func writeServiceAuth(s *Server, dir string) error {
 	if !slices.ContainsFunc(s.APIs, func(a *API) bool { return a.ServiceAuth }) {
 		return nil
 	}
-	gen := codegen.NewFileGenerator(templatesFS, templateFuncs())
-	if err := gen.GenerateFile(codegen.NewGoFileConfig(templatesFS, "serviceauth.go.tmpl", filepath.Join(dir, ServiceAuthFile), s, nil)); err != nil {
+	if err := render("serviceauth.go.tmpl", filepath.Join(dir, ServiceAuthFile), s); err != nil {
 		return fmt.Errorf("servergen: server %s: %w", s.Name, err)
 	}
 	return nil

@@ -22,9 +22,18 @@ Generated TypeScript API server for the `fixture-user-routes-api` schema. Built 
   every route, and `identityService(options)` builds it with capabilities over
   `operationSpecs`. The user model's operations are mounted with the
   runtime's handlers, behind the same rate limit and body limit.
+- `deps.ts`: `Deps`, what the implementation is built from (its `config`
+  when it has one, a `pg` Pool `db` for its database, an SDK client per API
+  it calls, and a `logger`), and `Constructor`, the type of the
+  implementation's `create`.
 - `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
 - `values-schema.json`: the env-var contract, when the schema declares an
-  `@envVars` class.
+  `@envVars` class or its edges derive config fields.
+
+The implementation is a package of its own, `@schemas/fixture-user-routes-api-implementation`, at
+the naming file's `[implementation_paths] typescript` template, which a
+stack's build (or `build --scaffold`) writes once when it is missing. Its
+`create` is a `Constructor`.
 
 ## Routes
 

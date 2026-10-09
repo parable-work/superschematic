@@ -62,7 +62,10 @@
     }
   },
   "fields": [
-    { "name": "presence", "description": "The heartbeat: deadline, when the instance is missed unless beaten, lastBeatAt, both in epoch milliseconds or null, missed, and released, the instances whose lease the last miss expired, by schema (null before a miss)." }
+    { "name": "deadline", "description": "When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat." },
+    { "name": "lastBeatAt", "description": "When the instance was last beaten, in epoch milliseconds; absent before the first beat." },
+    { "name": "missed", "description": "Whether the instance missed its deadline and has not been beaten since." },
+    { "name": "released", "description": "The instances whose lease the last miss expired, by schema; absent before a miss." }
   ],
   "operations": [
     {

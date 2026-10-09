@@ -1,0 +1,26 @@
+name: ts-pricing
+kind: API
+types:
+  Quote:
+    name: Quote
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: cents
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: Quotes
+    serviceCallers: { mode: require }
+    operations:
+      - name: getQuote
+        typeRef: { name: Quote }
+        required: true
+        httpMethod: GET
+        restPath: quotes/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

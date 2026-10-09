@@ -18,6 +18,14 @@
       "types": "./router.ts",
       "import": "./router.ts"
     },
+    "./deps": {
+      "types": "./deps.ts",
+      "import": "./deps.ts"
+    },
+    "./config": {
+      "types": "./config.ts",
+      "import": "./config.ts"
+    },
     "./openapi.json": "./openapi.json",
     "./permissions.json": "./permissions.json"
   },
@@ -38,10 +46,12 @@
   "peerDependencies": {
     "@acme/fixture-api-types": "*",
     "@acme/http-runtime": "*",
-    "hono": "4.13.8"
+    "hono": "4.13.8",
+    "pg": ">=8.11.0"
   },
   "devDependencies": {
     "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
     "hono": "4.13.8",
     "typescript": "5.9.3"
   }

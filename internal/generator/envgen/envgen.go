@@ -47,6 +47,10 @@ type ConfigOutput struct {
 	// targets computed by SetReplacePaths. Empty values omit the directive.
 	ScalarLibReplacePath string
 	SchemaIRReplacePath  string
+	// Pins are the runtime modules the standalone module's go.mod takes
+	// from the module proxy, at the release that generates it
+	// (SetReleasePins).
+	Pins naming.Pins
 	// Fields are the environment variable fields to generate.
 	Fields []ConfigField
 	// Enums are enum types used by the config fields.
@@ -71,6 +75,12 @@ type ConfigOutput struct {
 	// (docs/stack-model.md, section 3.4): its database's, then one per
 	// calls entry. Set by Options.Derived.
 	Derived []DerivedField
+	// CallersField is the name of the API's callers field
+	// (ir.CallersField) when an operation of the API has a service clause
+	// and Options.Callers asks for it: the TypeScript EnvConfig holds it
+	// (D51), while Go's entrypoint reads it itself and values-schema.json
+	// never lists it, since its variables follow the environment's edges.
+	CallersField string
 }
 
 // EnvConfigTypeName is the Go type that holds an API's settings and the
@@ -179,11 +189,16 @@ type Options struct {
 	Naming naming.Naming
 
 	// Derived adds the config fields an API's edges derive, and EnvConfig,
-	// which joins them to the @envVars settings: what the Go API's Deps
-	// holds. The output then exists for an API with derived fields and no
-	// @envVars type. The TypeScript and Rust loaders do not read the
-	// derived fields yet, so only the Go API asks for them.
+	// which joins them to the @envVars settings: what the Go and
+	// TypeScript APIs' Deps hold (D51). The output then exists for an API
+	// with derived fields and no @envVars type. The Rust loader does not
+	// read the derived fields yet.
 	Derived bool
+
+	// Callers adds the API's callers field, when an operation has a
+	// service clause, to the TypeScript EnvConfig (CallersField). The
+	// output then exists for an API with a service clause alone.
+	Callers bool
 }
 
 // Generate generates configuration code from an IR schema with @envVars directive.
@@ -212,20 +227,32 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 			return nil, err
 		}
 	}
+	callers := ""
+	if opts.Callers && schema.Kind == ir.SchemaKindAPI && schema.HasServiceCallers() {
+		callers = ir.CallersField(schemaName)
+		if envVarsType != nil {
+			for _, setting := range envVarsType.Fields {
+				if ir.DerivedFieldClaims(callers, setting.Name) {
+					return nil, fmt.Errorf("envgen: %s: @envVars field %s of %s collides with %s, the API's callers field", schemaName, setting.Name, envVarsType.Name, callers)
+				}
+			}
+		}
+	}
 	if envVarsType == nil {
-		if len(derived) == 0 {
+		if len(derived) == 0 && callers == "" {
 			return nil, nil
 		}
 		return &ConfigOutput{
-			PackageName: toPackageName(schemaName),
-			SchemaName:  schemaName,
-			ModulePath:  names.GoAPIModule(schemaName),
-			TypesModule: names.GoTypesModule(schemaName),
-			Naming:      names,
-			Fields:      []ConfigField{},
-			Enums:       []codegen.EnumInfo{},
-			EnvConfig:   true,
-			Derived:     derived,
+			PackageName:  toPackageName(schemaName),
+			SchemaName:   schemaName,
+			ModulePath:   names.GoAPIModule(schemaName),
+			TypesModule:  names.GoTypesModule(schemaName),
+			Naming:       names,
+			Fields:       []ConfigField{},
+			Enums:        []codegen.EnumInfo{},
+			EnvConfig:    true,
+			Derived:      derived,
+			CallersField: callers,
 		}, nil
 	}
 	if opts.Derived && envVarsType.Name == EnvConfigTypeName {
@@ -245,16 +272,17 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	scalarMap := buildScalarMapIR(schema)
 
 	output := &ConfigOutput{
-		PackageName: toPackageName(schemaName),
-		SchemaName:  schemaName,
-		TypeName:    envVarsType.Name,
-		ModulePath:  names.GoAPIModule(schemaName),
-		TypesModule: names.GoTypesModule(schemaName),
-		Naming:      names,
-		Fields:      []ConfigField{},
-		Enums:       []codegen.EnumInfo{},
-		EnvConfig:   opts.Derived,
-		Derived:     derived,
+		PackageName:  toPackageName(schemaName),
+		SchemaName:   schemaName,
+		TypeName:     envVarsType.Name,
+		ModulePath:   names.GoAPIModule(schemaName),
+		TypesModule:  names.GoTypesModule(schemaName),
+		Naming:       names,
+		Fields:       []ConfigField{},
+		Enums:        []codegen.EnumInfo{},
+		EnvConfig:    opts.Derived,
+		Derived:      derived,
+		CallersField: callers,
 	}
 
 	usedEnums := make(map[string]bool)
@@ -623,6 +651,14 @@ func SetReplacePaths(output *ConfigOutput, paths naming.LocalPaths, outputDir st
 		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
 	return nil
+}
+
+// SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
+// modules the standalone module reaches through its types module: the
+// scalar library and the schema IR. go.mod replaces every version of each
+// pinned module with its pin.
+func SetReleasePins(output *ConfigOutput, pins naming.Pins) {
+	output.Pins = pins.Of(output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule)
 }
 
 // WriteConfigModule writes a standalone generated environment config module.

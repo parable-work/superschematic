@@ -91,7 +91,7 @@ check every field before they return a typed value, and a generated router
 checks a request before the implementation sees it. The shop's TypeScript
 client parses its ids and the recipient's name before it sends them:
 
-<Snippet file="typescript/orders-client.ts" from="import { parseIdentityNameStrict" to="const missingOrder" />
+<Snippet file="typescript/clients/orders-client.ts" from="import { parseIdentityNameStrict" to="const missingOrder" />
 
 ## Required, nullable and optional
 
@@ -213,7 +213,7 @@ payload with an extra `colour` key, in each language:
     <Snippet file="go/types_test.go" symbol="ExampleFeedItemFromJSON" />
   </TabItem>
   <TabItem label="TypeScript">
-    <Snippet file="typescript/types.test.ts" from="test('@strictJSON refuses" to="});" />
+    <Snippet file="typescript/clients/types.test.ts" from="test('@strictJSON refuses" to="});" />
   </TabItem>
   <TabItem label="Python">
     <Snippet file="python/types_test.py" symbol="test_strict_json_refuses_an_undeclared_key" />

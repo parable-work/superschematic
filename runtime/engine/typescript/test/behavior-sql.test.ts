@@ -6,7 +6,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import { BehaviorError, defineBehavior, type BehaviorMigration, type Engine, type SqlValue } from '../dist/index.js';
 import { counter, openBehaviorEngine, publishItem, tablesOf } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -114,7 +114,7 @@ for (const driver of drivers) {
       for (const [sql, message] of others) {
         assert.match(sqlError(engine, 'write', sql), message, sql);
       }
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 0 } } });
     });
 
     test('a read runs SELECT, VALUES and WITH ... SELECT only', () => {

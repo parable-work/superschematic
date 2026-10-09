@@ -200,6 +200,14 @@ Python import name of the Python version-graph runtime. A generated
 facade (`<module>/versiongraph_<name>.py`) imports the facade base from
 its `facade` module.
 
+### `engine_npm_package`
+
+Default: `@superschematic/engine`
+
+npm package name of the engine. The module `superschematic engine-client`
+writes imports the typed client from its `/client` entry point
+([CLI](/superschematic/reference/cli/#engine-client---out-filets-schema-file)).
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`
@@ -381,14 +389,25 @@ replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
 absolute value is an error that names the key. An unset key emits no path
 dependency, so the generated manifest resolves the published module; set
-the key until that module is published.
+the key until that module is published. For a Go runtime module, a
+release of superschematic pins an unset key's module in every generated
+`go.mod` to itself: superschematic's modules at the release's tag and the
+scalar library's Go module at the version the release links. A binary
+built from a checkout pins nothing, and those `go.mod` files require
+versions no module proxy serves.
 
 ### `paths.scalar_go`
 
 Default: unset. This repository's own file sets
 `third_party/superscalar/go`.
 
-Directory of the scalar library's Go module (`go.mod`).
+Directory of the scalar library's Go module (`go.mod`). A stack's server
+Dockerfiles build superscalar's static archive, and the version graph's,
+from the checkout that holds it. Unset, a release of superschematic pins
+the module to the version the release links, and its server Dockerfiles
+download the archives the release ships
+([Stacks](/superschematic/guides/stacks/)); a binary built from a
+checkout writes no Dockerfile.
 
 ### `paths.scalar_typescript`
 
@@ -475,12 +494,39 @@ Default: unset. This repository's own file sets `runtime/http/rust`.
 
 Directory of the HTTP runtime Rust crate.
 
+### `paths.http_runtime_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/http/typescript`.
+
+Directory of the HTTP runtime's npm package (`package.json`). The
+generated TypeScript API packages, and the implementations the scaffold
+writes, depend on `@superschematic/http-runtime` with `*`; with this key
+set, the output root's Bun workspace overrides that with a `file:` path
+to the checkout, which the install copies from its `dist/`, so build the
+runtime first (`bun install && bun run build` in
+`runtime/http/typescript`). Unset, the install fetches the package, which
+fails with a 404 until it is published.
+
 ### `paths.ptr`
 
 Default: unset.
 
 Directory of the `ptr` Go module when it is a module of its own rather
 than a package of the schema runtime.
+
+### `paths.build_context`
+
+Default: unset, the repository root. `examples/acme-shop` sets `../..`.
+
+The build context of a stack's server images: the directory the generated
+`Dockerfile` copies from, and the root `stack build` and `stack deploy`
+archive for each build
+([The commands](/superschematic/guides/stacks/#the-commands)). Every
+module a server's `go.mod` replaces must lie under it, or the server gets
+no `Dockerfile`. Set it when the runtime modules the other keys name lie
+above the repository root, as in an example inside a checkout of
+superschematic.
 
 ## `[deps]`
 
@@ -526,9 +572,9 @@ Where each API service's implementation lives, per language, as a path
 from the repository root (the parent of the schemas root) in which
 `{service}` is the service's name. A stack's build writes a missing
 implementation there for each API its servers serve, and
-`build --scaffold` and `build-all --scaffold` for each Go API built. A
-server's generated entrypoint imports the implementation from there. An
-absolute path, or one without `{service}`, is an error.
+`build --scaffold` and `build-all --scaffold` for each Go or TypeScript
+API built. A server's generated entrypoint imports the implementation
+from there. An absolute path, or one without `{service}`, is an error.
 
 ### `implementation_paths.go`
 
@@ -536,6 +582,17 @@ Default: `go/{service}`
 
 The Go package of the implementation, whose `New(deps Deps)
 (Implementations, error)` the generated API's `Constructor` types.
+
+### `implementation_paths.typescript`
+
+Default: `typescript/{service}`
+
+The npm package of the implementation, whose `create` the generated API
+package's `Constructor` types. The scaffold names it
+`<npm_scope>/<service>-implementation`, a name you may change. The
+output root's Bun workspace has every directory the template matches,
+with `*` for `{service}`, as a member, so keep other packages out of
+them.
 
 ## `[extension.<name>]`
 

@@ -180,9 +180,9 @@ func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (strin
 		return "", err
 	}
 	if b.log != nil {
-		b.log.Record("build %s: %s", req.Server, req.Dockerfile)
+		b.log.Record("build %s: %s", req.Deployable, req.Dockerfile)
 	}
-	if err := b.Fail[req.Server]; err != nil {
+	if err := b.Fail[req.Deployable]; err != nil {
 		return "", err
 	}
 	entries, err := archiveEntries(req.Context)
@@ -193,9 +193,9 @@ func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (strin
 	if b.contexts == nil {
 		b.contexts = map[string][]string{}
 	}
-	b.contexts[req.Server] = entries
+	b.contexts[req.Deployable] = entries
 	b.mu.Unlock()
-	return kebab(req.Server) + "@" + req.ContextDigest, nil
+	return kebab(req.Deployable) + "@" + req.ContextDigest, nil
 }
 
 // Context returns the entries of the context the last build of server was
@@ -204,6 +204,28 @@ func (b *FakeBuilder) Context(server string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return slices.Clone(b.contexts[server])
+}
+
+// FakeJobs is a job runner that runs nothing: it records each run of a
+// job on demand in the provisioner's call log (D52).
+type FakeJobs struct {
+	log *FakeProvisioner
+
+	// Fail holds the error to return for a job's run.
+	Fail map[string]error
+}
+
+var _ registry.JobRunner = (*FakeJobs)(nil)
+
+// RunJob records the run, `run job <job>: <image>`.
+func (j *FakeJobs) RunJob(_ context.Context, req registry.JobRunRequest) error {
+	if err := req.Check(); err != nil {
+		return err
+	}
+	if j.log != nil {
+		j.log.Record("run job %s: %s", req.Job, req.Image)
+	}
+	return j.Fail[req.Job]
 }
 
 // archiveEntries lists a gzipped tarball's entries.
@@ -232,16 +254,22 @@ func archiveEntries(path string) ([]string, error) {
 }
 
 // FakeBootstrap is a bootstrap that creates nothing: it records the
-// request in the provisioner's call log.
+// request in the provisioner's call log, and returns Values for the core
+// to record in the schema.
 type FakeBootstrap struct {
 	log *FakeProvisioner
+
+	// Values are what each bootstrap returns: nothing when empty, else
+	// values such as gcp's project number (D47), which the fake target's
+	// values take as `projectNumber`, beside `project`.
+	Values []registry.BootstrapValue
 }
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
 // Bootstrap records the environment, the repository and the credentials'
-// secrets.
-func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) error {
+// secrets, and returns Values.
+func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	var secrets []string
 	for _, c := range req.Credentials {
 		secrets = append(secrets, c.Secret)
@@ -249,5 +277,8 @@ func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapReque
 	if b.log != nil {
 		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "))
 	}
-	return nil
+	if len(b.Values) == 0 {
+		return nil, nil
+	}
+	return &registry.BootstrapResult{Values: slices.Clone(b.Values)}, nil
 }

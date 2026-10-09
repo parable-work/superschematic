@@ -1,7 +1,8 @@
 // Package local is the core's `local` target (docs/stack-model.md,
 // sections 6.3 and 8.3): it runs an environment of a stack on the machine
-// at hand. A server is a process built from its generated entrypoint
-// module, every database deployable of the environment shares one Postgres
+// at hand. A server is a process run from its generated entrypoint: a Go
+// server's binary, built from its module, or a TypeScript server's main.ts
+// on Bun (D51). Every database deployable of the environment shares one Postgres
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
@@ -17,7 +18,8 @@
 // target).
 //
 // The platforms and connectors are pure. Provisioner applies their graph:
-// it runs Docker, the migration runner, `go build` and the servers.
+// it runs Docker, the migration runner, `go build`, `bun install` and the
+// servers.
 package local
 
 import (
@@ -33,14 +35,21 @@ const (
 	Target = "local"
 
 	// ServerPlatform runs a server as a process; DatabasePlatform runs a
-	// database as databases on the environment's Postgres container.
+	// database as databases on the environment's Postgres container;
+	// JobPlatform runs a job as a process on its schedule, or once on
+	// demand (D52).
 	ServerPlatform   = "local.process"
 	DatabasePlatform = "local.postgres"
+	JobPlatform      = "local.job"
 
 	// SQLConnector connects a process to a database on the container;
-	// HTTPConnector connects a process to one it calls.
-	SQLConnector  = "local.process-postgres"
-	HTTPConnector = "local.process-process"
+	// HTTPConnector connects a process to one it calls. JobSQLConnector
+	// and JobHTTPConnector connect a job, whose edges are its API's, the
+	// same way.
+	SQLConnector     = "local.process-postgres"
+	HTTPConnector    = "local.process-process"
+	JobSQLConnector  = "local.job-postgres"
+	JobHTTPConnector = "local.job-process"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -74,19 +83,36 @@ const (
 	// references.
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
-	// TypeProcess is a server process built from its entrypoint module.
+	// TypeProcess is a server process run from its entrypoint: built from
+	// its module, or run by Bun.
 	TypeProcess = "local:process/process:Process"
+
+	// TypeJob is a job built from its entrypoint module, which the
+	// provisioner runs on its schedule while the environment runs (D52).
+	TypeJob = "local:process/job:Job"
 )
 
-// Register adds the local target, its two platforms and two connectors, the
-// schema of each resource type they emit, and its provisioner. The
+// The languages of a process, as its node's language property names them:
+// a server's API language in lower case.
+const (
+	// LanguageGo is a Go server, whose module `go build` builds.
+	LanguageGo = "go"
+
+	// LanguageTypeScript is a TypeScript server, whose main.ts Bun runs
+	// after one `bun install` at the output root, the Bun workspace's root
+	// (D51).
+	LanguageTypeScript = "typescript"
+)
+
+// Register adds the local target, its three platforms and four connectors,
+// the schema of each resource type they emit, and its provisioner. The
 // provisioner is a new Provisioner with its defaults.
 func Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
 			Name:      ServerPlatform,
 			Kind:      ir.DeployableServer,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(serverSettings),
 			// A process serves plain HTTP, where a browser drops a Secure
 			// cookie: the session cookie of an API over the user model
@@ -95,6 +121,14 @@ func Register(r *registry.Registry) error {
 			NameOf:         processName,
 			AddressOf:      processAddress,
 			Lower:          lowerProcess,
+		},
+		{
+			Name:      JobPlatform,
+			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageGo},
+			NameOf:    processName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerJob,
 		},
 		{
 			Name:      DatabasePlatform,
@@ -112,6 +146,8 @@ func Register(r *registry.Registry) error {
 	for _, spec := range []registry.ConnectorSpec{
 		{Name: SQLConnector, Edge: ir.EdgeSQL, From: ServerPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -129,6 +165,7 @@ func Register(r *registry.Registry) error {
 		Platforms: map[ir.DeployableKind]string{
 			ir.DeployableServer:   ServerPlatform,
 			ir.DeployableDatabase: DatabasePlatform,
+			ir.DeployableJob:      JobPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -224,9 +261,31 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go"]},
+	    "language": {"enum": ["go", "typescript"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^/"},
+	    "env": {"type": "array", "items": {
+	      "type": "object",
+	      "required": ["name"],
+	      "properties": {"name": {"type": "string", "minLength": 1}, "value": {}, "secret": {"type": "string", "minLength": 1}},
+	      "additionalProperties": false
+	    }}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeJob: `{
+	  "type": "object",
+	  "required": ["name", "module", "language", "api", "job", "timeZone", "timeoutSeconds", "retries"],
+	  "properties": {
+	    "name": {"type": "string", "minLength": 1},
+	    "module": {"type": "string", "minLength": 1},
+	    "language": {"enum": ["go"]},
+	    "api": {"type": "string", "minLength": 1},
+	    "job": {"type": "string", "minLength": 1},
+	    "schedule": {"type": "string", "minLength": 1},
+	    "timeZone": {"type": "string", "minLength": 1},
+	    "timeoutSeconds": {"type": "integer", "minimum": 1},
+	    "retries": {"type": "integer", "minimum": 0},
 	    "env": {"type": "array", "items": {
 	      "type": "object",
 	      "required": ["name"],

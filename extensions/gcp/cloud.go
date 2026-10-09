@@ -19,6 +19,10 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	logging "cloud.google.com/go/logging/apiv2"
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
+	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -26,8 +30,11 @@ import (
 	serviceusage "cloud.google.com/go/serviceusage/apiv1"
 	"cloud.google.com/go/serviceusage/apiv1/serviceusagepb"
 	"cloud.google.com/go/storage"
+	"github.com/googleapis/gax-go/v2"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/parable-work/superschematic/registry"
@@ -42,6 +49,11 @@ import (
 type Cloud interface {
 	// EnableServices enables APIs (`run.googleapis.com`) on a project.
 	EnableServices(ctx context.Context, project string, services []string) error
+
+	// ProjectNumber returns a project's number, from the name Resource
+	// Manager gives the project, `projects/<number>`. The provider of the
+	// generated CI's Workload Identity Federation is named by it (D47).
+	ProjectNumber(ctx context.Context, project string) (string, error)
 
 	// EnsureBucket creates a bucket with uniform access, public access
 	// prevention and object versioning, unless it exists.
@@ -95,9 +107,24 @@ type Cloud interface {
 	// from spec, and reports whether it changed anything.
 	EnsureJob(ctx context.Context, project, region string, spec JobSpec) (changed bool, err error)
 
-	// RunJob runs a job once, with args in place of its container's, and
-	// returns once the execution finished, whether it succeeded or not.
+	// JobImage returns the image of a job's one container, or an error
+	// that wraps fs.ErrNotExist when the job does not exist.
+	JobImage(ctx context.Context, project, region, job string) (string, error)
+
+	// RunJob runs a job once, with args in place of its container's, or
+	// as the job is when args is nil, and returns once the execution
+	// finished, whether it succeeded or not, after the retries the job
+	// gives its task. An error means it could not start the execution or
+	// wait for it to finish, which may still be running.
 	RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error)
+
+	// ExecutionStderr returns the lines the task of run, an execution
+	// RunJob finished, wrote to stderr, oldest first, from Cloud Logging:
+	// those match selects, a Cloud Logging filter, or all of them when it
+	// is empty. Cloud Logging receives them seconds after the execution
+	// ends, so it reads again until it finds some or wait has passed, and
+	// then returns none.
+	ExecutionStderr(ctx context.Context, run *JobRun, match string, wait time.Duration) ([]string, error)
 }
 
 // BuildSpec is a Cloud Build build of a Docker image.
@@ -158,8 +185,12 @@ type JobRun struct {
 	Name   string
 	LogURI string
 
-	// Succeeded is whether its one task succeeded; Message says why it
-	// did not.
+	// Created is when the execution was created, so a read of its logs
+	// looks no further back; zero when Cloud Run did not say.
+	Created time.Time
+
+	// Succeeded is whether its one task succeeded; Message is Cloud Run's
+	// account of why it did not.
 	Succeeded bool
 	Message   string
 }
@@ -177,8 +208,10 @@ type googleCloud struct {
 	kms      *kms.KeyManagementClient
 	secrets  *secretmanager.Client
 	registry *artifactregistry.Client
+	projects *resourcemanager.ProjectsClient
 	builds   *cloudbuild.Client
 	jobs     *run.JobsClient
+	logs     *logging.Client
 	clientOK bool
 }
 
@@ -205,11 +238,17 @@ func (c *googleCloud) clients(ctx context.Context) error {
 	if c.registry, err = artifactregistry.NewClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Artifact Registry client: %w", err)
 	}
+	if c.projects, err = resourcemanager.NewProjectsClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Resource Manager client: %w", err)
+	}
 	if c.builds, err = cloudbuild.NewClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Cloud Build client: %w", err)
 	}
 	if c.jobs, err = run.NewJobsClient(ctx); err != nil {
 		return fmt.Errorf("gcp: the Cloud Run jobs client: %w", err)
+	}
+	if c.logs, err = logging.NewClient(ctx); err != nil {
+		return fmt.Errorf("gcp: the Cloud Logging client: %w", err)
 	}
 	c.clientOK = true
 	return nil
@@ -235,6 +274,21 @@ func (c *googleCloud) EnableServices(ctx context.Context, project string, servic
 		}
 	}
 	return nil
+}
+
+func (c *googleCloud) ProjectNumber(ctx context.Context, project string) (string, error) {
+	if err := c.clients(ctx); err != nil {
+		return "", err
+	}
+	p, err := c.projects.GetProject(ctx, &resourcemanagerpb.GetProjectRequest{Name: "projects/" + project})
+	if err != nil {
+		return "", fmt.Errorf("gcp: project %s: %w", project, err)
+	}
+	number, ok := strings.CutPrefix(p.GetName(), "projects/")
+	if !ok || number == "" || strings.Trim(number, "0123456789") != "" {
+		return "", fmt.Errorf("gcp: project %s is named %q, not projects/<number>", project, p.GetName())
+	}
+	return number, nil
 }
 
 func (c *googleCloud) EnsureBucket(ctx context.Context, project, bucket, location string) (bool, error) {
@@ -545,13 +599,17 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 	if err != nil {
 		return nil, fmt.Errorf("gcp: start the build of %s: %w", spec.Image, err)
 	}
-	logs := ""
-	if meta, merr := op.Metadata(); merr == nil && meta.GetBuild() != nil {
-		logs = meta.GetBuild().GetLogUrl()
+	// The operation of a build in a region is one the operations service
+	// does not find, so op.Wait fails with NotFound at once: the build
+	// itself is polled, by the name its operation's metadata gives it.
+	meta, err := op.Metadata()
+	if err != nil || meta.GetBuild().GetId() == "" {
+		return nil, fmt.Errorf("gcp: the build of %s started, but its operation %s names no build: %v", spec.Image, op.Name(), err)
 	}
-	done, err := op.Wait(ctx)
+	name := fmt.Sprintf("projects/%s/locations/%s/builds/%s", project, region, meta.GetBuild().GetId())
+	done, err := c.waitBuild(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("gcp: the build of %s failed (logs: %s): %w", spec.Image, logs, err)
+		return nil, fmt.Errorf("gcp: the build of %s (logs: %s): %w", spec.Image, meta.GetBuild().GetLogUrl(), err)
 	}
 	if done.GetStatus() != cloudbuildpb.Build_SUCCESS {
 		return nil, fmt.Errorf("gcp: the build of %s ended %s: %s (logs: %s)", spec.Image, done.GetStatus(), done.GetStatusDetail(), done.GetLogUrl())
@@ -562,6 +620,38 @@ func (c *googleCloud) RunBuild(ctx context.Context, project, region string, spec
 		}
 	}
 	return nil, fmt.Errorf("gcp: the build of %s pushed no image of that name (logs: %s)", spec.Image, done.GetLogUrl())
+}
+
+// buildPoll is how often waitBuild reads a running build.
+const buildPoll = 5 * time.Second
+
+// waitBuild reads the build name names until it ends, or ctx is done.
+func (c *googleCloud) waitBuild(ctx context.Context, name string) (*cloudbuildpb.Build, error) {
+	for {
+		build, err := c.builds.GetBuild(ctx, &cloudbuildpb.GetBuildRequest{Name: name})
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		if buildEnded(build.GetStatus()) {
+			return build, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(buildPoll):
+		}
+	}
+}
+
+// buildEnded reports whether a build in status has ended, whether or not
+// it succeeded.
+func buildEnded(status cloudbuildpb.Build_Status) bool {
+	switch status {
+	case cloudbuildpb.Build_SUCCESS, cloudbuildpb.Build_FAILURE, cloudbuildpb.Build_INTERNAL_ERROR,
+		cloudbuildpb.Build_TIMEOUT, cloudbuildpb.Build_CANCELLED, cloudbuildpb.Build_EXPIRED:
+		return true
+	}
+	return false
 }
 
 // jobResource is a job's resource name.
@@ -632,46 +722,211 @@ func (c *googleCloud) EnsureJob(ctx context.Context, project, region string, spe
 	return true, nil
 }
 
+func (c *googleCloud) JobImage(ctx context.Context, project, region, job string) (string, error) {
+	if err := c.clients(ctx); err != nil {
+		return "", err
+	}
+	name := jobResource(project, region, job)
+	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+	switch {
+	case status.Code(err) == codes.NotFound:
+		return "", fmt.Errorf("gcp: job %s: %w", name, fs.ErrNotExist)
+	case err != nil:
+		return "", fmt.Errorf("gcp: job %s: %w", name, err)
+	}
+	containers := current.GetTemplate().GetTemplate().GetContainers()
+	if len(containers) != 1 {
+		return "", fmt.Errorf("gcp: job %s has %d containers, not one", name, len(containers))
+	}
+	return containers[0].GetImage(), nil
+}
+
 func (c *googleCloud) RunJob(ctx context.Context, project, region, job string, args []string) (*JobRun, error) {
 	if err := c.clients(ctx); err != nil {
 		return nil, err
 	}
 	name := jobResource(project, region, job)
-	current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
-	if err != nil {
-		return nil, fmt.Errorf("gcp: job %s: %w", name, err)
-	}
-	container := ""
-	if containers := current.GetTemplate().GetTemplate().GetContainers(); len(containers) == 1 {
-		container = containers[0].GetName()
-	}
-	op, err := c.jobs.RunJob(ctx, &runpb.RunJobRequest{
-		Name: name,
-		Overrides: &runpb.RunJobRequest_Overrides{
+	req := &runpb.RunJobRequest{Name: name}
+	// A run of the job as it is, a graph-owned job's (D52), sends no
+	// overrides, which would need run.jobs.runWithOverrides beside
+	// run.jobs.run.
+	if args != nil {
+		current, err := c.jobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+		if err != nil {
+			return nil, fmt.Errorf("gcp: job %s: %w", name, err)
+		}
+		container := ""
+		if containers := current.GetTemplate().GetTemplate().GetContainers(); len(containers) == 1 {
+			container = containers[0].GetName()
+		}
+		req.Overrides = &runpb.RunJobRequest_Overrides{
 			ContainerOverrides: []*runpb.RunJobRequest_Overrides_ContainerOverride{{Name: container, Args: args}},
-		},
-	})
+		}
+	}
+	op, err := c.jobs.RunJob(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: run job %s: %w", name, err)
 	}
+	return waitExecution(ctx, name, op)
+}
+
+// executionOperation is what RunJob reads of the operation that runs an
+// execution, a run.RunJobOperation, which a test fakes.
+type executionOperation interface {
+	Wait(ctx context.Context, opts ...gax.CallOption) (*runpb.Execution, error)
+	Done() bool
+	Metadata() (*runpb.Execution, error)
+}
+
+// waitExecution waits for the execution op runs. The operation ends with
+// an error when the execution fails, which the JobRun reports. An error
+// while the operation is not done is the wait's own, from the transport
+// or ctx, and the execution may still be running.
+func waitExecution(ctx context.Context, job string, op executionOperation) (*JobRun, error) {
 	execution, err := op.Wait(ctx)
-	if err != nil {
-		// The execution failed: its metadata says where its logs are.
-		out := &JobRun{Message: err.Error()}
-		if meta, merr := op.Metadata(); merr == nil && meta != nil {
-			out.Name, out.LogURI = meta.GetName(), meta.GetLogUri()
+	if err == nil {
+		out := executionRun(execution)
+		out.Succeeded = execution.GetSucceededCount() == 1 && execution.GetFailedCount() == 0
+		if !out.Succeeded {
+			for _, cond := range execution.GetConditions() {
+				if cond.GetMessage() != "" {
+					out.Message = cond.GetMessage()
+					break
+				}
+			}
 		}
 		return out, nil
 	}
-	out := &JobRun{Name: execution.GetName(), LogURI: execution.GetLogUri()}
-	out.Succeeded = execution.GetSucceededCount() == 1 && execution.GetFailedCount() == 0
-	if !out.Succeeded {
-		for _, cond := range execution.GetConditions() {
-			if cond.GetMessage() != "" {
-				out.Message = cond.GetMessage()
-				break
-			}
+	// The metadata is the execution as the last poll saw it.
+	meta, _ := op.Metadata()
+	if !op.Done() {
+		what := "its execution"
+		if meta.GetName() != "" {
+			what = "execution " + meta.GetName()
 		}
+		return nil, fmt.Errorf("gcp: job %s: waiting for %s, which may still be running: %w", job, what, err)
+	}
+	out := executionRun(meta)
+	out.Message = err.Error()
+	if s, ok := status.FromError(err); ok && s.Message() != "" {
+		out.Message = s.Message()
 	}
 	return out, nil
+}
+
+// executionRun is the JobRun of an execution, without its outcome.
+func executionRun(execution *runpb.Execution) *JobRun {
+	out := &JobRun{Name: execution.GetName(), LogURI: execution.GetLogUri()}
+	if created := execution.GetCreateTime(); created != nil {
+		out.Created = created.AsTime()
+	}
+	return out
+}
+
+// stderrLines is the most lines ExecutionStderr returns.
+const stderrLines = 100
+
+func (c *googleCloud) ExecutionStderr(ctx context.Context, run *JobRun, match string, wait time.Duration) ([]string, error) {
+	project, filter, err := stderrFilter(run, match)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.clients(ctx); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	pause := 2 * time.Second
+	for {
+		lines, err := c.logLines(ctx, project, filter)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: Cloud Logging: %w", err)
+		}
+		if len(lines) > 0 || time.Now().Add(pause).After(deadline) {
+			return lines, nil
+		}
+		t := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+		pause = min(2*pause, 8*time.Second)
+	}
+}
+
+// logLines returns the lines of the log entries filter matches in a
+// project, oldest first, at most stderrLines of them.
+func (c *googleCloud) logLines(ctx context.Context, project, filter string) ([]string, error) {
+	it := c.logs.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{
+		ResourceNames: []string{"projects/" + project},
+		Filter:        filter,
+		OrderBy:       "timestamp asc",
+		PageSize:      stderrLines,
+	})
+	var lines []string
+	for len(lines) < stderrLines {
+		entry, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if status.Code(err) == codes.PermissionDenied {
+			return nil, fmt.Errorf("%w (the deployer reads logs with roles/logging.viewer, which stack bootstrap gives it)", err)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if line := entryLine(entry); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
+}
+
+// stderrFilter returns the project of run's execution and the Cloud
+// Logging filter of the lines its task wrote to stderr that match selects,
+// every one when it is empty: Cloud Run logs each as an entry of the job's
+// resource, labeled with the execution.
+func stderrFilter(run *JobRun, match string) (project, filter string, err error) {
+	// projects/<project>/locations/<region>/jobs/<job>/executions/<execution>
+	parts := strings.Split(run.Name, "/")
+	if len(parts) != 8 || parts[0] != "projects" || parts[2] != "locations" || parts[4] != "jobs" || parts[6] != "executions" || slices.Contains(parts, "") {
+		return "", "", fmt.Errorf("gcp: %q names no execution of a Cloud Run job", run.Name)
+	}
+	project = parts[1]
+	clauses := []string{
+		fmt.Sprintf("logName=%q", "projects/"+project+"/logs/run.googleapis.com%2Fstderr"),
+		`resource.type="cloud_run_job"`,
+		fmt.Sprintf("resource.labels.location=%q", parts[3]),
+		fmt.Sprintf("resource.labels.job_name=%q", parts[5]),
+		fmt.Sprintf(`labels."run.googleapis.com/execution_name"=%q`, parts[7]),
+	}
+	if !run.Created.IsZero() {
+		// A minute early, for the task's clock against Cloud Run's.
+		clauses = append(clauses, fmt.Sprintf("timestamp>=%q", run.Created.Add(-time.Minute).UTC().Format(time.RFC3339)))
+	}
+	if match != "" {
+		clauses = append(clauses, "("+match+")")
+	}
+	return project, strings.Join(clauses, " AND "), nil
+}
+
+// entryLine is the line a log entry holds: its text, or the message of a
+// JSON line, which Cloud Run logs as a JSON payload.
+func entryLine(entry *loggingpb.LogEntry) string {
+	if text := entry.GetTextPayload(); text != "" {
+		return strings.TrimSpace(text)
+	}
+	payload := entry.GetJsonPayload()
+	if payload == nil {
+		return ""
+	}
+	if msg := payload.GetFields()["message"].GetStringValue(); msg != "" {
+		return strings.TrimSpace(msg)
+	}
+	data, err := protojson.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

@@ -944,6 +944,83 @@
       "error": "a behavior name that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0/name': got number, want string"
     },
     {
+      "name": "a display",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"transitions\": {\"todo\": {\"doing\": \"Start\"}},\n\t\t\"states\": {\"doing\": {\"tone\": \"active\", \"activeForm\": \"Doing\"}, \"todo\": {\"label\": \"To do\"}}, \"summaryFields\": [\"Workflow.status\", \"title\"], \"titleField\": \"title\", \"noun\": \"Ticket\"}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"display\":{\"noun\":\"Ticket\",\"states\":{\"doing\":{\"activeForm\":\"Doing\",\"tone\":\"active\"},\"todo\":{\"label\":\"To do\"}},\"summaryFields\":[\"Workflow.status\",\"title\"],\"titleField\":\"title\",\"transitions\":{\"todo\":{\"doing\":\"Start\"}}},\"name\":\"Ticket\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "a display that declares nothing",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {}}",
+      "accept": false,
+      "error": "a display that declares nothing: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display': minProperties: got 0, want 1"
+    },
+    {
+      "name": "a blank display noun",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"noun\": \" \"}}",
+      "accept": false,
+      "error": "a blank display noun: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/noun': ' ' does not match pattern '\\\\S'"
+    },
+    {
+      "name": "a display summary field twice",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"summaryFields\": [\"title\", \"title\"]}}",
+      "accept": false,
+      "error": "a display summary field twice: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/summaryFields': items at 0 and 1 are equal"
+    },
+    {
+      "name": "a display state with an unknown tone",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"states\": {\"todo\": {\"tone\": \"blue\"}}}}",
+      "accept": false,
+      "error": "a display state with an unknown tone: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/states/todo/tone': value must be one of 'muted', 'active', 'success', 'warning', 'danger'"
+    },
+    {
+      "name": "a display state that declares nothing",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"states\": {\"todo\": {}}}}",
+      "accept": false,
+      "error": "a display state that declares nothing: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/states/todo': minProperties: got 0, want 1"
+    },
+    {
+      "name": "a display state that is no state name",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"states\": {\"to do\": {\"label\": \"To do\"}}}}",
+      "accept": false,
+      "error": "a display state that is no state name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '': invalid propertyName 'to do'\n  - at '': 'to do' does not match pattern '^[A-Za-z][A-Za-z0-9_-]*$'"
+    },
+    {
+      "name": "a display transition to no state name",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"transitions\": {\"todo\": {\"in progress\": \"Start\"}}}}",
+      "accept": false,
+      "error": "a display transition to no state name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '': invalid propertyName 'in progress'\n  - at '': 'in progress' does not match pattern '^[A-Za-z][A-Za-z0-9_-]*$'"
+    },
+    {
+      "name": "a display transition from a state that labels none",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"transitions\": {\"todo\": {}}}}",
+      "accept": false,
+      "error": "a display transition from a state that labels none: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/transitions/todo': minProperties: got 0, want 1"
+    },
+    {
+      "name": "a display key the schema lacks",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket\"}}",
+      "accept": false,
+      "error": "a display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display': additional properties 'icon' not allowed"
+    },
+    {
+      "name": "file display.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"tickets\",\n  \"kind\": \"General\",\n  \"types\": {\n    \"Ticket\": {\n      \"name\": \"Ticket\",\n      \"role\": \"EmbeddedStruct\",\n      \"behaviors\": [\n        {\n          \"name\": \"Workflow\",\n          \"config\": {\n            \"outcomes\": {\n              \"dropped\": \"neutral\"\n            },\n            \"states\": [\n              \"todo\",\n              \"implementing\",\n              \"review\",\n              \"done\",\n              \"dropped\"\n            ],\n            \"transitions\": [\n              {\n                \"from\": \"todo\",\n                \"to\": \"implementing\"\n              },\n              {\n                \"from\": \"implementing\",\n                \"to\": \"review\"\n              },\n              {\n                \"from\": \"review\",\n                \"to\": \"implementing\"\n              },\n              {\n                \"from\": \"review\",\n                \"permission\": \"tickets.accept\",\n                \"to\": \"done\"\n              },\n              {\n                \"from\": \"todo\",\n                \"to\": \"dropped\"\n              }\n            ]\n          }\n        },\n        {\n          \"name\": \"Comments\"\n        }\n      ],\n      \"display\": {\n        \"noun\": \"Ticket\",\n        \"plural\": \"Tickets\",\n        \"titleField\": \"title\",\n        \"createLabel\": \"New ticket\",\n        \"summaryFields\": [\n          \"Workflow.status\",\n          \"assignee\"\n        ],\n        \"states\": {\n          \"done\": {\n            \"label\": \"Done\",\n            \"tone\": \"success\"\n          },\n          \"dropped\": {\n            \"label\": \"Dropped\",\n            \"tone\": \"danger\"\n          },\n          \"implementing\": {\n            \"label\": \"Implement\",\n            \"activeForm\": \"Implementing\",\n            \"tone\": \"active\"\n          },\n          \"review\": {\n            \"label\": \"Review\",\n            \"activeForm\": \"In review\",\n            \"tone\": \"warning\"\n          },\n          \"todo\": {\n            \"label\": \"To do\",\n            \"tone\": \"muted\"\n          }\n        },\n        \"transitions\": {\n          \"implementing\": {\n            \"review\": \"Send to review\"\n          },\n          \"review\": {\n            \"done\": \"Accept\",\n            \"implementing\": \"Request changes\"\n          },\n          \"todo\": {\n            \"dropped\": \"Drop\",\n            \"implementing\": \"Start\"\n          }\n        }\n      },\n      \"fields\": [\n        {\n          \"name\": \"title\",\n          \"title\": \"Title\",\n          \"icon\": \"text\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true,\n          \"validateMaxLength\": 200\n        },\n        {\n          \"name\": \"assignee\",\n          \"title\": \"Assignee\",\n          \"icon\": \"person\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          }\n        },\n        {\n          \"name\": \"body\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          }\n        }\n      ]\n    }\n  }\n}\n",
+      "accept": true,
+      "canonical": "{\"kind\":\"General\",\"name\":\"tickets\",\"types\":{\"Ticket\":{\"behaviors\":[{\"config\":{\"outcomes\":{\"dropped\":\"neutral\"},\"states\":[\"todo\",\"implementing\",\"review\",\"done\",\"dropped\"],\"transitions\":[{\"from\":\"todo\",\"to\":\"implementing\"},{\"from\":\"implementing\",\"to\":\"review\"},{\"from\":\"review\",\"to\":\"implementing\"},{\"from\":\"review\",\"permission\":\"tickets.accept\",\"to\":\"done\"},{\"from\":\"todo\",\"to\":\"dropped\"}]},\"name\":\"Workflow\"},{\"name\":\"Comments\"}],\"display\":{\"createLabel\":\"New ticket\",\"noun\":\"Ticket\",\"plural\":\"Tickets\",\"states\":{\"done\":{\"label\":\"Done\",\"tone\":\"success\"},\"dropped\":{\"label\":\"Dropped\",\"tone\":\"danger\"},\"implementing\":{\"activeForm\":\"Implementing\",\"label\":\"Implement\",\"tone\":\"active\"},\"review\":{\"activeForm\":\"In review\",\"label\":\"Review\",\"tone\":\"warning\"},\"todo\":{\"label\":\"To do\",\"tone\":\"muted\"}},\"summaryFields\":[\"Workflow.status\",\"assignee\"],\"titleField\":\"title\",\"transitions\":{\"implementing\":{\"review\":\"Send to review\"},\"review\":{\"done\":\"Accept\",\"implementing\":\"Request changes\"},\"todo\":{\"dropped\":\"Drop\",\"implementing\":\"Start\"}}},\"fields\":[{\"icon\":\"text\",\"name\":\"title\",\"required\":true,\"title\":\"Title\",\"typeRef\":{\"name\":\"string\"},\"validateMaxLength\":200},{\"icon\":\"person\",\"name\":\"assignee\",\"title\":\"Assignee\",\"typeRef\":{\"name\":\"string\"}},{\"name\":\"body\",\"typeRef\":{\"name\":\"string\"}}],\"name\":\"Ticket\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
       "name": "file docs.schema.json",
       "registry": "core",
       "input": "{\n  \"name\": \"fixture-docs\",\n  \"kind\": \"API\",\n  \"scalars\": {\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"Order\": {\n      \"name\": \"Order\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"totalCents\",\n          \"title\": \"Total\",\n          \"purpose\": \"The order total in **cents**, tax included.\",\n          \"icon\": \"receipt\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"ReturnRequest\": {\n      \"name\": \"ReturnRequest\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"orderId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"reason\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true\n        }\n      ]\n    }\n  },\n  \"operationSets\": [\n    {\n      \"name\": \"OrderQueries\",\n      \"operations\": [\n        {\n          \"name\": \"getOrder\",\n          \"comment\": \"Fetch one order. OpenAPI takes the @docs description instead.\",\n          \"docs\": {\n            \"title\": \"Get an order\",\n            \"description\": \"Returns one order by its identifier.\",\n            \"capability\": \"orders.get\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"audience\": \"shoppers\",\n            \"mappingStatus\": \"mapped\",\n            \"useWhen\": \"Use when you have an order identifier.\",\n            \"doNotUseWhen\": \"Do not use to list orders; call listOrders.\",\n            \"success\": \"Returns the order with its total.\",\n            \"errors\": [\n              {\n                \"code\": \"order_not_found\",\n                \"description\": \"No order has that identifier.\",\n                \"commonCorrection\": \"Take the identifier from a listOrders result.\"\n              }\n            ]\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders/{id}\"\n        },\n        {\n          \"name\": \"listOrders\",\n          \"comment\": \"Lists every order. Without @docs the summary is the operation name.\",\n          \"typeRef\": {\n            \"name\": \"Order\",\n            \"isArray\": true\n          },\n          \"required\": true,\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders\"\n        }\n      ]\n    },\n    {\n      \"name\": \"ReturnMutations\",\n      \"operations\": [\n        {\n          \"name\": \"openReturn\",\n          \"docs\": {\n            \"title\": \"Open a return\",\n            \"description\": \"Opens a return for one delivered order.\",\n            \"capability\": \"orders.returns.open\",\n            \"lifecycle\": \"deprecated\",\n            \"visibility\": \"preview\",\n            \"mappingStatus\": \"uncertain\",\n            \"replacement\": \"orders.returns.create\",\n            \"sunset\": \"2027-01-31\"\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"ReturnRequest\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"POST\",\n          \"restPath\": \"returns\"\n        }\n      ]\n    }\n  ]\n}\n",

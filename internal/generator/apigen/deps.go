@@ -3,12 +3,18 @@ package apigen
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // DepsInfo is what the generated Deps holds beside the config and the
@@ -49,6 +55,36 @@ type DepsCall struct {
 
 // depsFields are the fields every Deps may hold beside its clients.
 var depsFields = []string{"Config", "DB", "Logger"}
+
+// JobInfo is a job of the API (D52): a method of the generated Jobs
+// interface.
+type JobInfo struct {
+	// Name is the job's `@job` class.
+	Name string
+
+	// Method is the Jobs method that runs it.
+	Method string
+
+	// Schedule is the decorator's schedule, for the method's comment;
+	// empty for a job that runs only on demand.
+	Schedule string
+}
+
+// jobsOf reads the API's jobs, sorted by name.
+func jobsOf(schema *ir.Schema) []JobInfo {
+	var jobs []JobInfo
+	for _, job := range schema.Jobs {
+		if job != nil {
+			jobs = append(jobs, JobInfo{Name: job.Name, Method: goutil.GoPublicIdentifier(job.Name), Schedule: job.Schedule})
+		}
+	}
+	slices.SortFunc(jobs, func(a, b JobInfo) int { return strings.Compare(a.Name, b.Name) })
+	return jobs
+}
+
+// HasJobs reports whether the API declares a job, for which deps.go
+// declares Jobs and JobsConstructor.
+func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
 // SetDeps sets what Deps holds, refusing a client whose field would take
 // the name of another of its fields.
@@ -114,6 +150,36 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 		return false, fmt.Errorf("write implementation scaffold: %w", err)
 	}
 	return true, nil
+}
+
+// JobsFunc is the function an implementation of an API with jobs
+// declares, of the generated JobsConstructor's signature.
+const JobsFunc = "NewJobs"
+
+// DeclaresFunc reports whether the Go package at dir declares a function
+// named name, in a file that is not a test.
+func DeclaresFunc(dir, name string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, fmt.Errorf("read implementation package %s: %w", dir, err)
+	}
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		file := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, filepath.Join(dir, file), nil, parser.SkipObjectResolution)
+		if err != nil {
+			return false, fmt.Errorf("read implementation package %s: %w", dir, err)
+		}
+		for _, decl := range parsed.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // ImplementationExists reports whether dir holds a Go package: a .go file.

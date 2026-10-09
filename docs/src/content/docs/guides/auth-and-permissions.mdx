@@ -129,7 +129,7 @@ the request context, with the bearer token already read into
 `ctx.bearerToken`, and returns a principal, its `subject` and
 `permissions`, or `null`:
 
-<Snippet file="typescript/app.ts" symbol="authenticate" />
+<Snippet file="typescript/shop-storefront/index.ts" symbol="authenticate" />
 
 The router applies the same 401 and 403 rules and the same nesting.
 `buildRouter`'s `permissionMatcher` option replaces the matching rule for a
@@ -175,7 +175,7 @@ after a 401. An SDK given no token sends none.
     <Snippet file="go/clients_test.go" from="shopper, err := sdk.New(" />
   </TabItem>
   <TabItem label="TypeScript">
-    <Snippet file="typescript/orders-client.ts" from="const shopper" />
+    <Snippet file="typescript/clients/orders-client.ts" from="const shopper" />
   </TabItem>
   <TabItem label="Python">
     <Snippet file="python/orders_client.py" from="shopper = ShopOrdersSDK" />

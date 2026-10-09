@@ -1,0 +1,127 @@
+{
+  "name": "tickets",
+  "kind": "General",
+  "types": {
+    "Ticket": {
+      "name": "Ticket",
+      "owner": "src/ticket.schema.ts",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "outcomes": {
+              "dropped": "neutral"
+            },
+            "states": [
+              "todo",
+              "implementing",
+              "review",
+              "done",
+              "dropped"
+            ],
+            "transitions": [
+              {
+                "from": "todo",
+                "to": "implementing"
+              },
+              {
+                "from": "implementing",
+                "to": "review"
+              },
+              {
+                "from": "review",
+                "to": "implementing"
+              },
+              {
+                "from": "review",
+                "permission": "tickets.accept",
+                "to": "done"
+              },
+              {
+                "from": "todo",
+                "to": "dropped"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Comments"
+        }
+      ],
+      "display": {
+        "noun": "Ticket",
+        "plural": "Tickets",
+        "titleField": "title",
+        "createLabel": "New ticket",
+        "summaryFields": [
+          "Workflow.status",
+          "assignee"
+        ],
+        "states": {
+          "done": {
+            "label": "Done",
+            "tone": "success"
+          },
+          "dropped": {
+            "label": "Dropped",
+            "tone": "danger"
+          },
+          "implementing": {
+            "label": "Implement",
+            "activeForm": "Implementing",
+            "tone": "active"
+          },
+          "review": {
+            "label": "Review",
+            "activeForm": "In review",
+            "tone": "warning"
+          },
+          "todo": {
+            "label": "To do",
+            "tone": "muted"
+          }
+        },
+        "transitions": {
+          "implementing": {
+            "review": "Send to review"
+          },
+          "review": {
+            "done": "Accept",
+            "implementing": "Request changes"
+          },
+          "todo": {
+            "dropped": "Drop",
+            "implementing": "Start"
+          }
+        }
+      },
+      "fields": [
+        {
+          "name": "title",
+          "title": "Title",
+          "icon": "text",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 200
+        },
+        {
+          "name": "assignee",
+          "title": "Assignee",
+          "icon": "person",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ]
+    }
+  }
+}

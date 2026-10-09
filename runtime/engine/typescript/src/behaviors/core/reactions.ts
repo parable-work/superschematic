@@ -41,9 +41,10 @@ A rule is one when and one then:
   carries revision, or, when its schema composes Branches, a release, a
   releaseCommit operation. The instances it sets off are the ones whose
   link points at the event's instance, found with Links' listLinked on
-  the type's own schema; for a pinned link and a revision, only the ones
-  the target has moved past (stale), so an instance linked to the new
-  revision since is left alone.
+  the type's own schema; for a link pinned to a revision and a revision,
+  or pinned to a release and a release, only the ones the target has
+  moved past (stale), so an instance linked to the new revision or
+  release since is left alone.
 - then { transition, link? }: move the instance, or the one its link
   points to, to the state.
 
@@ -88,12 +89,16 @@ configChange: rules hold no state, so any change is allowed, and
 Reactions may be added to and removed from a schema with instances.
 */
 
+import type { InstanceRecord } from '../../instances/store.js';
+import { LINKS_TARGETS, WORKFLOW_STATUS, behaviorField, type InstanceFields } from '../fields.js';
 import { BehaviorError, BehaviorVetoError } from '../../errors.js';
 import type { EngineEvent, OperationChange } from '../../events/log.js';
 import { mergePatch } from '../../instances/patch.js';
 import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
 import { reactionsGuidance } from './guidance/reactions.js';
+import { linkPin, type LinkPin } from './links.js';
+import { movedOn, targetMove } from './revised.js';
 import { MAX_ROLLUP_READ } from './rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
@@ -135,7 +140,8 @@ export interface ReactionsRollup {
 /** A link of the type's Links config a revised rule names, as the config gives it. */
 export interface ReactionsRevisedLink {
   readonly schema: string;
-  readonly pinned: boolean;
+  /** What the link pins, a revision or a release; absent when it pins nothing. */
+  readonly pin?: LinkPin;
 }
 
 /** Reactions' config, parsed: the rules, and what the type's other configs say of the rollups and links they name. */
@@ -166,19 +172,43 @@ function own<T>(record: Readonly<Record<string, T>> | undefined, name: string): 
   return record !== undefined && record !== null && Object.prototype.hasOwnProperty.call(record, name) ? record[name] : undefined;
 }
 
+// A change as the log records it: a merge patch of { data, behaviors }.
+type Logged = { readonly behaviors?: Readonly<Record<string, Readonly<Record<string, unknown>> | undefined>> } | null | undefined;
+
+// patchOf is the merge patch an event records of its instance: a create's
+// whole instance, an update's change and an operation's patch; none for a
+// delete.
+function patchOf(event: EngineEvent): Logged {
+  const change = event.change as Record<string, unknown> | null;
+  if (event.kind === 'delete') {
+    return undefined;
+  }
+  return (event.kind === 'operation' ? (change as OperationChange | null)?.patch : change) as Logged;
+}
+
 // entered reads the state an event moved its instance's status into: the
 // status a create, an update's patch or an operation's patch records.
 function entered(event: EngineEvent): string | undefined {
-  const change = event.change as Record<string, unknown> | null;
-  const patch = event.kind === 'operation' ? ((change as OperationChange | null)?.patch as Record<string, unknown> | undefined) : change;
-  const status = event.kind === 'delete' ? undefined : patch?.status;
+  const status = behaviorField(patchOf(event), 'Workflow', 'status');
   return typeof status === 'string' ? status : undefined;
 }
 
-// linkOf reads one link of an instance's links field.
-function linkOf(data: FrozenJSON | undefined, link: string): Target | undefined {
-  const held = (data?.links as Record<string, { schema?: unknown; id?: unknown }> | undefined)?.[link];
+// movedLinks reports whether an operation's patch moved the instance's links.
+function movedLinks(event: EngineEvent): boolean {
+  const patch = event.kind === 'operation' ? patchOf(event) : undefined;
+  const links = patch?.behaviors?.Links;
+  return links !== undefined && links !== null && Object.prototype.hasOwnProperty.call(links, 'targets');
+}
+
+// linkOf reads one link of an instance's Links targets field.
+function linkOf(record: Logged, link: string): Target | undefined {
+  const held = (behaviorField(record, 'Links', 'targets') as Record<string, { schema?: unknown; id?: unknown }> | undefined)?.[link];
   return typeof held?.schema === 'string' && typeof held.id === 'string' ? { schema: held.schema, id: held.id } : undefined;
+}
+
+// statusOf reads an instance's Workflow status.
+function statusOf(record: Logged): unknown {
+  return behaviorField(record, 'Workflow', 'status');
 }
 
 // parents lists the instances of the home schema that an event's instance
@@ -188,13 +218,12 @@ function parents(context: ReactionContext<ReactionsConfig>, event: EngineEvent, 
   const found = new Set<string>();
   const id = event.instanceId as string;
   if (event.kind !== 'delete') {
-    const now = linkOf(context.instances.get(event.schema, id, { fields: ['links'] })?.data, link);
+    const now = linkOf(context.instances.get(event.schema, id, { fields: [LINKS_TARGETS] }), link);
     if (now?.schema === context.schema) {
       found.add(now.id);
     }
   }
-  const patch = event.kind === 'operation' ? (event.change as OperationChange).patch : undefined;
-  if (event.kind === 'delete' || (patch !== undefined && Object.prototype.hasOwnProperty.call(patch, 'links'))) {
+  if (event.kind === 'delete' || movedLinks(event)) {
     const was = linkOf(context.before(event), link);
     if (was?.schema === context.schema) {
       found.add(was.id);
@@ -238,10 +267,10 @@ function allTerminal(context: ReactionContext<ReactionsConfig>, terminal: Reacti
     const found = context.instances.getMany(
       schema,
       page.items.map((item) => item.id),
-      { fields: ['status'] }
+      { fields: [WORKFLOW_STATUS] }
     );
     for (const item of page.items) {
-      if (!counts(flow, found.get(item.id)?.data.status, outcomes)) {
+      if (!counts(flow, statusOf(found.get(item.id)), outcomes)) {
         return false;
       }
       any = true;
@@ -261,8 +290,8 @@ function anyTerminal(context: ReactionContext<ReactionsConfig>, event: EngineEve
     return [];
   }
   const flow = flowOf(context, 'anyTerminal', terminal.schema);
-  const data = context.instances.get(event.schema, event.instanceId as string, { fields: ['links', 'status'] })?.data;
-  const now = linkOf(data, terminal.link);
+  const record = context.instances.get(event.schema, event.instanceId as string, { fields: [LINKS_TARGETS, WORKFLOW_STATUS] });
+  const now = linkOf(record, terminal.link);
   if (now?.schema !== context.schema) {
     return [];
   }
@@ -270,15 +299,14 @@ function anyTerminal(context: ReactionContext<ReactionsConfig>, event: EngineEve
   if (state !== undefined) {
     return counts(flow, state, terminal.outcomes) ? [now.id] : [];
   }
-  const patch = event.kind === 'operation' ? (event.change as OperationChange).patch : undefined;
-  if (patch === undefined || !Object.prototype.hasOwnProperty.call(patch, 'links')) {
+  if (!movedLinks(event)) {
     return [];
   }
   const was = linkOf(context.before(event), terminal.link);
   if (was?.schema === now.schema && was.id === now.id) {
     return [];
   }
-  return counts(flow, data?.status, terminal.outcomes) ? [now.id] : [];
+  return counts(flow, statusOf(record), terminal.outcomes) ? [now.id] : [];
 }
 
 // holdsOver is whether an all or any rollup holds, for a rule, over the
@@ -292,20 +320,20 @@ function holdsOver(rollup: ReactionsRollup, flags: readonly boolean[]): boolean 
   return rollup.function === 'all' ? flags.every(Boolean) : flags.some(Boolean);
 }
 
-// leftBy is the event's instance as the event left it: the create's data,
-// the instance before an update or an operation with the change's patch
-// applied, nothing after a delete.
-function leftBy(event: EngineEvent, was: FrozenJSON | undefined): Readonly<Record<string, unknown>> | undefined {
+// leftBy is the event's instance as the event left it, { data, behaviors }:
+// the create's, the instance before an update or an operation with the
+// change's patch applied, nothing after a delete.
+function leftBy(event: EngineEvent, was: InstanceFields | undefined): Logged {
   const change = event.change as Record<string, unknown> | null;
   switch (event.kind) {
     case 'delete':
       return undefined;
     case 'create':
-      return change ?? {};
+      return (change ?? {}) as Logged;
     case 'operation':
-      return mergePatch(was ?? {}, (change as OperationChange | null)?.patch ?? {}) as Record<string, unknown>;
+      return mergePatch(was ?? {}, (change as OperationChange | null)?.patch ?? {}) as Logged;
     default:
-      return mergePatch(was ?? {}, change ?? {}) as Record<string, unknown>;
+      return mergePatch(was ?? {}, change ?? {}) as Logged;
   }
 }
 
@@ -333,62 +361,25 @@ function madeHold(context: ReactionContext<ReactionsConfig>, rollup: ReactionsRo
     return false;
   }
   const ids = listed.items.map((item) => item.id);
-  const records = ids.length > 0 ? context.instances.getMany(rollup.schema, ids, { fields: ['status'] }) : new Map();
+  const records = ids.length > 0 ? context.instances.getMany(rollup.schema, ids, { fields: [WORKFLOW_STATUS] }) : new Map<string, InstanceRecord>();
   const flow = context.schemas.config(rollup.schema, 'Workflow') as WorkflowStates | undefined;
   const counted = (status: unknown) => flow !== undefined && counts(flow, status, rollup.outcomes);
-  const statuses = new Map<string, unknown>(ids.map((id) => [id, records.get(id)?.data.status]));
+  const statuses = new Map<string, unknown>(ids.map((id) => [id, statusOf(records.get(id))]));
   if (!holdsOver(rollup, [...statuses.values()].map(counted))) {
     return false;
   }
   const id = event.instanceId as string;
   const was = context.before(event);
-  const as = (record: Readonly<Record<string, unknown>> | undefined): boolean[] => {
+  const as = (record: Logged): boolean[] => {
     const set = new Map(statuses);
     set.delete(id);
-    const linked = linkOf(record as FrozenJSON | undefined, rollup.link);
+    const linked = linkOf(record, rollup.link);
     if (linked?.schema === context.schema && linked.id === parent) {
-      set.set(id, record?.status);
+      set.set(id, statusOf(record));
     }
     return [...set.values()].map(counted);
   };
   return holdsOver(rollup, as(leftBy(event, was))) && !holdsOver(rollup, as(was));
-}
-
-// revisedBy lists the instances of the home schema a revised rule moves on
-// an event of the link's schema: none unless the event is a new revision
-// (an update or an operation whose change carries revision, on a schema
-// that composes Revisions) or a release (Branches' releaseCommit); then
-// every instance whose link points at the event's instance, or for a
-// pinned link and a revision, each one the target has moved past.
-function revisedBy(context: ReactionContext<ReactionsConfig>, name: string, link: ReactionsRevisedLink, event: EngineEvent): string[] {
-  const revisions = context.schemas.config(link.schema, 'Revisions') !== undefined;
-  const branches = context.schemas.config(link.schema, 'Branches') !== undefined;
-  if (!revisions && !branches) {
-    throw new BehaviorError(NAME, `revised names link ${name} to ${link.schema}, which composes neither Revisions nor Branches, so it gains no revision or release`);
-  }
-  const change = event.change as Record<string, unknown> | null;
-  const patch = event.kind === 'operation' ? ((change as OperationChange | null)?.patch as Record<string, unknown> | undefined) : event.kind === 'update' ? change : undefined;
-  const revised = revisions && patch !== undefined && patch !== null && Object.prototype.hasOwnProperty.call(patch, 'revision');
-  const operation = event.kind === 'operation' ? (change as OperationChange | null) : null;
-  const released = branches && operation?.behavior === 'Branches' && operation.operation === 'releaseCommit';
-  if (!revised && !released) {
-    return [];
-  }
-  const stale = link.pinned && !released;
-  const found: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = context.instances.invokeSchema(context.schema, 'listLinked', {
-      name,
-      id: event.instanceId as string,
-      limit: PAGE,
-      ...(stale ? { stale: true } : {}),
-      ...(cursor === undefined ? {} : { cursor }),
-    } as FrozenJSON) as { items: Array<{ id: string }>; next: string | null };
-    found.push(...page.items.map((item) => item.id));
-    cursor = page.next ?? undefined;
-  } while (cursor !== undefined);
-  return found;
 }
 
 // apply moves a rule's target to its state, where it can. from, for an
@@ -397,7 +388,7 @@ function revisedBy(context: ReactionContext<ReactionsConfig>, name: string, link
 function apply(context: ReactionContext<ReactionsConfig>, then: ReactionsThen, id: string, from?: string): void {
   let target: Target | undefined = { schema: context.schema, id };
   if (then.link !== undefined) {
-    target = linkOf(context.instances.get(context.schema, id, { fields: ['links'] })?.data, then.link);
+    target = linkOf(context.instances.get(context.schema, id, { fields: [LINKS_TARGETS] }), then.link);
     if (target === undefined) {
       return;
     }
@@ -412,7 +403,7 @@ function apply(context: ReactionContext<ReactionsConfig>, then: ReactionsThen, i
       `a rule moves ${target.schema} ${target.id} to ${then.transition}, which is not a state of ${target.schema}'s Workflow (${flow.states.join(', ')})`
     );
   }
-  const status = context.instances.get(target.schema, target.id, { fields: ['status'] })?.data.status;
+  const status = statusOf(context.instances.get(target.schema, target.id, { fields: [WORKFLOW_STATUS] }));
   if (typeof status !== 'string' || status === then.transition || (from !== undefined && status !== from)) {
     return;
   }
@@ -527,7 +518,8 @@ function resolve(
       if (link === undefined) {
         throw new BehaviorConfigError(`${at}: when.revised names link ${name}, which is not a link of the type's Links (${Object.keys(links).join(', ')})`);
       }
-      revised[name] = { schema: String(link.schema), pinned: link.pinned === true };
+      const pin = linkPin(link);
+      revised[name] = { schema: String(link.schema), ...(pin === undefined ? {} : { pin }) };
     }
   });
   return { rollups, revised };
@@ -633,10 +625,11 @@ export const reactions = defineBehavior<ReactionsConfig>({
         if ('revised' in rule.when) {
           const name = rule.when.revised.link;
           const link = context.config.revised[name];
-          if (event.schema !== link.schema || event.kind === 'create' || event.kind === 'delete') {
+          const move = targetMove(context, NAME, 'revised', name, link.schema, event);
+          if (move === undefined) {
             continue;
           }
-          for (const referrer of revisedBy(context, name, link, event)) {
+          for (const referrer of movedOn(context, name, link.pin, event.instanceId as string, move)) {
             apply(context, rule.then, referrer);
           }
           continue;

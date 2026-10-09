@@ -26,18 +26,19 @@ as their support lands in every generator.
 | `@source(Table)` | class (API, General) | the class is a view of a table; its fields are checked against the table's | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@virtual` | field of a `@source` view | a field with no column behind it, filled in by the implementation | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@docs`, `@purpose`, `@icon` | field | presentation for a settings or form UI | [Documentation](/superschematic/reference/documentation/) |
+| `@display({ noun, plural, titleField, createLabel, summaryFields, states, transitions })` | class | how a UI shows the type's instances: what to call them, the title and summary fields, the create button, and labels and tones for its `Workflow`'s states and transitions | [Documentation](/superschematic/reference/documentation/#display-on-a-type) |
 | `@behavior(name, config?)` | class | composes an engine behavior (`Workflow`, `Links`, `Queue`, ...) on a type the engine runs; `BehaviorConfigs` types the config | [Engine behaviors](/superschematic/guides/engine-behaviors/#compose-a-behavior) |
 
 ## Tables: `@superschematic/db`
 
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
-| `@key` | field | the primary key | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@key` | field | the primary key; a unique field in the engine | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `AutoGenerate<T>` | field | the database generates the value on insert | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
-| `@unique` | field | a unique constraint on the column | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| `@unique` | field | a unique constraint on the column; in the engine, on the field within a namespace, which `lookup` reads by | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `Relation<T, { onDelete }>` | field | a foreign key to table `T`; `onDelete` is `CASCADE` (the default), `RESTRICT` or `NO ACTION` | [Database tables](/superschematic/guides/database-tables/#relations) |
 | `HasMany<T>` | field | the rows of `T` whose relation points at this row | [Database tables](/superschematic/guides/database-tables/#one-to-many) |
-| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields | [Database tables](/superschematic/guides/database-tables/#indexes) |
+| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields, in the engine too | [Database tables](/superschematic/guides/database-tables/#indexes), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `@searchField` | field | joins the field into a trigram-indexed `search_text` column | [Database tables](/superschematic/guides/database-tables/#text-search) |
 | `@jsonField`, `JsonField<T>` | field | stores the field as `JSONB` | [Database tables](/superschematic/guides/database-tables/#json-columns) |
 | `@sourceMustProject` | field | warns when a `@source` view leaves the field out | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
@@ -70,13 +71,14 @@ as their support lands in every generator.
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
 | `@mcp` | method | publishes the operation as an MCP tool, or says why not | [MCP tools](/superschematic/reference/mcp-tools/) |
+| `@job({ schedule?, timeZone?, timeout?, retries? })` | class with no fields | a job of the API, named after the class: a run to completion with the API's `Deps`, on a five-field cron schedule in its IANA time zone or on demand, bounded by `timeout` and run again `retries` times when it fails. The class is no type; the API's Go package gets `Jobs` and `JobsConstructor`, and a stack runs the job as a deployable of its own | [Stacks](/superschematic/guides/stacks/#jobs) |
 
 ## Configs: `@superschematic/schema-config`
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
-| `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs`; a Stack service's `outputs.ci` asks for its generated CI | [How it works](/superschematic/start/how-it-works/), [Stacks](/superschematic/guides/stacks/#generated-ci) |
+| `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class and the names of its `@job` classes | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General or API schema: its fields are the service's environment variables, with a generated loader and `values-schema.json`. On an API, it is the config of the API's server, and a stack's `env` binds its fields | [Modeling types](/superschematic/guides/modeling-types/#environment-variables), [Stacks](/superschematic/guides/stacks/#wire-the-services) |
 
 ## Stacks: `@superschematic/stack`
@@ -84,8 +86,9 @@ as their support lands in every generator.
 A Stack service (`kind: SchemaKind.Stack`) declares what runs where over
 the services it names by their handles. Its build writes each
 environment, resolved, to `stack/<service>/<environment>/environment.json`,
-and each Go server's entrypoint and Dockerfile to
-`server/<service>/<server>/`. The stack takes its service's name. Each
+each Go server's entrypoint and Dockerfile to
+`server/<service>/<server>/`, and with `outputs.ci` its CI workflow to
+`ci/<service>/<renderer>/`. The stack takes its service's name. Each
 class of its schema carries one of these decorators and no fields.
 
 | Name | On | What it does | Covered in |
@@ -93,5 +96,5 @@ class of its schema carries one of these decorators and no fields.
 | `@stack({ deploy, expose })` | class | the stack's entry points, API and DB handles: every service they reach through `authDb`, DB dependencies and `calls` joins the stack. `expose` names what is reachable from outside, an API's handle or an `@server` class. One class per schema | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
 | `@server({ serves })` | class | one server for the APIs listed, in place of their default servers | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
 | `@database({ hosts })` | class | one database for the DB schemas listed, in place of their default databases | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
-| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`local: { postgresImage, postgresPort }`, `gcp: { project, region, production }`), the domain and its DNS platform, and settings per deployable, each `of` a handle or an `@server` or `@database` class, with platform settings (a local server's `port`, a Cloud Run server's `minInstances`) and `env` values that are literals or `{ parameter }`. A class that extends another `@environment` class inherits its values | [Stacks](/superschematic/guides/stacks/#environments) |
+| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`local: { postgresImage, postgresPort }`, `gcp: { project, region, production }`), the domain and its DNS platform, and settings per deployable, each `of` a handle or an `@server` or `@database` class, with platform settings (a local server's `port`, a Cloud Run server's `minInstances`) and `env` values that are literals or `{ parameter }`. A job's element names it beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and changes its `schedule`, `timeZone` or `enabled`. A class that extends another `@environment` class inherits its values | [Stacks](/superschematic/guides/stacks/#environments) |
 | `Targets` | interface | the targets `target` may name, each with its values and a settings type per deployable kind, which `@environment` checks the values, each settings element and its `env` against. It lists the core's `local` (`LocalTarget`); a target's package, or your stack, augments it with another, such as `gcp` | [Stacks](/superschematic/guides/stacks/#type-a-targets-values) |

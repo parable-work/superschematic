@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/engineclientgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -23,7 +25,7 @@ const namingFixtureDir = "testdata/naming"
 // defaultCoordinateRE matches every default coordinate a manifest could
 // carry: module roots, npm scope, Python module prefixes, crate prefixes,
 // the runtime modules, the scalar library and the history actor setting.
-var defaultCoordinateRE = regexp.MustCompile(`superschematic\.history_actor_id|example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|@superschematic/http-runtime|@superschematic/versiongraph|superschematic[-_]versiongraph|\bsuperscalar\b`)
+var defaultCoordinateRE = regexp.MustCompile(`superschematic\.history_actor_id|example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|@superschematic/http-runtime|@superschematic/versiongraph|@superschematic/engine\b|superschematic[-_]versiongraph|\bsuperscalar\b`)
 
 // TestRunWithFixtureNamingEmitsFixtureNames builds the fixture services with
 // a superschematic.toml whose every value differs from the core defaults,
@@ -176,6 +178,32 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		t.Fatalf("run fixture-env-go: %v", err)
 	}
 
+	// The engine client module (superschematic engine-client, D49) imports
+	// the client from the package named by engine_npm_package.
+	engineRegistry := CoreRegistry(names)
+	notesPath := filepath.Join("..", "..", "examples", "engine-notes", "schemas", "notes.schema.json")
+	notesDoc, err := jsonreader.ReadFileWith(notesPath, "notes.schema.json", engineRegistry)
+	if err != nil {
+		t.Fatalf("read the engine-notes schema: %v", err)
+	}
+	notesSchema, err := loader.LoadDocument(notesDoc, "notes.schema.json", loader.WithRegistry(engineRegistry), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("load the engine-notes schema: %v", err)
+	}
+	engineModule, err := engineclientgen.Generate([]*ir.Schema{notesSchema}, engineclientgen.Options{Registry: engineRegistry, Naming: names})
+	if err != nil {
+		t.Fatalf("generate the engine client module: %v", err)
+	}
+	if !strings.Contains(string(engineModule), "from '"+names.EngineNpmPackage+"/client'") {
+		t.Errorf("the engine client module does not import the client from %s", names.EngineNpmPackage)
+	}
+	if err := os.MkdirAll(filepath.Join(outputRoot, "engine-client"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputRoot, "engine-client", "notes.client.ts"), engineModule, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := filepath.WalkDir(outputRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -205,7 +233,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 
 	manifests := []string{
 		"types/go/fixture-db/go.mod",
-		"types/typescript/package.json",
+		"package.json",
 		"types/typescript/fixture-db/package.json",
 		"types/python/fixture-db/pyproject.toml",
 		"types/rust/fixture-db/Cargo.toml",

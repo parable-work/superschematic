@@ -87,7 +87,7 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
-		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 {
+		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -185,6 +185,10 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	for _, ref := range def.Behaviors {
 		e.emitBehavior(def.Name, ref)
 	}
+	if def.Display != nil {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("display"), displayArgs(def.Display))
+	}
+	e.emitStackDeclarations(def)
 
 	fmt.Fprintf(&e.body, "export abstract class %s%s {\n", e.ident(def.Name, "type"), e.heritageClause(def))
 
@@ -222,6 +226,58 @@ func (e *emitter) emitBehavior(typeName string, ref ir.BehaviorRef) {
 		return
 	}
 	fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("behavior"), quote(ref.Name), valueLiteral(config))
+}
+
+// displayArgs renders @display's argument with its members in the IR's
+// order, and states and transitions by key.
+func displayArgs(d *ir.TypeDisplay) string {
+	var parts []string
+	text := func(key, value string) {
+		if value != "" {
+			parts = append(parts, key+": "+quote(value))
+		}
+	}
+	text("noun", d.Noun)
+	text("plural", d.Plural)
+	text("titleField", d.TitleField)
+	text("createLabel", d.CreateLabel)
+	if len(d.SummaryFields) > 0 {
+		names := make([]string, len(d.SummaryFields))
+		for i, name := range d.SummaryFields {
+			names[i] = quote(name)
+		}
+		parts = append(parts, "summaryFields: ["+strings.Join(names, ", ")+"]")
+	}
+	if len(d.States) > 0 {
+		states := make([]string, 0, len(d.States))
+		for _, name := range sortedKeys(d.States) {
+			state := d.States[name]
+			var members []string
+			if state.Label != "" {
+				members = append(members, "label: "+quote(state.Label))
+			}
+			if state.ActiveForm != "" {
+				members = append(members, "activeForm: "+quote(state.ActiveForm))
+			}
+			if state.Tone != "" {
+				members = append(members, "tone: "+quote(string(state.Tone)))
+			}
+			states = append(states, propertyName(name)+": { "+strings.Join(members, ", ")+" }")
+		}
+		parts = append(parts, "states: { "+strings.Join(states, ", ")+" }")
+	}
+	if len(d.Transitions) > 0 {
+		froms := make([]string, 0, len(d.Transitions))
+		for _, from := range sortedKeys(d.Transitions) {
+			tos := make([]string, 0, len(d.Transitions[from]))
+			for _, to := range sortedKeys(d.Transitions[from]) {
+				tos = append(tos, propertyName(to)+": "+quote(d.Transitions[from][to]))
+			}
+			froms = append(froms, propertyName(from)+": { "+strings.Join(tos, ", ")+" }")
+		}
+		parts = append(parts, "transitions: { "+strings.Join(froms, ", ")+" }")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 func versionedConfigArgs(cfg *ir.VersionedConfig) string {

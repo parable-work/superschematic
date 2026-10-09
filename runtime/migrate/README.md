@@ -315,12 +315,17 @@ give it, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT on its
 views, and USAGE and SELECT on its sequences: the objects the user owns,
 or a role it inherits owns, outside the system schemas and the runner's
 state tables, which no extension owns. Then it takes every privilege on
-those objects and schemas back from any other role the user gave them to,
-all in one transaction, so the roles listed are the roles that hold them.
+those objects, and USAGE on those schemas, back from any other role the
+user gave them to, all in one transaction, so the roles listed are the
+roles that hold them. A role the user is granted, such as
+`cloudsqlsuperuser` on Cloud SQL, keeps what it holds.
 An empty `readWrite` takes every such grant back. Only the Postgres
 driver gives privileges.
 
-Exit codes: 0 done, 1 refused or failed, 2 usage.
+Exit codes: 0 done, 1 refused or failed, 2 usage. A job that fails writes
+its error to stderr on a line that begins `superschematic-migrate: `,
+which a gcp deploy reads from the execution's logs and reports; a failed
+step's statement follows on the lines after it.
 
 ## Layout
 

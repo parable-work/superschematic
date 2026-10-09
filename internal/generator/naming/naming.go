@@ -111,6 +111,10 @@ type Naming struct {
 	// TypeScript types import when their schema declares a graph.
 	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
 
+	// EngineNpmPackage is the engine (D16), whose ./client subpath the
+	// module `superschematic engine-client` writes imports (D49).
+	EngineNpmPackage string `toml:"engine_npm_package"`
+
 	// VersionGraphPyPIDist and VersionGraphPythonModule are the Python
 	// version-graph runtime (D19): the engine, its Postgres adapter and the
 	// facade base, which the generated Python types depend on and import
@@ -229,11 +233,15 @@ func (d DerivedFieldsConfig) FieldNames() ir.DerivedFieldNames {
 // superschematic.toml: where each API service's implementation lives, per
 // language, as a path from the repository root (the parent of the schemas
 // root) in which `{service}` stands for the service's name
-// (docs/stack-model.md, section 8.5). The build scaffolds a missing
-// implementation there.
+// (docs/stack-model.md, sections 8.5 and 8.6). The build scaffolds a
+// missing implementation there.
 type ImplementationPathsConfig struct {
 	// Go is the Go implementation's package directory: "go/{service}".
 	Go string `toml:"go"`
+
+	// TypeScript is the TypeScript implementation's package directory:
+	// "typescript/{service}" (D51).
+	TypeScript string `toml:"typescript"`
 }
 
 // ServicePathPlaceholder is what an implementation path template replaces
@@ -250,18 +258,41 @@ func (n Naming) GoImplementationDir(repoRoot, service string) string {
 	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(template, ServicePathPlaceholder, service)))
 }
 
-// check refuses an absolute template, which GoImplementationDir would join
-// under the root, and one without the service, which would put every
-// service's implementation in one package.
+// TypeScriptImplementationDir resolves the TypeScript implementation path
+// of service against repoRoot (D51).
+func (n Naming) TypeScriptImplementationDir(repoRoot, service string) string {
+	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(n.typeScriptImplementationTemplate(), ServicePathPlaceholder, service)))
+}
+
+// TypeScriptImplementationGlob is the [implementation_paths] typescript
+// template with `*` for the service, slash-separated and relative to the
+// repository root: the Bun workspace's pattern for every TypeScript
+// implementation (D51).
+func (n Naming) TypeScriptImplementationGlob() string {
+	return strings.ReplaceAll(n.typeScriptImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+func (n Naming) typeScriptImplementationTemplate() string {
+	if n.ImplementationPaths.TypeScript != "" {
+		return n.ImplementationPaths.TypeScript
+	}
+	return Default().ImplementationPaths.TypeScript
+}
+
+// check refuses an absolute template, which the ImplementationDir
+// functions would join under the root, and one without the service,
+// which would put every service's implementation in one package.
 func (c ImplementationPathsConfig) check() error {
-	if c.Go == "" {
-		return nil
-	}
-	if isAbsPath(c.Go) {
-		return fmt.Errorf("implementation_paths.go %q is an absolute path: it is relative to the parent of the schemas root", c.Go)
-	}
-	if !strings.Contains(c.Go, ServicePathPlaceholder) {
-		return fmt.Errorf("implementation_paths.go %q does not contain %s: each API service has a package of its own", c.Go, ServicePathPlaceholder)
+	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}} {
+		if t.template == "" {
+			continue
+		}
+		if isAbsPath(t.template) {
+			return fmt.Errorf("implementation_paths.%s %q is an absolute path: it is relative to the parent of the schemas root", t.key, t.template)
+		}
+		if !strings.Contains(t.template, ServicePathPlaceholder) {
+			return fmt.Errorf("implementation_paths.%s %q does not contain %s: each API service has a package of its own", t.key, t.template, ServicePathPlaceholder)
+		}
 	}
 	return nil
 }
@@ -332,9 +363,20 @@ type PathsConfig struct {
 	HTTPRuntimeGo string `toml:"http_runtime_go"`
 	// HTTPRuntimeRust holds the http runtime Rust crate.
 	HTTPRuntimeRust string `toml:"http_runtime_rust"`
+	// HTTPRuntimeTypeScript holds the http runtime's npm package (its
+	// package.json), which the output root's Bun workspace overrides the
+	// generated packages' dependency on it with (D51).
+	HTTPRuntimeTypeScript string `toml:"http_runtime_typescript"`
 	// Ptr holds the ptr Go module when it is a module of its own rather
 	// than a package of the schema runtime.
 	Ptr string `toml:"ptr"`
+	// BuildContext is the build context of the server images a stack's
+	// build writes Dockerfiles for (docs/stack-model.md, section 8.2):
+	// every module a server's go.mod points at must lie under it. Unset,
+	// it is the repository root itself. A project whose runtime modules
+	// lie above the parent of the schemas root, as in a checkout of the
+	// compiler, names the directory that holds both.
+	BuildContext string `toml:"build_context"`
 }
 
 // LocalPaths is PathsConfig resolved against a repository root: every set
@@ -352,7 +394,9 @@ type LocalPaths struct {
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
+	HTTPRuntimeTypeScript  string
 	Ptr                    string
+	BuildContext           string
 }
 
 // LocalPaths resolves the [paths] table against repoRoot.
@@ -376,8 +420,19 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
+		HTTPRuntimeTypeScript:  resolve(n.Paths.HTTPRuntimeTypeScript),
 		Ptr:                    resolve(n.Paths.Ptr),
+		BuildContext:           resolve(n.Paths.BuildContext),
 	}
+}
+
+// BuildContext returns the build context of the stack's server images:
+// [paths] build_context resolved against repoRoot, else repoRoot.
+func (n Naming) BuildContext(repoRoot string) string {
+	if n.Paths.BuildContext == "" {
+		return repoRoot
+	}
+	return filepath.Join(repoRoot, filepath.FromSlash(n.Paths.BuildContext))
 }
 
 // checkRelative returns an error naming the first key whose value is an
@@ -397,7 +452,9 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
+		{"http_runtime_typescript", p.HTTPRuntimeTypeScript},
 		{"ptr", p.Ptr},
+		{"build_context", p.BuildContext},
 	} {
 		if strings.HasPrefix(entry.value, "/") || filepath.IsAbs(entry.value) {
 			return fmt.Errorf("paths.%s %q is an absolute path: [paths] values are relative to the parent of the schemas root", entry.key, entry.value)
@@ -426,6 +483,65 @@ func RelPath(outputDir, target string) (string, error) {
 		return "", fmt.Errorf("relate %s to %s: %w", target, outputDir, err)
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+// PhysicalRelPath is RelPath for a path a package manager resolves, such
+// as a package.json's file: dependency or a Bun workspace's pattern. Bun
+// resolves it from the directory it runs in, whose path the kernel reports
+// with its symbolic links resolved, so a path that climbs out of a linked
+// directory, such as a temporary output root under macOS's /var, which
+// links to /private/var, climbs out of the link's target instead. The path
+// it returns climbs from outputDir's physical path to that of the deepest
+// directory outputDir and target share, then descends to target as
+// target names it, through any link on the way. Where no link is involved
+// it is RelPath's.
+func PhysicalRelPath(outputDir, target string) (string, error) {
+	if target == "" || outputDir == "" {
+		return "", nil
+	}
+	absOutput, err := filepath.Abs(outputDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", target, err)
+	}
+	common := absOutput
+	for {
+		if r, err := filepath.Rel(common, absTarget); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			break
+		}
+		parent := filepath.Dir(common)
+		if parent == common {
+			break
+		}
+		common = parent
+	}
+	up, err := filepath.Rel(physicalPath(absOutput), physicalPath(common))
+	if err != nil {
+		return "", fmt.Errorf("relate %s to %s: %w", common, outputDir, err)
+	}
+	down, err := filepath.Rel(common, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("relate %s to %s: %w", target, common, err)
+	}
+	return filepath.ToSlash(filepath.Join(up, down)), nil
+}
+
+// physicalPath is path with the symbolic links of its deepest existing
+// ancestor resolved, and the rest as it is.
+func physicalPath(path string) string {
+	rest := ""
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		if filepath.Dir(dir) == dir {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+	}
 }
 
 // CacheConfig is the [cache] table of superschematic.toml. Both keys are
@@ -498,6 +614,7 @@ func Default() Naming {
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
 		VersionGraphNpmPackage:   "@superschematic/versiongraph",
+		EngineNpmPackage:         "@superschematic/engine",
 		VersionGraphPyPIDist:     "superschematic-versiongraph",
 		VersionGraphPythonModule: "superschematic_versiongraph",
 		SchemaLanguage:           "Superschematic",
@@ -512,7 +629,8 @@ func Default() Naming {
 			Service:  ir.DefaultServiceField,
 		},
 		ImplementationPaths: ImplementationPathsConfig{
-			Go: "go/" + ServicePathPlaceholder,
+			Go:         "go/" + ServicePathPlaceholder,
+			TypeScript: "typescript/" + ServicePathPlaceholder,
 		},
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -555,6 +673,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
+	fill(&n.EngineNpmPackage, d.EngineNpmPackage)
 	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
 	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
@@ -567,6 +686,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
 	fill(&n.DerivedFields.Service, d.DerivedFields.Service)
 	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
+	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -700,6 +820,41 @@ func (n Naming) NpmSDKPackage(schemaName string) string {
 // server.
 func (n Naming) NpmAPIPackage(schemaName string) string {
 	return n.NpmScope + "/" + schemaName + "-api"
+}
+
+// NpmImplementationPackage returns the npm name the scaffold gives an API
+// service's TypeScript implementation (D51), which the engineer may
+// rename. NpmServicePackage is the service's authoring package, so the
+// implementation takes a suffix of its own.
+func (n Naming) NpmImplementationPackage(schemaName string) string {
+	return n.NpmScope + "/" + schemaName + "-implementation"
+}
+
+// NpmServerPackage returns the npm name of the entrypoint package of a
+// TypeScript server of a stack (D51): the stack's name and the server's,
+// in lower case with a hyphen before each capital (ShopStorefront is
+// shop-storefront), and a suffix of its own.
+func (n Naming) NpmServerPackage(stack, server string) string {
+	var b strings.Builder
+	for i, r := range server {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				if prev := server[i-1]; prev != '-' && prev != '_' && (prev < 'A' || prev > 'Z') {
+					b.WriteByte('-')
+				}
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return n.NpmScope + "/" + strings.ToLower(stack) + "-" + b.String() + "-server"
+}
+
+// NpmWorkspacePackage returns the npm name of the Bun workspace root the
+// output root holds (D51). No generated package or implementation takes
+// it: each of theirs ends in a suffix.
+func (n Naming) NpmWorkspacePackage() string {
+	return n.NpmScope + "/workspace"
 }
 
 // PythonTypesModule returns the Python module name for a schema stem (the

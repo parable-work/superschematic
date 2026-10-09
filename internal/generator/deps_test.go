@@ -251,6 +251,16 @@ func TestTheImplementationBuildsFromDeps(t *testing.T) {
 	if !errors.As(err, &appErr) || appErr.HTTPStatus() != http.StatusNotImplemented {
 		t.Errorf("GetOrder: %v, want a 501 not-implemented error", err)
 	}
+
+	// The jobs are built from the same Deps, and each fails until it is
+	// implemented.
+	jobs, err := impl.NewJobs(api.Deps{Config: *cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.ShipOrders(context.Background()); !errors.As(err, &appErr) || appErr.HTTPStatus() != http.StatusNotImplemented {
+		t.Errorf("ShipOrders: %v, want a not-implemented error", err)
+	}
 }
 `
 	if err := os.WriteFile(filepath.Join(implDir, "deps-orders", "deps_test.go"), []byte(test), 0o644); err != nil {

@@ -18,6 +18,16 @@
       "types": "./router.ts",
       "import": "./router.ts"
     },
+    "./deps": {
+      "types": "./deps.ts",
+      "import": "./deps.ts"
+    },
+{{- if .HasEnvConfig }}
+    "./config": {
+      "types": "./config.ts",
+      "import": "./config.ts"
+    },
+{{- end }}
     "./openapi.json": "./openapi.json"
 {{- if .PermissionCatalogJSON }},
     "./permissions.json": "./permissions.json"
@@ -41,11 +51,22 @@
 {{- range $i, $pkg := .PeerPackages }}
     "{{ $pkg }}": "*",
 {{- end }}
+{{- range .DepsPeerPackages }}
+    "{{ . }}": "*",
+{{- end }}
     "{{ .RuntimePackage }}": "*",
+{{- if .Deps.Database }}
+    "hono": "{{ .HonoVersion }}",
+    "pg": "{{ .PGPeerRange }}"
+{{- else }}
     "hono": "{{ .HonoVersion }}"
+{{- end }}
   },
   "devDependencies": {
-    "@types/node": "22.19.9",
+    "@types/node": "{{ .NodeTypesVersion }}",
+{{- if .Deps.Database }}
+    "@types/pg": "{{ .PGTypesVersion }}",
+{{- end }}
     "hono": "{{ .HonoVersion }}",
     "typescript": "{{ .TSVersion }}"
   }

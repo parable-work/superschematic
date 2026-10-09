@@ -143,7 +143,7 @@ for (const driver of drivers) {
       assert.equal((await call(served.app, 'POST', '/namespaces/default/schemas/Task/publish', { token: ada })).status, 200);
       const created = await call(served.app, 'POST', TASKS, { token: ada, body: { id: 't1', data: { title: 'Write the docs' } } });
       assert.equal(created.status, 201, JSON.stringify(created.body));
-      assert.deepEqual([created.body.data.createdBy, created.body.data.data.status], [served.users['ada@example.com'], 'todo']);
+      assert.deepEqual([created.body.data.createdBy, created.body.data.behaviors.Workflow.status], [served.users['ada@example.com'], 'todo']);
 
       const rob = await login(served, 'rob@example.com');
       assert.deepEqual(outcome(await call(served.app, 'POST', TASKS, { token: rob, body: { data: { title: 'Not his' } } })), [403, 'forbidden']);
@@ -285,6 +285,18 @@ describe('engineCapabilities', () => {
     // default and east reach common's Shared too: five schemas, four actions each.
     assert.equal(Object.keys(engineCapabilities(engine, owner)).length, 5 * 4);
   });
+
+  test('an archived namespace, which refuses every write, answers write, define and publish false', () => {
+    const engine = openTestEngine({ policy: () => true });
+    const owner: Principal = { subject: 'owner', permissions: [] };
+    engine.namespaces.create(owner, 'acme');
+    engine.schemas.define(owner, schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' } }]), { namespace: 'acme' });
+    engine.schemas.publish(owner, 'Note', { namespace: 'acme' });
+    const acme = () => Object.fromEntries(Object.entries(engineCapabilities(engine, owner)).filter(([key]) => key.startsWith('acme/')));
+    assert.deepEqual(acme(), { 'acme/Note.define': true, 'acme/Note.publish': true, 'acme/Note.read': true, 'acme/Note.write': true });
+    engine.namespaces.archive(owner, 'acme');
+    assert.deepEqual(acme(), { 'acme/Note.define': false, 'acme/Note.publish': false, 'acme/Note.read': true, 'acme/Note.write': false });
+  });
 });
 
 describe('permissionPolicy', () => {
@@ -305,6 +317,16 @@ describe('permissionPolicy', () => {
     assert.equal(policy(request([], 'read')), false);
     assert.equal(permissionPolicy({ permissionMatcher: () => true })(request([], 'define')), true);
     assert.throws(() => permissionPolicy({ permissionMatcher: 'root' as never }), /permissionMatcher is a function/);
+  });
+
+  test("refuses a question that names no schema: a namespace's own, and a listing question", () => {
+    // A permission named after no schema is no namespace permission.
+    const principal: Principal = { subject: 'u', permissions: ['undefined', 'undefined.manage'] };
+    for (const policy of [permissionPolicy(), permissionPolicy({ permissionMatcher: () => true })]) {
+      assert.equal(policy({ principal, action: 'manage', namespace: 'acme', operation: 'create' }), false);
+      assert.equal(policy({ principal, action: 'define', namespace: 'default', listing: true }), false);
+      assert.equal(policy({ principal, action: 'manage', namespace: 'default', operation: 'list', listing: true }), false);
+    }
   });
 
   test("in an engine it matches with the engine's permissionMatcher, unless it was given its own", () => {

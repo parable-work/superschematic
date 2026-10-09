@@ -68,7 +68,7 @@
                   "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
                 },
                 "revised": {
-                  "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a pinned link, only an instance the new revision leaves stale.",
+                  "description": "The rule fires on an instance when the instance its link points to gains a new revision of Revisions, or, when its schema composes Branches, a new release (releaseCommit). For a link pinned to a revision, only an instance a new revision leaves stale, and for one pinned to a release, only an instance a new release leaves stale.",
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["link"],

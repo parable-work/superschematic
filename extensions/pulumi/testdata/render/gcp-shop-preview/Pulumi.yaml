@@ -160,8 +160,6 @@ resources:
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
-        scaling:
-          minInstanceCount: 0
         serviceAccount: ${Orders-account.email}
         volumes:
           - cloudSqlInstance:
@@ -470,8 +468,6 @@ resources:
             volumeMounts:
               - mountPath: /cloudsql
                 name: cloudsql
-        scaling:
-          minInstanceCount: 0
         serviceAccount: ${shop-api-account.email}
         volumes:
           - cloudSqlInstance:
@@ -519,6 +515,165 @@ resources:
     options:
       dependsOn:
         - ${parent-stack}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-account:
+    name: shop-orders-ship-orders.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: shop-orders-ship-orders-pr${pr}
+      displayName: Shop Preview job shop-orders-ship-orders
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-cloudsql-client-shop-db:
+    name: shop-orders-ship-orders.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-cloudsql-login-shop-db:
+    name: shop-orders-ship-orders.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-database-user-shop-db:
+    name: shop-orders-ship-orders.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      deletionPolicy: ABANDON
+      instance: ${parent-stack.outputs["shop-db.instance.name"]}
+      name: shop-orders-ship-orders-pr${pr}@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${parent-stack}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase rollout; owners shop-orders-ship-orders
+  shop-orders-ship-orders-job:
+    name: shop-orders-ship-orders.job
+    type: gcp:cloudrunv2/job:Job
+    properties:
+      deletionProtection: false
+      location: us-east1
+      name: shop-orders-ship-orders-pr${pr}
+      project: acme-staging
+      template:
+        taskCount: 1
+        template:
+          containers:
+            - envs:
+                - name: FULFILLMENT_REGION
+                  value: us
+                - name: MAX_LINE_ITEMS
+                  value: "50"
+                - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+                  value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api-pr${pr}
+                - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+                  value: google-id-token
+                - name: SHOP_API_SERVICE_URL
+                  value: ${shop-api-service.uri}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                  value: ${shop-db-database-shop-db.name}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                  value: ${parent-stack.outputs["shop-db.instance.connectionName"]}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                  value: shop-orders-ship-orders-pr${pr}@acme-staging.iam
+                - name: STRIPE_KEY
+                  valueSource:
+                    secretKeyRef:
+                      secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.secretId"]}
+                      version: latest
+              image: us-east1-docker.pkg.dev/acme-staging/shop/shop-orders-ship-orders
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - mountPath: /cloudsql
+                  name: cloudsql
+          maxRetries: 1
+          serviceAccount: ${shop-orders-ship-orders-account.email}
+          timeout: 300s
+          volumes:
+            - cloudSqlInstance:
+                instances:
+                  - ${parent-stack.outputs["shop-db.instance.connectionName"]}
+              name: cloudsql
+          vpcAccess:
+            egress: ALL_TRAFFIC
+            networkInterfaces:
+              - network: ${parent-stack.outputs["network.name"]}
+                subnetwork: ${parent-stack.outputs["network.subnet.name"]}
+    options:
+      dependsOn:
+        - ${parent-stack}
+        - ${shop-api-service}
+        - ${shop-db-database-shop-db}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY:
+    name: shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
+    options:
+      dependsOn:
+        - ${parent-stack}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase rollout; owners http:shop-orders-ship-orders->shop-api
+  shop-orders-ship-orders-run-invoker-shop-api:
+    name: shop-orders-ship-orders.run-invoker.shop-api
+    type: gcp:cloudrunv2/serviceIamMember:ServiceIamMember
+    properties:
+      location: us-east1
+      member: ${shop-orders-ship-orders-account.member}
+      name: ${shop-api-service.name}
+      project: acme-staging
+      role: roles/run.invoker
+    options:
+      dependsOn:
+        - ${shop-api-service}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-trace-agent:
+    name: shop-orders-ship-orders.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
       version: 9.37.1
 outputs:
   Orders.account.email: ${Orders-account.email}
@@ -572,3 +727,13 @@ outputs:
   shop-db.instance.id: ${parent-stack.outputs["shop-db.instance.id"]}
   shop-db.instance.name: ${parent-stack.outputs["shop-db.instance.name"]}
   shop-db.migrator.id: ${parent-stack.outputs["shop-db.migrator.id"]}
+  shop-orders-ship-orders.account.email: ${shop-orders-ship-orders-account.email}
+  shop-orders-ship-orders.account.id: ${shop-orders-ship-orders-account.id}
+  shop-orders-ship-orders.account.member: ${shop-orders-ship-orders-account.member}
+  shop-orders-ship-orders.cloudsql-client.shop-db.id: ${shop-orders-ship-orders-cloudsql-client-shop-db.id}
+  shop-orders-ship-orders.cloudsql-login.shop-db.id: ${shop-orders-ship-orders-cloudsql-login-shop-db.id}
+  shop-orders-ship-orders.database-user.shop-db.id: ${shop-orders-ship-orders-database-user-shop-db.id}
+  shop-orders-ship-orders.job.id: ${shop-orders-ship-orders-job.id}
+  shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
+  shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
+  shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}

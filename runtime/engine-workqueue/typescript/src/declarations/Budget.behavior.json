@@ -38,20 +38,14 @@
       "meters": {
         "additionalProperties": {
           "additionalProperties": false,
-          "not": {
-            "required": [
-              "limit",
-              "limitField"
-            ]
-          },
           "properties": {
             "limit": {
-              "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.",
+              "description": "The most the instance may have used and reserved together; with limitField, the limit while the field holds no value of at least 0. No limit of its own when neither gives one.",
               "minimum": 1,
               "type": "integer"
             },
             "limitField": {
-              "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+              "description": "An integer field of the type that holds the instance's limit; while it holds no value of at least 0, limit is the limit, and without limit there is none. Only a principal with limitPermission changes it once the instance exists.",
               "minLength": 1,
               "type": "string"
             },
@@ -109,7 +103,7 @@
   },
   "fields": [
     {
-      "name": "budget",
+      "name": "meters",
       "description": "Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0."
     }
   ],
@@ -183,7 +177,7 @@
               "additionalProperties": false,
               "properties": {
                 "hears": {
-                  "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope's data, and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
+                  "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope as a read returns it (/behaviors/Budget/meters/<meter>/remaining, /behaviors/Links/targets/<link>), and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
                   "items": {
                     "additionalProperties": false,
                     "properties": {

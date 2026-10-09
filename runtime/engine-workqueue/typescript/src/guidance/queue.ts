@@ -5,20 +5,32 @@ out of it, each from the config and the behaviors the type composes. It
 adds claim_required to Lease's acquire, which a claim takes instead.
 */
 
-import type { BehaviorGuidance, DescribeTarget } from '@superschematic/engine';
+import { linkPin, type BehaviorGuidance, type DescribeTarget } from '@superschematic/engine';
 
 import type { QueueConfig } from '../queue.js';
 import { list, sentences } from './text.js';
 
 const TOKEN = 'preconditions {"Lease": {"token": n}}';
 
+// pinned says what the links excludeStale names pin, read from the type's
+// Links config: a revision, a release, or either.
+function pinned(config: QueueConfig, target: DescribeTarget): { one: string; newest: string } {
+  const links = (target.configs.Links as { links?: Readonly<Record<string, unknown>> } | undefined)?.links ?? {};
+  const pins = new Set(config.excludeStale.map((name) => (Object.prototype.hasOwnProperty.call(links, name) ? linkPin(links[name]) : undefined)));
+  if (pins.has('release')) {
+    return pins.has('revision') ? { one: 'a revision or a release', newest: 'revision or release' } : { one: 'a release', newest: 'release' };
+  }
+  return { one: 'a revision', newest: 'revision' };
+}
+
 export function queueGuidance(config: QueueConfig, target: DescribeTarget): BehaviorGuidance {
   const from = list(config.claim.from, 'or');
+  const pin = pinned(config, target);
   const out = [
     config.dependencies ? 'blocked' : undefined,
     config.retries ? 'exhausted (Retries)' : undefined,
     config.budget ? 'over its budget, here or in an enclosing scope (Budget)' : undefined,
-    config.excludeStale.length > 0 ? `pinned through ${list(config.excludeStale, 'or')} to a revision its target has moved past` : undefined,
+    config.excludeStale.length > 0 ? `pinned through ${list(config.excludeStale, 'or')} to ${pin.one} its target has moved past` : undefined,
     config.maxExpiries === undefined ? undefined : `at ${config.maxExpiries} lease expiries`,
     config.assignment ? 'assigned to another principal' : undefined,
   ].filter((part): part is string => part !== undefined);
@@ -38,7 +50,7 @@ export function queueGuidance(config: QueueConfig, target: DescribeTarget): Beha
           { code: 'not_claimable', commonCorrection: `None now: only an instance in ${from} is claimed. Call claimNext for work that is.` },
           ...(config.dependencies ? [{ code: 'blocked', commonCorrection: 'Wait for its blockers to finish, or take other work with claimNext.' }] : []),
           ...(config.excludeStale.length > 0
-            ? [{ code: 'stale_link', commonCorrection: `Link ${list(config.excludeStale, 'or')} to its target's newest revision first, or take other work.` }]
+            ? [{ code: 'stale_link', commonCorrection: `Link ${list(config.excludeStale, 'or')} to its target's newest ${pin.newest} first, or take other work.` }]
             : []),
         ],
       },

@@ -71,15 +71,17 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | --- | --- | --- | --- |
 | database | one or more DB schemas | a SQL connection per hosted schema | nothing |
 | server | one or more API schemas | an HTTP endpoint per served API | a connection to each served API's database; the address of each service it calls |
+| job | one `@job` of an API schema | a run to completion, on a schedule or on demand | its API's needs: the same connection and addresses (D52) |
 
-Jobs, scheduled jobs, buckets, queues and static sites come later. Each
-lands the same way: a deployable kind, a platform per target that realizes
-it (section 6.1), and the edges it takes part in.
+Workers, buckets, queues and static sites come later. Each lands the same
+way: a deployable kind, a platform per target that realizes it (section
+6.1), and the edges it takes part in.
 
 ### 3.2 Defaults
 
-With nothing declared, each API service in a stack is one server and each
-DB service is one database. A deployable is declared only to change that:
+With nothing declared, each API service in a stack is one server, each
+`@job` of an API service is one job, and each DB service is one database.
+A deployable is declared only to change that:
 
 - to run several APIs in one process;
 - to host several DB schemas on one database.
@@ -93,8 +95,14 @@ An edge is a need met by something that provides it. v1 has two kinds:
 
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
-| sql | server | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
-| http | server | server | `calls` in the config of each API the calling server serves |
+| sql | server or job | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
+| http | server or job | server | `calls` in the config of each API the calling server serves |
+
+A job takes its API's edges, from itself (D52): the sql edge to the API's
+database and an http edge to the server of each API its API calls. A job
+of an API that a declared server serves with the API it calls still
+calls over HTTP, with a credential, since it runs in a process of its
+own.
 
 `calls` is the one wiring fact a person writes, because no schema says that
 one API's implementation calls another API. It sits in the API service's
@@ -179,7 +187,7 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   config (`PlatformSpec.IdentityConfig`), as the `local` platform's turns
   the session cookie's `Secure` off over plain HTTP; without either it is
   unbound, and the server runs with the runtime's defaults. Its binding
-  names the API in `identityOf`.
+  names the API in `identityOf`. A job has none (section 8.7).
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -190,11 +198,13 @@ The Go loader has the first two. The API package's `EnvConfig` embeds the
 reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
-that the platform sets, not a deployment's values. The TypeScript and Rust
-loaders read no derived field yet (section 12). The callers field is in
-neither `EnvConfig` nor `values-schema.json`, since its variables follow
-the environment's edges: the generated entrypoint reads it with
-`stackconfig.LoadCallers` (section 8.1).
+that the platform sets, not a deployment's values. The callers field is
+in neither Go's `EnvConfig` nor `values-schema.json`, since its variables
+follow the environment's edges: the generated entrypoint reads it with
+`stackconfig.LoadCallers` (section 8.1). The TypeScript API package's
+`EnvConfig` holds all three, read through the TypeScript HTTP runtime's
+readers (section 8.6). The Rust loader reads no derived field yet (section
+12).
 
 What a connector derives for each edge kind has a contract, in
 `ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
@@ -300,6 +310,7 @@ export abstract class Staging {}
   settings: [
     { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
     { of: Backend, minInstances: 1, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, job: "ShipOrders", schedule: "*/5 * * * *" },
   ],
 })
 export abstract class Production {}
@@ -332,12 +343,21 @@ export abstract class Preview extends Staging {}
   Production omits `dns` and gets the target's default, Cloud DNS.
 - **`settings`** sets values per deployable. `of` is a service handle or
   an `@server` or `@database` class. `platform` places the deployable on
-  another platform than the target's, and every key but `of`, `platform`
-  and `env` is a platform setting, which the loader checks against that
-  platform's settings schema. `env` binds the server's `@envVars` fields,
-  each to a literal or to `{ parameter }`, a parameter of the environment
-  that the deploy run supplies. tsc checks the same in the editor
-  (section 4.3).
+  another platform than the target's, and every key but `of`, `job`,
+  `platform`, `env`, `schedule`, `timeZone` and `enabled` is a platform
+  setting, which the loader checks against that platform's settings
+  schema. `env` binds the server's `@envVars` fields, each to a literal
+  or to `{ parameter }`, a parameter of the environment that the deploy
+  run supplies. tsc checks the same in the editor (section 4.3).
+- **A job's settings** name the job beside its API's handle: `{ of:
+  ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone:
+  "America/New_York", enabled: false }` (D52). `schedule` and `timeZone`
+  replace the `@job` decorator's, and `enabled` turns the schedule on or
+  off; every other key is the job platform's setting, and `env` binds the
+  job's fields, its API's, over what the API's server is given. Settings
+  merge over the `extends` chain as a server's do. A schedule runs unless
+  the settings turn it off, except in a parameterized environment, whose
+  members run none unless their settings turn it on (section 8.7).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
   makes it a family of environments, one per value (section 5.4). An
   `@environment` class extends only another `@environment` class.
@@ -353,14 +373,19 @@ declared, which the generated CI deploys them in (section 11.3). The
 TypeScript reader numbers each `@environment` class
 (`EnvironmentDecl.Order`): schema files in path order, and the classes of
 a file in source order. A data form writes `order` itself, and an
-environment without one comes after those with one, by name (D47).
+environment without one comes after those with one, by name (D47); the
+kind's verification refuses two environments with one order. The
+TypeScript writer writes the environment classes last, in their order,
+and leaves the property out.
 
 Every declaration has the JSON and YAML data forms every schema has. A
 class is a type, and its declaration the key the decorator writes. A
 handle is written `{name, kind}`, and a settings `of` or an `expose` entry
-`{service: {name, kind}}` or `{deployable: Backend}`. The target's values
-are `values`, the DNS platform `{platform, values}`, an env value `{value}`
-or `{parameter}`, and the parent the type's `extends`:
+`{service: {name, kind}}` or `{deployable: Backend}`, and a job's `of`
+`{service: {name, kind}, job: ShipOrders}`. The target's values are
+`values`, a job's `schedule`, `timeZone` and `enabled` keys of their own,
+the DNS platform `{platform, values}`, an env value `{value}` or
+`{parameter}`, and the parent the type's `extends`:
 
 ```yaml
 types:
@@ -368,6 +393,7 @@ types:
     name: Production
     role: EmbeddedStruct
     environment:
+      order: 3
       target: gcp
       values: { project: acme-prod, region: us-east1 }
       domain: acme.dev
@@ -377,6 +403,8 @@ types:
         - of: { deployable: Backend }
           values: { minInstances: 1 }
           env: { LOG_LEVEL: { value: warn } }
+        - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
+          schedule: "*/5 * * * *"
 ```
 
 A stack is named by no other service, so it has no sentinel, and its
@@ -479,7 +507,11 @@ line that holds it.
   an API without a TypeScript `@envVars` class, and `service()` infers the
   kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
-  so tsc refuses a DB handle there.
+  so tsc refuses a DB handle there. A third parameter, `J`, names an API's
+  jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
+  "ShipOrders">`, with `unknown` for the config type of an API without
+  one. It defaults to `string`, any job, and the sweep keeps it as it
+  keeps the config type.
 - **Targets type their own values and settings.** `@superschematic/stack`
   declares an empty `Targets` interface. Each target's authoring package
   augments it with the target's environment values and a settings type per
@@ -488,7 +520,7 @@ line that holds it.
   ```ts
   declare module "@superschematic/stack" {
     interface Targets {
-      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings };
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings };
     }
   }
   ```
@@ -501,6 +533,9 @@ line that holds it.
   the `settings` tuple. Each element is checked by its `of`:
   - an API handle takes the target's `server` settings, and an `env`
     typed from the handle's config type;
+  - an API handle beside a `job`, which must be one of the handle's jobs,
+    takes the target's `job` settings, a `schedule`, a `timeZone` and
+    `enabled`, and an `env` typed from the handle's config type (D52);
   - a DB handle takes the target's `database` settings and no `env`;
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
@@ -579,8 +614,9 @@ The order comes from the graph:
 
 1. infrastructure;
 2. the migrations' `expand` steps, which the running servers survive;
-3. servers, callees before callers, so a new caller never meets an old
-   callee;
+3. servers and jobs, callees before callers, so a new caller never meets
+   an old callee (a job calls what its API calls, and nothing calls a
+   job);
 4. the migrations' `contract` steps, once no server of the previous
    version runs (D27);
 5. exposure.
@@ -599,7 +635,7 @@ supplies it at run time.
 
 ## 6. Plug-in interfaces
 
-Five registrations keep platforms and tools independent of each other and
+Six registrations keep platforms and tools independent of each other and
 of the core:
 
 - a deployable is placed on a **platform**;
@@ -607,7 +643,9 @@ of the core:
 - a **target** names a platform for each deployable kind;
 - a **DNS platform** holds an environment's domain records (section 6.9);
 - a **provisioner** turns the resulting resource graph into running
-  resources.
+  resources;
+- a **CI renderer** writes a stack's workflow for one CI system from its
+  resolved environments (section 11.3).
 
 ### 6.1 Platform
 
@@ -616,9 +654,10 @@ Cloud SQL databases, local processes, a local Postgres container. It
 registers a `PlatformSpec`:
 
 - `Kind`, the deployable kind, and what it accepts: `Languages` for a
-  server platform, spelt as `outputs.api.language` spells them (`GO`,
-  `TYPESCRIPT`, `RUST`), or `Dialects` for a database platform
-  (`postgres`, `sqlite`), in order of preference;
+  server or job platform, spelt as `outputs.api.language` spells them
+  (`GO`, `TYPESCRIPT`, `RUST`), since a job is written in its API's
+  language, or `Dialects` for a database platform (`postgres`, `sqlite`),
+  in order of preference;
 - `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
 - `IdentityConfig`, for a server platform, the identity config (a JSON
   object) a server on it runs each API over the user model with unless its
@@ -633,8 +672,10 @@ registers a `PlatformSpec`:
   exposed server, the DNS records it needs (section 6.9).
 
 A resource a platform leaves without a phase gets the default of its
-producer: rollout for a server's own resources, infrastructure for a
-database's.
+producer: rollout for a server's or a job's own resources, infrastructure
+for a database's. A job platform's `AddressOf` may return nothing, since
+no edge reaches a job, and its `Lower` reads the job's run from the
+deployable's `Job` (D52).
 
 ### 6.2 Connector
 
@@ -646,6 +687,10 @@ Cloud SQL connection on the service) and the value of the derived binding.
 One connector serves an edge kind between two platforms; a second is
 refused. An http edge between two APIs one server serves runs from the
 server to itself, and its connector derives the server's own address.
+`From` is a server or a job platform: a job takes its API's edges, so a
+target that places jobs registers a connector from its job platform for
+each edge its servers take, which may share the server connector's
+`Connect`.
 
 A generic connector covers a pair of platforms on different providers that
 no specific connector serves, such as a Cloudflare Worker calling a Cloud
@@ -666,7 +711,10 @@ mix with.
 
 A target is a named bundle, registered as a `TargetSpec`, of:
 
-- a platform for each deployable kind;
+- a platform for each deployable kind. A kind it names none for is
+  refused in its environments: a stack whose APIs declare jobs resolves
+  only on a target with a job platform, or with each job placed on one by
+  a settings `platform`;
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
@@ -681,9 +729,9 @@ A target is a named bundle, registered as a `TargetSpec`, of:
 Registry, and a load balancer. `local` is processes, one Postgres container
 per environment and a gitignored secrets file (section 8.3). The core
 registers `local`, so every binary has it. Its resource types are the
-core's own `local` provider's (a container, a database, an edge's key pair
-and a process), not a Pulumi package's, since its own provisioner is the
-only one that applies them.
+core's own `local` provider's (a container, a database, an edge's key
+pair, a process and a job), not a Pulumi package's, since its own
+provisioner is the only one that applies them.
 
 Every deployable records its own placement in the IR from the start; the
 environment's target is only the default. A `settings` entry can place one
@@ -935,10 +983,11 @@ last part is not built: the Stack IR has no field for the program yet.
 
 ### 6.7 Registry surface
 
-There are five specs, registered like the others in section 3 of
+There are six specs, registered like the others in section 3 of
 `docs/extension-model.md`. The core registers one target, `local`, with
 its platforms, connectors and provisioner (section 8.3, and D30, amended:
-the core registers the local target); every other is an extension's.
+the core registers the local target), and one CI renderer, `github`
+(D47); every other is an extension's.
 
 - `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a server platform without languages or a
@@ -953,7 +1002,9 @@ the core registers the local target); every other is an extension's.
   unknown deployable kind, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
   with a different schema, and a policy rule without a name or a check, or
-  with a repeated name.
+  with a repeated name, and a deploy seam it cannot use (section 11.1):
+  any but `Secrets` without a provisioner, and `Bootstrap`, `Migrations`,
+  `Builder` or `CI` without `State`.
 - `RegisterDNSPlatform(DNSPlatformSpec)` refuses a malformed or repeated
   name, the reserved name `manual`, a values or resource type schema that
   does not compile, a resource type a target or another DNS platform
@@ -963,7 +1014,12 @@ the core registers the local target); every other is an extension's.
   name the secrets its provider reads when the provisioner runs (section
   6.9).
 - `RegisterProvisioner(ProvisionerSpec)` refuses a malformed or repeated
-  name and a missing implementation.
+  name, a missing implementation, and a tool without a name or a version,
+  or listed twice. Its `Tools` are the command-line tools it runs, which
+  a generated CI job installs (section 11.3).
+- `RegisterCIRenderer(CIRendererSpec)` refuses a malformed or repeated
+  name, a missing `Render`, and an install directory that is not a
+  relative path inside the repository.
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector joins registered platforms of the
@@ -1122,14 +1178,15 @@ change reads as a diff.
 
 ## 7. The gcp target
 
-`extensions/gcp` builds this section: the target, its Cloud Run and Cloud
-SQL platforms, their connectors, the Cloud DNS platform, the policy
-rules, the pinned provider schemas (section 6.4), at pulumi-gcp 9.37.1,
-bootstrap with the target's Secret Manager store and state bucket
-(section 7.3), image builds on Cloud Build, and the migration job
-(section 8.4, D46). Its golden
-environments resolve the acme-shop stack of section 4.1 in a staging, a
-production and a parameterized preview environment.
+`extensions/gcp` builds this section: the target, its Cloud Run, Cloud
+Run job and Cloud SQL platforms, their connectors, the Cloud DNS
+platform, the policy rules, the pinned provider schemas (section 6.4), at
+pulumi-gcp 9.37.1, bootstrap with the target's Secret Manager store and
+state bucket (section 7.3), image builds on Cloud Build, the migration
+job (section 8.4, D46), and a job's run on demand (section 8.7, D52). Its
+golden environments resolve the acme-shop stack of section 4.1,
+shop-orders' job included, in a staging, a production and a parameterized
+preview environment.
 
 ### 7.1 What the engineer enters
 
@@ -1156,13 +1213,15 @@ Bootstrap reads the GitHub repository from the git remote.
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service mounts |
-| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2) |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or the job's account, held to the edge's instance by an IAM condition; an IAM database user; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service or the job mounts |
+| http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
-| calling server | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable |
+| calling server or job | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
-| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's account, and an environment variable that references its latest version |
-| image | built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
+| secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's or job's account, and an environment variable that references its latest version |
+| image | a server's or a job's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
@@ -1176,6 +1235,21 @@ Each exposed server gets a load balancer of its own. A platform lowers one
 deployable, so it cannot write the host rules of a load balancer the
 environment's exposed servers would share; sharing one waits for a
 lowering that sees the whole environment.
+
+A schedule runs as its job's own account, which may run that job and no
+other. An account per stack, with a grant on each job, could run every job
+of the stack's environments in the project; an account per schedule would
+add an account, whose id must fit 30 characters beside the job's, to do
+what the job's account may do already. The job's account holds what the
+job's runs reach, so letting it start a run adds no reach. Cloud
+Scheduler's service agent mints the token, through the role Google gives
+it when the project enables Cloud Scheduler, and `deployer`, which names
+the account in the scheduler job, acts as it through
+`roles/iam.serviceAccountUser` (section 7.3). Cloud Run starts an
+execution each time the schedule fires, whether or not the last has
+ended, where `stack dev` skips a run that comes due while the last goes
+on (section 8.7): a job whose run may outlast its interval keeps its runs
+apart itself.
 
 Every node sets its `project`, so the provisioner needs no provider
 configuration, and the network lives in the environment's graph rather
@@ -1191,8 +1265,12 @@ again: each step creates what is missing and leaves the rest.
    of the state, the images and their builds (Artifact Registry, Cloud
    Build and Cloud Logging), the accounts and Workload Identity
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
-   Certificate Manager and Cloud DNS as the graph's resource types need
-   them, Cloud Run with any database for its migration job.
+   Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
+   resource types need them, Cloud Run with any database for its migration
+   job, and Cloud Scheduler for a job's schedule (D52). An API
+   enabled moments ago can refuse calls as one the project has not
+   enabled, so each later step retries such a refusal for up to five
+   minutes.
 2. It creates the state bucket and the KMS key directly, since Pulumi needs
    them before it can run: the bucket `<project>-superschematic-state`,
    with uniform access, public access prevention and object versioning,
@@ -1210,7 +1288,12 @@ again: each step creates what is missing and leaves the rest.
      resource and IAM policy a preview refreshes and sees whether a secret
      has a value, without reading one; it writes objects in the bucket,
      since a preview takes the stack's lock. `deployer` also runs Cloud
-     Build builds and the migration job, as the next two accounts;
+     Build builds and the migration job, as the next two accounts, and
+     reads a failed execution's stderr with the Logs Viewer role. It
+     applies a job's schedule with Cloud Scheduler's admin role, the role
+     that creates, updates and deletes scheduler jobs, and runs a job's
+     executions for `stack run` with the Cloud Run admin role it applies
+     the job with (D52);
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1224,7 +1307,8 @@ again: each step creates what is missing and leaves the rest.
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
      that repository, and the right of both accounts to be used from it.
-     Without a GitHub remote it is left out, and `--repository` names one.
+     Without a GitHub remote it is left out, `--repository` names one,
+     and `--repository ""` leaves it out.
 4. It creates the secret of each platform credential the environment
    needs (a DNS platform's API token, section 6.9) in Secret Manager,
    where only `deployer` and `planner` can read it, and asks for each
@@ -1275,14 +1359,15 @@ in its database; the migration job grants them (section 8.4, D46).
 
 The target sets defaults that `settings` can override:
 
-- one service account per server;
+- one service account per server and per job;
 - deletion protection on production databases (`deletionProtection`);
 - a zonal instance unless `highAvailability` is set, on the
   `db-custom-1-3840` tier of the Enterprise edition (`tier`), running
   Postgres 16, the version CI tests against (`version`), with backups on
   and point-in-time recovery in production;
 - one CPU, 512 MiB and no minimum instances per server (`cpu`, `memory`,
-  `minInstances`, `maxInstances`, `concurrency`);
+  `minInstances`, `maxInstances`, `concurrency`), and one CPU and 512 MiB
+  per job's task (`cpu`, `memory`);
 - logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
   OpenTelemetry setup.
 
@@ -1294,21 +1379,25 @@ The target sets defaults that `settings` can override:
   anything but an exposed server. It refuses an internal server's service
   that takes outside traffic or turns its invoker check off, a load
   balancer's address or forwarding rule, a grant to `allUsers` or
-  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`.
+  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`. A
+  job is never exposed, so a grant that lets anyone run it is refused too.
 
 ## 8. Generated build and runtime
 
 ### 8.1 Server entrypoint
 
-A generator per server language, Go first, writes each server's entrypoint
-when its stack builds. The Stack kind's `server` generator
+A generator per server language writes each server's entrypoint when its
+stack builds. The Stack kind's `server` generator
 (`internal/generator/servergen`) reads the stack's servers, which no
 environment changes (`stack.Servers`), and writes a Go module per Go
 server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
-`go.mod` and a Dockerfile (section 8.2). A server takes its name in the
-stack: a declared server's class name, or the API service a default server
-serves. The output root's `server/<stack>` directory holds only what the
-last build wrote, and a TypeScript or Rust server gets no entrypoint yet.
+`go.mod` and a Dockerfile (section 8.2), and in the same pass a package
+per TypeScript server at the same place, which Bun runs (section 8.6,
+D51). A server takes its name in the stack: a declared server's class
+name, or the API service a default server serves. Each job of a Go API
+gets a module of its own beside them, under its deployable's name
+(section 8.7). The output root's `server/<stack>` directory holds only
+what the last build wrote. A Rust server gets no entrypoint yet.
 
 `main` reads its whole configuration from the environment, and:
 
@@ -1391,9 +1480,12 @@ build the stack again.
 
 ### 8.2 Container image
 
-A generated Dockerfile per server builds the entrypoint and the
-implementations together. Its build context is the repository root, the
-parent of the schemas root, after the stack's services are built:
+A generated Dockerfile per server, and per job (section 8.7), builds the
+entrypoint and the implementations together. Its build context is the
+repository root, the parent of the schemas root, after the stack's
+services are built, unless the naming file's `[paths] build_context`
+names a directory above it, as `examples/acme-shop` does to reach the
+runtime modules of its checkout:
 
 ```sh
 docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
@@ -1401,32 +1493,60 @@ docker build -f schemas/dist/server/shop-stack/Storefront/Dockerfile .
 
 `Dockerfile.dockerignore` beside it cuts the context down to the
 directories the build reads: the server's module, the generated modules,
-the runtime modules, the implementations' modules and the superscalar
-checkout. A server whose modules lie outside the repository root, or a
-naming file without `[paths] scalar_go`, gets no Dockerfile, and the build
-says why.
+the runtime modules and the implementations' modules that the server's
+`go.mod` replaces with a directory, and the superscalar checkout when the
+image builds from one. A server whose modules lie outside the build
+context gets no Dockerfile, and the build says why.
 
 The generated Go code links superscalar's static archive through cgo (D3),
-so the binary cannot be a `CGO_ENABLED=0` build. The image is built in
-stages:
+so the binary cannot be a `CGO_ENABLED=0` build, and a server whose
+database declares a version graph links the version graph's archive too.
+No Go module the module proxy serves carries either, so they come from
+one of two places (D47, amended):
 
-- a Rust stage builds the archive for the image's platform from the
-  checkout `[paths] scalar_go` names, with `tools.env`'s Rust release, the
-  one the host's archives are built with. A second stage builds the
-  version graph's archive when a database the server connects to declares
-  a version graph;
-- a Go stage, on the Go release `tools.env` pins, puts each archive where
-  its binding's cgo flags look, then builds the server with `-mod=mod`;
-- the binary runs on distroless `cc`, which holds the glibc and libgcc
-  the archives need and nothing else, as a non-root user.
+- **A checkout.** With the naming file's `[paths] scalar_go` naming a
+  superscalar checkout, a Rust stage builds superscalar's archive for the
+  image's platform from it, with `tools.env`'s Rust release, the one the
+  host's archives are built with, and a second stage builds the version
+  graph's from the crate beside `[paths] versiongraph_go`. A Go stage puts
+  each archive where its binding's cgo flags look.
+- **The release.** Without `[paths] scalar_go`, as in a project that
+  takes the runtime modules from the module proxy, the image takes the
+  archives the release of superschematic that wrote the Dockerfile ships:
+  `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
+  the release page, both archives built with one Rust release under
+  `lib/`. The release builds them before the CLIs and links each CLI with
+  every platform's digest (`internal/release`), so the Dockerfile pins the
+  digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
+  tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument
+  whose default is the release's page, checks it, and points
+  `CGO_LDFLAGS` at it. The server's `go.mod` replaces each runtime module
+  no `[paths]` key names, every version of it, with the module at the
+  release: superschematic's at the release's tag and superscalar's Go
+  binding at the version the release links, since the runtime modules
+  require one another at versions only a checkout's replace resolves.
+  Every generated Go module's `go.mod` pins the ones it reaches the same
+  way, so each also builds on its own. A binary built from a checkout is
+  no release, and one the release workflow did not build names no
+  digests: neither writes a Dockerfile without `[paths] scalar_go`, and
+  the build says why.
 
-TypeScript and Rust servers get their own Dockerfiles with their
-entrypoints.
+Either way the Go stage, on the Go release `tools.env` pins, builds the
+server with `-mod=mod`, and the binary runs on distroless `cc`, which
+holds the glibc and libgcc the archives need and nothing else, as a
+non-root user.
+
+A TypeScript server's Dockerfile builds superscalar's Node addon and
+installs the Bun workspace, frozen to the lockfile the project commits
+(section 8.6). A Rust server gets none yet.
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
-the scalar library allows; and fetching a prebuilt archive, which
-superscalar does not publish yet. When it does, the Rust stage becomes a
-download.
+the scalar library allows; the archives superscalar's own release
+pipeline publishes, which it builds with its own Rust release and for
+musl, while a server links them beside the version graph's archive, which
+must come from the same Rust release; and building the archives from
+source in every image without a checkout, which the release already
+does once.
 
 ### 8.3 Local stack
 
@@ -1438,7 +1558,9 @@ runs an environment on the `local` target (`internal/stack/local`):
 2. It reads the environment the build resolved: `--environment`, or the
    stack's one environment on the local target.
 3. It applies the deploy order (section 5.3) through the local provisioner,
-   then stays in the foreground until Ctrl-C or until a server exits.
+   then stays in the foreground until Ctrl-C or until a server exits,
+   running each job on its schedule meanwhile (section 8.7). The summary it
+   prints names each server's URL and when each job runs.
 4. It stops the servers, callers first, then the container, which keeps
    its data for the next run. `--remove-database` removes the container
    and its data instead.
@@ -1447,7 +1569,8 @@ runs an environment on the `local` target (`internal/stack/local`):
 | --- | --- |
 | database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
-| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -1462,17 +1585,27 @@ which the provisioner reads when it starts the caller.
 
 The provisioner renders `local.json` into
 `<output-root>/program/<stack>/<environment>`: the containers, databases,
-migrations and servers it runs. Beside it are the models `stack dev` writes
-for it (`models/<service>.json`), the plans it applies
-(`migrations/<service>.plan.json`) and the binaries it builds (`bin/`).
-Each server runs in a process group of its own, so Ctrl-C reaches `stack
-dev` first, which sends each server SIGTERM, callers first, and SIGKILL
-ten seconds later.
+migrations, servers and jobs it runs. Beside it are the models `stack
+dev` writes for it (`models/<service>.json`), the plans it applies
+(`migrations/<service>.plan.json`) and the Go servers' and jobs' binaries
+it builds (`bin/`). A TypeScript server has no binary: the provisioner
+runs `bun install` once at the output root, whatever the number of
+TypeScript servers and waves, then starts each with `bun main.ts`. The
+install is the one an engineer runs, not frozen: it writes the
+workspace's lockfile, or brings the committed one up to date with the
+packages the build wrote, so the lockfile follows the schemas through
+`stack dev` (section 8.6). That install also links the implementations,
+which lie outside the output root, to it, so a `stack dev --out`
+elsewhere leaves them linked to that output root until the next install
+in the usual one. Each server runs in a process group of its own, so
+Ctrl-C reaches `stack dev` first, which sends each server SIGTERM,
+callers first, and SIGKILL ten seconds later.
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
-on one port (`local-distinct-ports`). The platform runs Go servers only,
-until the TypeScript and Rust entrypoints exist.
+on one port (`local-distinct-ports`). The platform runs Go and TypeScript
+servers; a Rust server, which has no entrypoint yet, does not resolve
+(`unrealizable`).
 
 Not built:
 
@@ -1512,8 +1645,16 @@ through the target's `Migrations` seam:
    `migrator` account (section 7.3), with one task, no retry and an hour to
    finish, and runs it once with the document's `gs://` URL as its
    argument, `superschematic-migrate job --job <url>`. It waits for the
-   execution, and a failed one fails the step with the execution's name
-   and logs.
+   execution, and a failed one fails the step with the execution's name,
+   its logs' URL and the runner's error. Cloud Run says only that the
+   container exited with an error, so the deploy reads what the task wrote
+   to stderr from Cloud Logging, for up to 30 seconds while none has
+   arrived, and reports the runner's error, the last line that begins
+   `superschematic-migrate: `, else the first line, such as a panic's.
+   With no line, or none it can read, it reports Cloud Run's message and
+   says why. An error while waiting is not a failed execution: the step
+   fails saying the execution may still be running, and the next deploy
+   runs the phase again, which the runner resumes.
 3. The job reads the document and the plans through Cloud Storage's API,
    and reaches each database through the Cloud SQL Go connector, with IAM
    database authentication as the migrator's IAM database user, so there
@@ -1527,7 +1668,9 @@ USAGE on the schemas that hold the migrator's objects, SELECT, INSERT,
 UPDATE and DELETE on its tables, SELECT on its views and USAGE and SELECT
 on its sequences, leaving out the runner's state tables, and takes every
 such privilege back from a user it gave them to that no longer connects,
-all in one transaction. The grant is table-level DML, not what each API
+all in one transaction. It takes nothing from a role the migrator is
+granted: Cloud SQL gives `cloudsqlsuperuser` CREATE on the public schema
+itself, and the first live deploy's job reported taking that back. The grant is table-level DML, not what each API
 reads. The deploy manifest records the servers each DB service's job saw
 connect, and a deploy runs the expand phase of a DB service whose servers
 changed even when its plan has no steps, before the new server rolls out
@@ -1542,7 +1685,7 @@ onto distroless static. `runtime/migrate/go` carries no `replace`
 directive, so `go install` takes it. The release is the one the binary is
 part of; a binary built from a checkout names none, and
 `SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
-its place. The local target runs the runner on the host (section 8.3).
+its place, which `scripts/migrate-dev-image.sh` builds from the checkout. The local target runs the runner on the host (section 8.3).
 
 ### 8.5 Where the implementation lives
 
@@ -1561,9 +1704,13 @@ found with no declaration:
   not-implemented error, which answers 501. For an API whose generated
   `Config` takes them, it also writes `AuthMiddleware(deps)`, which
   refuses every request with 401 until it verifies the end user, and
-  `PayloadDecryptor(deps)`, which refuses every encrypted payload. It never
-  writes into a directory that holds a Go file, so the package is the
-  engineer's from then on. A stack's build scaffolds each API its servers
+  `PayloadDecryptor(deps)`, which refuses every encrypted payload. For an
+  API with jobs it writes `NewJobs`, whose value has a method per job that
+  returns the not-implemented error (D52). It never writes into a
+  directory that holds a Go file, so the package is the engineer's from
+  then on: a stack's build fails on an API whose package declares no
+  `NewJobs` while the API declares jobs, an implementation that predates
+  them, and says what to add. A stack's build scaffolds each API its servers
   serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
   API built, outside a stack. A service the cache would restore builds
   again when its implementation is missing, and so does a stack that
@@ -1577,8 +1724,8 @@ found with no declaration:
 - **Signature.** The API generator writes `Deps` and the constructor's
   signature in `deps.go`: `type Constructor func(deps Deps)
   (Implementations, error)`, which the scaffold asserts with `var _
-  api.Constructor = New`. TypeScript and Rust get the equivalent later
-  (section 12). `Deps` is typed and filled by the entrypoint:
+  api.Constructor = New`. TypeScript gets the equivalent with its
+  entrypoint (section 8.6), and Rust later (section 12). `Deps` is typed and filled by the entrypoint:
 
   ```go
   type Deps struct {
@@ -1597,6 +1744,21 @@ found with no declaration:
   one whose config does not. The generated `Config` and `RegisterRoutes`
   do not change.
 
+  For an API with jobs, `deps.go` also declares `Jobs`, a method per job
+  sorted by name, and `JobsConstructor`, which the scaffold asserts with
+  `var _ api.JobsConstructor = NewJobs` (D52). A job is built from the
+  same `Deps` as the API:
+
+  ```go
+  type Jobs interface {
+      // ShipOrders runs the job ShipOrders, on */15 * * * * unless an
+      // environment changes its schedule.
+      ShipOrders(ctx context.Context) error
+  }
+
+  type JobsConstructor func(deps Deps) (Jobs, error)
+  ```
+
 Outside a stack the scaffold stays opt-in. Nothing imports the package
 but a server's generated `main` (section 8.1), and a build of a tree whose
 Go code lives elsewhere would gain a stub package beside it.
@@ -1611,6 +1773,312 @@ Not taken:
   servers would still need a convention.
 - A `main` the engineer writes, calling a generated `Run(impl)`. That brings
   hand wiring back, and the server still has to name its main package.
+
+### 8.6 TypeScript servers
+
+A TypeScript server runs on Bun, which runs the generated packages' `.ts`
+as they are, with no build step (D51). The pieces mirror Go's:
+
+- **Derived config.** The API package's `config.ts` declares `EnvConfig`
+  and `loadEnvConfig()`. `EnvConfig` extends the types package's
+  `Loaded<Type>` of the `@envVars` settings with the fields of section 3.4
+  under their names: a `Database` per sql edge, a `Service` per `calls`
+  entry, and, unlike Go's, the API's callers field, a `ServiceAuthConfig`,
+  when an operation has a service clause. `loadEnvConfig()` reads the
+  settings with the types package's loader and the rest with the HTTP
+  runtime's `loadDatabase`, `loadService` and `loadCallers`, which read the
+  variables Go's `stackconfig` reads, and throws a `StackConfigError`
+  naming every variable at fault. Vectors shared by both runtimes
+  (`runtime/http/testdata/stackconfig_parity.json`) hold them to one
+  encoding.
+- **Implementation.** `[implementation_paths] typescript` defaults to
+  `typescript/{service}`. The API generator writes `Deps` and
+  `Constructor`, `(deps: Deps) => Implementations |
+  Promise<Implementations>`, in `deps.ts`, and, for an API with a route
+  that needs an end user, `AuthenticatorFactory`, the type of the
+  implementation's `authenticate`, which builds the router's
+  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. `Deps`
+  holds `config`, `db`, a client per callee in a member named after it
+  (`shopApi`), and `logger`, each left out by Go's rule. The scaffold
+  writes the package once, as Go's does (section 8.5), in a directory
+  that holds no `.ts` file: `package.json`
+  (`<npm_scope>/<service>-implementation`), `tsconfig.json`, and an
+  `index.ts` whose `create` is a `Constructor` and whose methods throw the
+  runtime's `notImplemented()`, with an `authenticate` that establishes no
+  end user and a verifier per `@hmacVerified` provider that refuses every
+  request. `deps.db` is a `pg` Pool that the runtime's `connectPostgres`
+  (`@superschematic/http-runtime/postgres`) opens from the derived
+  connection; a TypeScript ORM, when one exists, adds a typed client on
+  the same pool. The Node Cloud SQL connector reads the instance's
+  settings from the Admin API when the pool opens, where Go's dialer waits
+  for the first dial; both pools connect to the database on first use.
+- **Packages.** One Bun workspace spans the generated TypeScript packages,
+  the servers and the implementations, so every import resolves with
+  `workspace:*` or by name. Its root is the output root's `package.json`,
+  which the generator owns, not the repository root's, which is the
+  project's own: its members are `types/typescript/*`, `sdk/typescript/*`,
+  `api/*` and `server/*/*`, and the implementations through a `../`
+  pattern from the implementation template, which Bun 1.4 accepts. Where
+  `[paths]` names a checkout of superscalar, the HTTP runtime or the
+  version-graph runtime, the root's `overrides` point every dependency on
+  it at the checkout with a `file:` path from the root; a member's own
+  `file:` path is read wrongly by Bun once members sit at different
+  depths. The root depends on superscalar itself, which the runtime and
+  the API packages import without naming. `bun install` runs in the output
+  root, or in a generated package under it; an install inside an
+  implementation does not find the root, and the lockfile lives in the
+  output root. A `file:` path or pattern climbs from the output root's
+  physical path, the one Bun runs in, so an output root under a symbolic
+  link, such as a temporary directory on macOS, resolves too.
+- **Lockfile.** The install writes `bun.lock` beside the root, and the
+  project commits it (D51, amended), so every install of one commit takes
+  the same versions: the image's, the generated CI's and an engineer's.
+  No build removes it, and the root it pairs with is the same bytes on
+  every build of the same schemas. The members' manifests are the build's
+  and the implementations' are the project's, so nothing else is
+  committed for it. A frozen install needs every member the lockfile
+  names that another member depends on, so the lockfile to commit is the
+  one an install writes after `build-all`: an install after building only
+  some services, as `stack dev`'s first in a fresh clone of a project
+  whose stack does not reach them all, drops the others' packages from it.
+  Its `file:` paths, like the root's overrides, are relative to the output
+  root, so it is the same on every machine with the same layout, and a
+  change to the manifest of a checkout `[paths]` names changes it too. An
+  output root is usually ignored whole (`dist/`), and git cannot take back
+  a file under an ignored directory, so the rule ignores the output
+  root's contents and takes the lockfile back:
+
+  ```gitignore
+  schemas/dist/*
+  !schemas/dist/bun.lock
+  ```
+
+  Where a broader rule ignores the directory, such as a repository's
+  `dist/`, the schemas root's `.gitignore` takes it back first (`!/dist/`,
+  `/dist/*`, `!/dist/bun.lock`), as acme-shop's does. The ignore rules are
+  the project's: the build of a stack with a TypeScript server, in a
+  repository whose rules ignore the lockfile, prints one line naming the
+  rule and the fix, and changes no ignore file. `stack init` (section
+  11.1), when it is built, writes the rule.
+- **Entrypoint.** The `server` generator writes
+  `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
+  pass that writes the Go ones (section 8.1): `package.json`
+  (`<npm_scope>/<stack>-<server>-server`, a workspace member that depends
+  with `workspace:*` on each served API package, each implementation by
+  the name its `package.json` gives it, and each callee's SDK, and on the
+  runtime, Hono and, with a database, `pg`), `tsconfig.json` and
+  `main.ts`. `main.ts` does what Go's `main` does:
+  - reads `$PORT`, 8080 when unset, and logs JSON lines through the HTTP
+    runtime's `createLogger`, bound to the stack and the server;
+  - loads each API's config with `loadEnvConfig()`, and opens one pool per
+    database with `connectPostgres`, shared by every API on it. Only a
+    server some environment places on Cloud SQL depends on the Cloud SQL
+    Node connector; any other refuses a Cloud SQL configuration at
+    startup and says to build the stack again, as Go's does;
+  - builds one SDK client per API called, with the endpoint's URL and
+    `serviceCredentialFor` its credential, and calls each implementation's
+    `create(deps)`, and its `authenticate(deps)` where a route needs an end
+    user. The end user travels per call, `{ forward: ctx }` (D37), so no
+    handler captures it as Go's `CaptureAuthorization` does;
+  - mounts each API's `buildRouter` on one Hono app, with
+    `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
+    an API with a service clause, then the runtime's `notFoundHandler` and
+    `errorHandler`. The build refuses two served APIs that register one
+    method and path, a manually routed operation included, which a
+    TypeScript router mounts;
+  - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
+    shutdown and 503 `unavailable` with each database whose ping fails
+    within two seconds, through `Bun.serve`, which it hands Hono as the
+    routes' bindings, so the runtime reads the peer's address from it;
+  - on SIGTERM or SIGINT stops taking requests, gives those in flight ten
+    seconds, ends the pools and exits; a second signal exits at once.
+
+  Bun runs `main.ts` as it is. A mismatch between the implementation and
+  `Deps` shows when `tsc` checks the package, as the generated CI's
+  `check` does (section 11.3), not when Bun runs it.
+- **Image.** With the naming file's `[paths]` naming the checkouts of
+  superscalar's TypeScript binding and the HTTP runtime's package, which
+  no registry serves yet, the Dockerfile's addon stage builds
+  superscalar's Node addon with `cargo build -p superscalar-napi` for the
+  image's platform, on `rust` at the release `tools.env` pins, against the
+  glibc of the Debian release the Bun image runs on. The build stage, on
+  `oven/bun` at `tools.env`'s Bun release, puts the addon in the binding's
+  `native/`, builds the binding's and the runtime's `dist/`, which the
+  root's overrides copy, and installs the workspace without development
+  packages, frozen to the committed lockfile, which fails when the
+  lockfile no longer matches the packages the build wrote. A context
+  without the lockfile, as in a project that has not committed it,
+  resolves afresh and prints that it does, so two images of one commit
+  may differ. The image keeps that fallback rather than refusing: the
+  generated CI's `check` refuses a missing or stale lockfile, and every
+  deploy job waits for it (section 11.3). The image copies the output root and the
+  implementations it runs from that stage and runs `bun main.ts` as the
+  non-root `bun` user, with `PORT=8080`. `Dockerfile.dockerignore` takes
+  in the workspace's root and lockfile, every member's manifest by
+  pattern, so the context does not depend on which services built before
+  the stack, every types package, each package the server depends on
+  whole, the two checkouts without their build output, and the
+  superscalar crates. Without either `[paths]` key no Dockerfile is
+  written, and the build says why. The deploy builds it as it builds Go's,
+  from the Dockerfile at the server's path.
+
+`stack dev` runs a TypeScript server on Bun beside the Go servers (section
+8.3). acme-shop's storefront is the proof: its implementation is the
+workspace package `typescript/shop-storefront`, whose `create` keeps carts
+in memory and whose `authenticate` knows its callers by static tokens,
+built from `Deps`; `shop-stack` deploys and exposes it; and
+`TestStackDevRunsTheShop` waits for its `/readyz` and reads a cart through
+its API. The example's other TypeScript, its clients and type tests, is a
+second member, `typescript/clients`, so nothing in the example links a
+package by hand.
+
+### 8.7 Jobs
+
+A job is a run to completion that an API service declares, with `@job` on
+a class of its schema (D52):
+
+```ts
+// The warehouse's pick run: ships each placed order.
+@job({ schedule: "*/15 * * * *", timeZone: "UTC", timeout: "5m", retries: 1 })
+export abstract class ShipOrders {}
+```
+
+- **Declaration.** `@job` comes from `@superschematic/api` and goes on a
+  class of an API schema that holds no fields and extends nothing. Every
+  argument is optional: `schedule`, a five-field cron (minute, hour, day of
+  the month, month, day of the week; no descriptor such as `@hourly`, and
+  no time zone prefix); `timeZone`, an IANA name, UTC unless set;
+  `timeout`, a duration of whole seconds as Go writes one (`90s`, `10m`,
+  `1h30m`), ten minutes unless set, Cloud Run's default for a task; and
+  `retries`, zero or more, none unless set. The class is no type: the IR
+  records it in `Schema.Jobs` (`ir.Job`), with its name and comment, and
+  the data forms write it under `jobs:`. No type, operation set or other
+  job of the schema takes its name, nor another job its Go method.
+- **Code.** The API's implementation package implements it, with the same
+  `Deps` as the API: the API generator writes a `Jobs` interface, a method
+  per job taking a context and returning an error, and the scaffold writes
+  `NewJobs` with a method that returns the not-implemented error (section
+  8.5).
+- **Deployable.** Each job of an API in the stack is a deployable of kind
+  `job`, named after its API service and its class in kebab case
+  (`shop-orders-ship-orders`, `ir.JobDeployableName`). Not after the
+  server that serves the API: grouping APIs into an `@server` leaves a
+  job's name, and every cloud resource named after it, as they were, and
+  two APIs of one server may each declare a job of one name. No class
+  declares a job's deployable, so a name another deployable takes is
+  refused. The name is lower case, digits and hyphens, as a Cloud Run
+  job's and a service account's are; a target refuses one longer than its
+  resources take, as it does a server's.
+- **Edges and config.** A job's edges are its API's (section 3.3), so it
+  connects to the same database and calls the same services, through the
+  connectors from its platform, which a target registers beside its
+  server's. Its config fields are its API's `@envVars` fields and the
+  fields its edges derive, and it takes the `env` its API's server is
+  given, under its own; a key the server takes for another API it serves
+  does not reach it. It reads the API's secrets, and has no callers field
+  and no identity config field, since it serves no request: its entrypoint
+  builds no identity service (D50), and its `Deps` reach the user model's
+  tables through the ORM. It rolls out after its callees, as a server
+  does (section 5.3).
+- **Identity.** A job serves its API in a callee's callers field. A
+  callee's `from: [ShopOrders]` therefore admits ShopOrders' server and
+  its jobs alike, and `Caller.Deployable` tells them apart. Resolution's
+  check that each edge reaches an operation its caller may invoke (section
+  9.3) covers the API's calls through its server; a job takes the edges
+  whether or not it makes the calls, so its own are not checked. It
+  forwards no end user, so it reaches what admits its API's identity or
+  anyone.
+- **Entrypoint.** The `server` generator writes a Go module per job at
+  `<output-root>/server/<stack>/<job>/`, beside the servers' and from the
+  same templates, so the build's pass that removes what it no longer
+  writes covers it: `main.go`, `go.mod`, `cloudsql.go` where some
+  environment places the API's database on Cloud SQL, and a Dockerfile
+  with its ignore file. `main` builds `Deps` as a server's does (section
+  8.1): the API's `EnvConfig`, a pool per database and a client per API
+  called, which sends the job's service credential and forwards no end
+  user. It calls the implementation's `NewJobs`, then the job's method
+  once, with a context SIGTERM and SIGINT cancel. It logs `job started`,
+  then `job done` or `job failed` with how long the run took, through
+  zap, and exits 1 when the method returns an error, so the platform
+  records the run as failed and runs it again if its retries allow. It
+  serves no port and answers no health check. A package that predates its
+  jobs, with no `NewJobs`, fails the build with the signature to add
+  (section 8.5).
+- **Image.** A job's Dockerfile is a server's (section 8.2), with the
+  binary at `/job`. `stack build` builds it, `--image` and the deploy
+  manifest pin it, and the deploy rolls it out, as they do a server's
+  (section 11.2); the target's `ImageBuilder` takes the job's name in
+  `BuildRequest.Deployable`.
+- **Schedule.** The decorator's schedule, a five-field cron in its time
+  zone (UTC unless set), is the default. An environment's settings change
+  it or turn it off: `{ of: ShopOrders, job: "ShipOrders", schedule,
+  timeZone, enabled }` (section 4.1). A member of a parameterized
+  environment runs no schedule unless its settings turn one on, with
+  `enabled: true`. A job with no schedule runs only on demand, and turning
+  on a schedule a job does not have is refused. Resolution records what
+  runs on the job's deployable (`ir.ResolvedJob`): its API and class, the
+  schedule it runs on in the environment, empty for none, the time zone,
+  the timeout in seconds and the retries.
+- **Running locally.** The local target lowers a job to a
+  `local:process/job:Job` node, and `stack dev` builds its binary in its
+  rollout wave, as it builds a server's, then runs each schedule beside
+  the servers until Ctrl-C (section 8.3): never two runs of one job at
+  once, a run that comes due while the last goes on skipped, each line of
+  its output with the job's name in front, a run stopped at the job's
+  timeout, SIGTERM first, and run again up to its retries when it fails. A
+  run's end is logged, success or failure, and never stops the
+  environment.
+- **On demand.** `superschematic stack run <environment> <job>` runs a job
+  once, waits for it, and exits non-zero when its last try fails. On the
+  local target it runs against the environment `stack dev` runs, from
+  another terminal: it builds no schema, reads the environment the last
+  build resolved and the program `stack dev` rendered, so the run has the
+  environment's values, secrets and keys, and builds the job's binary
+  again, so a change to the job's implementation is in the run. It refuses
+  an environment whose container or servers do not answer. A lock file per
+  job in the environment's state directory keeps its runs apart: the
+  schedule skips a run while `stack run`'s goes on, and `stack run` refuses
+  to start while the schedule's does. On a cloud target it runs the
+  deployed job, with the image the deploy manifest records, through the
+  target's `Jobs` seam (section 11.1), and refuses a target without one
+  and a run whose last deploy did not roll the job out.
+- **gcp.** The job platform is `gcp.cloudrunjob` (section 7.2), with
+  connectors from it to Cloud SQL and to Cloud Run that share the server's
+  `Connect`.
+  - A job is a Cloud Run job named after the deployable, as a server's
+    service is, with a service account of its own by the same name, the
+    API's secrets, Cloud SQL volume and config, and Direct VPC egress when
+    its API calls another. It has one task, the decorator's timeout for
+    each try and its retries, which Cloud Run caps at 10, so a job with
+    more fails to lower; its settings are the task's `cpu` and `memory`.
+    The deploy pins its image as a server's. Its account's id is its name,
+    which GCP holds to 30 characters, the value of each parameter
+    included: `shop-orders-ship-orders-pr` leaves four for a pull
+    request's number.
+  - An enabled schedule is a Cloud Scheduler job, named as the job is,
+    that POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth
+    token for the job's own account, which holds `roles/run.invoker` on
+    that job alone and so may run only it. A schedule that is off leaves
+    the Cloud Run job, which runs on demand, and neither the scheduler job
+    nor the grant.
+  - `stack run` runs an execution of the job as the last deploy left it,
+    with no overrides, after checking that it runs the image the deploy
+    manifest records, and refuses one that runs another, as during a
+    deploy. It waits for the execution's end, retries included, and on a
+    failure reports the last try's error: the error of its `job failed`
+    line, or its panic, which it reads from Cloud Logging as the migration
+    job's error is read (D46), with Cloud Run's account of the try and the
+    URL of the logs.
+  - Bootstrap enables Cloud Scheduler for an environment that runs a
+    schedule, and gives `deployer` Cloud Scheduler's admin role (section
+    7.3). The migration job gives a job's IAM database user its privileges
+    as it gives a server's (section 8.4).
+  - The Cloud Run job resource can also start an execution when it is
+    created or updated (`runExecutionToken`, `startExecutionToken` in the
+    pinned schema), which a job that runs on every deploy could use.
+
+Workers, which run until stopped, come with queues. A job that runs on
+every deploy is not built.
 
 ## 9. End-user auth and service auth
 
@@ -2094,9 +2562,11 @@ The callers field has its own tests:
 
 ### 9.9 Open
 
-- A deployable that serves no API, such as a job (section 3.1), has no
-  handle to put in `from`. Until jobs land with a way to name one, it may
-  call only operations whose `from` is empty.
+- A deployable that serves no API has no handle to put in `from`, and may
+  call only operations whose `from` is empty. A job is not one: it serves
+  its API in a callee's callers field, so `from` names it by its API
+  (section 8.7, D52). A worker, when queues land, may follow the same
+  rule.
 - A credential the callee config cannot express, such as a service mesh's
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
@@ -2145,9 +2615,10 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `build`, `deploy`, `destroy` and `outputs`. Targets and provisioners
-plug into it; they add no commands of their own. `stack dev` runs a local
-environment (section 8.3).
+`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `run`. Targets
+and provisioners plug into it; they add no commands of their own. `stack
+dev` runs a local environment (section 8.3), and `stack run` runs a job
+once on demand, locally or in the cloud (section 8.7).
 
 Each cloud command opens the Stack service as `stack dev` does: the one
 `--stack` names, else the working directory when it is one, else the one
@@ -2157,16 +2628,17 @@ environment as the `stack` generator does, without a build, so `plan`
 never reads a stale one. The provisioner's program goes to
 `<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
 `plan`, `build`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a
-local environment, which `stack dev` runs, and `secrets set` writes its
-`secrets.env`. A command
+local environment, which `stack dev` runs, `secrets set` writes its
+`secrets.env`, and `run` runs a job against it. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
-`plan`, `build`, `deploy`, `destroy` and `outputs` are built, in
-`cli/stack_deploy.go` over `internal/stackdeploy`, whose public face is in
-`stack`; the reference page "CLI" lists their flags. `build` builds the
-images a deploy would build (section 11.2) and deploys nothing: it prints
-each as an `--image` flag and writes no manifest. A target plugs into
-them through five seams on its `TargetSpec` (D45, D46):
+`plan`, `build`, `deploy`, `destroy`, `outputs` and `run` are built, in
+`cli/stack_deploy.go` and `cli/stack_run.go` over `internal/stackdeploy`,
+whose public face is in `stack`; the reference page "CLI" lists their
+flags. `build` builds the images a deploy would build (section 11.2) and
+deploys nothing: it prints each as an `--image` flag and writes no
+manifest. A target plugs into them, and into the generated CI, through
+seven seams on its `TargetSpec` (D45, D46, D47, D52):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest;
@@ -2176,9 +2648,20 @@ them through five seams on its `TargetSpec` (D45, D46):
 - `Migrations`, a migration runner, which runs one phase of a database's
   plans where `superschematic-migrate` reaches the database, and gives the
   servers that connect their privileges (section 8.4);
-- `Builder`, an image builder: a build request is a server, its
+- `Builder`, an image builder: a build request is a server or a job, its
   Dockerfile and its build context, which the deploy writes as an
-  archive, and the result is the image by digest. Cloud Build on gcp.
+  archive, and the result is the image by digest. Cloud Build on gcp;
+- `CI`, how a generated CI job signs in to a resolved environment as
+  `planner` or `deployer` (section 11.3): an identity, a kind and its
+  fields, which a CI renderer turns into its own steps, or none yet.
+  Workload Identity Federation on gcp;
+- `Jobs`, a job runner (`JobRunner`): a request is a run, a job and the
+  image the deploy manifest records for it, and the runner runs the
+  deployed job once, as its platform runs it on its schedule, and returns
+  when the run ends, with the last try's error when it fails (section
+  8.7). Without it, `stack run` refuses the target's environments. On
+  gcp, an execution of the job's Cloud Run job, whose error the runner
+  reads from Cloud Logging as the migration job's.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -2194,12 +2677,12 @@ file.
 
 `stack deploy <environment>`:
 
-1. decides each server's image: the one `--image` names, by digest
-   (`--image shop-api=<repository>@sha256:<digest>`); else a build, when
-   the target builds images and the server has the Dockerfile the stack's
-   build writes (section 8.2), unless its build context is the one the
-   image the manifest records was built from; else the image the manifest
-   records. A server with none of them is refused, and `--no-build`
+1. decides the image of each server and job: the one `--image` names, by
+   digest (`--image shop-api=<repository>@sha256:<digest>`); else a build,
+   when the target builds images and the server or job has the Dockerfile
+   the stack's build writes (section 8.2), unless its build context is the
+   one the image the manifest records was built from; else the image the
+   manifest records. One with none of them is refused, and `--no-build`
    builds nothing;
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
@@ -2219,8 +2702,8 @@ file.
    working, and the runner then gives the servers that connect their
    privileges; a DB service whose connecting servers changed runs its
    expand phase even with no steps (section 8.4);
-7. rolls servers callee first, a wave at a time, each wave returning once
-   the platform reports its servers ready: Cloud Run's provider waits for
+7. rolls servers and jobs callee first, a wave at a time, each wave
+   returning once the platform reports its servers ready: Cloud Run's provider waits for
    the revision's `Ready` condition, which the startup probe on `/readyz`
    holds back until the server's databases answer (section 7.2);
 8. runs the plan's `contract` steps (`--phase contract`), the drops and
@@ -2229,8 +2712,8 @@ file.
 9. applies exposure;
 10. writes a deploy manifest to the state bucket after every step and at
     the end: the resolved environment, the IR digest of each service, the
-    image of each server with the digest of the build context the deploy
-    built it from, and each database's applied model with the servers
+    image of each server and job with the digest of the build context the
+    deploy built it from, and each database's applied model with the servers
     its runner last saw connect.
 
 A build context is the repository root as the server's
@@ -2240,7 +2723,11 @@ executable bit, so the same files give the same archive on any machine.
 The digest of its tar stream decides whether the server changed: it
 covers the server's entrypoint module, the generated and runtime modules,
 the implementations and the superscalar checkout the image builds from,
-and nothing the ignore file leaves out. On gcp the builder uploads the
+or the Dockerfile that pins the release's archives, and nothing the
+ignore file leaves out. A context that lacks a path the ignore file takes
+in by name, such as a superscalar checkout a CI runner never made, or
+holds one under a symbolic link, which a context carries as a link and
+not its files, is refused before the upload. On gcp the builder uploads the
 archive to the state bucket, under `superschematic/builds/`, and runs a
 Cloud Build build of the Dockerfile with BuildKit, as the `builder`
 account (section 7.3), which pushes to the stack's repository with the tag
@@ -2274,16 +2761,16 @@ the step and the error. The bucket keeps every version of it.
 
 `stack plan <environment>` runs the provisioner's `Plan` over the program
 with the images pinned, plans each database's migration the same way, and
-prints both, with the secrets that have no value, the servers with no
-image yet, and the records to create by hand for a `manual` domain. It
+prints both, with the secrets that have no value, the servers and jobs
+with no image yet, and the records to create by hand for a `manual` domain. It
 changes nothing, so the read-only `planner` account runs it. `stack
 destroy` removes a run's resources and its manifest, and `stack outputs`
 prints the run's outputs file, or writes it with `--out`, which the
 bindings generator reads (section 6.6).
 
-`stack plan` builds nothing: it plans each server at the image `--image`
-names or the manifest records, and lists a server with neither among the
-servers with no image yet.
+`stack plan` builds nothing: it plans each server and job at the image
+`--image` names or the manifest records, and lists one with neither among
+those with no image yet.
 
 ### 11.3 Generated CI
 
@@ -2300,51 +2787,102 @@ export default defineConfig({
 });
 ```
 
-The build writes the workflow under `<output-root>/ci/<stack>/` and
-installs it into the renderer's directory under the repository root,
-`.github/workflows/<stack>.yml`, when that directory exists, as
-`InstallTargetDir` installs any generator's output. GitHub Actions
-(`github`) is the first renderer. Others are registrations, as
-provisioners are. A stack without `outputs.ci` gets no workflow, so an
-example in a repository with CI of its own installs nothing.
+Each renderer takes `branch`, which pull requests target and pushes
+deploy from, `main` unless set, and `install`, the renderer's directory
+unless set. Only a Stack service takes `outputs.ci`, and a renderer no
+extension registered fails the build. The Stack kind's `ci` generator
+resolves every environment as the `stack` generator does, asks each
+environment's target for its identities (`TargetSpec.CI`) and its
+provisioner for its tools (`ProvisionerSpec.Tools`), and renders. It
+writes the workflow under `<output-root>/ci/<stack>/<renderer>/` and
+installs it into the install directory under the repository root,
+`.github/workflows/<stack>.yml`, when that directory exists, through
+`InstallTargetDir`. Without the directory, or outside a git repository,
+it logs why and installs nothing. GitHub Actions (`github`) is the first
+renderer. Others are registrations, as provisioners are. A stack without
+`outputs.ci` gets no workflow, so an example in a repository with CI of
+its own installs nothing. The paths in the workflow are relative to the
+repository root, where a CI job starts, and its build writes to the
+default output root, `<schemas-root>/dist`, which the `stack` commands
+read.
 
 The GitHub workflow:
 
 - **On a pull request:**
-  - A `check` job needs no credentials. It installs superschematic and
-    the schemas root's packages, builds, which resolves every environment
-    and checks its graph (levels 1 and 3), and compiles each server's
-    entrypoint (level 2).
+  - A `check` job needs no credentials. It installs superschematic, the
+    static archives the release ships for the runner's platform (section
+    8.2), checked against the digest the binary names, with
+    `CGO_LDFLAGS` pointing at them, and the schemas root's packages, by
+    the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
+    runs `build-all` over the services root, which resolves every
+    environment and checks its graph (levels 1 and 3), and compiles each
+    Go server's entrypoint module with `go build -mod=mod` (level 2). It
+    runs on a push too. A binary the release workflow did not build names
+    no digests, and its archives step fails.
+  - For a stack with a TypeScript server, `check` then installs the
+    output root's Bun workspace from the lockfile the project commits
+    (section 8.6), `bun install --frozen-lockfile` in
+    `<schemas-root>/dist`, in a step that names the lockfile. It fails
+    when the lockfile is missing, where a frozen install alone would
+    install without one, or no longer matches the packages the build
+    wrote, and says to run `bun install` there after `build-all` and
+    commit it. Then each
+    TypeScript server's entrypoint package and the implementation of each
+    API one serves type-checks with `tsc --noEmit` (level 2), through `bun
+    x --no-install`, so the compiler is the one the package depends on and
+    the install linked, never one bunx downloads. The type-check reads the
+    runtime packages as the install linked them: from the registry they
+    carry their declarations, while a checkout that `[paths]` names needs
+    its build output in the CI checkout, which the image builds for itself
+    and the workflow does not.
   - A `plan` job per cloud environment without parameters runs `stack
-    plan` as `planner`: the infrastructure diff, the migration plans and
-    their hazards (levels 5 and 6).
+    plan` as `planner`, after `check`: the infrastructure diff, the
+    migration plans and their hazards (levels 5 and 6).
   - A `preview` job per environment with one parameter runs `stack deploy
     <environment> --param <parameter>=<pull request number>` as
-    `deployer`, a member per pull request, and `stack destroy` of that
-    member when the pull request closes (level 7). An environment with
-    more parameters has no CI job, and the workflow says so.
+    `deployer` after `check`, a member per pull request, and `stack
+    destroy` of that member when the pull request closes, when `check`
+    does not run (level 7). An environment with more parameters has no CI
+    job, and the workflow says so.
   - A pull request from a fork runs `check` alone: GitHub gives its jobs
     no identity token.
 - **On a push to the branch:** a `deploy` job per cloud environment
   without parameters, in the order the environments are declared. The
-  first deploys at once; each later one waits for the one before, and runs
-  in a GitHub environment of its own name, so that environment's required
-  reviewers approve it. Reviewers are a setting of the repository, not of
-  the stack.
-- One run at a time per environment, and per preview member.
+  first deploys once `check` passes; each later one waits for the one
+  before. Each runs in a GitHub environment of its own name, so that
+  environment's required reviewers approve it. Reviewers are a setting of
+  the repository, not of the stack. `workflow_dispatch` runs `check` and,
+  from the branch, the deploys.
+- One deploy at a time per environment, and one preview job per member,
+  neither cancelled by the next. A plan job has a group per pull request
+  and environment: GitHub keeps one pending job per group and cancels the
+  one it replaces, so a plan sharing the environment's group could cancel
+  a pending deploy. A plan that meets a running deploy's lock fails, and
+  runs again.
 - Local environments have no job. Level 4 runs on an engineer's machine.
+  The workflow's header names each environment that has no job and why.
 
 Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
 on gcp, Workload Identity Federation through the pool bootstrap creates,
 as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
 project's number, `projectNumber` (section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
-bootstrap to run.
+bootstrap to run. `google-github-actions/auth` signs in, and its
+credentials file gives superschematic and Pulumi application default
+credentials. The cloud jobs install the provisioner's tools: the Pulumi
+provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
+is built with. A job that installs Bun installs `tools.env`'s release, the
+one a TypeScript server's image runs on.
 
 The workflow installs the release of superschematic that generated it,
-checked against the release's `SHA256SUMS`. A binary built from a checkout
-is no release, so its workflow's install step fails and says to generate
-again with a released binary. Only servers whose build context changed
+the version of the root module in the binary's build information, from
+its repository's release page, checked against the release's
+`SHA256SUMS`. A binary built from a checkout is no release, so its
+workflow's install step fails and says to generate again with a released
+binary. Every action is pinned by commit, and the file holds no
+timestamp. The build cache keys the workflow on the stack's inputs, which
+hold its config, and on the binary, which names the release, so it needs
+no key of its own. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
 
@@ -2404,8 +2942,10 @@ whatever the deploy decides is affected, and needs no list of its own.
    refusal of an `@envVars` field that collides with one; and the callers
    field of an API with a service clause, `ir.ServiceAuth` in
    `ir/service_auth.go`, which the local and gcp connectors write and
-   `stackconfig.LoadCallers` reads (section 9.2). Next: the TypeScript and
-   Rust loaders read the derived fields, in the PR that gives them `Deps`.
+   `stackconfig.LoadCallers` reads (section 9.2). The TypeScript API
+   package's `loadEnvConfig()` reads them through the TypeScript HTTP
+   runtime's readers (section 8.6). Next: the Rust loader reads the
+   derived fields, in the PR that gives it `Deps`.
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -2418,11 +2958,16 @@ whatever the deploy decides is affected, and needs no list of its own.
    endpoint names, `serviceauth.go` builds the service authenticator of
    each API with a service clause from its callers field, and a server
    some environment places on Cloud SQL links the Cloud SQL connector.
-   Next: OpenTelemetry export; then `Deps`, the constructor signature, the scaffold and the
-   entrypoint in TypeScript and Rust. `examples/acme-shop/go` keeps its
-   implementations at the scaffold layout, `go/shop-api` and
-   `go/shop-orders`, which the entrypoints of its `shop-stack` import
-   (section 14, milestone 1).
+   For TypeScript, `Deps`, `Constructor` and the scaffold have landed, the
+   output root's Bun workspace holds the implementations, and the
+   `server` generator writes each TypeScript server's package, `main.ts`
+   and Dockerfile at `server/<stack>/<server>` in the pass that writes the
+   Go servers' (section 8.6). Next: OpenTelemetry export; then `Deps`, the
+   constructor signature, the scaffold and the entrypoint in Rust.
+   `examples/acme-shop` keeps its implementations at the scaffold layout,
+   `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
+   which the entrypoints of its `shop-stack` import (section 14,
+   milestone 1, and section 8.6).
 5. **Config and build plan.** `calls` is in the schema config, beside
    `authDb`, in the TypeScript type and the data-form schema, valid on an
    API config and naming API services. It is a build-order edge for the
@@ -2461,19 +3006,22 @@ whatever the deploy decides is affected, and needs no list of its own.
    `dns.credentials`. Next: a deploy lock beyond the provisioner's and
    the runner's, and the generated CI of section 11.3.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
-   and `bootstrap`, `secrets set`, `plan`, `deploy`, `destroy` and
-   `outputs` (section 11).
+   which runs Go and TypeScript servers, and `bootstrap`, `secrets set`,
+   `plan`, `deploy`, `destroy` and `outputs` (section 11).
 
 ## 13. Module layout
 
 - **The root module:** the Stack kind, the resolver, the registry specs,
-  the `local` target and the `stack` commands.
+  the `local` target, the `stack` commands, and the `ci` generator with
+  the `github` CI renderer (`internal/generator/cigen`): a workflow is
+  text, with no dependency to keep out of the core (D47).
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
   platforms, connectors and Cloud DNS platform, its policy rules, and its
   pinned provider schemas with the tool that keeps them current (sections
   6.4 and 7), and its bootstrap, secret store and state store over Google
   Cloud's client libraries (section 7.3), which stay out of the root
-  module, and its image builder and migration runner (D46).
+  module, its image builder and migration runner (D46), and its job
+  runner (D52).
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator (sections 6.5 and 6.6). Built: it registers provisioner
   `pulumi`, its `bindings` package is the generator, and it joins
@@ -2550,14 +3098,68 @@ model, or retired, when it lands.
    Cloud DNS and Cloudflare DNS platforms, the Pulumi provisioner, Cloud
    Build, secrets, `plan` and `deploy`. Done when
    a fresh project plus a project id and a region gives a live acme-shop.
-   A nightly job proves it against a sandbox project.
+   A run from a maintainer's machine proves it, with an owner's
+   application default credentials: no CI job, no secret in CI and no
+   sandbox kept between runs. Done on 2026-10-07, from a binary built from
+   a checkout, on a fresh project in `us-central1`. acme-shop's stack took
+   a gcp environment beside `Dev` for the run only, since the example
+   builds with the core binary, which links no target but `local`. The
+   migration runner's image came from `scripts/migrate-dev-image.sh`, since
+   no release exists to build it from. `stack bootstrap` ran with
+   `--repository ""`, leaving Workload Identity Federation out, then
+   `stack plan`, `stack build` and `stack deploy`. The deploy took seven
+   minutes: Cloud SQL and the accounts, the migration job, which applied
+   shop-db's 20 expand steps as the migrator's IAM database user with
+   `cloudsqlsuperuser` and gave both servers their privileges, then both
+   Cloud Run services. A client then signed a user in through the ORM,
+   over the Cloud SQL Go connector as shop-api's IAM database user, and
+   called `CreateProduct`, `ListProducts` and `PlaceOrder` through the
+   generated Go SDKs at the `run.app` URLs, as `TestStackDevRunsTheShop`
+   does locally. A second deploy built both images inside the deploy and
+   rolled them out with no migration, and `plan` then showed no change.
+   `stack destroy` removed the run in three minutes. It left what the
+   stack's runs in the project share: bootstrap's state bucket, KMS key
+   ring and key (which Google Cloud never deletes), Artifact Registry
+   repository with the images, and its four accounts; the migration job;
+   the build contexts and job documents in the bucket; and the enabled
+   APIs. Deleting the project removes them all.
+
+   The run found five bugs, each fixed in a pull request of its own:
+   acme-shop's servers had no Dockerfile, since their runtime modules lie
+   above the example (`[paths] build_context`, D30 amended); bootstrap
+   failed on Cloud KMS until enabling its API reached every server, so it
+   retries such a refusal; the operation of a build in a region answered
+   NotFound, so the deploy polls the build by name; both Cloud Run
+   services planned an update on every preview, from a
+   `minInstanceCount` of 0 that Cloud Run does not return; and the
+   migration job reported taking back Cloud SQL's own grant to
+   `cloudsqlsuperuser`. A failed job execution failed its step with only
+   Cloud Run's "The container exited with an error", the execution's name
+   and the URL of its logs, where the runner's own error was; the deploy
+   now reads that error from Cloud Logging (D46, amended). Not run: a
+   domain, its load balancer and either DNS platform, secrets (acme-shop
+   has none), Workload Identity Federation, a parameterized environment,
+   and a calling server's network, which waits for a stack with `calls`
+   edges (milestone 4).
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
 5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
    deploys, the hazard gate and the deploy manifest.
-6. **CI generation and parameterized environments.**
+6. **CI generation and parameterized environments.** Built (D47). A
+   stack's `outputs.ci` writes its GitHub Actions workflow (section
+   11.3), which checks with no credentials, plans each cloud environment
+   as `planner`, deploys a preview member per pull request, and deploys
+   the cloud environments in declaration order behind their GitHub
+   environments' reviewers. Bootstrap records the project's number the
+   workflow signs in with. No generated workflow has run on GitHub yet.
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
    and a second target (GKE or Cloudflare) added as a registration, with
-   the generic connector (section 6.2) so compute can mix.
+   the generic connector (section 6.2) so compute can mix. Built so far:
+   - TypeScript servers on Bun (section 8.6, D51);
+   - jobs and scheduled jobs, on the local target and on gcp as Cloud
+     Run jobs with Cloud Scheduler (section 8.7, D52).
+   
+   Not yet: buckets, queues with their workers, static sites and a
+   second target.
 
 ## 15. Open questions
 

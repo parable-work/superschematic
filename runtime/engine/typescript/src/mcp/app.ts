@@ -19,7 +19,10 @@ the core user model (D50), and, when it passes one, its service
 authenticator (D37). The caller it establishes, an end user, a
 service acting for one, or a service standing in for one
 (http/callers.ts), is the principal every tools/list and tools/call acts
-as, so the engine's access policy answers each call. A call the engine refuses returns a tool error
+as, so the engine's access policy answers each call, and the list holds
+the tools the policy lets that caller see. The mount's `tools` filter
+narrows it further, per caller: a session limited to one schema's
+operations lists and calls those alone. A call the engine refuses returns a tool error
 (isError) whose structured content is the problem document the HTTP API
 would answer with; a tool the namespace does not have is a JSON-RPC
 invalid-params error, and a malformed message the SDK's JSON-RPC error.
@@ -38,7 +41,7 @@ import type { Engine } from '../engine.js';
 import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { engineProblem } from '../http/problems.js';
 import { isPlainObject } from '../instances/patch.js';
-import { UnknownToolError } from '../tools/catalog.js';
+import { UnknownToolError, type ToolFilter } from '../tools/catalog.js';
 
 export interface EngineMcpOptions extends RouterRuntimeOptions {
   /** Requests per minute per client (the runtime's @rateLimit); absent or 0 for none. */
@@ -55,6 +58,16 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
    * session routes are engineApp's.
    */
   identity?: IdentityService;
+  /**
+   * Narrows the tools each caller is offered, beyond what the access
+   * policy hides: asked with the caller's principal and each tool, true
+   * keeps it. A tool it leaves out is not in the caller's tools/list, and
+   * tools/call of it is the invalid-params error of a tool the namespace
+   * does not have, so an agent's session limited to one schema's
+   * operations reaches no other tool. Absent, every tool the policy lets
+   * the caller see.
+   */
+  tools?: ToolFilter;
 }
 
 /** The MCP endpoint's path, relative to where the app is mounted. */
@@ -80,7 +93,7 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
   const authenticate = options.identity ? identityRouterOptions(options, 'engineMcp').authenticate : options.authenticate;
   const runtime: RouterRuntimeOptions = { ...options, authenticate: callerAuthenticator(authenticate), onError: mapError };
   const serverInfo = options.serverInfo ?? packageInfo();
-  const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError));
+  const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError, options.tools));
   const app = new Hono();
 
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
@@ -126,7 +139,8 @@ function serverFor(
   context: McpRequestContext,
   serverInfo: { name: string; version: string },
   instructions: string | undefined,
-  mapError: (error: unknown, ctx: RequestContext) => Promise<HttpProblem | Response | undefined>
+  mapError: (error: unknown, ctx: RequestContext) => Promise<HttpProblem | Response | undefined>,
+  filter: ToolFilter | undefined
 ): Server {
   const caller = (context.authInfo?.extra as { caller?: Caller } | undefined)?.caller;
   if (!caller) {
@@ -134,10 +148,10 @@ function serverFor(
   }
   const { principal, namespace, ctx } = caller;
   const server = new Server(serverInfo, { capabilities: { tools: { listChanged: false } }, ...(instructions ? { instructions } : {}) });
-  server.setRequestHandler('tools/list', () => ({ tools: listTools(engine, principal, namespace) }));
+  server.setRequestHandler('tools/list', () => ({ tools: listTools(engine, principal, namespace, filter) }));
   server.setRequestHandler('tools/call', async (request) => {
     try {
-      return toolResult(engine.tools.call(principal, request.params.name, request.params.arguments, { namespace }));
+      return toolResult(engine.tools.call(principal, request.params.name, request.params.arguments, { namespace, ...(filter === undefined ? {} : { filter }) }));
     } catch (error) {
       if (error instanceof UnknownToolError) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, error.message);
@@ -155,12 +169,13 @@ function serverFor(
  * listTools is the namespace's visible tools as MCP tools: the handle as
  * the name, the title and description, the argument schema as the input
  * schema, whether it only reads, and `_meta` with the tool's guidance and
- * its invocation policy under the policy's key.
+ * its invocation policy under the policy's key. A filter narrows them as
+ * EngineMcpOptions.tools does.
  */
-export function listTools(engine: Engine, principal: Principal, namespace: string): Tool[] {
+export function listTools(engine: Engine, principal: Principal, namespace: string, filter?: ToolFilter): Tool[] {
   const policyKey = engine.tools.options.invocationPolicy.key;
   const tools: Tool[] = [];
-  for (const tool of engine.tools.manifest(principal, { namespace }).tools) {
+  for (const tool of engine.tools.manifest(principal, { namespace, ...(filter === undefined ? {} : { filter }) }).tools) {
     if (tool.mcp.hidden) {
       continue;
     }

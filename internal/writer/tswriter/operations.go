@@ -97,22 +97,23 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 		if cfg.Register {
 			keys = append(keys, "register: true")
 		}
-		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), objectLiteral(keys))
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), optionalObjectLiteral(keys))
 	}
 	if cfg := set.UserAdministration; cfg != nil {
 		var keys []string
 		if cfg.Path != "" {
 			keys = append(keys, "path: "+quote(cfg.Path))
 		}
-		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userAdministration"), objectLiteral(keys))
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userAdministration"), optionalObjectLiteral(keys))
 	}
 	e.emitMiddlewareDecorators("", set.Middleware)
 	fmt.Fprintf(&e.body, "export class %s {}\n", e.ident(set.Name, "operation set"))
 }
 
-// objectLiteral renders keys, each "key: value", as an object literal, or
-// nothing when there are none.
-func objectLiteral(keys []string) string {
+// optionalObjectLiteral renders keys, each "key: value", as an object
+// literal, or nothing when there are none, for a decorator whose argument
+// is optional.
+func optionalObjectLiteral(keys []string) string {
 	if len(keys) == 0 {
 		return ""
 	}

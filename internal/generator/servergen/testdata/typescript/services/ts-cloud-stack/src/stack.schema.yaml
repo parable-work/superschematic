@@ -1,0 +1,27 @@
+# ts-stack's servers in two environments: Staging on stacktest's fake
+# target, whose sql connector derives a Cloud SQL connector configuration
+# as the gcp target's does, and Local on the local target, whose derives a
+# connection string. ts-shop's server depends on the Cloud SQL Node
+# connector and connects either way; ts-pricing's, on no database, does not.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-shop, kind: API }
+        - { name: ts-pricing, kind: API }
+      expose:
+        - service: { name: ts-shop, kind: API }
+  Staging:
+    name: Staging
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

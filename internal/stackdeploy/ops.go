@@ -40,7 +40,7 @@ type PlanResult struct {
 	// Unallowed are the plans' hazards the gate would stop the deploy on.
 	Unallowed []Hazard `json:"unallowed,omitempty"`
 
-	// Unpinned are the servers with no image yet, planned at their
+	// Unpinned are the servers and jobs with no image yet, planned at their
 	// repository with no digest.
 	Unpinned []string `json:"unpinned,omitempty"`
 
@@ -90,7 +90,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	images := map[string]string{}
 	if prev != nil {
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind == ir.DeployableServer {
+			if d := s.env.Deployable(server); d != nil && d.Kind.HasImage() {
 				images[server] = image
 			}
 		}
@@ -180,6 +180,58 @@ func Outputs(ctx context.Context, o Options) (*RunOutputs, error) {
 	return NewOutputs(s.env, maps.Clone(s.run.Parameters), resources), nil
 }
 
+// RunJobOptions is one run of a deployed job on demand.
+type RunJobOptions struct {
+	Options
+
+	// Job is the job deployable to run (`shop-orders-ship-orders`).
+	Job string
+}
+
+// RunJob runs a deployed job of the run once, outside its schedule, through
+// its target's job runner (`superschematic stack run`, docs/stack-model.md,
+// section 8.7, D52): the job with the image the last deploy rolled out,
+// which the deploy manifest records. It refuses a name that is no job of
+// the environment, a target with no job runner, and a run whose last
+// deploy did not roll the job out.
+func RunJob(ctx context.Context, o RunJobOptions) error {
+	s, err := open(o.Options)
+	if err != nil {
+		return err
+	}
+	if d := s.env.Deployable(o.Job); d == nil || d.Kind != ir.DeployableJob {
+		var jobs []string
+		for _, d := range s.env.Deployables {
+			if d.Kind == ir.DeployableJob {
+				jobs = append(jobs, d.Name)
+			}
+		}
+		if len(jobs) == 0 {
+			return fmt.Errorf("environment %s has no job %s: it has none", s.env.Environment, o.Job)
+		}
+		return fmt.Errorf("environment %s has no job %s (its jobs: %s)", s.env.Environment, o.Job, strings.Join(jobs, ", "))
+	}
+	if s.target.Jobs == nil {
+		return fmt.Errorf("target %s runs no job on demand, so `stack run` does not run job %s of environment %s", s.target.Name, o.Job, s.env.Environment)
+	}
+	if err := s.requireDeploy(); err != nil {
+		return err
+	}
+	prev, err := readManifest(ctx, s.target.State, s.run)
+	if err != nil {
+		return err
+	}
+	if prev == nil {
+		return fmt.Errorf("%s was never deployed; deploy it, then run job %s", s.run.Name(), o.Job)
+	}
+	image := prev.Images[o.Job]
+	if image == "" {
+		return fmt.Errorf("the last deploy of %s did not roll job %s out; deploy it, then run the job", s.run.Name(), o.Job)
+	}
+	s.logf("run job %s of %s (image %s)", o.Job, s.run.Name(), image)
+	return s.target.Jobs.RunJob(ctx, registry.JobRunRequest{Run: s.run, Job: o.Job, Image: image, Log: s.log})
+}
+
 // deployedRequest is the provisioner's request over the environment with
 // the images the manifest records pinned, so the program it renders is
 // the one the last deploy applied.
@@ -192,7 +244,7 @@ func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionReques
 	if prev != nil {
 		images := map[string]string{}
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind == ir.DeployableServer {
+			if d := s.env.Deployable(server); d != nil && d.Kind.HasImage() {
 				images[server] = image
 			}
 		}
@@ -215,37 +267,52 @@ type BootstrapOptions struct {
 	// Prompter asks for each credential of the environment that has no
 	// value.
 	Prompter Prompter
+
+	// Source is the stack's schema source, where bootstrap records the
+	// values the target's bootstrap returns (D47). Without one, it says
+	// what to add by hand.
+	Source *SchemaSource
 }
 
 // Bootstrap prepares the cloud project an environment deploys to
 // (docs/stack-model.md, section 7.3): the target's bootstrap, which also
-// creates the storage of each platform credential, then a value for each
-// credential the secret store lacks. Both halves are idempotent, so it is
-// safe to run again; a credential that has a value is not asked for, and
-// one that environments share is asked for once.
-func Bootstrap(ctx context.Context, o BootstrapOptions) error {
+// creates the storage of each platform credential; then it records each
+// value the target's bootstrap returns in the schema source (D47), and
+// asks for a value for each credential the secret store lacks. Each step
+// is idempotent, so it is safe to run again: a value the schema holds
+// leaves its file alone, a credential that has a value is not asked for,
+// and one that environments share is asked for once. It returns what it
+// did with each value, also when asking for a credential fails after it.
+func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error) {
 	s, err := openEnvironment(o.Options)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	creds := s.credentials()
 	if len(creds) > 0 && s.target.Secrets == nil {
-		return fmt.Errorf("environment %s needs credentials, and target %s stores no secrets", s.env.Environment, s.target.Name)
+		return nil, fmt.Errorf("environment %s needs credentials, and target %s stores no secrets", s.env.Environment, s.target.Name)
 	}
+	var recorded []RecordedValue
 	if s.target.Bootstrap != nil {
 		if err := s.requireDeploy(); err != nil {
-			return err
+			return nil, err
 		}
 		s.logf("bootstrap target %s for environment %s", s.target.Name, s.env.Environment)
-		if err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
+		result, err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
 			Environment: s.env,
 			Repository:  o.Repository,
 			Credentials: creds,
 			Provisioner: s.prov,
 			Dir:         s.dir,
 			Log:         s.log,
-		}); err != nil {
-			return fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)
+		}
+		if result != nil {
+			if recorded, err = s.record(o.Source, result.Values); err != nil {
+				return recorded, err
+			}
 		}
 	} else {
 		s.logf("target %s needs no bootstrap", s.target.Name)
@@ -253,20 +320,20 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) error {
 	for _, c := range creds {
 		ok, err := s.target.Secrets.Exists(ctx, s.env, c.Secret)
 		if err != nil {
-			return fmt.Errorf("credential %s: %w", c.Secret, err)
+			return recorded, fmt.Errorf("credential %s: %w", c.Secret, err)
 		}
 		if ok {
 			s.logf("credential %s has a value", c.Secret)
 			continue
 		}
 		if o.Prompter == nil {
-			return fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", c.Secret)
+			return recorded, fmt.Errorf("credential %s has no value, and no terminal to ask for it on: run bootstrap at a terminal", c.Secret)
 		}
 		if err := promptSecret(ctx, s, o.Prompter, c.Secret, credentialPrompt(c)); err != nil {
-			return err
+			return recorded, err
 		}
 	}
-	return nil
+	return recorded, nil
 }
 
 // SecretsOptions is one `stack secrets set`.

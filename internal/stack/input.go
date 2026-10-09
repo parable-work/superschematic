@@ -72,6 +72,10 @@ type Service struct {
 	// the API must reach one its caller may invoke. OperationsOf reads them
 	// from the service's IR.
 	Operations []Operation
+
+	// Jobs are an API service's jobs, its `@job` classes (D52), as
+	// ir.Schema.Jobs holds them. Each is a deployable of the stack.
+	Jobs []ir.Job
 }
 
 // Operation is what admits a caller to one operation of an API service.

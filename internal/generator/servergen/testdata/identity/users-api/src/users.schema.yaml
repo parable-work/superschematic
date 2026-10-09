@@ -20,3 +20,7 @@ operationSets:
         auth: true
         httpMethod: GET
         restPath: greeting
+# A job of the API, a deployable of its own with the API's Deps (D52). It
+# serves no request, so it builds no identity service.
+jobs:
+  - name: PurgeSessions

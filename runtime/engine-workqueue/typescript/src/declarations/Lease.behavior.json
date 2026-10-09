@@ -9,6 +9,46 @@
         "minLength": 1,
         "type": "string"
       },
+      "directOn": {
+        "description": "Directives the engine's runner sends the holder of an instance's active lease when the target of one of the instance's links moves on: a new revision of Revisions, or a release of Branches; for a pinned link, a revision tells only the instances the target moved past. The runner sends each with direct, as its principal, which needs directPermission, or overridePermission when that is absent, once per lease and move (dedupeKey). An instance with no lease held hears nothing, and its next holder nothing either. Needs Links on the type; one entry per link.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "data": {
+              "description": "Its data, beside revised, which the runner sets: the link, the target's schema and id, and its revision or the release's commit.",
+              "type": "object"
+            },
+            "name": {
+              "description": "The directive's name, as direct takes it.",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "revised": {
+              "additionalProperties": false,
+              "description": "The link whose target's move sends the directive.",
+              "properties": {
+                "link": {
+                  "description": "A link of the type's Links config.",
+                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "link"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "revised",
+            "name"
+          ],
+          "type": "object"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
       "directPermission": {
         "description": "The permission a principal needs to send the holder a directive; overridePermission when absent. With neither, direct is refused.",
         "minLength": 1,
@@ -119,8 +159,36 @@
   },
   "fields": [
     {
-      "name": "lease",
-      "description": "The lease: holder (null when free), token, acquiredAt, renewedAt (its acquire or its last heartbeat), expiresAt, active (held and not expired), expiries, and ended, how and when the last lease ended (null while one is held)."
+      "name": "holder",
+      "description": "The subject of the principal that holds the lease; absent when the instance is free."
+    },
+    {
+      "name": "token",
+      "description": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it."
+    },
+    {
+      "name": "acquiredAt",
+      "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "renewedAt",
+      "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "expiresAt",
+      "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free."
+    },
+    {
+      "name": "active",
+      "description": "Whether a lease is held and has not expired."
+    },
+    {
+      "name": "expiries",
+      "description": "How many leases have expired or been abandoned since the last resetExpiries."
+    },
+    {
+      "name": "ended",
+      "description": "How and when the last lease ended (reason and at); absent while one is held."
     }
   ],
   "operations": [

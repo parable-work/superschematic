@@ -14,6 +14,7 @@ import {
   defineBehavior,
   openEngine,
   type BehaviorDeclaration,
+  type ConfigChange,
   type Engine,
 } from '../dist/index.js';
 import {
@@ -27,12 +28,15 @@ import {
   publishItem,
   tablesOf,
   tally,
+  type CounterConfig,
 } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, freshPath, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, clone, drivers, fieldsOf, freshPath, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 
-// A behavior whose field and operation collide with the counter's.
+// A behavior whose field and operation are named like the counter's: the
+// operation collides, the field does not, since each behavior's fields sit
+// under its own name.
 const shadow = defineBehavior({
   declaration: {
     name: 'test.Shadow',
@@ -70,33 +74,34 @@ for (const driver of drivers) {
         [
           [{ name: 'test.Counter' }, { name: 'test.Shadow' }],
           '/types/Item/behaviors/1',
-          'type Item: behaviors test.Counter and test.Shadow both add field count',
+          'type Item: behaviors test.Counter and test.Shadow both add operation history',
         ],
       ];
       for (const [behaviors, path, message] of cases) {
         const issues = issuesOf(() => engine.schemas.define(alice, itemDocument(behaviors)));
         assert.deepEqual(issues[0], { path, message }, message);
       }
+      // The operation is the one issue: two behaviors' fields of one name are none.
       assert.deepEqual(
         issuesOf(() => engine.schemas.define(alice, itemDocument([{ name: 'test.Counter' }, { name: 'test.Shadow' }]))).map((issue) => issue.message),
-        [
-          'type Item: behaviors test.Counter and test.Shadow both add field count',
-          'type Item: behaviors test.Counter and test.Shadow both add operation history',
-        ]
+        ['type Item: behaviors test.Counter and test.Shadow both add operation history']
       );
       assert.deepEqual(engine.schemas.list(alice), []);
     });
 
-    test('a behavior field may not take the name or the JSON key of a field of the type', () => {
-      const engine = openBehaviorEngine({ driver });
+    test("a type's field and two behaviors' fields of one name each sit apart: an own field by its name or its JSON key", () => {
+      const twin = defineBehavior({ declaration: { name: 'test.Twin', fields: [{ name: 'count' }] }, fields: { count: () => 1 } });
       for (const field of [
         { name: 'count', typeRef: { name: 'number' } },
         { name: 'total', jsonTag: 'count', typeRef: { name: 'number' } },
       ]) {
-        assert.deepEqual(
-          issuesOf(() => engine.schemas.define(alice, itemDocument([{ name: 'test.Counter' }], [field]))),
-          [{ path: '/types/Item/behaviors/0', message: 'type Item: behavior test.Counter adds field count, which the type declares' }]
-        );
+        const engine = openBehaviorEngine({ driver, behaviors: [counter, twin] });
+        publishItem(engine, [{ name: 'test.Counter', config: { start: 3 } }, { name: 'test.Twin' }], [field]);
+        engine.instances.create(alice, 'Item', { title: 'Desk', count: 7 }, { id: 'i1' });
+        assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), {
+          data: { title: 'Desk', count: 7 },
+          behaviors: { 'test.Counter': { count: 3 }, 'test.Twin': { count: 1 } },
+        });
       }
     });
 
@@ -242,7 +247,7 @@ for (const driver of drivers) {
         );
       }
       second.behaviors.register(counter);
-      assert.deepEqual(second.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 2 });
+      assert.deepEqual(fieldsOf(second.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 2 } } });
     });
 
     test("registering brings existing storage up to the implementation's last migration", () => {
@@ -316,7 +321,10 @@ for (const driver of drivers) {
       // The counter opts in to being added: the instance that exists counts from 0.
       engine.schemas.define(alice, itemDocument([{ name: 'test.Flag' }, { name: 'test.Counter' }]));
       assert.equal(engine.schemas.publish(alice, 'Item').version, 2);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', flagged: false, count: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), {
+        data: { title: 'Desk' },
+        behaviors: { 'test.Flag': { flagged: false }, 'test.Counter': { count: 0 } },
+      });
       // ... and refuses to be removed.
       assert.deepEqual(changesOf(engine, [{ name: 'test.Flag' }]), [
         'behavior test.Counter cannot be removed from type Item, which has instances: removing it loses every count',
@@ -344,6 +352,50 @@ for (const driver of drivers) {
         thrown(() => engine.schemas.define(alice, itemDocument([]), { namespace: 'shared' }), IncompatibleChangeError).changes.map((change) => change.path),
         ['Item.behaviors.test.Flag']
       );
+    });
+
+    test('configChange sees whether the schema has instances, in any namespace that reads it, and publish asks again', () => {
+      const asked: boolean[] = [];
+      const counted = defineBehavior<CounterConfig>({
+        ...counter,
+        configChange(before: CounterConfig | undefined, after: CounterConfig | undefined, change: ConfigChange) {
+          if (before === undefined || after === undefined) {
+            return undefined;
+          }
+          asked.push(change.instances);
+          return before.start !== after.start && change.instances ? 'start cannot change while an instance counts from it' : undefined;
+        },
+      });
+      const engine = openBehaviorEngine({ driver, behaviors: [counted], namespaces: { names: ['shared', 'east'], shared: 'shared' } });
+      const define = (start: number) => engine.schemas.define(alice, itemDocument([{ name: 'test.Counter', config: { start } }]), { namespace: 'shared' });
+      define(1);
+      engine.schemas.publish(alice, 'Item', { namespace: 'shared' });
+      // No namespace holds an instance: start may change.
+      define(2);
+      // An instance in a namespace that reads the shared schema: the publish asks again, in its transaction.
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { namespace: 'east' });
+      assert.deepEqual(
+        thrown(() => engine.schemas.publish(alice, 'Item', { namespace: 'shared' }), IncompatibleChangeError).changes.map((change) => change.message),
+        ['behavior test.Counter on type Item cannot change its config from {"start":1} to {"start":2}: start cannot change while an instance counts from it']
+      );
+      assert.deepEqual(asked, [false, true]);
+    });
+
+    test('a configChange that never reads instances asks nothing of the store', () => {
+      const engine = published([{ name: 'test.Counter', config: { limit: 5 } }], false);
+      let reads = 0;
+      const all = engine.storage.all.bind(engine.storage);
+      const get = engine.storage.get.bind(engine.storage);
+      engine.storage.get = ((sql: string, params?: never) => {
+        reads += /FROM engine_instances/.test(sql) ? 1 : 0;
+        return get(sql, params);
+      }) as typeof engine.storage.get;
+      engine.storage.all = ((sql: string, params?: never) => {
+        reads += /FROM engine_instances/.test(sql) ? 1 : 0;
+        return all(sql, params);
+      }) as typeof engine.storage.all;
+      engine.schemas.define(alice, itemDocument([{ name: 'test.Counter', config: { limit: 9 } }]));
+      assert.equal(reads, 0);
     });
   });
 }
@@ -394,7 +446,10 @@ describe("a binary's meta-schema and its behaviors' declarations", () => {
     engine.instances.create(alice, 'Item', { sku: 'D-1' }, { id: 'i1' });
     assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'restock', { quantity: 4 }), { onHand: 4 });
     assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'audit'), { auditedAt: '1970-01-01T00:00:00.000Z' });
-    assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { sku: 'D-1', onHand: 4, auditedAt: '1970-01-01T00:00:00.000Z' });
+    assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), {
+      data: { sku: 'D-1' },
+      behaviors: { 'acme.Stock': { onHand: 4 }, 'acme.Audited': { auditedAt: '1970-01-01T00:00:00.000Z' } },
+    });
   });
 
   test('the meta-schema refuses a name the binary does not declare before the engine looks', () => {

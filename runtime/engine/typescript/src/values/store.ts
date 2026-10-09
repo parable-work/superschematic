@@ -17,7 +17,16 @@ with no pointers.
 Where the values live is a driver (ValueDriver). The default keeps them in
 the engine's own file, in engine_payloads, written in the transaction that
 writes the row, so D16's one file holds everything. A driver over other
-storage implements the same three synchronous calls.
+storage implements the same three synchronous calls. Its writes are
+outside the file's transactions, so a rollback cannot undo them: once the
+outermost transaction ends, committed or rolled back, the store removes
+each value it wrote there that no holder references (Storage.
+afterTransaction), and engine.values.sweep() removes what a crash left
+between a write and that end, for a driver that lists its hashes (list).
+
+No value is longer than maxBytes (16 MiB of canonical JSON by default):
+a write that would store one is refused (ValueTooLargeError,
+value_too_large).
 
 Who holds a value is engine_payload_holders: one row per value per holder,
 an instance's row, an event, or a row of a behavior's tables, by namespace
@@ -37,6 +46,7 @@ a copy. Values come back in canonical form: an object's members sorted.
 import { deepFreeze } from '../behaviors/json.js';
 import { setMember } from '../instances/patch.js';
 import type { Storage } from '../storage/storage.js';
+import { ValueTooLargeError } from '../errors.js';
 import { canonicalJSON, sha256Hex } from './canonical.js';
 
 /** The member of a ref that names its value's hash. */
@@ -78,6 +88,12 @@ export interface ValueDriver {
   write(hash: string, json: string): void;
   /** Removes the value under a hash, which no holder references any more. */
   remove(hash: string): void;
+  /**
+   * The hashes it stores after `after`, in order, at most limit of them:
+   * what engine.values.sweep() pages through to remove the values no
+   * holder references. Optional; a driver without it is not swept.
+   */
+  list?(after: string, limit: number): string[];
 }
 
 /** EngineOptions.values. */
@@ -95,10 +111,23 @@ export interface ValueOptions {
    * A value never changes under its hash, so nothing invalidates them.
    */
   cacheBytes?: number;
+  /**
+   * The longest value the engine stores, in UTF-8 bytes of its canonical
+   * JSON: 16 MiB by default, at least thresholdBytes. A write that would
+   * store a longer top-level member, in an instance's row, an event or a
+   * behavior's row, is refused (ValueTooLargeError, value_too_large).
+   */
+  maxBytes?: number;
 }
 
 /** The default of ValueOptions.cacheBytes: 32 MiB. */
 export const DEFAULT_VALUE_CACHE_BYTES = 32 * 1024 * 1024;
+
+/** The default of ValueOptions.maxBytes: 16 MiB. */
+export const DEFAULT_VALUE_MAX_BYTES = 16 * 1024 * 1024;
+
+/** How many hashes engine.values.sweep() reads from a driver at a time. */
+const SWEEP_PAGE = 500;
 
 /** The default driver: engine_payloads, in the engine's file and its transactions. */
 export class SqliteValueDriver implements ValueDriver {
@@ -119,6 +148,10 @@ export class SqliteValueDriver implements ValueDriver {
 
   remove(hash: string): void {
     this.storage.run('DELETE FROM engine_payloads WHERE hash = ?', [hash]);
+  }
+
+  list(after: string, limit: number): string[] {
+    return this.storage.all('SELECT hash FROM engine_payloads WHERE hash > ? ORDER BY hash LIMIT ?', [after, limit]).map((row) => String(row.hash));
   }
 }
 
@@ -153,14 +186,19 @@ const NO_REFS: ReadonlySet<string> = new Set();
 
 export class ValueStore {
   readonly threshold: number;
+  readonly maxBytes: number;
   readonly driver: ValueDriver;
   private readonly cache: ValueCache;
+  // What a driver outside the file's transactions wrote in the
+  // transaction under way, to remove at its end if nothing holds it.
+  private written: Set<string> | undefined;
 
   constructor(
     private readonly storage: Storage,
     options: ValueOptions = {}
   ) {
     this.threshold = checkThreshold(options.thresholdBytes);
+    this.maxBytes = checkMaxBytes(options.maxBytes, this.threshold);
     this.driver = checkDriver(options.driver) ?? new SqliteValueDriver(storage);
     this.cache = new ValueCache(checkCacheBytes(options.cacheBytes));
   }
@@ -170,9 +208,17 @@ export class ValueStore {
    * JSON is longer than the threshold stored by hash and a ref in its
    * place. prefix is the pointer of the object in what is stored (an
    * operation's params are at /params); known lists the pointers of
-   * members that already hold a ref, which are kept as they are.
+   * members that already hold a ref, which are kept as they are; inline
+   * names members kept as they are whatever their length: the fields an
+   * index of the instance type covers, in an instance's row
+   * (instances/indexes.ts).
    */
-  stow(object: Readonly<Record<string, unknown>>, prefix = '', known: ReadonlySet<string> = NO_REFS): Stowed {
+  stow(
+    object: Readonly<Record<string, unknown>>,
+    prefix = '',
+    known: ReadonlySet<string> = NO_REFS,
+    inline: ReadonlySet<string> = NO_REFS
+  ): Stowed {
     const value: Record<string, unknown> = {};
     const refs: string[] = [];
     const hashes = new Set<string>();
@@ -196,13 +242,50 @@ export class ValueStore {
         continue;
       }
       const json = canonicalJSON(member);
+      const bytes = Buffer.byteLength(json, 'utf8');
+      if (bytes > this.maxBytes) {
+        throw new ValueTooLargeError(at, bytes, this.maxBytes);
+      }
+      if (inline.has(key)) {
+        setMember(value, key, member);
+        continue;
+      }
       const hash = sha256Hex(json);
-      this.driver.write(hash, json);
-      setMember(value, key, { [VALUE_REF_KEY]: hash, bytes: Buffer.byteLength(json, 'utf8') } satisfies ValueRef);
+      this.write(hash, json);
+      setMember(value, key, { [VALUE_REF_KEY]: hash, bytes } satisfies ValueRef);
       refs.push(at);
       hashes.add(hash);
     }
     return { value, refs, hashes };
+  }
+
+  /**
+   * stowChange stows an instance as the log holds it, or a change of one:
+   * a merge patch of what a read returns, { data, behaviors }. data's own
+   * fields keep the refs known already (pointers from the change's root,
+   * prefix included), and each behavior's fields go under its name, a
+   * large one by hash as an own field is. With whole, the change is the
+   * instance and holds both parts; otherwise a part that is undefined or
+   * changes nothing is left out.
+   */
+  stowChange(
+    prefix: string,
+    data: Readonly<Record<string, unknown>> | undefined,
+    behaviors: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+    options: { readonly whole?: boolean; readonly known?: ReadonlySet<string> } = {}
+  ): Stowed {
+    const parts: Record<string, Stowed> = {};
+    if (data !== undefined && (options.whole === true || Object.keys(data).length > 0)) {
+      parts.data = this.stow(data, `${prefix}/data`, options.known);
+    }
+    if (behaviors !== undefined && (options.whole === true || Object.keys(behaviors).length > 0)) {
+      const entries: Record<string, Stowed> = {};
+      for (const [name, fields] of Object.entries(behaviors)) {
+        entries[name] = this.stow(fields, `${prefix}/behaviors${pointerToken(name)}`, options.known);
+      }
+      parts.behaviors = joinStowed({}, entries);
+    }
+    return joinStowed({}, parts);
   }
 
   /**
@@ -300,6 +383,65 @@ export class ValueStore {
   read(hash: string): StoredValue | undefined {
     const value = this.cached(hash);
     return value === undefined ? undefined : { hash, bytes: value.bytes, value: structuredClone(value.value) };
+  }
+
+  /**
+   * sweep removes every value the driver stores that no holder
+   * references: what a crash left between a non-transactional driver's
+   * write and the end of its transaction. It needs a driver that lists
+   * its hashes (ValueDriver.list) and no open transaction, and returns how
+   * many it removed. The default driver writes in the file's transactions
+   * and leaves none.
+   */
+  sweep(): { removed: number } {
+    if (typeof this.driver.list !== 'function') {
+      throw new TypeError('values.sweep needs a driver that lists its hashes (ValueDriver.list)');
+    }
+    if (this.storage.inTransaction) {
+      throw new Error('values.sweep runs outside any transaction');
+    }
+    let removed = 0;
+    let after = '';
+    for (;;) {
+      const hashes = this.driver.list(after, SWEEP_PAGE);
+      for (const hash of hashes) {
+        if (!this.storage.get('SELECT 1 AS held FROM engine_payload_holders WHERE hash = ? LIMIT 1', [hash])) {
+          this.driver.remove(hash);
+          this.cache.delete(hash);
+          removed += 1;
+        }
+      }
+      if (hashes.length < SWEEP_PAGE) {
+        return { removed };
+      }
+      after = hashes[hashes.length - 1];
+    }
+  }
+
+  // write stores a value through the driver. A driver outside the file's
+  // transactions keeps it whatever the transaction does, so the store
+  // notes it, and once the outermost transaction ends removes it unless a
+  // holder references it then: a write that rolled back leaves no value
+  // behind.
+  private write(hash: string, json: string): void {
+    this.driver.write(hash, json);
+    if (this.driver.transactional === true || !this.storage.inTransaction) {
+      return;
+    }
+    if (this.written === undefined) {
+      this.written = new Set();
+      this.storage.afterTransaction(() => {
+        const written = this.written ?? new Set<string>();
+        this.written = undefined;
+        for (const each of written) {
+          if (!this.storage.get('SELECT 1 AS held FROM engine_payload_holders WHERE hash = ? LIMIT 1', [each])) {
+            this.driver.remove(each);
+            this.cache.delete(each);
+          }
+        }
+      });
+    }
+    this.written.add(hash);
   }
 
   /** schemasHolding lists the schemas of a namespace whose rows, events or behaviors' rows hold a value, by name. */
@@ -469,9 +611,10 @@ function checkDriver(driver: ValueDriver | undefined): ValueDriver | undefined {
       driver === null ||
       typeof driver.read !== 'function' ||
       typeof driver.write !== 'function' ||
-      typeof driver.remove !== 'function')
+      typeof driver.remove !== 'function' ||
+      (driver.list !== undefined && typeof driver.list !== 'function'))
   ) {
-    throw new TypeError('values.driver is a ValueDriver: { read, write, remove }');
+    throw new TypeError('values.driver is a ValueDriver: { read, write, remove, list? }');
   }
   return driver;
 }
@@ -486,6 +629,16 @@ function checkCacheBytes(cacheBytes: number | undefined): number {
   return cacheBytes;
 }
 
+function checkMaxBytes(maxBytes: number | undefined, threshold: number): number {
+  if (maxBytes === undefined) {
+    return Math.max(DEFAULT_VALUE_MAX_BYTES, threshold);
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < threshold) {
+    throw new TypeError(`values.maxBytes is an integer of at least values.thresholdBytes (${threshold}), got ${String(maxBytes)}`);
+  }
+  return maxBytes;
+}
+
 function checkThreshold(threshold: number | undefined): number {
   if (threshold === undefined) {
     return DEFAULT_VALUE_THRESHOLD;
@@ -498,7 +651,7 @@ function checkThreshold(threshold: number | undefined): number {
 
 /** checkValueOptions throws TypeError for options a value store refuses; Engine.open calls it before it opens the file. */
 export function checkValueOptions(options: ValueOptions = {}): void {
-  checkThreshold(options.thresholdBytes);
+  checkMaxBytes(options.maxBytes, checkThreshold(options.thresholdBytes));
   checkDriver(options.driver);
   checkCacheBytes(options.cacheBytes);
 }

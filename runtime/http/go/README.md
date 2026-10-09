@@ -16,7 +16,7 @@ depends on a generated type.
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `identity` | the core user model's runtime (D50): the identity `Config`, argon2id passwords as PHC strings, session tokens, the session cookie, the credential a request carries (`ExtractCredential`), the cross-origin check and the credentialed `CORS` middleware, roles and capabilities, the `Store` with its `database/sql` `SQLStore` for Postgres and SQLite, the `Service` with every session and administration operation, its handlers and its `Middleware` |
 | `filterparse` | list-endpoint filter expression parsing |
-| `stackconfig` | the config fields an API's edges derive in a stack: a database connection and a service endpoint, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4) |
+| `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path, and a JSON-object scalar's value first checked on its own JSON by the check the route passes in (`CheckJSON`); and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 | `cmd/superschematic-identity` | the identity runner, the binary that creates a database's first administrator (below) |
 
@@ -139,3 +139,19 @@ The compiler finds it as `$SUPERSCHEMATIC_IDENTITY`, else on `PATH`. Its
 tests run against SQLite always and against the Postgres
 `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set, and sign
 the administrator in through the `identity` package's `Service`.
+
+## Stack config parity vectors
+
+`runtime/http/testdata/stackconfig_parity.json` holds the vectors the Go
+and TypeScript runtimes read with their `stackconfig` readers (D51). The
+`stackconfig` package writes it from `ir.DerivedVariables`:
+
+```
+cd runtime/http/go && go test ./stackconfig -run TestWriteParityVectors -update
+```
+
+Each vector names a reader (`database`, `service` or `callers`) and a
+field, and holds an `ir` derived value, the variables `ir.DerivedVariables`
+makes of it, edits to them for an environment no value encodes, and the
+loaded value or the messages of the refusal. The file's `comment` states
+the harness in full.

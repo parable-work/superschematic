@@ -92,7 +92,7 @@ describe('the core behaviors say what their config means', () => {
     assert.deepEqual(codes(transition), ['transition_not_allowed', 'already_in_state', 'terminal_state', 'no_status']);
     assert.match(transition.errors[0].description, /^Workflow: /, "each error's description names its behavior");
     assert.match(guidanceOf(engine, 'Doc', 'create').success, /A new instance's status is draft\./);
-    assert.match(guidanceOf(engine, 'Doc', 'update').doNotUseWhen, /Do not set status: it is read-only; call transition\./);
+    assert.match(guidanceOf(engine, 'Doc', 'update').doNotUseWhen, /Do not use to move Workflow's status, which behaviors\.Workflow holds; call transition\./);
 
     // A config no transition leaves no state of has no terminal state, and no terminal_state refusal.
     assert.match(summaryOf(engine, 'Light', 'Workflow') as string, /No state is terminal/);
@@ -148,7 +148,36 @@ describe('the core behaviors say what their config means', () => {
     assert.match(rollups, /A move into done waits until tasksFinished holds\./);
     const transition = guidanceOf(engine, 'projects', 'transition');
     assert.deepEqual(codes(transition).at(-1), 'not_held');
-    assert.match(transition.doNotUseWhen, /Read rollups before a move: a move into done waits until tasksFinished holds\./);
+    assert.match(transition.doNotUseWhen, /Read behaviors\.Rollups\.values before a move: a move into done waits until tasksFinished holds\./);
+  });
+
+  test('Links says what each pinned link pins, Rollups what latest reads, Revisions how to read one revision and what waits for review', () => {
+    const engine = openTestEngine();
+    publish(engine, recipesDocument());
+    publish(engine, documentsDocument());
+    publish(
+      engine,
+      typed('Cook', [
+        { name: 'Links', config: { links: { recipe: { schema: 'Recipe', pinned: 'release' }, doc: { schema: 'documents', pinned: 'revision' } } } },
+      ])
+    );
+    const links = summaryOf(engine, 'Cook', 'Links') as string;
+    assert.match(links, /by name: doc to documents \(pinned to a revision\) and recipe to Recipe \(pinned to a release\)\./);
+    assert.match(links, /A link pinned to a release records the target's release; behaviors\.Links\.targets gives the target's latest beside it and says stale once the target has released again\./);
+    assert.deepEqual(codes(guidanceOf(engine, 'Cook', 'link')), ['no_revision', 'no_release']);
+    assert.match(guidanceOf(engine, 'Cook', 'link').useWhen, /doc records the target's latest revision, or the one given\. recipe records the target's latest release, or the one given\./);
+    assert.match(guidanceOf(engine, 'Cook', 'create').useWhen, /each the target's id, or \{ id, revision \} for doc, or \{ id, release \} for recipe\./);
+    assert.match(summaryOf(engine, 'Recipe', 'Branches') as string, /release holds the number of the latest release/);
+
+    publish(engine, typed('Step', [{ name: 'Links', config: { links: { cook: { schema: 'Cook' } } } }], [{ name: 'note', typeRef: { name: 'string' } }]));
+    publish(engine, typed('Cook', [{ name: 'Rollups', config: { rollups: { lastNote: { schema: 'Step', link: 'cook', function: 'latest', field: 'note' } } } }]));
+    assert.match(summaryOf(engine, 'Cook', 'Rollups') as string, /lastNote, the note of the one of the Step instances whose cook points here created last/);
+
+    const revisions = summaryOf(engine, 'documents', 'Revisions') as string;
+    assert.match(revisions, /pendingProposals counts the proposals waiting\./);
+    assert.match(guidanceOf(engine, 'documents', 'getRevision').useWhen, /Use to read one revision by its number/);
+    assert.match(guidanceOf(engine, 'documents', 'listRevisions').doNotUseWhen, /call getRevision with its number/);
+    assert.match(guidanceOf(engine, 'documents', 'propose').useWhen, /evidence cites instances the proposer may read/);
   });
 
   test("the operations a config turns off say so: Revisions without review, Search without vectors", () => {
@@ -166,7 +195,9 @@ describe('the core behaviors say what their config means', () => {
     assert.match(guidanceOf(engine, 'Plain', 'settleEmbeddings').doNotUseWhen, /keeps no vectors/);
     assert.match(summaryOf(engine, 'notes', 'Search') as string, /over title \(weight 3\) and body\. With vectors of 384 dimensions from model minilm-l6, which an outside embedder with permission notes\.embed settles\./);
     assert.match(guidanceOf(engine, 'notes', 'settleEmbeddings').useWhen, /with permission notes\.embed: it stores at most 100 vectors of 384 numbers/);
-    assert.match(guidanceOf(engine, 'notes', 'create').doNotUseWhen, /call search or similar first/);
+    assert.match(guidanceOf(engine, 'notes', 'create').doNotUseWhen, /call similar with the draft's text first/);
+    assert.match(guidanceOf(engine, 'notes', 'similar').useWhen, /with text, the ones nearest to a draft's title and body, joined by a blank line\. With text, a vector of 384 numbers from model minilm-l6/);
+    assert.match(guidanceOf(engine, 'Plain', 'similar').useWhen, /with text, the ones nearest to a draft's title\.$/);
   });
 
   test("Constants and Variants tell a create and an update what the fields hold; Reactions and Branches summarize what they run", () => {
@@ -401,7 +432,18 @@ describe('where the guidance goes', () => {
     const engineTools = manifest.tools.filter((tool) => tool.namespace === 'engine');
     assert.deepEqual(
       engineTools.map((tool) => tool.name),
-      ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue']
+      [
+        'engine.listSchemas',
+        'engine.describeSchema',
+        'engine.defineSchema',
+        'engine.listBehaviors',
+        'engine.describeBehavior',
+        'engine.getValue',
+        'engine.listNamespaces',
+        'engine.createNamespace',
+        'engine.archiveNamespace',
+        'engine.unarchiveNamespace',
+      ]
     );
     for (const tool of engineTools) {
       assert.ok(tool.guidance.useWhen.startsWith('Use '), tool.name);

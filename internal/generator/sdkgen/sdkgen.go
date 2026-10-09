@@ -527,6 +527,12 @@ func toSDKClassName(schemaName string) string {
 	return tsutil.ToClassName(schemaName) + "SDK"
 }
 
+// ClassName is the root client class the TypeScript SDK of the schema
+// named schemaName exports: "my-api" is MyApiSDK.
+func ClassName(schemaName string) string {
+	return toSDKClassName(schemaName)
+}
+
 // WriteSDKWithTools writes the generated SDK and tool calling bindings to files.
 func WriteSDKWithTools(output *SDKOutput, apiOutput *apigen.APIOutput, outputDir string, clock codegen.Clock) error {
 	return WriteSDKWithToolsProfiled(output, apiOutput, outputDir, clock, nil, false)

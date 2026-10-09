@@ -1,7 +1,9 @@
 /*
 The schema registry, as callers use it: each method takes the principal
 it acts for and asks the access policy (`define`, `publish`, `read`)
-before it touches the catalog (catalog.ts), which holds the rules.
+before it touches the catalog (catalog.ts), which holds the rules. An
+archived namespace refuses a define and a publish once the policy has
+allowed them (namespace_archived), and is read as it was.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
@@ -68,6 +70,7 @@ export class SchemaRegistry {
     const namespace = this.namespaces.resolve(options.namespace);
     const model = this.catalog.read(input, options.source ?? 'schema');
     this.access.require(principal, 'define', namespace, model.name);
+    this.namespaces.requireWritable(namespace);
     return this.catalog.define(model, namespace, actorOf(principal), this.reads(principal, namespace), options.source ?? 'schema');
   }
 
@@ -75,6 +78,7 @@ export class SchemaRegistry {
   publish(principal: Principal, name: string, options: SchemaTarget = {}): PublishResult {
     const namespace = this.target(principal, name, options);
     this.access.require(principal, 'publish', namespace, name);
+    this.namespaces.requireWritable(namespace);
     return this.catalog.publish(name, namespace, actorOf(principal), this.reads(principal, namespace));
   }
 
@@ -118,17 +122,20 @@ export class SchemaRegistry {
    * and a draft that was never published has no live version. A behavior
    * operation asks its action, so it is not listed apart; a call the
    * policy allows may still be refused for another reason, a name the
-   * shared namespace holds say.
+   * shared namespace holds say. An archived namespace refuses every
+   * write, so it answers write, define and publish false whatever the
+   * policy says.
    */
   capabilities(principal: Principal, options: SchemaTarget = {}): SchemaCapabilities[] {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
+    const archived = this.namespaces.archived(namespace);
     const out: SchemaCapabilities[] = [];
     for (const { name, liveVersion } of this.catalog.list(namespace)) {
       if (liveVersion === null || !this.access.allows(principal, 'read', namespace, name)) {
         continue;
       }
-      const allows = (action: 'write' | 'define' | 'publish') => this.access.allows(principal, action, namespace, name);
+      const allows = (action: 'write' | 'define' | 'publish') => !archived && this.access.allows(principal, action, namespace, name);
       out.push({ name, read: true, write: allows('write'), define: allows('define'), publish: allows('publish') });
     }
     return out;
@@ -136,10 +143,16 @@ export class SchemaRegistry {
 
   /**
    * validate checks a value as an instance of a name's live version, or of
-   * the given version. It throws not_found when there is no such version.
+   * the given version, as a create would: the value as the version stores
+   * it, its scalars' values normalized and its defaults filled, then, when
+   * the version refuses nothing, what a scalar's parser refused. It throws
+   * not_found when there is no such version.
    */
   validate(principal: Principal, name: string, value: unknown, options: ValidateOptions = {}): ValidationIssue[] {
-    return this.validator(principal, name, options).validate(value);
+    const validator = this.validator(principal, name, options);
+    const normalized = validator.normalize(value, 'create');
+    const issues = validator.validate(normalized.value);
+    return issues.length > 0 ? issues : normalized.issues;
   }
 
   /**

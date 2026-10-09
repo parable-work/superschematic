@@ -14,6 +14,7 @@ export {
   EngineClient,
   EventCalls,
   InstanceCalls,
+  NamespaceCalls,
   SchemaCalls,
 } from './client.js';
 export type { CreateOptions, EngineClientOptions, ListOptions, OperationOutcome, ReadEventsOptions, WriteOptions } from './client.js';
@@ -34,11 +35,15 @@ export { DEFAULT_TIMEOUT_MS, SERVICE_AUTHORIZATION_HEADER } from './transport.js
 export type { CallOptions, EndUserAuth, FetchLike, ForwardedUser, ServiceCredential } from './transport.js';
 export type {
   BehaviorDocument,
+  BehaviorFieldsJSON,
   BehaviorOperationDocument,
   BehaviorSummary,
   DescribeDocument,
   DescribedBehavior,
+  DescribedField,
   DescribedOperation,
+  DisplayState,
+  DisplayTone,
   EngineEvent,
   EventCause,
   EventKind,
@@ -47,6 +52,7 @@ export type {
   InstancePage,
   JSONObject,
   JSONSchema,
+  NamespaceRecord,
   OperationChange,
   Preconditions,
   PublishResult,
@@ -59,4 +65,5 @@ export type {
   ToolGuidance,
   ToolMCPRecord,
   ToolManifest,
+  TypeDisplay,
 } from './types.js';

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -37,19 +38,49 @@ type fakeCloud struct {
 	secrets map[string]*fakeSecret
 
 	// images holds each pushed image's digest by `<repository>:<tag>`;
-	// builds and jobs what RunBuild and EnsureJob were last given; runs
-	// the arguments of each job run.
-	images map[string]string
-	builds []BuildSpecRecord
-	jobs   map[string]gcp.JobSpec
-	runs   [][]string
+	// builds and jobs what RunBuild and EnsureJob were last given;
+	// graphJobs the image of each Cloud Run job the graph made, which a
+	// test sets, since the fake provisioner makes none (D52); runs the
+	// arguments of each job run, nil for a graph job's; stderr what each
+	// failed execution wrote to stderr, by its name, and stderrReads each
+	// read of it.
+	images      map[string]string
+	builds      []BuildSpecRecord
+	jobs        map[string]gcp.JobSpec
+	graphJobs   map[string]string
+	runs        [][]string
+	stderr      map[string][]string
+	stderrReads []stderrRead
 
-	// failRun fails the next job run whose arguments hold the string,
-	// and failBuild every build of an image that starts with the string.
-	failRun   map[string]string
-	failBuild map[string]string
+	// failRun fails the next job run whose arguments, or a graph job's
+	// name, hold the string, and failBuild every build of an image that
+	// starts with the string.
+	// failWait fails the wait for the next job run, which the fake starts;
+	// failStderr fails each read of an execution's stderr.
+	failRun    map[string]fakeFailure
+	failBuild  map[string]string
+	failWait   error
+	failStderr error
+
+	// numbers holds each project's number.
+	numbers map[string]string
 
 	log *stacktest.FakeProvisioner
+}
+
+// fakeFailure is an execution that fails: Cloud Run's message, and the
+// lines its task wrote to stderr.
+type fakeFailure struct {
+	message string
+	stderr  []string
+}
+
+// stderrRead is a read of an execution's stderr: the lines match
+// selects, all of them when it is empty.
+type stderrRead struct {
+	execution string
+	match     string
+	wait      time.Duration
 }
 
 // BuildSpecRecord is a build the fake ran.
@@ -69,8 +100,9 @@ func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
 		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
-		images: map[string]string{}, jobs: map[string]gcp.JobSpec{},
-		failRun: map[string]string{}, failBuild: map[string]string{},
+		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
+		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
+		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
 	}
 }
 
@@ -121,23 +153,59 @@ func (c *fakeCloud) EnsureJob(_ context.Context, project, region string, spec gc
 	return true, nil
 }
 
+func (c *fakeCloud) JobImage(_ context.Context, project, region, job string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := project + "/" + region + "/" + job
+	if image, ok := c.graphJobs[key]; ok {
+		return image, nil
+	}
+	if spec, ok := c.jobs[key]; ok {
+		return spec.Image, nil
+	}
+	return "", fmt.Errorf("job %s: %w", key, fs.ErrNotExist)
+}
+
 func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args []string) (*gcp.JobRun, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := project + "/" + region + "/" + job
-	if _, ok := c.jobs[key]; !ok {
+	_, ensured := c.jobs[key]
+	_, graph := c.graphJobs[key]
+	if !ensured && !graph {
 		return nil, fmt.Errorf("no job %s", key)
 	}
 	c.runs = append(c.runs, slices.Clone(args))
 	name := fmt.Sprintf("%s/executions/%d", key, len(c.runs))
-	c.record("cloud run job %s", strings.Join(args, " "))
-	for match, msg := range c.failRun {
-		if strings.Contains(strings.Join(args, " "), match) {
+	subject := strings.Join(args, " ")
+	if args == nil {
+		subject = job
+		c.record("cloud run %s", job)
+	} else {
+		c.record("cloud run job %s", subject)
+	}
+	if err := c.failWait; err != nil {
+		c.failWait = nil
+		return nil, fmt.Errorf("gcp: job %s: waiting for execution %s, which may still be running: %w", key, name, err)
+	}
+	for match, fail := range c.failRun {
+		if strings.Contains(subject, match) {
 			delete(c.failRun, match)
-			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: msg}, nil
+			c.stderr[name] = fail.stderr
+			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: fail.message}, nil
 		}
 	}
 	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
+}
+
+func (c *fakeCloud) ExecutionStderr(_ context.Context, run *gcp.JobRun, match string, wait time.Duration) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stderrReads = append(c.stderrReads, stderrRead{run.Name, match, wait})
+	if c.failStderr != nil {
+		return nil, c.failStderr
+	}
+	return slices.Clone(c.stderr[run.Name]), nil
 }
 
 func (c *fakeCloud) change(format string, args ...any) {
@@ -160,6 +228,16 @@ func (c *fakeCloud) EnableServices(_ context.Context, project string, services [
 		}
 	}
 	return nil
+}
+
+func (c *fakeCloud) ProjectNumber(_ context.Context, project string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	number, ok := c.numbers[project]
+	if !ok {
+		return "", fmt.Errorf("project %s does not exist", project)
+	}
+	return number, nil
 }
 
 func (c *fakeCloud) EnsureBucket(_ context.Context, project, bucket, location string) (bool, error) {
@@ -307,12 +385,16 @@ func newDeployFixture(t *testing.T, withRunner bool) *deployFixture {
 	return f
 }
 
-// shopImages are images of the shop's servers in the repository the
-// Cloud Run platform writes.
+// shopImages are images of the shop's servers and its job in the
+// repository the Cloud Run platforms write.
 func shopImages(project string, n int) map[string]string {
 	digest := "sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
 	repo := "us-east1-docker.pkg.dev/" + project + "/shop/"
-	return map[string]string{"shop-api": repo + "shop-api@" + digest, "Orders": repo + "orders@" + digest}
+	return map[string]string{
+		"shop-api":                repo + "shop-api@" + digest,
+		"Orders":                  repo + "orders@" + digest,
+		"shop-orders-ship-orders": repo + "shop-orders-ship-orders@" + digest,
+	}
 }
 
 // shopPlanner plans shop-db with a step in each phase.
@@ -354,7 +436,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		steps = append(steps, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 35 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
+	want := []string{"render 45 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("ran %q, want %q", steps, want)
 	}
@@ -437,9 +519,11 @@ func TestStores(t *testing.T) {
 }
 
 // TestBootstrap bootstraps Staging's project twice: the first run enables
-// the APIs, creates the state bucket and key, applies the bootstrap graph
-// and creates each credential's secret; the second changes nothing and
-// applies the same graph.
+// the APIs, Cloud Scheduler's among them for the job's schedule (D52),
+// creates the state bucket and key, applies the bootstrap graph
+// and creates each credential's secret, and returns the project's number to
+// record beside project (D47); the second changes nothing, applies the
+// same graph and returns the same number.
 func TestBootstrap(t *testing.T) {
 	f := newDeployFixture(t, false)
 	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
@@ -451,13 +535,19 @@ func TestBootstrap(t *testing.T) {
 		Credentials: []registry.Credential{cred, cred},
 		Provisioner: f.prov, Dir: t.TempDir(),
 	}
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err := target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantNumber := []registry.BootstrapValue{{Key: "projectNumber", Value: "123456789012", Beside: "project"}}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	first := f.cloud.Changes()
 	for _, want := range []string{
 		"enable compute.googleapis.com", "enable run.googleapis.com", "enable sqladmin.googleapis.com",
 		"enable certificatemanager.googleapis.com", "enable dns.googleapis.com", "enable sts.googleapis.com",
+		"enable cloudscheduler.googleapis.com",
 		"create bucket acme-staging-superschematic-state in acme-staging/us-east1",
 		"create key acme-staging/us-east1/superschematic/pulumi-state",
 		"create secret acme-staging/shop-cloudflare-dns-acme_dev",
@@ -474,8 +564,12 @@ func TestBootstrap(t *testing.T) {
 	graph := f.prov.Rendered()
 	applied := f.prov.Calls()
 
-	if err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+	result, err = target.Bootstrap.Bootstrap(ctx, req)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result == nil || !slices.Equal(result.Values, wantNumber) {
+		t.Errorf("the second bootstrap returned %+v, want %+v", result, wantNumber)
 	}
 	if again := f.cloud.Changes(); len(again) != len(first) {
 		t.Errorf("the second bootstrap changed %v", again[len(first):])

@@ -4,22 +4,29 @@
 #
 #   examples/acme-shop/scripts/check.sh            check
 #   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/
+#                                                  and schemas/dist/bun.lock
 #
 # Needs what `make setup` stands up (the superscalar checkout and archive,
 # the version-graph archive, the runtime installs and the Python schema
 # runtime's uv environment), the pinned Go and Rust toolchains, bun and jq. Generated output goes to the example's schemas/dist
-# (gitignored).
+# (gitignored), but for the lockfile of its Bun workspace, schemas/dist/bun.lock,
+# which is committed (D51, amended) and which every step here keeps.
 #
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first, and the stack, shop-stack, last of
-#      the services it deploys, which writes each server's entrypoint;
+#      the services it deploys, which writes the entrypoint of each server
+#      and of shop-orders' job;
 #   2. every generated Go module builds and vets, the entrypoints of
-#      shop-stack's servers included;
-#   3. the generated TypeScript router and SDKs, and the app in typescript/,
-#      type-check; the generated Python packages import and python/'s type
-#      tests pass; the Rust client in rust/ builds against the generated Rust
-#      SDK and its type tests pass;
+#      shop-stack's servers and job included;
+#   3. the generated TypeScript router and SDKs, the entrypoint of
+#      shop-stack's TypeScript server, the storefront's implementation in
+#      typescript/shop-storefront and the clients in typescript/clients
+#      type-check, all of them one Bun workspace, which installs frozen to
+#      the committed schemas/dist/bun.lock and fails when the build's
+#      packages no longer match it; the generated Python
+#      packages import and python/'s type tests pass; the Rust client in
+#      rust/ builds against the generated Rust SDK and its type tests pass;
 #   4. the Go app in go/ builds, vets and passes its tests, which call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
@@ -31,15 +38,19 @@
 #      tables have the columns shop-db's DDL gives them) that the Rust
 #      server reads too, and check they print the same; and, when Docker
 #      runs, `superschematic stack dev` runs shop-stack's Dev environment,
-#      Postgres and both Go servers on their generated entrypoints, and
-#      the test calls each API through its SDK (milestone 1 of
-#      docs/stack-model.md);
+#      Postgres, both Go servers and the storefront's TypeScript server on
+#      Bun, each on its generated entrypoint, and the test calls each Go
+#      API through its SDK and the storefront over HTTP (milestones 1 and
+#      7 of docs/stack-model.md), then sees shop-orders' job ship an order
+#      with `superschematic stack run` and on the every-minute schedule
+#      stack dev runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password over the same tables, in memory, and its pages
 #      call shop-orders in-process through the crate the Topcoat extension
 #      writes into schemas/dist-rust, with the binary that links it;
-#   5. the TypeScript app's tests call the generated TypeScript router
-#      through the generated TypeScript SDK;
+#   5. the storefront's tests call the generated TypeScript router over its
+#      implementation through the generated TypeScript SDK, and the clients'
+#      type tests decode the generated types;
 #   6. build-all with --cache skips every service on a second run and
 #      restores every service once dist is gone;
 #   7. the copies under testdata/generated/ match this run byte for byte:
@@ -79,6 +90,13 @@ capture() {
   (cd "$EXAMPLE_DIR" && "$@") | sed "s|$EXAMPLE_DIR/|.../|g" >"$OUT/logs/$name"
 }
 
+# Empties schemas/dist but for the committed lockfile of its Bun workspace.
+clean_dist() {
+  if [[ -d "$DIST" ]]; then
+    find "$DIST" -mindepth 1 -maxdepth 1 ! -name bun.lock -exec rm -rf {} +
+  fi
+}
+
 echo "==> core binary (no extension)"
 # The core with no extension linked, under the name the docs pages run, so
 # the example proves the core alone builds it. The installed binary
@@ -89,7 +107,7 @@ echo "==> core binary (no extension)"
 (cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)
 
 echo "==> build-all"
-rm -rf "$DIST"
+clean_dist
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
 grep -q '^All 6 schema services built successfully$' "$OUT/logs/build-all.full.txt"
@@ -143,50 +161,39 @@ done
 # superschematic writes no go.sum for an entrypoint, and go mod tidy would
 # resolve the imports of go/'s tests too; -mod=mod fills it as the build
 # reads each module, as stack dev's build does.
-for server in shop-api shop-orders; do
-  echo "    server/shop-stack/$server"
-  (cd "$DIST/server/shop-stack/$server" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
+for entrypoint in shop-api shop-orders shop-orders-ship-orders; do
+  echo "    server/shop-stack/$entrypoint"
+  (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
 
-echo "==> TypeScript: the generated router and SDKs type-check"
+echo "==> TypeScript: the generated packages, the storefront's entrypoint and implementation, and the clients type-check"
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
-TYPES="$DIST/types/typescript"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
-# The types packages form one Bun workspace; installing it links each to the
-# types packages of the services it depends on.
-(cd "$TYPES" && bun install >/dev/null)
-# Until the packages are published, every package the router, the SDKs and
-# the app import by name is linked into their node_modules, as a service's
-# own install would resolve it. hono comes from the runtime's install so the
-# router, the runtime and the app share one copy.
-link_module() {
-  mkdir -p "$(dirname "$2")"
-  rm -rf "$2"
-  ln -s "$1" "$2"
-}
-link_packages() {
-  local service
-  for service in shop-common shop-db shop-api shop-orders shop-storefront; do
-    link_module "$TYPES/$service" "$1/node_modules/@acme/$service-types"
-  done
-  for service in shop-api shop-orders shop-storefront; do
-    link_module "$DIST/sdk/typescript/$service" "$1/node_modules/@acme/$service-sdk"
-  done
-  link_module "$DIST/api/shop-storefront" "$1/node_modules/@acme/shop-storefront-api"
-  link_module "$RUNTIME" "$1/node_modules/@superschematic/http-runtime"
-  link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$1/node_modules/superscalar"
-  for dep in hono typescript @types/node; do
-    link_module "$RUNTIME/node_modules/$dep" "$1/node_modules/$dep"
-  done
-}
-for pkg in api/shop-storefront sdk/typescript/shop-api sdk/typescript/shop-orders sdk/typescript/shop-storefront; do
-  echo "    $pkg"
-  link_packages "$DIST/$pkg"
-  (cd "$DIST/$pkg" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
+# The output root is one Bun workspace of the generated TypeScript packages,
+# the stack's TypeScript server and the packages in typescript/: the
+# storefront's implementation and the clients (D51). Installing it links
+# each to the packages it imports, so nothing is linked by hand. Its
+# lockfile is committed (D51, amended): the install is frozen to it, as the
+# generated CI's and the storefront's image are, and fails once the build's
+# packages no longer match it. UPDATE=1 brings it up to date instead.
+if [[ "${UPDATE:-}" == 1 ]]; then
+  (cd "$DIST" && bun install >/dev/null)
+elif [[ ! -f "$DIST/bun.lock" ]]; then
+  echo "schemas/dist/bun.lock is missing: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+elif ! (cd "$DIST" && bun install --frozen-lockfile >/dev/null); then
+  echo "schemas/dist/bun.lock does not match the packages the build wrote: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+fi
+TSC="$RUNTIME/node_modules/.bin/tsc"
+for pkg in \
+  "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
+  "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
+  "$APP/shop-storefront" "$APP/clients"; do
+  echo "    ${pkg#"$EXAMPLE_DIR/"}"
+  (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
-link_packages "$APP"
-(cd "$APP" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
 
 echo "==> Python: the generated types and SDK import"
 # The schema runtime's uv environment (make setup) has pydantic and the
@@ -239,7 +246,7 @@ if docker info >/dev/null 2>&1; then
   grep -q '^--- PASS: TestStackDevRunsTheShop ' "$OUT/go-test.log"
 fi
 
-echo "==> the TypeScript app's tests"
+echo "==> the TypeScript tests"
 (cd "$APP" && bun test)
 
 echo "==> the generated files the pages quote"
@@ -260,6 +267,7 @@ QUOTED=(
   types/python/shop-common/acme_types_shop_common/types.py
   types/rust/shop-common/src/types.rs
   stack/shop-stack/Dev/environment.json
+  server/shop-stack/shop-storefront/main.ts
 )
 mkdir -p "$OUT/quoted"
 for path in "${QUOTED[@]}"; do
@@ -272,7 +280,7 @@ echo "==> build-all --cache: skip, then restore"
 CACHE_FLAGS=(--cache --cache-root "$OUT/cache")
 superschematic build-all "${CACHE_FLAGS[@]}" "$SCHEMAS/services" >/dev/null
 capture build-all-cache.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
-rm -rf "$DIST"
+clean_dist
 capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
