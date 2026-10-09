@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,16 +89,25 @@ func TestEverySDKCallsTheGoServer(t *testing.T) {
 }
 
 // Every generated SDK calls shop-orders served by the generated Rust server
-// (rust-server/) and sees what it sees from the Go server. scripts/check.sh
-// builds the server and sets ACME_SHOP_RUST_SERVER to its binary, which
-// prints the URL it serves on and authenticates the shopper by the token
-// token-1 (rust-server/src/lib.rs).
+// (rust-server/) and sees what it sees from the Go server, as a shopper
+// signed in through shop-api's login. scripts/check.sh builds the server
+// and sets ACME_SHOP_RUST_SERVER to its binary. The shop's users are in a
+// SQLite database of shop-db's identity tables, which the Rust server reads
+// too: the shopper signs in on shop-api, served in Go over it, and the
+// Rust server, given the database in ACME_SHOP_DATABASE, prints the URL it
+// serves on and authenticates the shopper's session from it.
 func TestEverySDKCallsTheRustServer(t *testing.T) {
 	binary := os.Getenv("ACME_SHOP_RUST_SERVER")
 	if binary == "" {
 		t.Skip("set ACME_SHOP_RUST_SERVER to rust-server's binary, as scripts/check.sh does, to run the clients against it")
 	}
+	database := filepath.Join(t.TempDir(), "shop.db")
+	u := newSQLiteUsers(t, database)
+	u.add(t, shopperLogin, "Grace Hopper", shopperPassword, "orders")
+	token := signIn(t, productsClient(t, productsServer(t, u)), shopperLogin, shopperPassword)
+
 	server := exec.Command(binary)
+	server.Env = append(os.Environ(), "ACME_SHOP_DATABASE="+database)
 	stdout, err := server.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +124,7 @@ func TestEverySDKCallsTheRustServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the Rust server printed no URL: %v", err)
 	}
-	runClients(t, strings.TrimSpace(baseURL), "token-1")
+	runClients(t, strings.TrimSpace(baseURL), token)
 }
 
 // runClients runs the Go client against baseURL as the shopper whose
