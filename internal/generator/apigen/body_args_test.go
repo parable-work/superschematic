@@ -384,6 +384,13 @@ func writeGoAPIModule(t *testing.T, schema *ir.Schema, service string) string {
 // routes run.
 func writeGoAPIModuleWith(t *testing.T, schema *ir.Schema, service string, checks apigen.RawBodyChecks) string {
 	t.Helper()
+	return writeGoAPIModuleOver(t, schema, service, nil, checks)
+}
+
+// writeGoAPIModuleOver is writeGoAPIModuleWith for an API whose authDb's IR
+// is upstream, which the auth provider analyzes; nil for none.
+func writeGoAPIModuleOver(t *testing.T, schema *ir.Schema, service string, upstream *ir.Schema, checks apigen.RawBodyChecks) string {
+	t.Helper()
 	typesModule := "example.com/schemas/types/go/" + service
 	paths := testpaths.Local(t)
 	root := t.TempDir()
@@ -410,6 +417,7 @@ func writeGoAPIModuleWith(t *testing.T, schema *ir.Schema, service string, check
 		SchemaName:    service,
 		ModulePath:    "example.com/schemas/api/" + service,
 		TypesModule:   typesModule,
+		UpstreamIR:    upstream,
 		Clock:         goModuleClock,
 		RawBodyChecks: checks,
 	})

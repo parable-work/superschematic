@@ -28,7 +28,8 @@ var templatesFS embed.FS
 //	├── go.mod          # Module definition
 //	├── interfaces.go   # Implementation interfaces per namespace
 //	├── routes.go       # RegisterRoutes() with handler factories
-//	├── middleware.go   # Auth middleware + ORM store adapters (public only)
+//	├── middleware.go   # Auth middleware and the database context (public only)
+//	├── identity.go     # NewIdentity and the identity route table (D50; Auth.Identity only)
 //	├── openapi.go      # Embedded OpenAPI spec constant
 //	├── openapi.json    # Standalone spec for downstream tooling
 //	├── index.go        # Index page HTML
@@ -47,11 +48,14 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 // WriteAPIWithProfile writes the generated API module with shared codegen profiling.
 func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) error {
 	// The user model's operations are the identity runtime's (D50): the
-	// interfaces, the router and the Deps leave them out, and the runtime
-	// serves their routes.
+	// interfaces, the router and the Deps leave them out, and the router
+	// mounts the runtime's handlers at their routes.
 	output, err := ImplementedOutput(output)
 	if err != nil {
 		return err
+	}
+	if len(output.IdentityEndpoints) > 0 && !output.Auth.Identity {
+		return fmt.Errorf("apigen: %s declares the user model's routes (@userSessions or @userAdministration), which the identity runtime serves, and the auth provider %s does not authenticate with it", output.SchemaName, output.Provider.Name())
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
@@ -110,6 +114,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 
 	conditionalFiles := []codegen.ConditionalFile{
 		{Condition: output.IsPublic, Template: "middleware.tmpl", Filename: "middleware.go"},
+		{Condition: output.Auth.Identity, Template: "identity.tmpl", Filename: "identity.go"},
 		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
 	}

@@ -576,10 +576,23 @@ func (r run) generateTypeScriptAPI() error {
 
 // resolveUpstreamAuth determines the DB schema backing authentication for a
 // public API: the authDb config value when set, otherwise the single DB-kind
-// dependency. Non-public schemas carry no upstream auth.
+// dependency. A non-public API carries no upstream auth, except the IR of an
+// authDb that declares the user model (D50), whose server authenticates
+// with the identity runtime whether or not the API is public: it returns
+// that IR alone, with no name, so the upstream ORM wiring stays public's.
 func (r run) resolveUpstreamAuth() (string, *ir.Schema, error) {
 	if !r.Config.Public {
-		return "", nil, nil
+		if r.Config.AuthDB == "" || r.Options.LoadDependency == nil {
+			return "", nil, nil
+		}
+		upstream, err := r.LoadDependency(r.Config.AuthDB)
+		if err != nil {
+			return "", nil, fmt.Errorf("generator: load the authDb %s of %s: %w", r.Config.AuthDB, r.Config.Name, err)
+		}
+		if upstream.UserTable() == nil {
+			return "", nil, nil
+		}
+		return "", upstream, nil
 	}
 
 	name := r.Config.AuthDB

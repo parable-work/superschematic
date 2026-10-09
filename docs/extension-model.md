@@ -1427,14 +1427,16 @@ The `api` generator takes the provider `auth_provider` selects
 (`Registry.SelectedAuthProvider`) and:
 
 - calls `Analyze` once with the API schema and the upstream DB schema its
-  config's `authDb` names (nil when the API is not public). `AuthModel`
-  reports whether the upstream can back the session store
-  (`Session(id, jti, user, expiresAt)`), whether that table is
-  soft-deletable with a nullable `deletedAt` the store reports
-  (`SessionSoftDelete`, D33), and the principal store (`User(id, name)`);
+  config's `authDb` names (nil when the API is not public, unless that
+  schema declares the user model). `AuthModel.User` is the core user
+  model (D50) the upstream declares: the table with the `User` trait,
+  found by the trait and never by name, with its key, login and name
+  fields and the `UserRole` table beside it. `AuthModel.Identity` says
+  the generated server authenticates with the identity runtime over it;
   `Extra` holds the provider's own findings.
-  `registry.AnalyzeSessionStores` is the core half and `registry.HasTable`
-  the probe;
+  `registry.AnalyzeSessionStores` is the core half, which sets `User` and
+  `Identity` together, and `registry.HasTable` the probe for a table of
+  the provider's own;
 - calls `Endpoint` per operation. The core has already set `RequiresAuth`
   and the required permissions; the provider sets `IsScopedEndpoint` and
   `ScopeParamName` (the SDK generators read them) and its own `Auth` data;
@@ -1451,7 +1453,11 @@ The `api` generator takes the provider `auth_provider` selects
   generator checks the set when it
   parses the templates, before it writes a file, and
   `registry.AuthSnippetFunc(provider)` runs the same check in a provider's
-  own test;
+  own test. With `Identity` set, the core templates wire the identity
+  runtime themselves, public or not: `Config.Identity`, `AuthMiddleware`
+  defaulting to the service's middleware, the user model's routes on the
+  runtime's handlers, `identity.go`'s `NewIdentity` and route table, and
+  the CORS middleware; the auth-middleware snippets render beside it;
 - renders the provider's whole files (`Files`) next to the core files and
   adds `OpenAPIParameters` to every operation of the OpenAPI document.
 
@@ -1460,16 +1466,19 @@ The snippet hooks are the only way a provider changes a core template.
 ### 8.2 The core session provider
 
 `internal/generator/apigen/sessionauth` registers as `session`, the default
-`auth_provider`. It models bearer sessions over the upstream `Session`
-table, an optional principal from the `User` table, and plain-string
-permissions. It has no tenancy or organization scope: no endpoint is scoped
-and no scope parameter is hoisted.
+`auth_provider`. It is the core user model (D50): an upstream schema with
+a `User` table makes the server authenticate with the identity runtime
+(`runtime/http/go/identity`), which signs users in, resolves sessions and
+roles from the tables the core owns, and serves the user model's routes.
+It generates no store adapter. Permissions are plain strings. It has no
+tenancy or organization scope: no endpoint is scoped and no scope
+parameter is hoisted.
 
 Its generated code depends only on the generic runtime:
 `runtime/http/go/session` (the context helpers, `RequireAuth`,
-`RequirePermissions`, `RequirePermissionsWith`, `Guard`, the `Store`,
-`PrincipalStore` and `RoleStore` interfaces) and the other provider-neutral
-runtime packages (D6). Permissions are dotted paths; a granted permission
+`RequirePermissions`, `RequirePermissionsWith`, `Guard`),
+`runtime/http/go/identity` over the user model, and the other
+provider-neutral runtime packages (D6). Permissions are dotted paths; a granted permission
 covers a required one when they are equal or the required one is nested
 under it, and there is no root permission.
 `TestSessionProviderAPIDependsOnGenericRuntimeOnly` in
@@ -1488,14 +1497,20 @@ packages that provider's snippets import, pulling them in through the
 A provider is an ordinary Go type in the extension module, registered in
 `Register`. It cannot import `sessionauth`, which is internal, so it
 reimplements the snippets it needs; `registry.AnalyzeSessionStores` and
-`registry.HasTable` cover the model probe. acme's `apikey`
-(`examples/acme-schematic/ext/auth`) is the worked example: it reads an
-`X-API-Key` header, resolves it to a principal through a key store, puts
-the principal on the context with the session runtime's helpers, and so
-reuses `RequireAuth` and `RequirePermissions` unchanged. The key store
-adapter is generated only when the upstream DB has an `ApiKey(id, secret,
-user)` table, so the generated module always compiles against the ORM it
-is given.
+`registry.HasTable` cover the model probe. A provider may build on the
+user model and keep `Identity`, so the core wires the identity runtime,
+or authenticate callers its own way over the same users and clear it; an
+API on such a provider declares no `@userSessions` or
+`@userAdministration` set, and the Go server writer refuses one that
+does. acme's `apikey` (`examples/acme-schematic/ext/auth`) is the worked
+example of the second: it reads an `X-API-Key` header, resolves it to a
+principal through a key store, puts the principal on the context with
+the session runtime's helpers, and so reuses `RequireAuth` and
+`RequirePermissions` unchanged. Its principal store reads the table
+`AuthModel.User` names, through the trait. The key store adapter is
+generated only when the upstream DB has an `ApiKey(id, secret, user)`
+table, so the generated module always compiles against the ORM it is
+given.
 
 ### 8.4 The TypeScript server
 

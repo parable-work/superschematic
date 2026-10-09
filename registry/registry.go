@@ -110,6 +110,10 @@ type (
 	// generator renders with the one Naming.AuthProvider names.
 	AuthProvider = registry.AuthProvider
 	AuthModel    = registry.AuthModel
+	// UserModel is AuthModel.User: the user model (D50) the upstream
+	// schema declares by its User trait, found whatever its table is
+	// named.
+	UserModel = registry.UserModel
 
 	// What an AuthProvider's methods receive and return: the per-endpoint
 	// record Endpoint fills, the module-level output Files and
@@ -353,12 +357,16 @@ func GoPublicIdentifier(value string) string { return goutil.GoPublicIdentifier(
 var AuthSnippets = apigen.AuthSnippets
 
 // HasTable reports whether upstream declares a DB table named name carrying
-// every field in fields; see internal/generator/apigen.HasTable.
+// every field in fields, for a store of the provider's own; see
+// internal/generator/apigen.HasTable. The user model's tables are found by
+// their traits instead (AnalyzeSessionStores).
 func HasTable(upstream *ir.Schema, name string, fields ...string) bool {
 	return apigen.HasTable(upstream, name, fields...)
 }
 
-// AnalyzeSessionStores is the core half of AuthProvider.Analyze; see
+// AnalyzeSessionStores is the core half of AuthProvider.Analyze: the user
+// model the upstream schema declares by its User and UserRole traits (D50),
+// which the identity runtime authenticates with; see
 // internal/generator/apigen.AnalyzeSessionStores.
 func AnalyzeSessionStores(upstream *ir.Schema) AuthModel {
 	return apigen.AnalyzeSessionStores(upstream)
