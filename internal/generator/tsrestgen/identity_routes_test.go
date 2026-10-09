@@ -45,7 +45,11 @@ func userRoutesFixture(t *testing.T, routesOnly bool) apiFixture {
 // table have the project's operation alone. Regenerate with
 // go test ./internal/generator/tsrestgen -run TestWriteAPIGoldenUserRoutes -update
 func TestWriteAPIGoldenUserRoutes(t *testing.T) {
-	checkGolden(t, generateFixture(t, userRoutesFixture(t, false)), userRoutesAPI)
+	output := generateFixture(t, userRoutesFixture(t, false))
+	if !strings.Contains(output.PermissionCatalogJSON, `"identity.roles.write"`) {
+		t.Error("the package carries no permissions.json with the administration routes' permissions")
+	}
+	checkGolden(t, output, userRoutesAPI)
 }
 
 // TestGenerateLeavesOutUserRoutes: the user model's operations are the

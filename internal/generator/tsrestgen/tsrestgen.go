@@ -25,6 +25,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -225,6 +226,10 @@ type APIOutput struct {
 	PeerPackages []string
 
 	OpenAPISpecRaw string
+	// PermissionCatalogJSON is the API's permissions.json as apigen builds
+	// it, written beside openapi.json and exported from the package; empty
+	// when no operation names a permission.
+	PermissionCatalogJSON string
 }
 
 // HasManualRoutes reports whether any operation is @manualRouteRegistration.
@@ -259,17 +264,18 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
-		SchemaName:        opts.SchemaName,
-		PackageName:       opts.Naming.NpmAPIPackage(opts.SchemaName),
-		TypesPackage:      opts.Naming.NpmTypesPackage(opts.SchemaName),
-		RuntimePackage:    opts.Naming.HTTPRuntimeNpmPackage,
-		ScalarPackage:     opts.Naming.ScalarNpmPackage + "/scalars",
-		Author:            opts.Naming.PackageAuthor,
-		HonoVersion:       HonoVersion,
-		TSVersion:         TypeScriptVersion,
-		Timestamp:         opts.Clock.RFC3339(),
-		OpenAPISpecRaw:    apiOutput.OpenAPISpecRaw,
-		HasServiceCallers: apiOutput.HasServiceCallers,
+		SchemaName:            opts.SchemaName,
+		PackageName:           opts.Naming.NpmAPIPackage(opts.SchemaName),
+		TypesPackage:          opts.Naming.NpmTypesPackage(opts.SchemaName),
+		RuntimePackage:        opts.Naming.HTTPRuntimeNpmPackage,
+		ScalarPackage:         opts.Naming.ScalarNpmPackage + "/scalars",
+		Author:                opts.Naming.PackageAuthor,
+		HonoVersion:           HonoVersion,
+		TSVersion:             TypeScriptVersion,
+		Timestamp:             opts.Clock.RFC3339(),
+		OpenAPISpecRaw:        apiOutput.OpenAPISpecRaw,
+		HasServiceCallers:     apiOutput.HasServiceCallers,
+		PermissionCatalogJSON: apiOutput.PermissionCatalogJSON,
 	}
 
 	byNamespace := map[string]*NamespaceInfo{}
@@ -881,6 +887,11 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		}
 		if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(output.OpenAPISpecRaw), 0o644); err != nil {
 			return fmt.Errorf("write openapi.json: %w", err)
+		}
+	}
+	if output.PermissionCatalogJSON != "" {
+		if err := os.WriteFile(filepath.Join(outputDir, permcatalog.FileName), []byte(output.PermissionCatalogJSON), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", permcatalog.FileName, err)
 		}
 	}
 	return nil

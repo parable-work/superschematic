@@ -1,7 +1,9 @@
 package rustrestgen
 
 import (
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -139,6 +142,15 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		if string(got) != string(want) {
 			t.Errorf("%s/%s differs from golden (run with -update to accept)", name, file)
 		}
+	}
+	// permissions.json is apigen's catalog, pinned by apigen's goldens: the
+	// crate holds it beside openapi.json, and none without one.
+	catalog, err := os.ReadFile(filepath.Join(outDir, permcatalog.FileName))
+	switch {
+	case output.PermissionCatalogJSON == "" && !errors.Is(err, fs.ErrNotExist):
+		t.Errorf("%s: %s was written for an API whose operations name no permission: %v", name, permcatalog.FileName, err)
+	case output.PermissionCatalogJSON != "" && string(catalog) != output.PermissionCatalogJSON:
+		t.Errorf("%s: %s is not apigen's catalog: %v", name, permcatalog.FileName, err)
 	}
 	return generated
 }
