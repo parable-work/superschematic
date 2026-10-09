@@ -387,13 +387,22 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 
+	// The user model's operations are the identity runtime's (D50): the
+	// Implementations traits and the router leave them out, and the
+	// runtime serves their routes.
+	var implemented []apigen.EndpointInfo
 	for _, endpoint := range api.Endpoints {
+		if endpoint.IdentityOperation == "" {
+			implemented = append(implemented, endpoint)
+		}
+	}
+	for _, endpoint := range implemented {
 		output.HasServiceCallers = output.HasServiceCallers || endpoint.ServiceCallers != nil
 	}
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
-	for _, endpoint := range api.Endpoints {
+	for _, endpoint := range implemented {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
 		// has no such step and would hand the envelope to the implementation

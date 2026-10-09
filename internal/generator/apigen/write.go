@@ -46,6 +46,13 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 
 // WriteAPIWithProfile writes the generated API module with shared codegen profiling.
 func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) error {
+	// The user model's operations are the identity runtime's (D50): the
+	// interfaces, the router and the Deps leave them out, and the runtime
+	// serves their routes.
+	output, err := ImplementedOutput(output)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
@@ -134,6 +141,12 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 
 // WriteScaffoldsWithProfile writes route-impl scaffold files with shared codegen profiling.
 func WriteScaffoldsWithProfile(output *APIOutput, scaffoldsDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) (*codegen.ScaffoldResult, error) {
+	// No scaffold for a user model operation, which the identity runtime
+	// serves (D50).
+	output, err := ImplementedOutput(output)
+	if err != nil {
+		return nil, err
+	}
 	funcs, err := templateFuncs(output.Provider)
 	if err != nil {
 		return nil, err

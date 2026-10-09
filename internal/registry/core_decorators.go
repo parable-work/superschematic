@@ -175,6 +175,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 		})
 	}
 
+	// The user model's route sets (D50), on a class with no methods
+	// (core_identity_routes.go).
+	specs = append(specs, identityRouteDecorators()...)
+
 	// Operations.
 	opFlag := func(name string, set func(*ir.FieldDef)) {
 		flag(TargetOperation, name, []string{pkgAPI}, func(n Node) { set(n.Field) })

@@ -122,7 +122,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     }
 {{- end }}
     let state = Arc::new(RouterState { implementations });
-    let mut router: Router<Arc<RouterState>> = Router::new();
+    let {{ if .Endpoints }}mut {{ end }}router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
@@ -165,6 +165,7 @@ where
     }))
 }
 {{- end }}
+{{- if .Endpoints }}
 
 fn method_from_str(method: &str) -> Method {
     match method {
@@ -189,6 +190,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     }
     out
 }
+{{- end }}
 
 {{- range .Endpoints }}
 {{- $endpoint := . }}

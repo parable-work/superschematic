@@ -275,6 +275,12 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	byNamespace := map[string]*NamespaceInfo{}
 	webhookProviders := map[string]struct{}{}
 	for _, ep := range apiOutput.Endpoints {
+		// The user model's operations are the identity runtime's (D50): the
+		// implementation interfaces and the operation table leave them out,
+		// and the runtime serves their routes.
+		if ep.IdentityOperation != "" {
+			continue
+		}
 		endpoint, err := b.endpoint(ep)
 		if err != nil {
 			return nil, err

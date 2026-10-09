@@ -143,6 +143,13 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an unknown key on a user trait", "core", `{"name": "Account", "role": "DBTable", "user": {"login": "email", "password": "secret"}}`},
 	{"a key on a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": {"permissions": "permissions"}}`},
 	{"null for a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": null}`},
+	// The user model's route sets (D50): each config, whose zero values the
+	// decoder drops, and an empty one a pointer keeps.
+	{"the user model's route sets", "core", `{"kind": "API", "name": "accounts-api", "operationSets": [
+		{"name": "Account", "operations": [], "userSessions": {"path": "account", "noLogin": false, "register": true}},
+		{"name": "AccountAdmin", "operations": [], "userAdministration": {}}]}`},
+	{"an unknown key on a route set's config", "core", `{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": {"login": false}}`},
+	{"a route set's path that is not a string", "core", `{"kind": "OperationSet", "name": "AccountAdmin", "operations": [], "userAdministration": {"path": 1}}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

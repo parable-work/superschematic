@@ -623,8 +623,15 @@ func (w *walker) walkClass(node *astNode) {
 	name := node.Name().Text()
 	decorators := w.decoratorsOf(node)
 
-	if classHasMethods(node) {
+	// A user model route set (D50) is a class with no methods that the
+	// loader fills.
+	routes := identityRoutesDecorator(decorators)
+	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
+			if routes != nil {
+				w.addErr(errorAtNode(routes.node, "@%s is only allowed in an API schema (this service is kind %s)", routes.id.name, w.cfg.Kind))
+				return
+			}
 			w.addErr(errorAtNode(node, "operation sets (classes with methods) are only allowed in API schemas (this service is kind %s)", w.cfg.Kind))
 			return
 		}
@@ -1287,6 +1294,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	}
 
 	auth := false
+	var bases identityRoutesBases
 	for _, clause := range heritageClauses(node) {
 		hc := clause.AsHeritageClause()
 		for _, t := range hc.Types.Nodes {
@@ -1298,8 +1306,10 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			switch {
 			case id.is("@superschematic/api", "Authenticated"):
 				auth = true
+				bases.authenticated = t
 			case id.is("@superschematic/api", "Encrypted"):
 				set.Encrypted = true
+				bases.encrypted = t
 			default:
 				if trait, core := identityTrait(id); core {
 					w.addErr(errorAtNode(t, "%s: the %s trait is only allowed on a DB table of a DB schema (an operation set is not one)", name, trait))
@@ -1312,6 +1322,14 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 
 	for _, d := range decorators {
 		w.addErr(w.applyDecorator(d, registry.TargetOperationSet, registry.Node{Schema: w.schema, OperationSet: set}))
+	}
+
+	if set.IsIdentityRoutes() {
+		w.checkIdentityRoutesClass(node, set, decorators, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
 	}
 
 	for _, m := range node.AsClassDeclaration().Members.Nodes {

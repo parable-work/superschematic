@@ -6,7 +6,9 @@
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if or .Namespaces .HasEncryptedEndpoints }}
 	"context"
+{{- end }}
 {{- if .HasEncryptedEndpoints }}
 	"errors"
 {{- end }}
