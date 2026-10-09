@@ -4710,7 +4710,10 @@ so anyone could run the handler unsigned. A `@requireService` route
 admits only a service caller (D37), but its procedure admitted an end
 user's session, or anyone when the operation has no user clause. And a
 procedure skipped its route's `@rateLimit`, `@bodyLimit` and `@timeout`,
-so `placeOrder` had an unlimited twin.
+so `placeOrder` had an unlimited twin. Fixing them found a fourth: the
+JSON API the crate mounts keyed its rate limits by addresses a request
+through Topcoat does not carry, so every client of a route shared one
+budget.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
@@ -4718,6 +4721,7 @@ so `placeOrder` had an unlimited twin.
 | An operation with a call has a procedure unless a second reason says otherwise, which the call's doc and the build log give. The one reason is a `@requireService` route, since a browser holds no service credential. An `@allowService` route admits an end user too, so its procedure stays. The `@requireService` operation's in-process call is unchanged and applies the end-user step alone; its doc and its guard's say so, and whether it should refuse stays open, as D37, amended, left it. | Keeping the procedure and refusing every call to it, a route that can never succeed |
 | A procedure meets its route's traffic controls in the route's order (D35) through `ProcedureControls`, a Topcoat layer on the procedure's path that `<service>(...)` adds: the rate limit, then the body limit, read before the procedure decodes its arguments with Topcoat's own limit raised to it, then the timeout around the decoding and the call. Each refusal is the route's 429 (with `Retry-After`), 413 or 504, answered as the procedure answers one, as a `ProblemRecord`. | Topcoat's `BodyLimit` alone, whose refusal is a bare 413 the browser cannot read; the timeout inside `call_<operation>`, which would leave the decoding outside it and time a page's own call |
 | The procedure's rate limit is a limiter of its own at the route's rate, built with each router as `build_router` builds the route's, and keyed by the client's IP address as Topcoat reads it (`client_ip`: the peer's, or the one a proxy the app trusts names). The JSON API's route keeps its limiter, so a client gets the rate on each, as on two replicas. | Sharing the route's limiter, which `RouteControls` keeps private, at the cost of a change to every Rust server; no limit on the procedure |
+| `<service>(...)` gives each request to the mounted JSON API the same address, as the runtime's `ClientIp`, through `ClientAddress`, a Topcoat layer on `/api` that puts it on the request `TowerRoute` hands the API. A route's rate limit and its procedure's then count the same clients, and the app's trusted proxies apply to both. An address Topcoat does not know is left out, and the runtime's fallback stands. | A tower layer around the API reading Topcoat's `RemoteAddr`, the peer's address, which ignores the app's trusted proxies; a route of the crate's own in place of `TowerRoute` |
 | A control a procedure cannot apply as its route does leaves the procedure out with the reason, rather than being skipped; all three apply today. A page's in-process call applies none of them: the page is a route of the app, under the controls the app gives it. | Applying a route's controls to in-process calls, which would spend an operation's budget on the pages that call it |
 
 Status: built. The extension's YAML fixture `fixture-controls-api` has a
@@ -4731,12 +4735,9 @@ and the webhook's guard and the `@requireService` call still answer a
 page. The order's procedure answers its third call in a minute, a body
 past the route's three megabytes, sent or declared, and a call past its
 second as the 429, 413 and 504 `ProblemRecord`s, and reads a body past
-Topcoat's own two. acme-shop's `placeOrder` and `cancelOrder` procedures
-carry their routes' controls.
-
-The JSON API mounted in a Topcoat app keys its routes' limiters by the
-runtime's `ClientIp` or axum's `ConnectInfo`, and a Topcoat request
-carries neither, so its clients share one bucket per route. That is the
-mounted API's, not a procedure's, and is left to a change of its own.
+Topcoat's own two. On the order's JSON route, two client addresses get a
+budget each: the second is admitted after the first is refused 429, and
+requests without an address share the fallback's. acme-shop's
+`placeOrder` and `cancelOrder` procedures carry their routes' controls.
 
 The rule is reversible until the first release.

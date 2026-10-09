@@ -6,7 +6,9 @@ is Rust, `outputs.topcoat` writes a crate that a
 beside the API crate, at `<out>/topcoat/<service>`, and is named
 `<rust_crate_prefix><service>-topcoat`. The crate:
 
-- mounts the service's JSON API in the app's router, at `/api/{*rest}`;
+- mounts the service's JSON API in the app's router, at `/api/{*rest}`,
+  giving its routes the client's address as Topcoat reads it, by which
+  their rate limits count clients;
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
@@ -239,7 +241,8 @@ such procedure:
   which counts each client by its IP address as Topcoat reads it
   (`client_ip`: the peer's, or the one a trusted proxy names). The JSON
   API's route keeps its own, so a client gets the rate on each, as it
-  would on two replicas.
+  would on two replicas; `<service>(...)` gives the JSON API's routes the
+  same address, so both count the same clients.
 - **Body limit.** The procedure's request body is read up to the limit
   before its arguments are decoded, and Topcoat's own limit is raised to
   it for that procedure.

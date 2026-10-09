@@ -402,8 +402,9 @@ func TestWhatHasNoProcedure(t *testing.T) {
 // TestProceduresKeepTheirRoutesRules does what TestTheCrateServesATopcoatApp
 // does for fixture-controls-api with controlsAppTest: the webhook and the
 // @requireService operation have no procedure path, the @allowService one
-// has, and a procedure answers its route's rate limit, body limit and
-// timeout as a ProblemRecord.
+// has, a procedure answers its route's rate limit, body limit and timeout
+// as a ProblemRecord, and the mounted JSON API's rate limit counts each
+// client by the address Topcoat records for it.
 func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
 }
@@ -940,6 +941,7 @@ fn a_form_parses_into_its_input() {
 
 // controlsAppTest is tests/app.rs of fixture-controls-api's Topcoat crate.
 const controlsAppTest = `use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -957,7 +959,7 @@ use schemas_fixture_controls_api_topcoat::api::{
 };
 use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
-use topcoat::router::{header, page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::router::{header, page, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
 struct NoRequests;
@@ -1124,6 +1126,34 @@ async fn a_procedure_answers_its_routes_body_limit_as_a_problem() {
     assert!(body.contains(r#""err""#) && body.contains(r#""code":"payload_too_large""#) && body.contains(r#""v":"413""#), "{body}");
     let (_, _, body) = post(&app(false), PLACE_ORDER, no_arguments(0), Some(4 * MEBIBYTE)).await;
     assert!(body.contains(r#""code":"payload_too_large""#), "{body}");
+}
+
+// A post to the JSON API from a client at ip, as Topcoat's server records
+// the connection's address; none when ip is.
+async fn post_from(router: &Router, uri: &str, ip: Option<[u8; 4]>) -> StatusCode {
+    let mut request = http::Request::builder().method("POST").uri(uri);
+    if let Some(ip) = ip {
+        request = request.extension(RemoteAddr(SocketAddr::from((ip, 40000))));
+    }
+    router.handle(request.body(Body::empty()).unwrap()).await.status()
+}
+
+#[tokio::test]
+async fn each_client_of_a_json_api_route_has_its_own_budget() {
+    let router = app(false);
+    let (ada, bob) = (Some([10, 0, 0, 1]), Some([10, 0, 0, 2]));
+    for _ in 0..2 {
+        assert_eq!(post_from(&router, "/api/orders", ada).await, StatusCode::OK);
+    }
+    assert_eq!(post_from(&router, "/api/orders", ada).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(post_from(&router, "/api/orders", bob).await, StatusCode::OK);
+    // Clients Topcoat has no address for share the runtime's fallback
+    // bucket, apart from the clients it knows.
+    for _ in 0..2 {
+        assert_eq!(post_from(&router, "/api/orders", None).await, StatusCode::OK);
+    }
+    assert_eq!(post_from(&router, "/api/orders", None).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(post_from(&router, "/api/orders", bob).await, StatusCode::OK);
 }
 
 #[tokio::test]
