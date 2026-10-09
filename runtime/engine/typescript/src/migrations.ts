@@ -42,8 +42,40 @@ caller's change.
 The define of a draft is an event too, of kind define, with no instance
 and no version, since a draft has none; an event a service's call wrote
 records the service's deployable (D37).
+
+engine_payloads is the value store's (values/store.ts): each large value
+once, under the SHA-256 of its canonical JSON. engine_payload_holders
+records who holds each one, an instance's row, an event or a row of a
+behavior's tables, by namespace and schema, and a value goes when its
+last holder does. value_refs on an instance and an event lists the JSON
+pointers of the members that hold a ref in place of their value.
+
+The indexes of an instance type's own fields (@unique, @key, @index) are
+indexes on engine_instances named engine_unique_<digest> and
+engine_index_<digest>, partial on one schema's rows, which publish
+creates and drops as versions add and remove them (instances/indexes.ts);
+migration 10 creates the ones of the versions published before it.
+
+engine_namespaces holds the namespaces a create made while an engine ran
+(namespaces.ts), each with who made it and when, and who archived it and
+when while it is archived.
+
+Retention prunes the event log (events/retention.ts). engine_log_floors
+holds how far it has pruned each namespace: every event of the namespace
+at or before floor is gone, and publish_floor is the last publish event
+it pruned, which the namespaces that look names up there read. The
+trigger that refuses a delete of an event lets one through at or before
+its namespace's floor, which retention moves first. engine_event_bases
+holds, for each instance whose events it pruned, the instance as the log
+had it after the last of them and that event's sequence, so a reaction's
+before() still folds the instance from the log and a create after a
+delete still takes the next sequence. engine_schemas records the cursor
+of each version's publish event (published_cursor), so a subscription
+finds where it starts without the event.
 */
 
+import { clashMessage, ownIndexes, syncOwnIndexes } from './instances/indexes.js';
+import { modelOf } from './registry/document.js';
 import type { MigrationSet } from './storage/migrations.js';
 
 export const ENGINE_OWNER = 'engine';
@@ -307,6 +339,127 @@ ALTER TABLE engine_references ADD COLUMN hears TEXT;
 ALTER TABLE engine_references ADD COLUMN crosses REAL;
 
 CREATE INDEX engine_references_hears ON engine_references (namespace, target_schema, target_id, hears, crosses);
+`);
+      },
+    },
+    {
+      version: 9,
+      name: 'the value store',
+      // A row or event written before keeps its values inline and has no
+      // value_refs: an instance's row moves its large members to the store
+      // at its next write, and an event is never rewritten.
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_payloads (
+  hash  TEXT    PRIMARY KEY,
+  value TEXT    NOT NULL CHECK (json_valid(value)),
+  bytes INTEGER NOT NULL CHECK (bytes >= 0)
+) STRICT;
+
+CREATE TABLE engine_payload_holders (
+  hash      TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  schema    TEXT NOT NULL,
+  holder    TEXT NOT NULL,
+  id        TEXT NOT NULL,
+  key       TEXT NOT NULL,
+  PRIMARY KEY (hash, namespace, schema, holder, id, key)
+) STRICT;
+
+CREATE INDEX engine_payload_holders_holder ON engine_payload_holders (namespace, schema, holder, id, key);
+
+ALTER TABLE engine_instances ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
+ALTER TABLE engine_events ADD COLUMN value_refs TEXT CHECK (value_refs IS NULL OR json_valid(value_refs));
+`);
+      },
+    },
+    {
+      version: 10,
+      name: 'unique fields and indexes',
+      // The engine ignored @unique, @key and @index before. Each live
+      // version gets the indexes publish now creates (instances/indexes.ts),
+      // with the values under their keys put back inline first. A unique
+      // index the stored instances break stops the file from opening: an
+      // operator makes the values distinct, or drops the field's @unique in
+      // a new version, with the engine before this one. A field the engine
+      // refuses @unique on now (a list, an object, a nested type's) stays
+      // unenforced in the version that has it, as the define of its next
+      // version refuses it.
+      up(storage) {
+        const live = storage.all(
+          `SELECT namespace, name, document FROM engine_schemas AS s
+           WHERE version = (SELECT MAX(version) FROM engine_schemas AS t WHERE t.namespace = s.namespace AND t.name = s.name) AND version > 0
+           ORDER BY namespace, name`
+        );
+        for (const row of live) {
+          const holder = String(row.namespace);
+          const model = modelOf(String(row.document));
+          const clashes = syncOwnIndexes(storage, holder, model.name, [], ownIndexes(model, holder));
+          if (clashes.length > 0) {
+            throw new Error(
+              `engine migration 10: schema ${model.name} in namespace ${holder} has unique fields its stored instances break: ${clashes
+                .map((clash) => clashMessage(clash, clash.namespace, model.instanceType))
+                .join('; ')}. Make the values distinct, or publish a version without the unique field, with the engine before this one`
+            );
+          }
+        }
+      },
+    },
+    {
+      version: 11,
+      name: 'namespaces a create makes',
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_namespaces (
+  name        TEXT    PRIMARY KEY,
+  created_at  INTEGER NOT NULL,
+  created_by  TEXT    NOT NULL,
+  archived_at INTEGER,
+  archived_by TEXT,
+  CHECK ((archived_at IS NULL) = (archived_by IS NULL))
+) STRICT;
+`);
+      },
+    },
+    {
+      version: 12,
+      name: 'event log retention',
+      // Every publish event is still in the log when this runs, so each
+      // version gets its publish's cursor; one a version-1 file stored with
+      // no event keeps null, from which a subscription starts at 0, as it
+      // did. The delete trigger is made again, letting through only an
+      // event at or before its namespace's floor.
+      up(storage) {
+        storage.exec(`
+ALTER TABLE engine_schemas ADD COLUMN published_cursor INTEGER;
+
+UPDATE engine_schemas SET published_cursor = (
+  SELECT MAX(events.cursor) FROM engine_events AS events
+  WHERE events.kind = 'publish' AND events.namespace = engine_schemas.namespace
+    AND events.schema = engine_schemas.name AND events.version = engine_schemas.version
+) WHERE version > 0;
+
+CREATE TABLE engine_log_floors (
+  namespace     TEXT    PRIMARY KEY,
+  floor         INTEGER NOT NULL CHECK (floor >= 0),
+  publish_floor INTEGER NOT NULL DEFAULT 0 CHECK (publish_floor >= 0),
+  pruned        INTEGER NOT NULL DEFAULT 0 CHECK (pruned >= 0)
+) STRICT;
+
+CREATE TABLE engine_event_bases (
+  namespace   TEXT    NOT NULL,
+  schema      TEXT    NOT NULL,
+  instance_id TEXT    NOT NULL,
+  seq         INTEGER NOT NULL CHECK (seq >= 1),
+  data        TEXT    CHECK (data IS NULL OR (json_valid(data) AND json_type(data) = 'object')),
+  value_refs  TEXT    CHECK (value_refs IS NULL OR json_valid(value_refs)),
+  PRIMARY KEY (namespace, schema, instance_id)
+) STRICT;
+
+DROP TRIGGER engine_events_no_delete;
+CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
+WHEN OLD.cursor > COALESCE((SELECT floor FROM engine_log_floors WHERE namespace = OLD.namespace), 0)
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
 `);
       },
     },

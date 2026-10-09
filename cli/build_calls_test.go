@@ -121,3 +121,39 @@ func TestAStackScaffoldsTheImplementationsItServes(t *testing.T) {
 	assert.Contains(t, out, "OK: shop-stack (built")
 	assert.Contains(t, out, "implementation scaffold of shop-reviews written to "+filepath.Dir(reviews)+"\n")
 }
+
+// TestScaffoldWritesEachMissingTypeScriptImplementation: --scaffold writes
+// a TypeScript API's implementation at typescript/{service} from the
+// repository root, the output root is the Bun workspace that holds it
+// (D51), and a cached run still builds a service whose implementation is
+// missing so it can write it.
+func TestScaffoldWritesEachMissingTypeScriptImplementation(t *testing.T) {
+	repoRoot := t.TempDir()
+	servicesRoot := filepath.Join(repoRoot, "schemas", "services")
+	for _, fixture := range []string{"deps-db", "deps-ts-pricing", "deps-ts-shop"} {
+		copyDir(t, filepath.Join("../internal/generator/testdata/services", fixture), filepath.Join(servicesRoot, fixture))
+	}
+	outDir := filepath.Join(repoRoot, "schemas", "dist")
+	cacheRoot := t.TempDir()
+	shop := filepath.Join(repoRoot, "typescript", "deps-ts-shop", "index.ts")
+	pricing := filepath.Join(repoRoot, "typescript", "deps-ts-pricing", "index.ts")
+
+	runCLI(t, "build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot)
+	_, err := os.Stat(filepath.Join(repoRoot, "typescript"))
+	require.True(t, os.IsNotExist(err), "build-all without --scaffold wrote %s", filepath.Join(repoRoot, "typescript"))
+	manifest, err := os.ReadFile(filepath.Join(outDir, "package.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(manifest), `"../../typescript/*"`)
+
+	out := runCLI(t, "build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--scaffold")
+	assert.FileExists(t, shop)
+	assert.FileExists(t, pricing)
+	assert.FileExists(t, filepath.Join(filepath.Dir(shop), "package.json"))
+	assert.Contains(t, out, "OK: deps-db (up to date")
+
+	require.NoError(t, os.RemoveAll(filepath.Dir(pricing)))
+	out = runCLI(t, "build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--scaffold")
+	assert.FileExists(t, pricing)
+	assert.Contains(t, out, "OK: deps-ts-shop (up to date")
+	assert.Contains(t, out, "OK: deps-ts-pricing (built")
+}

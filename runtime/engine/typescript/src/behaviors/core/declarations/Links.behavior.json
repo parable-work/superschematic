@@ -1,6 +1,6 @@
 {
   "name": "Links",
-  "description": "Named, single-valued links from the instance to instances of the schemas its config names, set by link or given at create. A pinned link records the target's revision (its schema composes Revisions) and reports whether the target has moved past it. A required link is given at create, can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
+  "description": "Named, single-valued links from the instance to instances of the schemas its config names, set by link or given at create. A pinned link records the target's revision (its schema composes Revisions) or its release (its schema composes Branches), and reports the target's latest beside it and whether the target has moved past it. A required link is given at create, can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -9,8 +9,13 @@
           "additionalProperties": false,
           "properties": {
             "pinned": {
-              "description": "The link records the target's revision, and reports whether the target has moved past it. The schema must compose Revisions.",
-              "type": "boolean"
+              "description": "What the link records of the target, reporting the target's latest beside it and whether the target has moved past it: true or revision, its revision, whose schema must compose Revisions; release, its release, whose schema must compose Branches; false or absent, nothing.",
+              "enum": [
+                true,
+                false,
+                "revision",
+                "release"
+              ]
             },
             "required": {
               "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.",
@@ -43,7 +48,7 @@
   "createParamsSchema": {
     "additionalProperties": {
       "additionalProperties": false,
-      "description": "The target: its id, or an object with its id and, for a pinned link, the revision to record.",
+      "description": "The target: its id, or an object with its id and, for a pinned link, the revision or the release to record.",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
       "properties": {
         "id": {
@@ -51,8 +56,13 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
           "type": "string"
         },
+        "release": {
+          "description": "For a link pinned to a release, the target's release to record, one it has had; its latest when absent.",
+          "minimum": 1,
+          "type": "integer"
+        },
         "revision": {
-          "description": "For a pinned link, the target's revision to record, one it has had; its latest when absent.",
+          "description": "For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent.",
           "minimum": 1,
           "type": "integer"
         }
@@ -73,14 +83,14 @@
   },
   "fields": [
     {
-      "name": "links",
-      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision it records and whether the target has moved past it."
+      "name": "targets",
+      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none."
     }
   ],
   "operations": [
     {
       "name": "link",
-      "description": "Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given.",
+      "description": "Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -94,8 +104,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "release": {
+            "description": "For a link pinned to a release, the target's release to record, one it has had; its latest when absent.",
+            "minimum": 1,
+            "type": "integer"
+          },
           "revision": {
-            "description": "For a pinned link, the target's revision to record, one it has had; its latest when absent.",
+            "description": "For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent.",
             "minimum": 1,
             "type": "integer"
           }
@@ -116,8 +131,12 @@
           "name": {
             "type": "string"
           },
+          "release": {
+            "description": "The target's release a link pinned to a release records.",
+            "type": "integer"
+          },
           "revision": {
-            "description": "The target's revision a pinned link records.",
+            "description": "The target's revision a link pinned to a revision records.",
             "type": "integer"
           },
           "schema": {
@@ -160,6 +179,9 @@
           "name": {
             "type": "string"
           },
+          "release": {
+            "type": "integer"
+          },
           "revision": {
             "type": "integer"
           },
@@ -178,7 +200,7 @@
     },
     {
       "name": "listLinked",
-      "description": "Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it.",
+      "description": "Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -203,7 +225,7 @@
             "type": "string"
           },
           "stale": {
-            "description": "Only the pinned links whose target has moved past the revision they record.",
+            "description": "Only the pinned links whose target has moved past the revision or the release they record.",
             "type": "boolean"
           }
         },
@@ -224,12 +246,20 @@
                   "description": "The id of the instance that holds the link.",
                   "type": "string"
                 },
+                "latest": {
+                  "description": "The target's latest revision or release, of the kind the link pins.",
+                  "type": "integer"
+                },
+                "release": {
+                  "description": "The target's release a link pinned to a release records.",
+                  "type": "integer"
+                },
                 "revision": {
-                  "description": "The target's revision a pinned link records.",
+                  "description": "The target's revision a link pinned to a revision records.",
                   "type": "integer"
                 },
                 "stale": {
-                  "description": "Whether the target has moved past that revision.",
+                  "description": "Whether the target has moved past the one the link records.",
                   "type": "boolean"
                 }
               },
@@ -260,7 +290,11 @@
   "vetoes": [
     {
       "code": "no_revision",
-      "description": "A pinned link, by link or a create's links, to a target that has no revision to pin yet."
+      "description": "A link pinned to a revision, by link or a create's links, to a target that has no revision to pin yet."
+    },
+    {
+      "code": "no_release",
+      "description": "A link pinned to a release, by link or a create's links, to a target that has not been released yet."
     },
     {
       "code": "required_link",

@@ -74,7 +74,8 @@ for (const driver of drivers) {
       );
 
       const created = engine.instances.create(writer, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
-      assert.deepEqual(created.data, { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1 });
+      assert.deepEqual(created.data, { title: 'Launch plan' });
+      assert.deepEqual(created.behaviors, { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } });
 
       engine.instances.invoke(writer, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'review' });
@@ -86,29 +87,33 @@ for (const driver of drivers) {
       engine.instances.invoke(publisher, 'documents', 'doc-1', 'transition', { to: 'published' });
 
       const read = engine.instances.get(alice, 'documents', 'doc-1');
-      assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.', status: 'published', commentCount: 2, revision: 2 });
+      assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.' });
+      assert.deepEqual(read?.behaviors, { Workflow: { status: 'published' }, Comments: { commentCount: 2 }, Revisions: { revision: 2, pendingProposals: 0 } });
       assert.equal(read?.seq, 7);
 
       const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { patch: unknown }).patch : event.change]),
         [
-          ['create', 'wes', { title: 'Launch plan', status: 'draft', commentCount: 0, revision: 1 }],
-          ['operation', 'wes', { commentCount: 1 }],
-          ['operation', 'wes', { status: 'review' }],
-          ['operation', 'wes', {}],
-          ['operation', 'rae', { body: 'The plan, in full.', revision: 2 }],
-          ['operation', 'rae', { commentCount: 2 }],
-          ['operation', 'pat', { status: 'published' }],
+          [
+            'create',
+            'wes',
+            { data: { title: 'Launch plan' }, behaviors: { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } } },
+          ],
+          ['operation', 'wes', { behaviors: { Comments: { commentCount: 1 } } }],
+          ['operation', 'wes', { behaviors: { Workflow: { status: 'review' } } }],
+          ['operation', 'wes', { behaviors: { Revisions: { pendingProposals: 1 } } }],
+          ['operation', 'rae', { data: { body: 'The plan, in full.' }, behaviors: { Revisions: { revision: 2, pendingProposals: 0 } } }],
+          ['operation', 'rae', { behaviors: { Comments: { commentCount: 2 } } }],
+          ['operation', 'pat', { behaviors: { Workflow: { status: 'published' } } }],
         ]
       );
-      // The log replays to the instance a read returns.
-      let replayed: Record<string, unknown> = {};
+      // The log replays, a merge patch at a time, to the instance a read returns.
+      let replayed: unknown = {};
       for (const event of events) {
-        const patch = event.kind === 'create' ? (event.change as Record<string, unknown>) : (event.change as { patch: Record<string, unknown> }).patch;
-        replayed = { ...replayed, ...patch };
+        replayed = mergePatch(replayed, event.kind === 'create' ? event.change : (event.change as { patch: unknown }).patch);
       }
-      assert.deepEqual(replayed, read?.data);
+      assert.deepEqual(replayed, { data: read?.data, behaviors: read?.behaviors });
 
       const revisions = engine.instances.invoke(alice, 'documents', 'doc-1', 'listRevisions') as { items: Array<{ revision: number; data: unknown; proposal?: number }> };
       assert.deepEqual(
@@ -136,14 +141,9 @@ for (const driver of drivers) {
       assert.equal(engine.schemas.publish(alice, 'documents').version, 2);
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'retracted' });
       engine.instances.update(writer, 'documents', 'doc-1', { summary: 'Withdrawn.' });
-      assert.deepEqual(engine.instances.get(alice, 'documents', 'doc-1')?.data, {
-        title: 'Launch plan',
-        body: 'The plan, in full.',
-        summary: 'Withdrawn.',
-        status: 'retracted',
-        commentCount: 2,
-        revision: 3,
-      });
+      const retracted = engine.instances.get(alice, 'documents', 'doc-1');
+      assert.deepEqual(retracted?.data, { title: 'Launch plan', body: 'The plan, in full.', summary: 'Withdrawn.' });
+      assert.deepEqual(retracted?.behaviors, { Workflow: { status: 'retracted' }, Comments: { commentCount: 2 }, Revisions: { revision: 3, pendingProposals: 0 } });
     });
 
     test('it runs the notes document: its title and body are searched, the title weighing more, and its embedder pulls their text', () => {
@@ -188,7 +188,10 @@ for (const driver of drivers) {
       const project = { Links: { project: 'launch' } };
       engine.instances.create(writer, 'tasks', { title: 'Plan' }, { id: 'plan', behaviors: project });
       const created = engine.instances.create(writer, 'tasks', { title: 'Build' }, { id: 'build', behaviors: project });
-      assert.deepEqual(created.data, { title: 'Build', status: 'todo', blocked: false, links: { project: { schema: 'projects', id: 'launch' } } });
+      assert.deepEqual([created.data, created.behaviors], [
+        { title: 'Build' },
+        { Workflow: { status: 'todo' }, Dependencies: { blocked: false }, Links: { targets: { project: { schema: 'projects', id: 'launch' } } } },
+      ]);
 
       // build waits on plan and on the design, implements the design at its
       // first revision, and belongs to plan.
@@ -197,14 +200,15 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'spec', id: 'doc-1' });
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'parent', id: 'plan' });
       engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'doing' });
-      assert.deepEqual(engine.instances.get(alice, 'tasks', 'build')?.data, {
-        title: 'Build',
-        status: 'doing',
-        blocked: true,
-        links: {
-          parent: { schema: 'tasks', id: 'plan' },
-          project: { schema: 'projects', id: 'launch' },
-          spec: { schema: 'documents', id: 'doc-1', revision: 1, stale: false },
+      assert.deepEqual(engine.instances.get(alice, 'tasks', 'build')?.behaviors, {
+        Workflow: { status: 'doing' },
+        Dependencies: { blocked: true },
+        Links: {
+          targets: {
+            parent: { schema: 'tasks', id: 'plan' },
+            project: { schema: 'projects', id: 'launch' },
+            spec: { schema: 'documents', id: 'doc-1', revision: 1, latest: 1, stale: false },
+          },
         },
       });
       // A create gives the same edges and links in one event: test waits on plan.
@@ -212,7 +216,7 @@ for (const driver of drivers) {
         id: 'test',
         behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
       });
-      assert.deepEqual([test.seq, test.data.blocked, Object.keys(test.data.links as object)], [1, true, ['parent', 'project']]);
+      assert.deepEqual([test.seq, test.behaviors.Dependencies.blocked, Object.keys(test.behaviors.Links.targets as object)], [1, true, ['parent', 'project']]);
       engine.instances.delete(writer, 'tasks', 'test');
       assert.equal(thrown(() => engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' })).code, 'vetoed');
 
@@ -224,9 +228,12 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'doing' });
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'done' });
       const build = engine.instances.get(alice, 'tasks', 'build');
-      assert.deepEqual([build?.data.blocked, (build?.data.links as { spec: unknown }).spec], [false, { schema: 'documents', id: 'doc-1', revision: 1, stale: true }]);
+      assert.deepEqual(
+        [build?.behaviors.Dependencies.blocked, (build?.behaviors.Links.targets as { spec: unknown }).spec],
+        [false, { schema: 'documents', id: 'doc-1', revision: 1, latest: 2, stale: true }]
+      );
       assert.deepEqual(engine.instances.invokeSchema(alice, 'tasks', 'listLinked', { name: 'spec', id: 'doc-1', stale: true }), {
-        items: [{ id: 'build', revision: 1, stale: true }],
+        items: [{ id: 'build', revision: 1, latest: 2, stale: true }],
         next: null,
       });
       assert.deepEqual(engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' }), { from: 'doing', to: 'done' });
@@ -244,12 +251,15 @@ for (const driver of drivers) {
           ['operation', 'tasks', 'build', 'unlink'],
         ]
       );
-      assert.deepEqual(engine.instances.get(alice, 'tasks', 'build')?.data, {
-        title: 'Build',
-        status: 'done',
-        blocked: false,
-        links: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } },
-      });
+      const done = engine.instances.get(alice, 'tasks', 'build');
+      assert.deepEqual([done?.data, done?.behaviors], [
+        { title: 'Build' },
+        {
+          Workflow: { status: 'done' },
+          Dependencies: { blocked: false },
+          Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
+        },
+      ]);
     });
 
     test('it runs the projects document beside the tasks one: a project rolls up the tasks that point at it, and waits for them to finish', () => {
@@ -263,12 +273,15 @@ for (const driver of drivers) {
         ['Workflow', 'Rollups']
       );
       const created = engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
-      assert.deepEqual(created.data, { title: 'Launch', status: 'active', rollups: { tasks: 0, tasksByStatus: {}, tasksFinished: true } });
+      assert.deepEqual([created.data, created.behaviors], [
+        { title: 'Launch' },
+        { Workflow: { status: 'active' }, Rollups: { values: { tasks: 0, tasksByStatus: {}, tasksFinished: true } } },
+      ]);
       for (const id of ['plan', 'build']) {
         engine.instances.create(writer, 'tasks', { title: id }, { id, behaviors: { Links: { project: 'launch' } } });
       }
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'doing' });
-      assert.deepEqual(engine.instances.get(alice, 'projects', 'launch')?.data.rollups, {
+      assert.deepEqual(engine.instances.get(alice, 'projects', 'launch')?.behaviors.Rollups.values, {
         tasks: 2,
         tasksByStatus: { doing: 1, todo: 1 },
         tasksFinished: false,
@@ -277,7 +290,7 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'done' });
       engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'dropped' });
       const read = engine.instances.get(alice, 'projects', 'launch');
-      assert.deepEqual([read?.seq, read?.data.rollups], [1, { tasks: 2, tasksByStatus: { done: 1, dropped: 1 }, tasksFinished: true }]);
+      assert.deepEqual([read?.seq, read?.behaviors.Rollups.values], [1, { tasks: 2, tasksByStatus: { done: 1, dropped: 1 }, tasksFinished: true }]);
       assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
     });
 
@@ -292,7 +305,7 @@ for (const driver of drivers) {
       for (const id of ['design', 'build']) {
         engine.instances.invoke(writer, 'projects', id, 'link', { name: 'parent', id: 'launch' });
       }
-      const statuses = () => ['launch', 'design', 'build'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status);
+      const statuses = () => ['launch', 'design', 'build'].map((id) => engine.instances.get(alice, 'projects', id)?.behaviors.Workflow.status);
 
       engine.instances.invoke(writer, 'projects', 'design', 'transition', { to: 'doing' });
       assert.deepEqual(statuses(), ['todo', 'doing', 'todo']);
@@ -324,7 +337,7 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'projects', 'site', 'transition', { to: 'done' });
       engine.runner.runDue();
       assert.deepEqual(
-        ['release', 'docs', 'site'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status),
+        ['release', 'docs', 'site'].map((id) => engine.instances.get(alice, 'projects', id)?.behaviors.Workflow.status),
         ['failed', 'failed', 'done']
       );
     });
@@ -386,6 +399,22 @@ for (const driver of drivers) {
       );
     });
   });
+}
+
+// mergePatch applies a JSON merge patch (RFC 7386) to a copy of target.
+function mergePatch(target: unknown, patch: unknown): unknown {
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+    return patch;
+  }
+  const out: Record<string, unknown> = typeof target === 'object' && target !== null && !Array.isArray(target) ? { ...(target as Record<string, unknown>) } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete out[key];
+    } else {
+      out[key] = mergePatch(out[key], value);
+    }
+  }
+  return out;
 }
 
 // thrown runs fn and returns the EngineError it throws.

@@ -23,7 +23,7 @@ import {
   type SqlValue,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -202,7 +202,7 @@ for (const driver of drivers) {
         ]
       );
       // A view reads it too: a field reader counts the instances ranked above.
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i2')?.data, { title: 'Lamp', ahead: 2 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i2')), { data: { title: 'Lamp' }, behaviors: { 'test.Queue': { ahead: 2 } } });
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i3', 'read', { sql: "SELECT json_extract(data, '$.title') AS title FROM {instances} WHERE rank >= ? ORDER BY rank", values: [2] }), [
         { title: 'Rug' },
         { title: 'Desk' },

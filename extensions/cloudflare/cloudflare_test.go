@@ -44,7 +44,8 @@ func assemble(t *testing.T) *registry.Registry {
 // shop is the stack/stacktest shop stack with its domains on Cloudflare,
 // in zone acme.dev: Staging's records are DNS-only, Production's are
 // proxied, and Preview extends Staging with a parameter, so its host's
-// name references the parameter.
+// name references the parameter. shop-orders' job, which is never
+// exposed, writes no record.
 func shop() *ir.Stack {
 	s := stacktest.Shop()
 	for _, env := range s.Environments {

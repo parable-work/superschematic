@@ -14,6 +14,8 @@ import (
 // reaches it as environment variables: a literal as its value, a secret as
 // a reference to its Secret Manager secret, a derived field as one
 // variable per member of the value its edge's connector derived.
+// The job platform (cloudrunjob.go) lowers a job the same way, to a Cloud
+// Run job (D52).
 
 // The ingress settings a service takes.
 const (
@@ -36,10 +38,11 @@ func serviceAddress(ctx registry.PlatformContext) any {
 
 // lowerService lowers a server to:
 //
-//   - a service account, and the trace agent role for it, since the
-//     entrypoint exports traces to Cloud Trace (section 7.5);
-//   - a Secret Manager secret and an accessor grant per secret binding
-//     (secretNodes);
+//   - what a server and a job share (lowerWorkload): a service account,
+//     the trace agent role for it, since the entrypoint exports traces to
+//     Cloud Trace (section 7.5), a Secret Manager secret and an accessor
+//     grant per secret binding, and the Cloud SQL volume and VPC egress
+//     its edges need;
 //   - the Cloud Run service. An internal server takes internal traffic
 //     only and keeps Cloud Run's invoker check, which admits the callers
 //     its edges grant. An exposed one turns the check off, since browsers
@@ -47,10 +50,6 @@ func serviceAddress(ctx registry.PlatformContext) any {
 //     only; without one, the run.app URL is its public address. Every
 //     service lists its full resource name as a custom audience, the
 //     audience of its callers' ID tokens (serviceAudience).
-//   - for a server that calls another, Direct VPC egress through the
-//     environment's network (networkNodes): a call to the callee's run.app
-//     URL from the VPC counts as internal, which an internal server's
-//     ingress requires;
 //   - for an exposed server under a domain, a load balancer and a
 //     certificate for its host, and the DNS records they need
 //     (exposureNodes).
@@ -58,117 +57,46 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
 	v := valuesOf(env)
-	if err := checkLength("the service account id of "+d.Name, d.ResourceName, 6, 30); err != nil {
+	out, w, err := lowerWorkload(ctx)
+	if err != nil {
 		return registry.Lowered{}, err
 	}
-	account := d.Name + ".account"
-	member := ir.Output{Resource: account, Name: "member"}
-	var out registry.Lowered
 	add := func(res ...*ir.Resource) { out.Resources = append(out.Resources, res...) }
-	add(
-		&ir.Resource{ID: account, Type: TypeAccount, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
-			"project":     v.project,
-			"accountId":   d.ResourceName,
-			"displayName": fmt.Sprintf("%s %s server %s", env.Stack, env.Name, d.Name),
-		}},
-		&ir.Resource{ID: d.Name + ".trace-agent", Type: TypeProjectIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
-			"project": v.project,
-			"role":    "roles/cloudtrace.agent",
-			"member":  member,
-		}},
-	)
 
-	var envs, instances []any
-	for _, b := range d.Bindings {
-		switch b.Source {
-		case ir.BindingLiteral:
-			value, err := envString(b.Value)
-			if err != nil {
-				return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
-			}
-			envs = append(envs, map[string]any{"name": b.Field, "value": value})
-		case ir.BindingParameter:
-			envs = append(envs, map[string]any{"name": b.Field, "value": ir.Parameter(b.Parameter)})
-		case ir.BindingSecret:
-			nodes, ref := secretNodes(env, v, d.Name, b.Secret, member)
-			add(nodes...)
-			envs = append(envs, map[string]any{"name": b.Field, "valueSource": map[string]any{
-				"secretKeyRef": map[string]any{"secret": ref, "version": "latest"},
-			}})
-		case ir.BindingDerived:
-			vars, err := ir.DerivedVariables(b.Field, b.Value)
-			if err != nil {
-				return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
-			}
-			for _, variable := range vars {
-				envs = append(envs, map[string]any{"name": variable.Name, "value": variable.Value})
-			}
-			if instance := cloudSQLInstance(b.Value); instance != nil && !containsValue(instances, instance) {
-				instances = append(instances, instance)
-			}
-		default:
-			return registry.Lowered{}, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
-		}
+	container, template := w.container, w.template
+	container["ports"] = map[string]any{"containerPort": containerPort}
+	// The entrypoint's health checks (section 8.1): an instance takes
+	// traffic once /readyz answers, so a revision whose databases do not
+	// answer never serves, and one whose process stops answering /healthz
+	// is restarted. /healthz answers while the instance drains, so a
+	// drain is never cut short.
+	container["startupProbe"] = map[string]any{
+		"httpGet":          map[string]any{"path": readinessPath, "port": containerPort},
+		"periodSeconds":    startupPeriod,
+		"timeoutSeconds":   startupTimeout,
+		"failureThreshold": startupFailures,
 	}
-
-	container := map[string]any{
-		"image": imageRepository(v, env.Stack, d.Name),
-		"ports": map[string]any{"containerPort": containerPort},
-		"resources": map[string]any{"limits": map[string]any{
-			"cpu":    settingString(d.Settings, "cpu", defaultCPU),
-			"memory": settingString(d.Settings, "memory", defaultMemory),
-		}},
-		// The entrypoint's health checks (section 8.1): an instance takes
-		// traffic once /readyz answers, so a revision whose databases do
-		// not answer never serves, and one whose process stops answering
-		// /healthz is restarted. /healthz answers while the instance
-		// drains, so a drain is never cut short.
-		"startupProbe": map[string]any{
-			"httpGet":          map[string]any{"path": readinessPath, "port": containerPort},
-			"periodSeconds":    startupPeriod,
-			"timeoutSeconds":   startupTimeout,
-			"failureThreshold": startupFailures,
-		},
-		"livenessProbe": map[string]any{
-			"httpGet":          map[string]any{"path": livenessPath, "port": containerPort},
-			"periodSeconds":    livenessPeriod,
-			"timeoutSeconds":   livenessTimeout,
-			"failureThreshold": livenessFailures,
-		},
+	container["livenessProbe"] = map[string]any{
+		"httpGet":          map[string]any{"path": livenessPath, "port": containerPort},
+		"periodSeconds":    livenessPeriod,
+		"timeoutSeconds":   livenessTimeout,
+		"failureThreshold": livenessFailures,
 	}
-	if len(envs) > 0 {
-		container["envs"] = envs
+	// Cloud Run returns no minInstanceCount for a service without a
+	// minimum, so a 0 in the template would differ from the service on
+	// every preview: a minimum goes in only when it is above 0.
+	scaling := map[string]any{}
+	if n, ok := d.Settings["minInstances"]; ok && fmt.Sprint(n) != "0" {
+		scaling["minInstanceCount"] = n
 	}
-	scaling := map[string]any{"minInstanceCount": settingNumber(d.Settings, "minInstances", 0)}
 	if n, ok := d.Settings["maxInstances"]; ok {
 		scaling["maxInstanceCount"] = n
 	}
-	template := map[string]any{
-		"serviceAccount": ir.Output{Resource: account, Name: "email"},
-		"scaling":        scaling,
+	if len(scaling) > 0 {
+		template["scaling"] = scaling
 	}
 	if n, ok := d.Settings["concurrency"]; ok {
 		template["maxInstanceRequestConcurrency"] = n
-	}
-	if len(instances) > 0 {
-		// The Cloud SQL connection on the service: the instances its
-		// connections name, mounted where the Cloud SQL connector's
-		// sockets go (section 7.4).
-		template["volumes"] = []any{map[string]any{
-			"name":             "cloudsql",
-			"cloudSqlInstance": map[string]any{"instances": instances},
-		}}
-		container["volumeMounts"] = []any{map[string]any{"name": "cloudsql", "mountPath": "/cloudsql"}}
-	}
-	if callsAnother(d) {
-		add(networkNodes(env, v)...)
-		template["vpcAccess"] = map[string]any{
-			"egress": "ALL_TRAFFIC",
-			"networkInterfaces": []any{map[string]any{
-				"network":    ir.Output{Resource: networkID, Name: "name"},
-				"subnetwork": ir.Output{Resource: subnetID, Name: "name"},
-			}},
-		}
 	}
 	template["containers"] = []any{container}
 
@@ -197,8 +125,137 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
+// workload is what lowerWorkload makes of a server or a job for the Cloud
+// Run resource that runs it: its one container, and the template that
+// holds the container. A service's template is a revision's and a job's a
+// task's, which take the members here under the same names.
+type workload struct {
+	// container has the image, the resource limits, the environment and
+	// the Cloud SQL mount; the platform adds what only its resource takes.
+	container map[string]any
+
+	// template has the account the container runs as, the Cloud SQL
+	// volume and the VPC egress; the platform adds the container.
+	template map[string]any
+}
+
+// lowerWorkload lowers what a server and a job share (sections 7.2 and
+// 8.7, D52):
+//
+//   - a service account named after the deployable, and the trace agent
+//     role for it, since the entrypoint exports traces to Cloud Trace
+//     (section 7.5);
+//   - a Secret Manager secret and an accessor grant per secret binding
+//     (secretNodes);
+//   - its config as the container's environment variables: a literal as
+//     its value, a parameter as a reference to it, a secret as a reference
+//     to its Secret Manager secret, a derived field as one variable per
+//     member of the value its edge's connector derived;
+//   - the image's repository path, which the deploy pins to a digest
+//     (section 11.2), and the cpu and memory settings;
+//   - the Cloud SQL volume, holding the instances its connections name,
+//     mounted where the Cloud SQL connector's sockets go (section 7.4);
+//   - for a deployable that calls a server other than itself, Direct VPC
+//     egress through the environment's network (networkNodes): a call to
+//     the callee's run.app URL from the VPC counts as internal, which an
+//     internal server's ingress requires.
+func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, error) {
+	d := ctx.Deployable
+	env := ctx.Environment
+	v := valuesOf(env)
+	if err := checkLength("the service account id of "+d.Name, d.ResourceName, 6, 30, renameOf(d)); err != nil {
+		return registry.Lowered{}, workload{}, err
+	}
+	account := d.Name + ".account"
+	member := ir.Output{Resource: account, Name: "member"}
+	var out registry.Lowered
+	add := func(res ...*ir.Resource) { out.Resources = append(out.Resources, res...) }
+	add(
+		&ir.Resource{ID: account, Type: TypeAccount, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+			"project":     v.project,
+			"accountId":   d.ResourceName,
+			"displayName": fmt.Sprintf("%s %s %s %s", env.Stack, env.Name, d.Kind, d.Name),
+		}},
+		&ir.Resource{ID: d.Name + ".trace-agent", Type: TypeProjectIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+			"project": v.project,
+			"role":    "roles/cloudtrace.agent",
+			"member":  member,
+		}},
+	)
+
+	var envs, instances []any
+	for _, b := range d.Bindings {
+		switch b.Source {
+		case ir.BindingLiteral:
+			value, err := envString(b.Value)
+			if err != nil {
+				return registry.Lowered{}, workload{}, fmt.Errorf("binding %s: %w", b.Field, err)
+			}
+			envs = append(envs, map[string]any{"name": b.Field, "value": value})
+		case ir.BindingParameter:
+			envs = append(envs, map[string]any{"name": b.Field, "value": ir.Parameter(b.Parameter)})
+		case ir.BindingSecret:
+			nodes, ref := secretNodes(env, v, d.Name, b.Secret, member)
+			add(nodes...)
+			envs = append(envs, map[string]any{"name": b.Field, "valueSource": map[string]any{
+				"secretKeyRef": map[string]any{"secret": ref, "version": "latest"},
+			}})
+		case ir.BindingDerived:
+			vars, err := ir.DerivedVariables(b.Field, b.Value)
+			if err != nil {
+				return registry.Lowered{}, workload{}, fmt.Errorf("binding %s: %w", b.Field, err)
+			}
+			for _, variable := range vars {
+				envs = append(envs, map[string]any{"name": variable.Name, "value": variable.Value})
+			}
+			if instance := cloudSQLInstance(b.Value); instance != nil && !containsValue(instances, instance) {
+				instances = append(instances, instance)
+			}
+		default:
+			return registry.Lowered{}, workload{}, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
+		}
+	}
+
+	w := workload{
+		container: map[string]any{
+			"image": imageRepository(v, env.Stack, d.Name),
+			"resources": map[string]any{"limits": map[string]any{
+				"cpu":    settingString(d.Settings, "cpu", defaultCPU),
+				"memory": settingString(d.Settings, "memory", defaultMemory),
+			}},
+		},
+		template: map[string]any{
+			"serviceAccount": ir.Output{Resource: account, Name: "email"},
+		},
+	}
+	if len(envs) > 0 {
+		w.container["envs"] = envs
+	}
+	if len(instances) > 0 {
+		w.template["volumes"] = []any{map[string]any{
+			"name":             "cloudsql",
+			"cloudSqlInstance": map[string]any{"instances": instances},
+		}}
+		w.container["volumeMounts"] = []any{map[string]any{"name": "cloudsql", "mountPath": "/cloudsql"}}
+	}
+	if callsAnother(d) {
+		add(networkNodes(env, v)...)
+		w.template["vpcAccess"] = map[string]any{
+			"egress": "ALL_TRAFFIC",
+			"networkInterfaces": []any{map[string]any{
+				"network":    ir.Output{Resource: networkID, Name: "name"},
+				"subnetwork": ir.Output{Resource: subnetID, Name: "name"},
+			}},
+		}
+	}
+	return out, w, nil
+}
+
 // callsAnother reports whether a server calls an API another server
-// serves. A call to an API it serves itself stays on loopback.
+// serves. A call to an API it serves itself stays on loopback. A job
+// serves its API alone and runs apart from every server (D52), so it
+// reaches each API its API calls over the network, the server of its own
+// API's siblings included.
 func callsAnother(d ir.ResolvedDeployable) bool {
 	for _, call := range d.Calls {
 		if !slices.ContainsFunc(d.Services, func(s ir.ServiceRef) bool { return s.Name == call.Name }) {
@@ -237,13 +294,6 @@ func envString(v any) (string, error) {
 func settingString(settings map[string]any, key, def string) string {
 	if s, ok := settings[key].(string); ok {
 		return s
-	}
-	return def
-}
-
-func settingNumber(settings map[string]any, key string, def any) any {
-	if n, ok := settings[key]; ok {
-		return n
 	}
 	return def
 }

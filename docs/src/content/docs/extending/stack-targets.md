@@ -1,22 +1,22 @@
 ---
 title: Stack targets
-description: Write a platform, connector, target, DNS platform or provisioner for the stack model, pin the provider schemas it emits, and test it offline with stack.Resolve.
+description: Write a platform, connector, target, DNS platform, provisioner or CI renderer for the stack model, pin the provider schemas it emits, and test it offline with stack.Resolve.
 sidebar:
   order: 4
 ---
 
 A [stack](/superschematic/guides/stacks/) deploys through registrations.
-The core registers one target, `local`, which `stack dev` runs; the gcp
-target, the Cloudflare DNS platform and the Pulumi provisioner are
-extensions like any other, so a new cloud, DNS provider or infrastructure
-tool needs no core edit.
+The core registers one target, `local`, which `stack dev` runs, and one
+CI renderer, `github`; the gcp target, the Cloudflare DNS platform and the
+Pulumi provisioner are extensions like any other, so a new cloud, DNS
+provider, infrastructure tool or CI system needs no core edit.
 [A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
-lists the five registrations. This page covers what each function you
-write receives and returns, the seams the `stack` commands deploy
-through, how to pin a provider's schemas, and how to test the result. The
-design is sections 6, 7 and 11 of
+lists the six registrations. This page covers what each function you
+write receives and returns, the seams the `stack` commands and the
+generated CI deploy through, how to pin a provider's schemas, and how to
+test the result. The design is sections 6, 7 and 11 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D45 in `docs/DECISIONS.md`.
+and D45, D46 and D47 in `docs/DECISIONS.md`.
 
 `extensions/gcp`, `extensions/cloudflare` and `extensions/pulumi` are the
 worked examples, and `stack/stacktest` is the smallest one: a fake target
@@ -27,8 +27,8 @@ never depends on it.
 
 ## Names and purity
 
-A platform, connector, target, DNS platform or provisioner name is
-lowercase words joined by dots or hyphens (`gcp.cloudrun`,
+A platform, connector, target, DNS platform, provisioner or CI renderer
+name is lowercase words joined by dots or hyphens (`gcp.cloudrun`,
 `gcp.cloudrun-cloudsql`). `manual` is reserved: it is the DNS platform of
 a domain no registered DNS platform holds.
 
@@ -102,6 +102,21 @@ Resolution validates each `settings` element against it, and refuses a
 server whose language is not in `Languages`, or a database whose hosted
 schemas do not all support one of its `Dialects`, with `unrealizable`.
 
+A job platform (`Kind: ir.DeployableJob`) places an API's jobs. It
+declares `Languages`, as a server platform does, since a job is written in
+its API's language. Its `AddressOf` may return nil: nothing reaches a job.
+Its `Lower` reads what runs from the deployable's `Job`, an
+`ir.ResolvedJob`: the API and the `@job` class, the schedule the
+environment runs, empty when it runs only on demand, its time zone, the
+timeout in seconds and the retries. A job has a server's bindings, from
+its API's config and its own edges, and no callers field.
+`stack/stacktest`'s `fake.job` lowers one to a job with its own account
+and, for a schedule, a scheduler entry. gcp's `gcp.cloudrunjob` lowers
+one to a Cloud Run job, sharing the Cloud Run service's lowering of the
+account, secrets, config, Cloud SQL volume and egress, and for a schedule
+to a Cloud Scheduler job and the grant that lets the job's account run
+it.
+
 ## A connector
 
 `Connect` receives a `registry.ConnectorContext`: the environment, the
@@ -124,12 +139,21 @@ server serves runs from the server to itself, and its connector derives
 the server's own address. Return an error for an edge the platforms
 cannot serve, as the gcp sql connector does for a Rust server.
 
+A connector's `From` is a server or a job platform. A job takes its API's
+edges, so a target with a job platform registers a connector from it for
+each edge its server platform has; it may share the server connector's
+`Connect`, which sees the job as `From`, as gcp's do. For an http edge,
+the callee's issuer lists the job as a caller that serves its API.
+
 ## A target
 
-A `TargetSpec` names a platform for each deployable kind, the JSON Schema
-of an environment's values under the target's name, its default DNS
-platform, its provisioner, the schema of every resource type its
-platforms, connectors and default DNS platform emit, and its policy rules.
+A `TargetSpec` names a platform for each deployable kind (`server`,
+`database` and `job`), the JSON Schema of an environment's values under
+the target's name, its default DNS platform, its provisioner, the schema
+of every resource type its platforms, connectors and default DNS platform
+emit, and its policy rules. A kind it names no platform for is refused in
+its environments, so a stack whose APIs declare jobs resolves on it only
+with each job placed on another target's platform.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:
@@ -148,28 +172,44 @@ under the name `pulumi` for that reason.
 ### Deploy seams
 
 A target that resolves can be built and checked. To bootstrap, plan and
-deploy it with the `stack` commands, it also fills five seams on its
-`TargetSpec`, each an interface in `registry`:
+deploy it with the `stack` commands and the generated CI, it also fills
+seven seams on its `TargetSpec`, each an interface in `registry`:
 
 | Field | Interface | Does |
 | --- | --- | --- |
 | `State` | `StateStore` | gives the provisioner's state backend for an environment, and reads, writes and deletes each run's deploy manifest |
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
-| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs |
+| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`) |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
-| `Builder` | `ImageBuilder` | builds a server's image from the Dockerfile a stack's build writes, and returns it by digest |
+| `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
+| `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
+| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run`: a `JobRunRequest` names the run, the job and the image the deploy manifest records, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 
 A target with none of them resolves and does not deploy. `RegisterTarget`
-refuses `State`, `Bootstrap`, `Migrations` or `Builder` without a
-provisioner, and `Bootstrap`, `Migrations` or `Builder` without `State`.
-With no `Migrations`, a deploy that has a migration to run is refused;
-with no `Builder`, every server's image comes from `--image` or the
-deploy manifest. The gcp target fills all five: its migrations run each
-phase as an execution of the stack's Cloud Run job, which runs
+refuses `State`, `Bootstrap`, `Migrations`, `Builder`, `CI` or `Jobs`
+without a provisioner, and `Bootstrap`, `Migrations`, `Builder`, `CI` or
+`Jobs` without `State`. With no `Migrations`, a deploy that has a
+migration to run is refused; with no `Builder`, every image comes from
+`--image` or the deploy manifest; with no `Jobs`, `stack run` refuses the
+target's environments. The gcp target fills all seven: its migrations run
+each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
-takes a runner of your own instead), and its builder builds each changed
-server's image on Cloud Build (D46). Each operation works on a `registry.Run`: the resolved
-environment and the values of its parameters.
+takes a runner of your own instead), its builder builds each changed
+server's and job's image on Cloud Build (D46), its CI identity signs a
+job in through Workload Identity Federation (D47), and its job runner
+runs an execution of a job's Cloud Run job and reads a failed one's error
+from Cloud Logging (D52). Each operation works on a
+`registry.Run`: the resolved environment and the values of its
+parameters.
+
+A `CIIdentity` is a kind and its fields, which a CI renderer turns into
+its own sign-in steps. gcp's kind is `gcp-workload-identity`, with
+`provider`, the workload identity provider bootstrap creates, and
+`account`, the role's service account. Its `Identity` is pure, and nil
+until the environment's values hold what the identity names, as gcp's is
+until bootstrap records `projectNumber`. A renderer refuses a kind it
+does not know, so a target with a new kind of sign-in teaches the
+renderers it is used with.
 
 ## A DNS platform
 
@@ -217,6 +257,40 @@ provisioner's
 [`provision.go`](https://github.com/parable-work/superschematic/blob/main/extensions/pulumi/provision.go)
 is the reference, and its tests run every operation against a `file://`
 backend with the `random` provider, which needs no credentials.
+
+A `ProvisionerSpec` also lists in `Tools` the command-line tools the
+provisioner runs, each with a name and the version it needs, which a
+generated CI job installs before it plans or deploys. The Pulumi
+provisioner declares the `pulumi` CLI at `pulumi.CLIVersion`, the release
+of the Pulumi SDK it is built with.
+
+## A CI renderer
+
+A CI renderer writes a stack's workflow for one CI system. It registers
+a `registry.CIRendererSpec`: its name, which is the key of `outputs.ci` in
+a stack's config, `Dir`, the directory it installs into relative to the
+repository root (`.github/workflows`), and a pure `Render`:
+
+```go
+Render func(registry.CIRequest) ([]registry.CIFile, error)
+```
+
+A `CIRequest` carries the stack, with its service's directory, the
+schemas root, the output root the workflow's build writes and the schemas
+root's package manager, all relative to the repository root; its
+environments in declaration order, each resolved, with the identity its
+target's `CI` seam gives each role and its provisioner's tools; the
+renderer's options from the config (`branch` and `install`, with their
+defaults applied); `Version`, the release of superschematic that
+renders, empty for a binary built from a checkout; and `Archives`, by
+platform (`linux-x64`), the URL and SHA-256 of the static archives the
+release ships, which a job that compiles a Go server installs and points
+`CGO_LDFLAGS` at, empty for a binary the release workflow did not build.
+Each `CIFile` is a
+path relative to the install directory and its bytes. The Stack kind's
+`ci` generator writes them under `<output-root>/ci/<stack>/<renderer>/`
+and installs them when the directory exists. The core's `github`
+renderer, in `internal/generator/cigen`, is the reference.
 
 ## Pin the provider schemas
 
@@ -282,12 +356,19 @@ pass your extension to `cli.New` and run `build`, as
 does with the fake target.
 
 The deploy itself is public too: `stack.Deploy`, `stack.Plan`,
-`stack.Destroy`, `stack.Outputs`, `stack.Bootstrap` and `stack.SetSecrets`
-are what the commands call. `stack/stacktest` has in-memory seams
-(`FakeState`, `FakeSecrets`, `FakeMigrations` and `FakeBootstrap`) that
-record each call, so a test reads the order a deploy ran in, and
+`stack.Destroy`, `stack.Outputs`, `stack.Bootstrap`, `stack.SetSecrets`
+and `stack.RunJob` are what the commands call. `stack/stacktest` has
+in-memory seams (`FakeState`, `FakeSecrets`, `FakeMigrations`,
+`FakeBootstrap`, `FakeBuilder` and `FakeJobs`) that record each call, so a test reads the order a deploy
+ran in, and `FakeCI`, a CI seam shaped like gcp's.
 `extensions/pulumi/deploy_test.go` deploys through the real provisioner
 against a `file://` backend.
+
+To check what the generated CI does with a target, read each resolved
+environment with `registry.CIEnvironment`, which asks the target's `CI`
+seam and the provisioner's `Tools` as the `ci` generator does, and render
+it with the core's `github` renderer (`reg.CIRenderer("github")`), as
+`extensions/gcp/ci_test.go` does against its golden workflow.
 
 ## Link it
 

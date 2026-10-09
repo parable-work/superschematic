@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/ir"
 )
 
 // TypeScriptConfigFile is the loader's file name inside the generated
@@ -168,4 +169,74 @@ func jsString(value string) string {
 func typeScriptDoc(description string) string {
 	flat := strings.Join(strings.Fields(description), " ")
 	return strings.ReplaceAll(flat, "*/", "*\\/")
+}
+
+// TypeScriptEnvConfigFile is the file of a generated TypeScript API
+// package that declares EnvConfig and loadEnvConfig (D51).
+const TypeScriptEnvConfigFile = "config.ts"
+
+// typeScriptEnvConfig is the template view of an API's EnvConfig.
+type typeScriptEnvConfig struct {
+	SchemaName     string
+	TypesPackage   string
+	RuntimePackage string
+	// TypeName is the @envVars type, empty without one.
+	TypeName       string
+	Derived        []typeScriptDerivedField
+	HasDatabase    bool
+	HasService     bool
+	Callers        string
+	CallersLiteral string
+}
+
+// typeScriptDerivedField is a field an edge derives, read by the HTTP
+// runtime's Reader into its Type.
+type typeScriptDerivedField struct {
+	Key        string
+	KeyLiteral string
+	Reader     string
+	Type       string
+	Doc        string
+}
+
+// WriteTypeScriptEnvConfig writes config.ts into a generated TypeScript API
+// package: EnvConfig, the API's @envVars settings (Loaded<Type>, which the
+// types package's config.ts loads) joined with a field per edge a stack
+// derives for it and its callers field, and loadEnvConfig, which reads
+// them all from the environment through the HTTP runtime's stackconfig
+// readers (D51; docs/stack-model.md, sections 3.4 and 8.6). Deps holds it.
+func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
+	n := output.Naming.OrDefault()
+	view := typeScriptEnvConfig{
+		SchemaName:     output.SchemaName,
+		TypesPackage:   n.NpmTypesPackage(output.SchemaName),
+		RuntimePackage: n.HTTPRuntimeNpmPackage,
+		TypeName:       output.TypeName,
+		Callers:        output.CallersField,
+		CallersLiteral: jsString(output.CallersField),
+	}
+	for _, field := range output.Derived {
+		derived := typeScriptDerivedField{Key: field.Key, KeyLiteral: jsString(field.Key)}
+		if field.Kind == ir.EdgeSQL {
+			from := "its one DB-kind dependency"
+			if field.From == "authDb" {
+				from = "its authDb"
+			}
+			derived.Reader, derived.Type = "loadDatabase", "Database"
+			derived.Doc = fmt.Sprintf("The connection to %s, the API's database: %s. It is read from %s_*.", field.Service, from, field.Key)
+			view.HasDatabase = true
+		} else {
+			derived.Reader, derived.Type = "loadService", "Service"
+			derived.Doc = fmt.Sprintf("The endpoint of %s, which the API calls. It is read from %s_*.", field.Service, field.Key)
+			view.HasService = true
+		}
+		view.Derived = append(view.Derived, derived)
+	}
+	target := filepath.Join(apiDir, TypeScriptEnvConfigFile)
+	if err := codegen.GenerateFile(
+		codegen.NewFileConfig(templatesFS, "env.ts.tmpl", target, view, nil),
+	); err != nil {
+		return fmt.Errorf("failed to generate TypeScript EnvConfig: %w", err)
+	}
+	return nil
 }

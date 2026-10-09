@@ -11,7 +11,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -186,11 +185,11 @@ func writeTypesPackage(t *testing.T, bunPath string, schema *ir.Schema, name, te
 	if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 		t.Fatalf("write types: %v", err)
 	}
-	if err := tsgen.WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
+	if err := (tsgen.WorkspaceRoot{OutputRoot: tempRoot, Paths: paths}).Write(); err != nil {
 		t.Fatalf("write workspace root: %v", err)
 	}
 	install := exec.Command(bunPath, "install")
-	install.Dir = typesRoot
+	install.Dir = tempRoot
 	if out, err := install.CombinedOutput(); err != nil {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the types package (likely offline): %v\n%s", err, out))
 	}

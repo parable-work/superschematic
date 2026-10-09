@@ -89,7 +89,7 @@ describe('invoke and operate with an expected sequence', () => {
     assert.equal(stale.code, 'seq_mismatch');
     // Nothing was written: the count, the sequence and the log are as they were.
     const item = engine.instances.get(alice, 'Item', 'i1');
-    assert.deepEqual([item?.seq, item?.data.count], [3, 3]);
+    assert.deepEqual([item?.seq, item?.behaviors['test.Counter']?.count], [3, 3]);
     assert.equal(engine.events.read(alice, { schema: 'Item', instanceId: 'i1' }).events.length, 3);
   });
 
@@ -132,7 +132,10 @@ describe('the operation route', () => {
     // A result that is not an object crosses as it is.
     assert.deepEqual(await data(call(app, 'POST', operation('i1', 'flag'), { body: { reason: 'hold' } })), { data: true, etag: '"4"' });
     const item = await data(call(app, 'GET', `${ITEMS}/i1`));
-    assert.deepEqual([item.etag, item.data.data], ['"4"', { title: 'Desk', count: 3, flagged: true, flagReason: 'hold' }]);
+    assert.deepEqual(
+      [item.etag, item.data.data, item.data.behaviors],
+      ['"4"', { title: 'Desk' }, { 'test.Counter': { count: 3 }, 'test.Flag': { flagged: true, flagReason: 'hold' } }]
+    );
   });
 
   test('If-Match names the sequence the operation expects', async () => {
@@ -255,17 +258,19 @@ describe('the describe and tools routes', () => {
     const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
     assert.deepEqual(tools, engine.tools.manifest({ subject: 'reader', permissions: ['read'] }));
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
-    assert.deepEqual(visible, [
-      'engine.listSchemas',
-      'engine.describeSchema',
-      'engine.defineSchema',
-      'engine.listBehaviors',
-      'engine.describeBehavior',
-      'item.get',
-      'item.list',
-      'item.history',
-    ]);
+    // The policy refuses reader define and manage, so define_schema and the namespace tools are hidden too.
+    assert.deepEqual(visible, ['engine.listSchemas', 'engine.describeSchema', 'engine.listBehaviors', 'engine.describeBehavior', 'engine.getValue', 'item.get', 'item.list', 'item.history']);
     await problem(call(app, 'GET', '/namespaces/nowhere/tools'), 404);
+  });
+
+  test("the tools route answers through the mount's tool filter", async () => {
+    const { engine } = withItem();
+    const app = engineApp(engine, { authenticate, tools: (principal, tool) => principal.subject !== 'reader' || tool.schema === 'Item' });
+    const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
+    const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
+    assert.deepEqual(visible, ['item.get', 'item.list', 'item.history']);
+    const listSchemas = tools.tools.find((tool: { name: string }) => tool.name === 'engine.listSchemas');
+    assert.equal(listSchemas.mcp.hiddenReason, "this mount's tool filter leaves it out of reader's tools");
   });
 });
 
@@ -306,7 +311,7 @@ describe("the core's behaviors over HTTP", () => {
     assert.equal((await problem(call(app, 'POST', TRANSITION, { body: { to: 'gone' } }), 400)).code, 'invalid_argument');
     assert.equal((await problem(call(app, 'POST', TRANSITION, { body: { to: 'draft', status: 'draft' } }), 400)).code, 'invalid_argument');
     const read = await data(call(app, 'GET', DOCUMENT));
-    assert.deepEqual([read.etag, read.data.data.status], ['"2"', 'review']);
+    assert.deepEqual([read.etag, read.data.behaviors.Workflow.status], ['"2"', 'review']);
   });
 
   test('a transition whose permission the caller lacks is 403 and writes nothing; one who holds it moves the instance', async () => {
@@ -342,7 +347,7 @@ describe("the core's behaviors over HTTP", () => {
       call(app, 'POST', `${TASKS}/instances`, { body: { id: 'build', data: { title: 'Build' }, behaviors: { Links: { project: 'launch', parent: 'plan' } } } }),
       201
     );
-    assert.deepEqual([created.etag, created.data.data.links], ['"1"', { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]);
+    assert.deepEqual([created.etag, created.data.behaviors.Links.targets], ['"1"', { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]);
     assert.deepEqual(await data(call(app, 'POST', build('addBlocker'), { body: { id: 'plan' }, headers: { 'if-match': '"1"' } })), {
       data: { schema: 'tasks', id: 'plan', status: 'todo', open: true },
       etag: '"2"',
@@ -361,7 +366,7 @@ describe("the core's behaviors over HTTP", () => {
     );
     assert.equal((await problem(call(app, 'POST', build('addBlocker'), { body: { id: 'build' } }), 400)).code, 'invalid_argument');
     assert.deepEqual(await data(call(app, 'POST', `${TASKS}/operations/listLinked`, { token: 'reader', body: { name: 'spec', id: 'doc-1' } })), {
-      data: { items: [{ id: 'build', revision: 1, stale: false }], next: null },
+      data: { items: [{ id: 'build', revision: 1, latest: 1, stale: false }], next: null },
       etag: null,
     });
     const required = await problem(call(app, 'DELETE', '/namespaces/default/schemas/projects/instances/launch'), 409);
@@ -370,7 +375,10 @@ describe("the core's behaviors over HTTP", () => {
     assert.equal((await problem(call(app, 'DELETE', DOCUMENT, { token: 'reader' }), 403)).code, 'forbidden');
     await data(call(app, 'DELETE', DOCUMENT));
     const read = await data(call(app, 'GET', `${TASKS}/instances/build`));
-    assert.deepEqual([read.data.data.blocked, read.data.data.links], [true, { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]);
+    assert.deepEqual(
+      [read.data.behaviors.Dependencies.blocked, read.data.behaviors.Links.targets],
+      [true, { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } }]
+    );
   });
 
   test("Rollups through the routes: describe lists its field, a read carries it, a gated transition is 409, and a task's change moves no ETag", async () => {
@@ -387,11 +395,13 @@ describe("the core's behaviors over HTTP", () => {
     const rollups = described.behaviors.find((behavior: { name: string }) => behavior.name === 'Rollups');
     assert.deepEqual(
       [rollups.fields.map((field: { name: string }) => field.name), rollups.operations, Object.keys(rollups.config.rollups)],
-      [['rollups'], [], ['tasks', 'tasksByStatus', 'tasksFinished']]
+      [['values'], [], ['tasks', 'tasksByStatus', 'tasksFinished']]
     );
-    assert.equal(described.instance.properties.rollups.readOnly, true);
+    // The field is no property of the instance's own, but of its behaviors'.
+    assert.equal(described.instance.properties.values, undefined);
+    assert.equal(described.instanceBehaviors.properties.Rollups.properties.values.readOnly, true);
     const read = await data(call(app, 'GET', `${PROJECTS}/instances/launch`, { token: 'reader' }));
-    assert.deepEqual([read.etag, read.data.data.rollups], ['"1"', { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false }]);
+    assert.deepEqual([read.etag, read.data.behaviors.Rollups.values], ['"1"', { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false }]);
     const gated = await problem(call(app, 'POST', `${PROJECTS}/instances/launch/operations/transition`, { body: { to: 'done' } }), 409);
     assert.deepEqual(
       [gated.code, gated.details.behavior, gated.details.reason],
@@ -399,7 +409,7 @@ describe("the core's behaviors over HTTP", () => {
     );
     await data(call(app, 'POST', plan('transition'), { body: { to: 'dropped' } }));
     const again = await data(call(app, 'GET', `${PROJECTS}/instances/launch`));
-    assert.deepEqual([again.etag, again.data.data.rollups.tasksFinished], ['"1"', true]);
+    assert.deepEqual([again.etag, again.data.behaviors.Rollups.values.tasksFinished], ['"1"', true]);
     assert.deepEqual(await data(call(app, 'POST', `${PROJECTS}/instances/launch/operations/transition`, { body: { to: 'done' }, headers: { 'if-match': '"1"' } })), {
       data: { from: 'active', to: 'done' },
       etag: '"2"',

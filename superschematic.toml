@@ -42,6 +42,7 @@ http_runtime_npm_package = "@superschematic/http-runtime"
 versiongraph_npm_package = "@superschematic/versiongraph"
 versiongraph_pypi_dist = "superschematic-versiongraph"
 versiongraph_python_module = "superschematic_versiongraph"
+engine_npm_package = "@superschematic/engine"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.
@@ -105,6 +106,7 @@ versiongraph_rust = "runtime/versiongraph/rust-engine"
 versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
+http_runtime_typescript = "runtime/http/typescript"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, and the endpoint of each API it `calls`. {SERVICE} is

@@ -134,20 +134,25 @@ POST /namespaces/default/schemas/jobs/operations/claimNext                 {"mat
 POST /namespaces/default/schemas/jobs/instances/{id}/operations/heartbeat  Preconditions: {"Lease": {"token": 1}}
 ```
 
-The example's worker claims the best queued job, highest priority first,
-then oldest; the claim takes the lease, reserves the budget and moves
-the status to running, all in one transaction. It renews the lease on a
-timer while it works, presents the token on every write, reports usage
-and the attempt by failure class, finishes the job and gives the lease
-back:
-
-<Snippet example="engine-jobs" file="src/worker.ts" symbol="JobWorker" />
+A claim takes the best queued job, highest priority first, then oldest:
+it takes the lease, reserves the budget and moves the status to running,
+all in one transaction. The holder renews the lease while it works,
+presents the token on every write, reports usage and the attempt by
+failure class, finishes the job and gives the lease back. The example's
+workers leave that loop to the package's worker
+([Write a worker](#write-a-worker)).
 
 A heartbeat's result also carries the directives sent to the holder and
 not yet acknowledged, and `heartbeat({ acknowledge: ids })` acknowledges
-the ones handled in the same write; this worker does not act on them. A
-failed attempt's result carries its class's `hint`, which can steer the
-next attempt.
+the ones handled in the same write. A failed attempt's result carries its
+class's `hint`, which can steer the next attempt.
+
+A large result, a field whose JSON is longer than 64 KiB that
+`recordAttempt` keeps or the worker writes, is stored once in the
+engine's value store, and the job's row and events keep a ref to it, so
+heartbeats and the other writes under the lease never rewrite it. A
+dashboard that lists jobs passes `valueRefs` to receive the refs rather
+than the results ([The engine](/superschematic/guides/engine/#instances)).
 
 A refusal carries a code to branch on. A worker whose lease is gone gets
 409 `vetoed` with `details.behavior` `Lease` and `details.code`
@@ -160,9 +165,12 @@ stops:
                "code": "token_stale", "details": { "token": 1, "current": 3 } } }
 ```
 
-The example's worker reads any `Lease` veto as the job being gone:
-
-<Snippet example="engine-jobs" file="src/worker.ts" symbol="leaseGone" />
+The engine's client reads it as an `EngineVeto`, and
+`isVeto(error, 'Lease', ['lapsed', 'token_stale'])` branches on it. Not
+every `Lease` veto means the lease is gone: `held_by_another` refuses a
+principal that never held it. The worker below takes `lapsed`,
+`token_stale`, `not_holder` and `not_leased`, and a deleted instance, as
+the lease lost.
 
 An agent that works the queue over MCP reads the same from the tools:
 each tool's guidance, in its `_meta`, says what the job's config means
@@ -176,61 +184,47 @@ A worker that dies stops renewing. Once its lease passes `expiresAt`, or
 the job's `timeLimitMs`, the runner's `expire` sweep clears the holder,
 advances the token, counts the expiry, settles the budget reservation
 and moves the job back to `queued`, where the next `claimNext` finds it.
-After the test's run, a job that timed out reads:
+After the test's run, a job that timed out reads, its own fields in
+`data` and each behavior's under its name in `behaviors`:
 
 ```json
 {
-  "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000,
-  "status": "queued",
-  "lease": { "holder": null, "token": 2, "acquiredAt": null, "renewedAt": null, "expiresAt": null, "active": false, "expiries": 1,
-             "ended": { "reason": "maxHold", "at": 1045000 } },
-  "budget": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } },
-  "retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "bestScore": null, "exhausted": false, "stuck": false }
+  "data": { "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000 },
+  "behaviors": {
+    "Workflow": { "status": "queued" },
+    "Lease": { "token": 2, "active": false, "expiries": 1, "ended": { "reason": "maxHold", "at": 1045000 } },
+    "Assignment": {},
+    "Budget": { "meters": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } } },
+    "Retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "exhausted": false, "stuck": false }
+  }
 }
 ```
 
+A free lease has no `holder`, and no `acquiredAt`, `renewedAt` or
+`expiresAt`: a behavior's field with no value is absent.
+
 ## Write a worker
 
-The example's `JobWorker` writes the loop above by hand, over `fetch`, to
-show each step. A worker written that way gets edge cases wrong in its
-own way. This one polls an empty queue every `idleMs`, drops a failed
-heartbeat, so it learns the lease is gone only when a later write is
-refused, and does not act on directives; others write on after the lease
-lapsed, acknowledge each directive with a write of its own, or let their
-leases lapse at shutdown. The package's `./worker` subpath runs the loop
-for you, on the engine's typed client
+The package's `./worker` subpath runs the loop above for you, on the
+engine's typed client
 ([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
 It imports only `@superschematic/engine/client`, so a worker process
-loads no SQLite and no behavior:
+loads no SQLite and no behavior. The example's workers run on it: each
+process calls as its own principal, beats the worker instance that stands
+for it, claims the jobs of its topic, and runs a handler over each, which
+an operator's `cancel` directive stops:
+
+<Snippet example="engine-jobs" file="src/worker.ts" symbol={['jobWorker', 'work']} />
+
+A process makes its client and starts the worker; a stop hands back what
+it holds:
 
 ```ts
 import { EngineClient } from '@superschematic/engine/client';
-import { QueueWorker, WorkFailure } from '@superschematic/engine-workqueue/worker';
-import { signedTokenSource } from '@superschematic/http-runtime';
+import { jobWorker } from './worker.ts';
 
-const client = new EngineClient({
-  baseUrl: 'https://jobs.internal/api',
-  serviceCredential: { token: signedTokenSource(edgeKey, { issuer: 'indexer', subject: 'indexer', audience: 'jobs' }) },
-});
-
-const worker = new QueueWorker(client, {
-  schema: 'jobs',
-  match: { topic: 'search' },
-  concurrency: 4,
-  handle: async (job) => {
-    job.onDirective((directive) => {
-      if (directive.name === 'budgetExceeded') slowDown();
-    });
-    const { data } = await job.instance.get();
-    const result = await index(data, { signal: job.signal });   // aborts when the lease is lost
-    if (!result.ok) {
-      throw new WorkFailure('timed out', { failure: 'timeout', attempt: { detail: result.detail } });
-    }
-    await job.instance.invoke('recordUsage', { meter: 'cpuSeconds', amount: result.seconds });
-    return { transition: 'done' };
-  },
-  onError: (error, job) => console.warn(job?.id, error),
-});
+const client = new EngineClient({ baseUrl: 'http://127.0.0.1:8788/api', auth: { token: 'worker-1-token' } });
+const worker = jobWorker(client, 'worker-1', async ({ job, signal }) => crawl(job, { signal }), { topic: 'search' });
 await worker.start();
 process.on('SIGTERM', () => worker.stop());
 ```
@@ -240,6 +234,14 @@ process.on('SIGTERM', () => worker.stop());
   watched, not polled: the schema's event stream wakes the worker, and
   between events it looks again with `countClaimable`, a read that takes
   no write lock, after a backoff that doubles (`idle`).
+- **Presence.** With `presence`, the worker beats that instance as its
+  principal before it claims, then on a timer of its own, a third of the
+  Presence `ttlMs` apart by default, whatever its handlers are doing.
+  While the engine refuses a beat, or none succeeds for the `ttlMs`, it
+  claims nothing, `onError` hears a `PresenceLostError`, and the next beat
+  that succeeds brings it back. The jobs it holds go on: their own
+  heartbeats keep their leases, and a miss expires only the leases not
+  renewed since the last beat.
 - **The job.** `job.instance` reads the claimed instance and presents
   the lease's token on every write; `job.client` reaches everything else,
   without it. Each job heartbeats at the claim's interval, and the
@@ -251,18 +253,18 @@ process.on('SIGTERM', () => worker.stop());
   the handler waits on. A write through `job.instance` after that throws
   without being sent, and the worker writes nothing more for the job.
 - **How it ends.** `{ transition: 'done' }` records a successful attempt
-  when the schema composes `Retries`, moves the status and releases.
-  Returning nothing hands the job back. A `WorkFailure` records its
-  failure class and hands the job back, or abandons it with `abandon:
-  true`, which counts toward `maxExpiries`; any other error abandons it,
-  so a job no worker can finish escalates instead of coming back forever.
+  when the schema composes `Retries`, with the `attempt` given (the
+  example's `result`), moves the status and releases. Returning nothing
+  hands the job back. A `WorkFailure` records its failure class and hands
+  the job back, or abandons it with `abandon: true`, which counts toward
+  `maxExpiries`; any other error abandons it, so a job no worker can
+  finish escalates instead of coming back forever. The example's cancel
+  is a failure of a terminal class, so `Retries` fails the job for good.
 - **Stopping.** `stop()` claims nothing more, waits up to 30 seconds for
   the jobs it holds (`timeoutMs`; `drain: false` waits for none), then
   aborts the rest and releases their leases, which counts nothing, so a
-  deploy hands work back at once instead of letting it lapse.
-- **Presence is yours.** The worker beats no `Presence` instance. A fleet
-  that keeps one per worker, as the example's does, beats it on a timer
-  of its own, at most the presence `ttlMs` apart.
+  deploy hands work back at once instead of letting it lapse. It beats
+  until nothing is held.
 
 The package's
 [README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md#the-worker)
@@ -274,9 +276,9 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 
 | | |
 | --- | --- |
-| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission` |
+| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`) |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Field | `lease`: `{ holder, token, acquiredAt, renewedAt, expiresAt, active, expiries, ended }` |
+| Fields | `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries`, `ended`, under `Lease`; a list filters on `Lease.holder`, null for a free instance |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
 | Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
@@ -306,13 +308,26 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 - **Expiries say why.** `expire` returns `reason`: `ttl` (the holder
   stopped renewing), `maxHold` (it renewed past its longest hold, so it
   is stuck) or `holder` (an active lease expired by its holder's name).
-  `lease.ended` keeps how the last lease ended, and the event of each end
+  `Lease.ended` keeps how the last lease ended, and the event of each end
   carries it.
 - **Directives** are messages to the holder: `direct` sends one, every
   heartbeat returns those not yet acknowledged, and `acknowledge`, or a
   heartbeat's own `acknowledge`, stops them in the same write. A
   `dedupeKey` sends a directive once per lease, so a sender that fires
   on every change does not queue it twice. They end with the lease.
+- **Tell the holder a linked target moved.** `directOn` sends a
+  directive when the target of one of the type's links gains a revision
+  or a release, as `Reactions`' `revised` hears it: with
+  `{ "revised": { "link": "plan" }, "name": "rebase" }`, the holder of
+  each step pinned to an earlier revision of its plan hears `rebase`,
+  its `data.revised` saying which plan and which revision. The runner
+  sends it with `direct`, as its principal, which needs
+  `directPermission`, once per lease and move. A step with no lease
+  hears nothing, and nothing waits for its next holder, who takes it
+  after the move.
+- **List by holder.** `where: { "Lease.holder": "worker-1" }` lists the
+  instances whose lease worker-1 holds, a lapsed one until its expiry is
+  applied, and `null` the free ones: what a worker reads at a restart.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
@@ -343,14 +358,16 @@ One principal the instance is assigned to, or none.
 | | |
 | --- | --- |
 | Config | `permission`, optional |
-| Field | `assignee`, the principal's subject |
+| Field | `assignee`, the principal's subject; a list filters on `Assignment.assignee`, null for the unassigned |
 | Operations | `assign({ to })`, `unassign()` |
 | Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
 
 A principal may assign an unassigned instance to itself and unassign
 itself; every other move needs `permission`. `claimNext` skips work
 assigned to someone else, so in the test above a worker never claims the
-job assigned to another, whatever its priority.
+job assigned to another, whatever its priority. A list of my work, or of
+work no one has, filters on the assignee:
+`where: { "Assignment.assignee": [null, "worker-1"] }`.
 
 ## Queue
 
@@ -359,14 +376,14 @@ takes its lease and moves its status.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, pinned `Links` links |
+| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, `Links` links pinned to a revision or a release |
 | Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
 | Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
 
 `claim` expires a lapsed lease first, then checks the status is one of
 `claim.from`, that no `Dependencies` blocker holds the instance up, and
-that no link `excludeStale` names is pinned to a revision its target has
-moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
+that no link `excludeStale` names is pinned to a revision or a release its
+target has moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
 transitions to `claim.to`. A refusal at any step leaves nothing behind.
 
 A claim waits on blockers; a plain `transition` to `claim.to` does not,
@@ -380,7 +397,7 @@ dependent's `satisfiedBy` lists, a success by default
 `claimNext` tries candidates highest priority first (an instance with no
 priority last), then oldest, then by id, skipping work that is blocked,
 assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
-pinned to a superseded revision or over its `Budget`, and claims the first that succeeds; a claim
+pinned to a superseded revision or release or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
 the next. Calls are synchronous and the engine writes from one process,
 so two claims never interleave.
@@ -399,7 +416,9 @@ so two claims never interleave.
 - **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
   pinned `spec` link, a job whose spec has a newer revision than the one
   it pins is out of the candidates, and `claim` refuses it, until it is
-  linked to the spec again. A `revised` rule of `Reactions` can send it
+  linked to the spec again. A link pinned to a release (`pinned:
+  "release"`, to a schema that composes `Branches`) keeps its job out
+  the same way once the target is released again. A `revised` rule of `Reactions` can send it
   back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 - **Your own work.** `assignedOnly: true` takes only work assigned to
   the caller.
@@ -417,7 +436,7 @@ it.
 | | |
 | --- | --- |
 | Config | `ttlMs` and `principalField`, required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (5000) |
-| Field | `presence`: `{ deadline, lastBeatAt, missed, released }` |
+| Fields | `deadline`, `lastBeatAt`, `missed`, `released`, under `Presence` |
 | Operations | `beat()`, `miss()` |
 | Schedule | `miss`, every `sweepMs`, on the runner |
 
@@ -443,7 +462,7 @@ renewed strictly after the worker's last beat is spared: its heartbeats
 show the process holding it is alive, and it expires on its own if they
 stop. A lease taken in the same millisecond as the beat is not spared.
 Keep lease heartbeats at most the presence `ttlMs` apart. The miss
-records the ids it expired in `presence.released`, which its event
+records the ids it expired in `Presence.released`, which its event
 carries. The runner's principal needs `read` and `write` on the worker
 schema, which the sweep reads (`workers.read` in the example), and
 `read` and Lease's `overridePermission` on each `releaseLeases` schema.
@@ -451,9 +470,14 @@ Without `read`, the sweep fails `forbidden` and keeps retrying. A later
 `beat` clears the miss.
 
 The example's test shows it on a clock it moves, with a worker
-`ttlMs` of 15 seconds and a lease of 30:
+`ttlMs` of 15 seconds and a lease of 30. worker-1 holds a job when the
+test cuts it off from the engine:
 
-<Snippet example="engine-jobs" file="test/jobs.test.ts" from="// worker-1 dies holding the job" to="assert.equal(taken.token, 3);" />
+<Snippet example="engine-jobs" file="test/jobs.test.ts" from="// worker-1 is cut off holding the job" to="assert.equal(second.worker.jobs[0]?.token, 3);" />
+
+When worker-1 comes back, its next heartbeat presents token 1, which
+Lease refuses (`token_stale`, details `{ token: 1, current: 3 }`): the
+worker aborts its handler, and writes nothing more for the job.
 
 ## Blueprint
 
@@ -464,7 +488,7 @@ of a child schema an instance has, and which block which.
 | --- | --- |
 | Config | `schema` (the child schema, which keeps `keyField` and the copied fields with `Constants`), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
 | Steps | by key: `{ after?, when?, data? }`; `after` lists the steps that block this one, `when` is `{ field, equals }` or `{ field, includes }` |
-| Field | `blueprint`: `{ children: [{ key, id }] }` |
+| Field | `children`: `[{ key, id }]`, under `Blueprint` |
 | Guard | once stamped, moving the `from` link is `vetoed` (`stamped`); a stamp that cannot read its steps is too (`no_revision`, `unreadable`, `invalid_steps`, `no_dependencies`), and so is one whose child schema's live version no longer keeps `keyField` and the copied fields with `Constants` (`not_constant`), which refuses the create or the link that stamps |
 
 ```ts
@@ -520,12 +544,13 @@ the enclosing scopes its `scope` link points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, by name): each `limit` or `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
-| Field | `budget`: by meter, `{ used, reserved, limit, remaining }` |
+| Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
+| Field | `meters`: by meter, `{ used, reserved, limit, remaining }`, under `Budget` |
 | Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
 - A claim reserves each meter's amount, the instance's `reserveField`
-  or else `reserve`, and is refused when it does not fit (`over_limit`).
+  or else `reserve`, and is refused when it does not fit (`over_limit`)
+  in the meter's limit, the instance's `limitField` or else `limit`.
   `checkReserve` says whether it would fit, without reserving, and which
   values of each scope its answer turns on; Queue copies it, so
   `claimNext` does not try work over its budget.
@@ -549,7 +574,7 @@ once.
 | | |
 | --- | --- |
 | Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
-| Field | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
+| Fields | `total`, `classAttempts`, `bestScore`, `exhausted`, `stuck`, under `Retries`; a list filters on `Retries.exhausted` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
 | Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 

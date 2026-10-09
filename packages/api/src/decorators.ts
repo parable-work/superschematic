@@ -212,6 +212,36 @@ export function source(_target: unknown): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of a job: when it runs, and how long and how often it tries. */
+export type JobOptions = {
+  /**
+   * A five-field cron: minute, hour, day of the month, month and day of the
+   * week (`"*\/15 * * * *"`). Without one the job runs only on demand. An
+   * environment's settings change it or turn it off.
+   */
+  readonly schedule?: string;
+  /** The IANA time zone the schedule is read in (`"Europe/Paris"`); UTC unless set. */
+  readonly timeZone?: string;
+  /** Bounds one run, a duration of whole seconds (`"90s"`, `"10m"`, `"1h30m"`); ten minutes unless set. */
+  readonly timeout?: string;
+  /** How many times a failed run is run again; none unless set. */
+  readonly retries?: number;
+};
+
+/**
+ * Declares a job of the API service: a run to completion that does the
+ * API's background work with the API's Deps (docs/stack-model.md, section
+ * 8.7). The class's name is the job's, and the class holds nothing:
+ *
+ * ```ts
+ * @job({ schedule: "*\/15 * * * *", timeout: "10m" })
+ * export abstract class ExpireCarts {}
+ * ```
+ */
+export function job(_options?: JobOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 export const manualRouteRegistration: MethodDecorator = noopMethodDecorator;

@@ -23,7 +23,7 @@ afterChange of the create when the create gives the link (Links' create
 parameters), else in afterChange of the first link, so the link and the
 children commit together, or neither does, and a refused stamp refuses
 the create or the link. It reads the map from the revision the link
-pins, through Revisions' listRevisions on the definition, as the
+pins, through Revisions' getRevision on the definition, as the
 principal, so a later revision of the definition changes only what is
 stamped from then on. Once stamped, the guard refuses moving the from
 link: the children came from the revision it pins. Each refusal is a
@@ -42,19 +42,22 @@ then the step's data.
 
 parseConfig checks the config when the schema is defined or published:
 the child schema composes Links with parentLink pointing at this schema
-(and this type lists Revisions before Blueprint when that link is
-pinned), Constants over keyField and every copied field, Dependencies
-(with its own schema among its blockers' schemas) when a step comes after
-another, and not Blueprint; keyField is a string field of the child's
-type; copyFields are fields of both types, of one JSON type; when's
-fields are fields of this type, a list for includes;
+(and this type lists Revisions before Blueprint when that link pins a
+revision; it pins no release, which a parent has none of when it stamps
+its children at its create), Constants over keyField and every copied
+field, Dependencies (with its own schema among its blockers' schemas)
+when a step comes after another, and not Blueprint; keyField is a string
+field of the child's type; copyFields are fields of both types, of one
+JSON type; when's fields are fields of this type, a list for includes;
 inline steps name only steps the map has in after, form no cycle, and
 set no keyField in data. A map read through from is held to the same
 rules (against this type) when it is stamped, and an invalid one refuses
-the change that stamps. copyLinks are links of both Links configs to one
-schema, copied with the revision a pinned one records: the ones the
-instance holds when it is stamped, which for inline steps are the ones
-its create gives.
+the change that stamps. from names a link pinned to a revision, since a
+release pins the definition's version graph and not the fields the map
+is in. copyLinks are links of both Links configs to one schema, copied
+with the revision or the release this instance's link records where the
+child's link pins the same: the ones the instance holds when it is
+stamped, which for inline steps are the ones its create gives.
 
 A child is routed by what the stamp set: the step it is, in keyField, and
 the fields it copied. Any writer of the child, the holder of its lease
@@ -68,7 +71,7 @@ checks Dependencies for a step's after: one whose Constants no longer
 keeps them refuses the change that stamps (not_constant), so no child is
 stamped whose route a writer could change.
 
-What was stamped is kept in Blueprint's own table: the blueprint field
+What was stamped is kept in Blueprint's own table: the children field
 lists each step's key and its child's id, in the order they were
 created, from the stamp's record and not from the links that point here,
 so a child linked to the parent later is not among them, and one deleted
@@ -84,8 +87,11 @@ of what was stamped would stay behind.
 import {
   BehaviorConfigError,
   BehaviorVetoError,
+  EngineError,
+  LINKS_TARGETS,
+  behaviorField,
   defineBehavior,
-  page,
+  linkPin,
   type ConfigSchema,
   type ConfigTarget,
   type FrozenJSON,
@@ -131,9 +137,9 @@ export interface BlueprintConfig {
   readonly listFields: readonly string[];
 }
 
-/** The blueprint field. */
+/** Blueprint's fields, as a read returns them under behaviors.Blueprint: children is absent until the instance is stamped. */
 export interface BlueprintRecord {
-  readonly children: ReadonlyArray<{ readonly key: string; readonly id: string }>;
+  readonly children?: ReadonlyArray<{ readonly key: string; readonly id: string }>;
 }
 
 const NAME = 'Blueprint';
@@ -322,9 +328,9 @@ function jsonTypes(schema: unknown): string[] {
 }
 
 /** A Links config as a schema holds it. */
-type LinksConfig = { readonly links?: Readonly<Record<string, { readonly schema?: string; readonly pinned?: boolean }>> } | undefined;
+type LinksConfig = { readonly links?: Readonly<Record<string, { readonly schema?: string; readonly pinned?: unknown }>> } | undefined;
 
-function linkOf(config: unknown, name: string): { schema?: string; pinned?: boolean } | undefined {
+function linkOf(config: unknown, name: string): { schema?: string; pinned?: unknown } | undefined {
   const links = (config as LinksConfig)?.links;
   return hasOwn(links, name) ? links?.[name] : undefined;
 }
@@ -350,9 +356,14 @@ function checkChild(config: BlueprintConfig, target: ConfigTarget, child: Config
   if (parent.schema !== target.schema) {
     throw new BehaviorConfigError(`${at}'s link ${config.parentLink} points at ${String(parent.schema)}, not ${target.schema}`);
   }
-  // A pinned parentLink pins the parent's first revision, which Revisions
-  // records in its afterChange of the create: before Blueprint's, in list order.
-  if (parent.pinned === true && !target.behaviors.slice(0, target.behaviors.indexOf(NAME)).includes('Revisions')) {
+  // A parentLink pinned to a revision pins the parent's first revision,
+  // which Revisions records in its afterChange of the create: before
+  // Blueprint's, in list order. One pinned to a release would find none.
+  const pin = linkPin(parent);
+  if (pin === 'release') {
+    throw new BehaviorConfigError(`${at}'s link ${config.parentLink} pins a release, which ${target.type} has none of when it stamps its children`);
+  }
+  if (pin === 'revision' && !target.behaviors.slice(0, target.behaviors.indexOf(NAME)).includes('Revisions')) {
     throw new BehaviorConfigError(`${at}'s link ${config.parentLink} is pinned, so ${target.type} lists Revisions before Blueprint, to have a revision to pin`);
   }
   if ((config.steps ?? []).some((step) => step.after.length > 0)) {
@@ -441,22 +452,24 @@ function stamped(view: InstanceView<BlueprintConfig>): boolean {
   return at !== null && at !== undefined;
 }
 
-// linksOf reads this instance's links field, as the caller.
+// linksOf reads this instance's Links targets field, as the caller.
 function linksOf(context: InstanceContext<BlueprintConfig>): Readonly<Record<string, LinkRecord>> {
-  const links = context.instances.get(context.schema, context.id, { fields: ['links'] })?.data.links;
+  const links = behaviorField(context.instances.get(context.schema, context.id, { fields: [LINKS_TARGETS] }), 'Links', 'targets');
   return (isObject(links) ? links : {}) as Readonly<Record<string, LinkRecord>>;
 }
 
 // revisionData reads one revision of an instance's own fields through
-// Revisions' listRevisions, as the caller: a page of one, after the
-// revision before it, with a cursor written by the engine's own paging.
+// Revisions' getRevision, as the caller; undefined when the instance has
+// no such revision.
 function revisionData(context: InstanceContext<BlueprintConfig>, schema: string, id: string, revision: number): FrozenJSON | undefined {
-  const cursor = revision > 1 ? page([{ revision: revision - 1 }, { revision }], 1, (row) => row.revision).next : null;
-  const listed = context.instances.invoke(schema, id, 'listRevisions', (cursor === null ? { limit: 1 } : { limit: 1, cursor }) as FrozenJSON) as {
-    items: ReadonlyArray<{ revision: number; data: FrozenJSON }>;
-  };
-  const found = listed.items[0];
-  return found?.revision === revision ? found.data : undefined;
+  try {
+    return (context.instances.invoke(schema, id, 'getRevision', { revision } as FrozenJSON) as { data: FrozenJSON }).data;
+  } catch (error) {
+    if (error instanceof EngineError && error.code === 'not_found') {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 // stamp creates the children of the steps for this instance, each with
@@ -501,8 +514,10 @@ function stamp(context: InstanceContext<BlueprintConfig>, steps: readonly Bluepr
       if (link === undefined) {
         continue;
       }
-      const keep = linkOf(childLinks, name)?.pinned === true && link.revision !== undefined;
-      links[name] = keep ? { id: link.id, revision: link.revision } : link.id;
+      // The child keeps this instance's pin where its own link pins the same kind.
+      const pin = linkPin(linkOf(childLinks, name));
+      const value = pin === undefined ? undefined : link[pin];
+      links[name] = pin !== undefined && value !== undefined ? { id: link.id, [pin]: value } : link.id;
     }
     const behaviors: Record<string, unknown> = { Links: links };
     if (step.after.length > 0) {
@@ -581,8 +596,13 @@ export const blueprint = defineBehavior<BlueprintConfig>({
       if (link === undefined) {
         throw new BehaviorConfigError(`from: the type's Links has no link ${raw.from.link}`);
       }
-      if (link.pinned !== true) {
-        throw new BehaviorConfigError(`from: link ${raw.from.link} is not pinned, so it cannot hold the revision its steps are read from`);
+      const pin = linkPin(link);
+      if (pin !== 'revision') {
+        throw new BehaviorConfigError(
+          pin === undefined
+            ? `from: link ${raw.from.link} is not pinned, so it cannot hold the revision its steps are read from`
+            : `from: link ${raw.from.link} pins a release, not the revision of the fields its steps are read from`
+        );
       }
       if (target.schemas !== undefined) {
         checkSource(raw.from, String(link.schema), target.schemas.get(String(link.schema)));
@@ -664,7 +684,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
   },
 
   fields: {
-    blueprint(view): BlueprintRecord | undefined {
+    children(view): BlueprintRecord['children'] {
       if (!stamped(view)) {
         return undefined;
       }
@@ -672,7 +692,7 @@ export const blueprint = defineBehavior<BlueprintConfig>({
         `SELECT step, child_id FROM ${view.sql.table('children')} WHERE namespace = ? AND schema = ? AND id = ? ORDER BY position`,
         key(view)
       );
-      return { children: rows.map((row) => ({ key: String(row.step), id: String(row.child_id) })) };
+      return rows.map((row) => ({ key: String(row.step), id: String(row.child_id) }));
     },
   },
 

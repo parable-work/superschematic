@@ -32,28 +32,41 @@ func openD1(t *testing.T, url string, edit func(*d1.Options)) *d1.Driver {
 
 // TestD1Lease: a runner waits for the lease another holds; once that
 // lease expires, it takes it over and applies the plan, and a batch of the
-// runner that held it fails without running.
+// runner that held it fails without running (D27, amended).
 func TestD1Lease(t *testing.T) {
 	ctx := context.Background()
 	url := testdb.NewD1(t)
-	dead := openD1(t, url, func(o *d1.Options) { o.Holder, o.Lease = "dead-runner", 400*time.Millisecond })
-	// The lease starts while Lock runs, so the wait is measured from before
-	// it: a lease can then end no sooner than 400ms after began, however
-	// long Lock takes to return.
+	// The lease the impatient runner meets lasts a minute, so it is still
+	// held however long that runner takes to open its database and plan.
+	holding := openD1(t, url, func(o *d1.Options) { o.Holder, o.Lease = "dead-runner", time.Minute })
+	release, err := holding.Lock(ctx, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	impatient := &migrate.Runner{Driver: openD1(t, url, func(o *d1.Options) { o.LockWait = 50 * time.Millisecond }), Log: &testLog{t: t}}
+	_, err = impatient.Apply(ctx, plan(t, migrate.SQLite, "01-create"), migrate.All)
+	if err == nil || !strings.Contains(err.Error(), "dead-runner holds the lease of service shop until ") {
+		t.Fatalf("apply while another runner holds the lease = %v", err)
+	}
+	if err := release(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// The runner then takes the lease again for 400ms and dies, so the next
+	// runner waits for that short lease to expire. The lease starts while
+	// Lock runs, so the wait is measured from before it: the lease can then
+	// end no sooner than 400ms after began, however long Lock takes to
+	// return.
+	const lease = 400 * time.Millisecond
+	dead := openD1(t, url, func(o *d1.Options) { o.Holder, o.Lease = "dead-runner", lease })
 	began := time.Now()
 	if _, err := dead.Lock(ctx, "shop"); err != nil {
 		t.Fatal(err)
 	}
 
-	impatient := &migrate.Runner{Driver: openD1(t, url, func(o *d1.Options) { o.LockWait = 50 * time.Millisecond }), Log: &testLog{t: t}}
-	_, err := impatient.Apply(ctx, plan(t, migrate.SQLite, "01-create"), migrate.All)
-	if err == nil || !strings.Contains(err.Error(), "dead-runner holds the lease of service shop until ") {
-		t.Fatalf("apply while another runner holds the lease = %v", err)
-	}
-
 	r := &migrate.Runner{Driver: openD1(t, url, func(o *d1.Options) { o.Holder = "next-runner" }), Log: &testLog{t: t}}
 	result := apply(t, r, plan(t, migrate.SQLite, "01-create"), migrate.All)
-	if !result.Finished || time.Since(began) < 400*time.Millisecond {
+	if !result.Finished || time.Since(began) < lease {
 		t.Fatalf("apply took the lease after %s: %+v", time.Since(began), result)
 	}
 	if got := testdb.Strings(t, url, `SELECT holder FROM superschematic_lock WHERE service = 'shop'`); !slices.Equal(got, []string{"next-runner"}) {

@@ -21,7 +21,7 @@
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit",
     "build": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/fix-esm-extensions.mjs",
-    "test": "node scripts/link-local-deps.mjs && node test/ir-reader.cjs && node test/field-length-parity.cjs && node test/parse-registry-datetime.cjs && node test/parse-registry-names.cjs && node test/parse-registry-json.cjs && node test/nested-arrays.cjs && node test/list-rules.cjs && node test/scalar-errors.cjs && node test/scalar-value-classes.cjs && node test/validation-parity.cjs && node test/schema-file-parity.cjs && node test/schema-file-esm.mjs"
+    "test": "node scripts/link-local-deps.mjs && node test/ir-reader.cjs && node test/field-length-parity.cjs && node test/parse-registry-datetime.cjs && node test/parse-registry-names.cjs && node test/parse-registry-json.cjs && node test/parse-defaults.cjs && node test/nested-arrays.cjs && node test/list-rules.cjs && node test/scalar-errors.cjs && node test/scalar-value-classes.cjs && node test/validation-parity.cjs && node test/schema-file-parity.cjs && node test/schema-file-esm.mjs"
   },
   "dependencies": {
     "ajv": "8.20.0",

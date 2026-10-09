@@ -12,8 +12,9 @@ import "sort"
 // its class's TypeDef (StackDecl, ServerDecl, DatabaseDecl and
 // EnvironmentDecl), and StackOf assembles a schema's declarations into its
 // Stack. A service handle is a ServiceRef, a declared deployable's class is
-// its name, and the keys of one `settings` element other than `of`,
-// `platform` and `env` are the platform settings.
+// its name, and the keys of one `settings` element other than `of`, `job`,
+// `platform`, `env`, `schedule`, `timeZone` and `enabled` are the platform
+// settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -27,16 +28,29 @@ const (
 	// to each served API's database and the address of each service it
 	// calls.
 	DeployableServer DeployableKind = "server"
+
+	// DeployableJob runs one `@job` of an API schema to completion, on a
+	// schedule or on demand. Its needs are its API's: the connection to
+	// the API's database and the address of each service the API calls
+	// (D52).
+	DeployableJob DeployableKind = "job"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob
+}
+
+// HasImage reports whether a deployable of kind k runs code the stack's
+// build writes an entrypoint for, and so has an image a deploy builds,
+// pins and records: a server or a job (D52).
+func (k DeployableKind) HasImage() bool {
+	return k == DeployableServer || k == DeployableJob
 }
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -45,10 +59,11 @@ type EdgeKind string
 
 const (
 	// EdgeSQL runs from a server to the database that hosts a served API's
-	// database schema.
+	// database schema, and from a job to its API's.
 	EdgeSQL EdgeKind = "sql"
 
-	// EdgeHTTP runs from a server to the server that serves an API it calls.
+	// EdgeHTTP runs from a server to the server that serves an API it
+	// calls, and from a job to the server of each API its API calls.
 	EdgeHTTP EdgeKind = "http"
 )
 
@@ -63,18 +78,26 @@ func (k EdgeKind) Valid() bool {
 
 // DeployableRef names a deployable: by a service handle, which means the
 // deployable that hosts or serves that service, or by the name of a
-// declared deployable's class. Exactly one is set.
+// declared deployable's class. Exactly one is set. With Job beside an API
+// service's handle, it names that job of the API (D52).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
 
 	// Deployable is the name of a declared deployable.
 	Deployable string `json:"deployable,omitempty" yaml:"deployable,omitempty"`
+
+	// Job names a job of the API service Service names: the name of its
+	// `@job` class (`{of: ShopOrders, job: "ExpireCarts"}`).
+	Job string `json:"job,omitempty" yaml:"job,omitempty"`
 }
 
 // String renders the reference the way resolution errors quote it.
 func (r DeployableRef) String() string {
 	if r.Service != nil {
+		if r.Job != "" {
+			return r.Service.Name + " job " + r.Job
+		}
 		return r.Service.Name
 	}
 	return r.Deployable
@@ -98,8 +121,9 @@ type Stack struct {
 	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
 
-	// Environments are the stack's environments. StackOf gives them in name
-	// order: a schema's types have no declaration order.
+	// Environments are the stack's environments. StackOf gives them in the
+	// order they are declared (EnvironmentDecl.Order), the order the
+	// generated CI deploys them in (D47).
 	Environments []*Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
@@ -191,7 +215,21 @@ type DeployableSettings struct {
 	Values map[string]any `json:"values,omitempty" yaml:"values,omitempty"`
 
 	// Env binds fields of a server's `@envVars` type, keyed by field name.
+	// A job's fields are its API's: it takes the env its API's server is
+	// given, with its own over that.
 	Env map[string]EnvValue `json:"env,omitempty" yaml:"env,omitempty"`
+
+	// Schedule replaces a job's schedule, a five-field cron, and TimeZone
+	// the IANA time zone it is read in. Only an element whose `of` names a
+	// job sets them (D52).
+	Schedule string `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	TimeZone string `json:"timeZone,omitempty" yaml:"timeZone,omitempty"`
+
+	// Enabled turns a job's schedule on or off. Unset, a schedule runs,
+	// except in a parameterized environment, whose members run none unless
+	// their settings turn it on. A job whose schedule is off runs only on
+	// demand.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // EnvValue is the value an environment gives one config field: a literal,
@@ -231,7 +269,8 @@ type DatabaseDecl struct {
 
 // EnvironmentDecl is the declaration of an `@environment` class: an
 // Environment without the name and the parent, which are the class's name
-// and the class it extends. Its fields are Environment's.
+// and the class it extends, and with its place among the stack's
+// environments. Its other fields are Environment's.
 type EnvironmentDecl struct {
 	Target     string                `json:"target,omitempty" yaml:"target,omitempty"`
 	Values     map[string]any        `json:"values,omitempty" yaml:"values,omitempty"`
@@ -239,16 +278,23 @@ type EnvironmentDecl struct {
 	DNS        *DNSPlacement         `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Settings   []*DeployableSettings `json:"settings,omitempty" yaml:"settings,omitempty"`
 	Parameters []string              `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+
+	// Order is the environment's place in declaration order, from 1. The
+	// TypeScript reader numbers the `@environment` classes: the schema
+	// files in path order, and the classes of a file in source order. A
+	// data form writes it; zero is none, and such an environment comes
+	// after those with one (D47).
+	Order int `json:"order,omitempty" yaml:"order,omitempty"`
 }
 
 // StackOf assembles the stack a Stack schema declares from its types'
 // declarations. The stack takes the schema's name, the `@stack` class gives
 // its entry points and what it exposes, each `@server` and `@database`
 // class is a declared deployable, and each `@environment` class is an
-// environment that extends the class it extends. It returns nil when no
-// type declares `@stack`, and reads the first by name when several do. It
-// checks nothing: the Stack kind's verification does, and resolution
-// checks the rest.
+// environment that extends the class it extends, in declaration order
+// (EnvironmentNames). It returns nil when no type declares `@stack`, and
+// reads the first by name when several do. It checks nothing: the Stack
+// kind's verification does, and resolution checks the rest.
 func StackOf(schema *Schema) *Stack {
 	if schema == nil {
 		return nil
@@ -260,7 +306,6 @@ func StackOf(schema *Schema) *Stack {
 	sort.Strings(names)
 	var stack *Stack
 	var deployables []*DeployableDecl
-	var environments []*Environment
 	for _, name := range names {
 		td := schema.Types[name]
 		if td == nil {
@@ -279,25 +324,50 @@ func StackOf(schema *Schema) *Stack {
 		if td.Database != nil {
 			deployables = append(deployables, &DeployableDecl{Name: td.Name, Kind: DeployableDatabase, Hosts: td.Database.Hosts})
 		}
-		if e := td.Environment; e != nil {
-			environments = append(environments, &Environment{
-				Name:       td.Name,
-				Extends:    td.Extends,
-				Target:     e.Target,
-				Values:     e.Values,
-				Domain:     e.Domain,
-				DNS:        e.DNS,
-				Settings:   e.Settings,
-				Parameters: e.Parameters,
-			})
-		}
 	}
 	if stack == nil {
 		return nil
 	}
 	stack.Deployables = deployables
-	stack.Environments = environments
+	for _, name := range EnvironmentNames(schema.Types) {
+		td := schema.Types[name]
+		e := td.Environment
+		stack.Environments = append(stack.Environments, &Environment{
+			Name:       td.Name,
+			Extends:    td.Extends,
+			Target:     e.Target,
+			Values:     e.Values,
+			Domain:     e.Domain,
+			DNS:        e.DNS,
+			Settings:   e.Settings,
+			Parameters: e.Parameters,
+		})
+	}
 	return stack
+}
+
+// EnvironmentNames returns the names of the types that declare an
+// `@environment`, in declaration order: by EnvironmentDecl.Order, then
+// those without one by name. Equal orders, which the Stack kind's
+// verification refuses, keep name order, so the result is the same on
+// every call.
+func EnvironmentNames(types map[string]*TypeDef) []string {
+	var names []string
+	for name, td := range types {
+		if td != nil && td.Environment != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	order := func(name string) int { return max(types[name].Environment.Order, 0) }
+	sort.SliceStable(names, func(i, j int) bool {
+		a, b := order(names[i]), order(names[j])
+		if (a == 0) != (b == 0) {
+			return b == 0
+		}
+		return a < b
+	})
+	return names
 }
 
 // StackReferences returns every service handle the declarations of a Stack

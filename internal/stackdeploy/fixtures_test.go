@@ -95,12 +95,14 @@ func digest(n int) string {
 	return "sha256:" + strings.Repeat(fmt.Sprintf("%x", n%16), 64)
 }
 
-// images are images of both shop servers, by the repository the fake
-// platform writes (the deployable's name in kebab case).
+// images are images of both shop servers and of shop-orders' job, by the
+// repository the fake platforms write (the deployable's name in kebab
+// case).
 func images(n int) map[string]string {
 	return map[string]string{
-		"shop-api": "shop-api@" + digest(n),
-		"Orders":   "orders@" + digest(n),
+		"shop-api":              "shop-api@" + digest(n),
+		"Orders":                "orders@" + digest(n),
+		stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest(n),
 	}
 }
 

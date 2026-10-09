@@ -165,7 +165,7 @@ func lowerFirst(s string) string {
 // version instead. A package whose schema declares no graph has no such
 // dependency.
 func SetVersionGraphLibSpec(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
-	rel, err := naming.RelPath(outputDir, paths.VersionGraphTypeScript)
+	rel, err := naming.PhysicalRelPath(outputDir, paths.VersionGraphTypeScript)
 	if err != nil {
 		return fmt.Errorf("version-graph package path: %w", err)
 	}

@@ -20,11 +20,12 @@ import {
   type Engine,
   type EngineOptions,
   type FrozenJSON,
+  type InstanceFields,
   type InstanceRecord,
   type Principal,
 } from '../dist/index.js';
 import { counter, openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
 import { runnerPrincipal, testClock } from './runner-fixtures.ts';
 
 afterEach(() => {
@@ -100,7 +101,8 @@ function summary(record: InstanceRecord): Record<string, unknown> {
     seq: record.seq,
     createdBy: record.createdBy,
     data: record.data,
-    frozen: Object.isFrozen(record) && Object.isFrozen(record.data),
+    behaviors: record.behaviors,
+    frozen: Object.isFrozen(record) && Object.isFrozen(record.data) && Object.isFrozen(record.behaviors),
   };
 }
 
@@ -221,6 +223,11 @@ function publish(engine: Engine, name: string, behaviors: Array<{ name: string; 
 
 const taskBehaviors = [{ name: 'test.Counter', config: { start: 7 } }, { name: 'test.Child' }];
 
+/** A task's fields as a read returns them once it is born: its count from 7. */
+function task(title: string, data: Record<string, unknown> = {}): InstanceFields {
+  return { data: { title, ...data }, behaviors: { 'test.Counter': { count: 7 }, 'test.Child': { born: 1 } } };
+}
+
 /** A policy that records every question and lets alice do anything; bob gets what rules allow. */
 function recording(rules: (request: AccessRequest) => boolean = () => true): { policy: AccessPolicy; asked: AccessRequest[] } {
   const asked: AccessRequest[] = [];
@@ -273,7 +280,7 @@ for (const driver of drivers) {
   }
 
   function spawned(engine: Engine): unknown {
-    return engine.instances.get(alice, 'Note', 'n1')?.data.spawned;
+    return engine.instances.get(alice, 'Note', 'n1')?.behaviors['test.Spawner']?.spawned;
   }
 
   describe(`a behavior creates instances (${driver})`, () => {
@@ -287,10 +294,11 @@ for (const driver of drivers) {
         schemaNamespace: 'default',
         seq: 1,
         createdBy: 'bob',
-        data: { title: 'Paint', count: 7, born: 1 },
+        data: { title: 'Paint' },
+        behaviors: { 'test.Counter': { count: 7 }, 'test.Child': { born: 1 } },
         frozen: true,
       });
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't1')?.data, { title: 'Paint', count: 7, born: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Task', 't1')), task('Paint'));
       assert.deepEqual(eventsAfter(engine, from), [
         ['create', 'Task', 't1', 'bob'],
         ['operation', 'Note', 'n1', 'spawn'],
@@ -300,7 +308,7 @@ for (const driver of drivers) {
       assert.equal(spawned(engine), 2);
     });
 
-    test('a create the engine refuses refuses the call: invalid data, a behavior field, a taken or malformed id, no such schema', () => {
+    test("a create the engine refuses refuses the call: invalid data, a behavior field's name as an own field, a taken or malformed id, no such schema", () => {
       const engine = world();
       engine.instances.invoke(alice, 'Note', 'n1', 'spawn', { schema: 'Task', data: { title: 'Paint' }, id: 't1' });
       const from = lastCursor(engine);
@@ -309,7 +317,7 @@ for (const driver of drivers) {
       assert.equal(thrown(() => spawn({}), InstanceValidationError).code, 'invalid_instance');
       assert.deepEqual(
         thrown(() => spawn({ title: 'Paint', count: 3 }), InstanceValidationError).issues.map((issue) => [issue.path, issue.rule]),
-        [['count', 'readOnly']]
+        [['count', 'unknown']]
       );
       const taken = thrown(() => spawn({ title: 'Again' }, { id: 't1' }), EngineError);
       assert.deepEqual([taken.code, taken.message], ['conflict', 'Task t1 already exists in namespace default']);
@@ -330,7 +338,7 @@ for (const driver of drivers) {
         ['create', 'Task', 'f1-2', 'alice'],
         ['create', 'Folder', 'f1', 'alice'],
       ]);
-      assert.deepEqual(engine.instances.get(alice, 'Task', 'f1-2')?.data, { title: 'Kitchen 2', count: 7, born: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Task', 'f1-2')), task('Kitchen 2'));
 
       const failing = thrown(() => engine.instances.create(alice, 'Folder', { title: 'boom' }, { id: 'f2' }), EngineError);
       assert.deepEqual([failing.code, failing.message], ['invalid_argument', 'boom 1 refuses to start']);
@@ -342,7 +350,7 @@ for (const driver of drivers) {
       const engine = world();
       engine.instances.create(alice, 'Task', { title: 'nest', depth: 3 }, { id: 't0' });
       assert.deepEqual(tasks(engine), ['t0', 't0.2', 't0.2.1', 't0.2.1.0']);
-      assert.deepEqual(engine.instances.get(alice, 'Task', 't0.2.1.0')?.data, { title: 'nest', depth: 0, count: 7, born: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Task', 't0.2.1.0')), task('nest', { depth: 0 }));
       const deep = thrown(() => engine.instances.create(alice, 'Task', { title: 'nest', depth: 20 }, { id: 'd0' }), BehaviorError);
       assert.equal(deep.message, 'behavior test.Child: instances.create: calls nest more than 16 deep');
       assert.equal(tasks(engine).length, 4);
@@ -362,7 +370,7 @@ for (const driver of drivers) {
       assert.deepEqual(tasks(engine), []);
 
       assert.deepEqual(engine.instances.invokeSchema(alice, 'Note', 'spawnMany', { schema: 'Task', count: 2 }), ['gen-1', 'gen-2']);
-      assert.deepEqual(engine.instances.get(alice, 'Task', 'gen-2')?.data, { title: 'batch 2', count: 7, born: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Task', 'gen-2')), task('batch 2'));
     });
 
     test('a failure the behavior catches rolls back the create alone; one it does not rolls back the whole call', () => {
@@ -438,7 +446,7 @@ for (const driver of drivers) {
       assert.deepEqual(engine.runner.runDue(), { handled: 1, skipped: 0, failed: 0, scheduled: 0 });
       const created = engine.events.read(alice, { schema: 'Shelf', instanceId: shelf.id }).events[0];
       assert.deepEqual(eventsAfter(engine, from), [['create', 'Task', 'plan-s1', 'runner', { behavior: 'test.Planner', event: created.cursor, depth: 1 }]]);
-      assert.deepEqual(engine.instances.get(alice, 'Task', 'plan-s1')?.data, { title: 'plan for s1', count: 7, born: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Task', 'plan-s1')), task('plan for s1'));
 
       clock.now = 60_000;
       const before = lastCursor(engine);

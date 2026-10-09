@@ -61,7 +61,10 @@ export function workflowGuidance(config: WorkflowConfig, target: DescribeTarget)
         ],
       },
       create: { success: `A new instance's status is ${config.initial}.` },
-      update: { doNotUseWhen: 'Do not set status: it is read-only; call transition.' },
+      list: {
+        useWhen: `where: { "Workflow.status": <state> } lists the instances in one of ${list(config.states, 'or')}, and a list of states the instances in any of them.`,
+      },
+      update: { doNotUseWhen: "Do not use to move Workflow's status, which behaviors.Workflow holds; call transition." },
     },
   };
 }

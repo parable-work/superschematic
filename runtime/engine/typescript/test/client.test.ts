@@ -47,9 +47,13 @@ describe('the client', () => {
     const { client: open, requests } = serve();
     const client = open();
     const plan = await client.instances.create('Task', { title: 'Plan' }, { id: 'plan' });
-    assert.deepEqual([plan.id, plan.seq, plan.createdBy, plan.data.status, plan.data.blocked], ['plan', 1, 'alice', 'todo', false]);
-    const build = await client.instances.create<{ title: string; blocked: boolean }>('Task', { title: 'Build' }, { id: 'build', behaviors: { Dependencies: { blockers: [{ id: 'plan' }] } } });
-    assert.equal(build.data.blocked, true);
+    assert.deepEqual([plan.id, plan.seq, plan.createdBy, plan.behaviors.Workflow.status, plan.behaviors.Dependencies.blocked], ['plan', 1, 'alice', 'todo', false]);
+    const build = await client.instances.create<{ title: string }, { Dependencies: { blocked: boolean } }>(
+      'Task',
+      { title: 'Build' },
+      { id: 'build', behaviors: { Dependencies: { blockers: [{ id: 'plan' }] } } }
+    );
+    assert.equal(build.behaviors.Dependencies.blocked, true);
     assert.equal(requests.at(-1)!.headers.get('content-type'), 'application/json');
 
     assert.deepEqual((await client.instances.get('Task', 'build')).data.title, 'Build');
@@ -70,6 +74,30 @@ describe('the client', () => {
     await refused(client.instances.delete('Task', 'build'), 404, 'not_found');
   });
 
+  test('filters a list with where, looks an instance up by a unique field, and reads a conflict\'s fields', async () => {
+    const { client: open, engine, requests } = serve();
+    const client = open();
+    engine.schemas.define(alice, schemaDocument('Model', [
+      { name: 'slug', typeRef: { name: 'string' }, unique: true },
+      { name: 'kind', typeRef: { name: 'string' } },
+    ]));
+    engine.schemas.publish(alice, 'Model');
+    await client.instances.create('Model', { slug: 'openai/gpt-5', kind: 'chat' }, { id: 'a' });
+    await client.instances.create('Model', { slug: 'openai/o3', kind: 'reason' }, { id: 'b' });
+    await client.instances.create('Model', { slug: 'acme/x, y', kind: 'chat' }, { id: 'c' });
+    const chat = await client.instances.list('Model', { where: { kind: 'chat' } });
+    assert.deepEqual(chat.items.map((item) => item.id), ['a', 'c']);
+    assert.equal(new URL(requests.at(-1)!.url, 'http://engine.test').searchParams.get('where'), '{"kind":"chat"}');
+    const any = await client.instances.list('Model', { where: { slug: ['acme/x, y', 'openai/o3'] }, limit: 1 });
+    assert.deepEqual(any.items.map((item) => item.id), ['b']);
+    assert.equal((await client.instances.lookup('Model', { slug: 'openai/gpt-5' })).id, 'a');
+    await refused(client.instances.lookup('Model', { slug: 'openai' }), 404, 'not_found');
+    await refused(client.instances.lookup('Model', { kind: 'chat' }), 400, 'invalid_argument');
+    const conflict = await refused(client.instances.create('Model', { slug: 'openai/o3' }), 409, 'conflict');
+    assert.deepEqual(conflict.fields, ['slug']);
+    assert.deepEqual((await refused(client.instances.create('Model', { slug: 'x' }, { id: 'a' }), 409, 'conflict')).fields, []);
+  });
+
   test('turns refusals into typed problems with their issues at their paths', async () => {
     const served = serve();
     const client = served.client();
@@ -77,8 +105,9 @@ describe('the client', () => {
 
     const invalid = await refused(client.instances.create('Task', { title: 7 }), 422, 'invalid_instance');
     assert.deepEqual(invalid.issues.map((issue) => [issue.path, issue.rule]), [['title', 'type']]);
-    const readOnly = await refused(client.instances.update('Task', 'plan', { status: 'done' }), 422, 'invalid_instance');
-    assert.deepEqual(readOnly.issues.map((issue) => [issue.path, issue.rule]), [['status', 'readOnly']]);
+    // A patch holds own fields only: Workflow's status there is a key Task does not declare.
+    const undeclared = await refused(client.instances.update('Task', 'plan', { status: 'done' }), 422, 'invalid_instance');
+    assert.deepEqual(undeclared.issues.map((issue) => [issue.path, issue.rule]), [['status', 'unknown']]);
 
     const params = await refused(client.instances.create('Task', { title: 'X' }, { behaviors: { Dependencies: { blockers: [{ id: '-' }] } } }), 400, 'invalid_argument');
     assert.deepEqual(params.issues.map((issue) => issue.path), ['/behaviors/Dependencies/blockers/0/id']);
@@ -149,6 +178,33 @@ describe('the client', () => {
     const paged = await client.events.read({ after: 0, limit: 2 });
     assert.deepEqual([paged.events.length, paged.more, paged.next], [2, true, 2]);
     await refused(client.events.read({ behaviors: ['not a name'] }), 400, 'invalid_argument');
+  });
+
+  test('lists, creates, archives and unarchives namespaces; reads from the start after retention, and a pruned cursor carries the floor and the head', async () => {
+    const served = serve({}, { retention: { maxEvents: 1 } });
+    const client = served.client();
+    const acme = await client.namespaces.create('acme');
+    assert.deepEqual([acme.name, acme.origin, acme.state, acme.createdBy], ['acme', 'created', 'active', 'alice']);
+    assert.deepEqual(served.requests.at(-1)?.url, '/api/namespaces');
+    assert.deepEqual((await client.namespaces.list()).map((namespace) => namespace.name), ['default', 'acme']);
+    assert.deepEqual(await client.namespaces.get('acme'), acme);
+    await refused(client.namespaces.create('acme'), 409, 'conflict');
+    await refused(served.client({ auth: { token: 'reader' } }).namespaces.archive('acme'), 403, 'forbidden');
+    assert.equal((await client.namespaces.archive('acme')).state, 'archived');
+    await refused(client.schemas.define(taskDocument(), { namespace: 'acme' }), 409, 'namespace_archived');
+    assert.equal((await client.namespaces.unarchive('acme')).state, 'active');
+    await refused(client.namespaces.get('nowhere'), 404, 'unknown_namespace');
+
+    await client.instances.create('Task', { title: 'Plan' }, { id: 'plan' });
+    await client.instances.create('Task', { title: 'Build' }, { id: 'build' });
+    served.engine.runner.prune();
+    const floor = served.engine.events.floor();
+    const head = served.engine.events.head();
+    const expired = await refused(client.events.read({ after: 1 }), 410, 'cursor_expired');
+    assert.deepEqual([expired.floor, expired.head], [floor, head]);
+    assert.deepEqual((await client.events.read()).events.map((event) => event.cursor), [head]);
+    assert.deepEqual((await client.events.read({ after: 0 })).events.map((event) => event.cursor), [head]);
+    assert.deepEqual([(await refused(client.instances.get('Task', 'nowhere'), 404, 'not_found')).floor], [undefined]);
   });
 
   test('calls schema-level operations, searches, and reads the tools document and the behavior catalog', async () => {

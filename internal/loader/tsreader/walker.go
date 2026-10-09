@@ -55,6 +55,12 @@ type walker struct {
 	// belong in Imports.
 	suppressRecording bool
 
+	// environments counts the @environment classes walked so far. The
+	// files are walked in path order and a file's statements in source
+	// order, so the count numbers each class in declaration order
+	// (EnvironmentDecl.Order), which the decorator's handler cannot see.
+	environments int
+
 	errs SchemaErrorList
 }
 
@@ -730,9 +736,19 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 		}
 		w.addErr(w.applyDecorator(d, registry.TargetType, registry.Node{Schema: w.schema, Type: td}))
 	}
+	if td.Environment != nil {
+		w.environments++
+		td.Environment.Order = w.environments
+	}
 
 	if src := findDecorator(decorators, "source"); src != nil {
 		w.applySource(td, src)
+	}
+
+	// A @job class declares a job of the API, which @job's Apply recorded
+	// in Schema.Jobs: it is no type (D52).
+	if findDecorator(decorators, "job") != nil {
+		return
 	}
 
 	if _, exists := w.schema.Types[name]; exists {

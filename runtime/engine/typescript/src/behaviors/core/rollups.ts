@@ -6,10 +6,13 @@ function from a closed set:
 
 - count: how many instances point here;
 - countBy: how many hold each value of a field, by value: a string, enum
-  or boolean field of their type, or status, their Workflow's. An
-  instance with no value is not counted;
+  or boolean field of their type, or Workflow.status, their Workflow's.
+  An instance with no value is not counted;
 - sum, min and max: of a number or integer field, over the instances
   that hold a value. min and max of none have no value;
+- latest: the value of a field of their type, or Workflow.status, on the
+  instance created last (createdAt, then the greater id on a tie), and
+  no value when it holds none or there is none;
 - all and any: whether every one, or some one, is in a terminal state of
   its schema's Workflow (isTerminalState) and, when the rollup lists
   outcomes, one whose outcome (stateOutcome) it lists. all of none holds;
@@ -17,12 +20,14 @@ function from a closed set:
   from the same closed set of three, not a filter over the instances.
 
 The set is closed so that each function is one pass over the records it
-reads, has one JSON type, and has a rule parseConfig can check against
-the linked schema when the schema is defined. Filters, averages or
-expressions would make the config a query language.
+reads, has one JSON type (latest's is its field's), and has a rule
+parseConfig can check against the linked schema when the schema is
+defined. Filters, averages or expressions would make the config a query
+language.
 
-One read-only field, rollups, holds every rollup's value, since a
-declaration's fields are fixed and the config's names are not. It is
+One read-only field, values, holds every rollup's value, since a
+declaration's fields are fixed and the config's names are not; a read
+returns it as Rollups.values. It is
 computed when the instance is read, as the caller: a linked instance's
 change shows at this instance's next read, with no event on it, and
 nothing is stored, so no reaction has to keep it current. For each
@@ -51,9 +56,11 @@ parseConfig holds gatedStates to the states of the type's Workflow. When
 the schema is defined or published it checks each linked schema too, as
 the caller may read it (ConfigTarget.schemas): the schema has a live
 version and composes Links with the link pointing at this schema;
-countBy's field is a string, enum or boolean field of its type, or status
-when it composes Workflow; sum's, min's and max's is a number or integer
-field; all and any need its Workflow. A later version of the linked
+countBy's field is a string, enum or boolean field of its type, or
+Workflow.status when it composes Workflow; sum's, min's and max's is a
+number or integer field; latest's is any field of its type, or
+Workflow.status when it composes
+Workflow; all and any need its Workflow. A later version of the linked
 schema cannot drop the link, change its schema or change a field's type
 while it has instances (Links' configChange, the compatibility rule);
 without instances it may, and the rollup then reads what is there.
@@ -62,6 +69,7 @@ configChange: nothing is stored, so rollups may be added, removed and
 changed, and Rollups added to or removed from a schema with instances.
 */
 
+import { WORKFLOW_STATUS, behaviorField } from '../fields.js';
 import type { Veto } from '../../errors.js';
 import type { InstanceRecord } from '../../instances/store.js';
 import { setMember } from '../../instances/patch.js';
@@ -71,7 +79,7 @@ import { rollupsGuidance } from './guidance/rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
 
 /** The functions a rollup computes. */
-export type RollupFunction = 'count' | 'countBy' | 'sum' | 'min' | 'max' | 'all' | 'any';
+export type RollupFunction = 'count' | 'countBy' | 'sum' | 'min' | 'max' | 'latest' | 'all' | 'any';
 
 /** One rollup of a Rollups config. */
 export interface RollupSpec {
@@ -80,7 +88,7 @@ export interface RollupSpec {
   /** The link of that schema's Links config they point through. */
   readonly link: string;
   readonly function: RollupFunction;
-  /** countBy's, sum's, min's and max's field of the linked instances. */
+  /** countBy's, sum's, min's, max's and latest's field of the linked instances. */
   readonly field?: string;
   /** For all and any, the states of the type's Workflow a transition into waits for the rollup to hold; none when absent. */
   readonly gatedStates: readonly string[];
@@ -156,9 +164,15 @@ function linked(view: InstanceView<RollupsConfig>, group: Group): Linked {
     return { over: true };
   }
   const ids = listed.items.map((item) => item.id);
-  const records = group.records && ids.length > 0 ? view.instances.getMany(group.schema, ids, { fields: group.status ? ['status'] : [] }) : new Map<string, InstanceRecord>();
+  const records = group.records && ids.length > 0 ? view.instances.getMany(group.schema, ids, { fields: group.status ? [WORKFLOW_STATUS] : [] }) : new Map<string, InstanceRecord>();
   const flow = group.flow ? (view.schemas.config(group.schema, 'Workflow') as WorkflowStates | undefined) : undefined;
   return { over: false, ids, records, ...(flow === undefined ? {} : { flow }) };
+}
+
+// fieldOf reads a rollup's field of a linked instance: Workflow.status, its
+// Workflow's, or one of its own fields.
+function fieldOf(record: InstanceRecord | undefined, field: string): unknown {
+  return field === WORKFLOW_STATUS ? behaviorField(record, 'Workflow', 'status') : record?.data[field];
 }
 
 // compute computes one rollup over the instances read for its link. An id
@@ -169,13 +183,13 @@ function compute(spec: RollupSpec, set: Linked): Computed {
     return { over: true };
   }
   const total = set.ids.length;
-  const data = set.ids.map((id) => set.records.get(id)?.data);
+  const records = set.ids.map((id) => set.records.get(id));
   switch (spec.function) {
     case 'count':
       return { over: false, value: total, total };
     case 'countBy': {
       const counts = new Map<string, number>();
-      for (const value of data.map((record) => record?.[spec.field as string])) {
+      for (const value of records.map((record) => fieldOf(record, spec.field as string))) {
         if (typeof value === 'string' || typeof value === 'boolean') {
           counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
         }
@@ -189,7 +203,7 @@ function compute(spec: RollupSpec, set: Linked): Computed {
     case 'sum':
     case 'min':
     case 'max': {
-      const numbers = data.map((record) => record?.[spec.field as string]).filter((value): value is number => typeof value === 'number');
+      const numbers = records.map((record) => fieldOf(record, spec.field as string)).filter((value): value is number => typeof value === 'number');
       if (spec.function === 'sum') {
         return { over: false, value: numbers.reduce((sum, value) => sum + value, 0), total };
       }
@@ -198,11 +212,24 @@ function compute(spec: RollupSpec, set: Linked): Computed {
       }
       return { over: false, value: spec.function === 'min' ? Math.min(...numbers) : Math.max(...numbers), total };
     }
+    case 'latest': {
+      // The instance created last, the greater id on a tie; one listLinked
+      // gave whose instance is gone has no createdAt and is passed over.
+      let last: InstanceRecord | undefined;
+      for (const id of set.ids) {
+        const record = set.records.get(id);
+        if (record !== undefined && (last === undefined || record.createdAt > last.createdAt || (record.createdAt === last.createdAt && record.id > last.id))) {
+          last = record;
+        }
+      }
+      const value = fieldOf(last, spec.field as string);
+      return { over: false, ...(value === undefined || value === null ? {} : { value }), total };
+    }
     case 'all':
     case 'any': {
       const flow = set.flow;
-      const terminal = data.filter((record) => {
-        const status = record?.status;
+      const terminal = records.filter((record) => {
+        const status = behaviorField(record, 'Workflow', 'status');
         const outcome = flow !== undefined && typeof status === 'string' ? stateOutcome(flow, status) : undefined;
         return outcome !== undefined && (spec.outcomes === undefined || spec.outcomes.includes(outcome));
       }).length;
@@ -222,7 +249,7 @@ function evaluate(view: InstanceView<RollupsConfig>, names: readonly string[]): 
     const key = groupKey(spec);
     const group = groups.get(key) ?? { schema: spec.schema, link: spec.link, records: false, status: false, flow: false };
     group.records ||= spec.function !== 'count';
-    group.status ||= spec.function === 'all' || spec.function === 'any' || spec.field === 'status';
+    group.status ||= spec.function === 'all' || spec.function === 'any' || spec.field === WORKFLOW_STATUS;
     group.flow ||= spec.function === 'all' || spec.function === 'any';
     groups.set(key, group);
   }
@@ -308,10 +335,10 @@ function checkLinked(name: string, spec: RollupSpec, target: ConfigTarget, sourc
       }
       return;
     case 'countBy': {
-      const type = hasOwn(source.fields, field) ? source.fields[field] : field === 'status' && workflow ? 'string' : undefined;
+      const type = hasOwn(source.fields, field) ? source.fields[field] : field === WORKFLOW_STATUS && workflow ? 'string' : undefined;
       if (type === undefined) {
         throw new BehaviorConfigError(
-          `${at}: ${spec.schema} has no field ${field}; countBy takes a string, enum or boolean field of its type, or status when it composes Workflow`
+          `${at}: ${spec.schema} has no field ${field}; countBy takes a string, enum or boolean field of its type, or ${WORKFLOW_STATUS} when it composes Workflow`
         );
       }
       if (!GROUPABLE.includes(type)) {
@@ -331,6 +358,11 @@ function checkLinked(name: string, spec: RollupSpec, target: ConfigTarget, sourc
       }
       return;
     }
+    case 'latest':
+      if (!hasOwn(source.fields, field) && !(field === WORKFLOW_STATUS && workflow)) {
+        throw new BehaviorConfigError(`${at}: ${spec.schema} has no field ${field}; latest takes a field of its type, or ${WORKFLOW_STATUS} when it composes Workflow`);
+      }
+      return;
     default:
       return;
   }
@@ -404,7 +436,7 @@ export const rollups = defineBehavior<RollupsConfig>({
   },
 
   fields: {
-    rollups: (view) => {
+    values: (view) => {
       const out: Record<string, unknown> = {};
       for (const [name, result] of evaluate(view, Object.keys(view.config.rollups))) {
         if (result.over) {

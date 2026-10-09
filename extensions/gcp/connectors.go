@@ -12,23 +12,23 @@ import (
 // Authorization to the application (section 9.2).
 const serverlessAuthorizationHeader = "X-Serverless-Authorization"
 
-// connectSQL realizes a sql edge from a Cloud Run server to a Cloud SQL
-// database (sections 7.2 and 7.4). The server's account gets the Cloud
-// SQL client role, to reach the instance through the connector, and the
-// instance user role, to log in with IAM, both held to the edge's
-// instance by an IAM condition; and an IAM database user on the instance,
-// which the migration job gives read and write privileges on the edge's
-// DB service's tables.
-// The derived value is the Cloud SQL connection the server's connector
+// connectSQL realizes a sql edge from a Cloud Run server, or a Cloud Run
+// job (D52), to a Cloud SQL database (sections 7.2 and 7.4). The server's
+// or the job's account gets the Cloud SQL client role, to reach the
+// instance through the connector, and the instance user role, to log in
+// with IAM, both held to the edge's instance by an IAM condition; and an
+// IAM database user on the instance, which the migration job gives read
+// and write privileges on the edge's DB service's tables.
+// The derived value is the Cloud SQL connection the entrypoint's connector
 // dials, so there is no password.
 //
-// A Rust server has no Cloud SQL connector to dial with. Section 7.4's
-// other form, a generated password and Cloud Run's Cloud SQL mount, waits
-// for a password form of the derived value, so the edge is refused.
+// A Rust server or job has no Cloud SQL connector to dial with. Section
+// 7.4's other form, a generated password and Cloud Run's Cloud SQL mount,
+// waits for a password form of the derived value, so the edge is refused.
 func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	if from.Language == registry.APILanguageRust {
-		return registry.Connected{}, fmt.Errorf("server %s is a %s server, which has no Cloud SQL connector to reach %s with IAM authentication; the password form of docs/stack-model.md section 7.4 is not built", from.Name, from.Language, to.Name)
+		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Cloud SQL connector to reach %s with IAM authentication; the password form of docs/stack-model.md section 7.4 is not built", from.Kind, from.Name, from.Language, from.Kind, to.Name)
 	}
 	v := valuesOf(ctx.Environment)
 	account := from.Name + ".account"
@@ -49,7 +49,8 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 		}}
 	}
 	// A service account's Postgres user is its email without
-	// `.gserviceaccount.com`. The account's id is the server's name.
+	// `.gserviceaccount.com`. The account's id is the server's or the
+	// job's name (lowerWorkload).
 	user := join(from.ResourceName, "@", v.project, ".iam")
 	return registry.Connected{
 		Resources: []*ir.Resource{
@@ -100,16 +101,16 @@ func serviceAudience(v values, name any) any {
 	return join("//run.googleapis.com/projects/", v.project, "/locations/", v.region, "/services/", name)
 }
 
-// serviceAccountEmail is the email of a server's service account, whose
-// id is the server's name (lowerService).
+// serviceAccountEmail is the email of a server's or a job's service
+// account, whose id is the deployable's name (lowerWorkload).
 func serviceAccountEmail(v values, name any) any {
 	return join(name, "@", v.project, ".iam.gserviceaccount.com")
 }
 
-// connectHTTP realizes an http edge from a Cloud Run server to one it
-// calls (sections 7.2 and 9.2). The caller's account gets the invoker role
-// on the callee, which Cloud Run's invoker check admits an internal callee
-// by. The derived value is the callee's run.app URL, which the caller
+// connectHTTP realizes an http edge from a Cloud Run server, or a Cloud
+// Run job (D52), to a server it calls (sections 7.2 and 9.2). The caller's
+// account gets the invoker role on the callee, which Cloud Run's invoker
+// check admits an internal callee by. The derived value is the callee's run.app URL, which the caller
 // reaches through the VPC (lowerService), and a Google ID token from the
 // metadata server as the service credential, for the callee's custom
 // audience (serviceAudience). The token travels in Service-Authorization,
@@ -119,7 +120,8 @@ func serviceAccountEmail(v values, name any) any {
 //
 // The callee verifies the token against Google's keys, with its custom
 // audience, and knows the caller by its service account's email in the
-// token's email claim.
+// token's email claim. A job's caller entry serves its API, so an
+// operation whose `from` names the API admits its jobs as its server.
 //
 // A server that calls an API it serves itself reaches it over loopback,
 // needs no grant and sends no credential.

@@ -43,3 +43,9 @@ operationSets:
           - name: sku
             typeRef: { name: string }
             required: true
+# A job is a deployable of its own, with shop-orders' Deps: its database and
+# its client of shop-api (D52).
+jobs:
+  - name: ExpireOrders
+    schedule: "0 * * * *"
+    timeout: 2m

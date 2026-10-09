@@ -1,0 +1,22 @@
+{
+  "name": {{ quote .Package }},
+  "version": "0.0.0",
+  "description": "Server {{ .Name }} of stack {{ .Stack }}, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+{{- range $i, $d := .Dependencies }}{{ if $i }},{{ end }}
+    {{ quote $d.Name }}: {{ quote $d.Spec }}
+{{- end }}
+  },
+  "devDependencies": {
+{{- range $i, $d := .DevDependencies }}{{ if $i }},{{ end }}
+    {{ quote $d.Name }}: {{ quote $d.Spec }}
+{{- end }}
+  }
+}

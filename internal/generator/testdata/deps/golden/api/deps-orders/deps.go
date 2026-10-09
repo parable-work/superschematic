@@ -3,10 +3,16 @@
 // This file defines Deps, what the implementation of deps-orders is built
 // from, and Constructor, the signature of the implementation's constructor
 // (docs/stack-model.md, section 8.5).
+//
+// It also defines Jobs, a method per job of deps-orders, and JobsConstructor,
+// the signature of the implementation's constructor of its jobs (section
+// 8.7).
 
 package depsorders
 
 import (
+	"context"
+
 	orm "example.com/schemas/orm/deps-db"
 	depscatalogsdk "example.com/schemas/sdk/go/deps-catalog"
 	"go.uber.org/zap"
@@ -36,3 +42,20 @@ type Deps struct {
 // New(deps Deps) (Implementations, error), which the entrypoint calls. The
 // scaffolded implementation asserts it: var _ depsorders.Constructor = New.
 type Constructor func(deps Deps) (Implementations, error)
+
+// Jobs are the jobs of deps-orders, a method per @job class. A job's
+// entrypoint calls its method once per run, with a context that SIGTERM
+// cancels, and the run fails when the method returns an error.
+type Jobs interface {
+	// ReindexOrders runs the job ReindexOrders.
+	ReindexOrders(ctx context.Context) error
+	// ShipOrders runs the job ShipOrders, on */15 * * * * unless an
+	// environment changes its schedule.
+	ShipOrders(ctx context.Context) error
+}
+
+// JobsConstructor is the signature of the implementation's constructor of
+// its jobs, NewJobs(deps Deps) (Jobs, error), which a job's entrypoint calls
+// with the API's Deps. The scaffolded implementation asserts it:
+// var _ depsorders.JobsConstructor = NewJobs.
+type JobsConstructor func(deps Deps) (Jobs, error)

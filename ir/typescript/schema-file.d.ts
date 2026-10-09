@@ -78,14 +78,29 @@ export interface DatabaseDecl {
 
 export interface DeployableRef {
   deployable?: string;
+  job?: string;
   service?: ServiceRef;
 }
 
 export interface DeployableSettings {
+  enabled?: boolean;
   env?: { [key: string]: EnvValue };
   of: DeployableRef;
   platform?: string;
+  schedule?: string;
+  timeZone?: string;
   values?: { [key: string]: unknown };
+}
+
+/**
+ * How a UI shows one Workflow state: its label, the present-progressive form
+ * it shows while an instance is in the state, and a tone, what the state means
+ * to a reader.
+ */
+export interface DisplayState {
+  activeForm?: string;
+  label?: string;
+  tone?: 'muted' | 'active' | 'success' | 'warning' | 'danger';
 }
 
 export interface Document {
@@ -95,6 +110,7 @@ export interface Document {
   enums?: { [key: string]: EnumDef };
   extensions?: Extensions;
   imports?: Import[];
+  jobs?: Job[];
   kind?: SchemaKind;
   name?: string;
   operationSets?: OperationSet[];
@@ -136,6 +152,7 @@ export interface EnvValue {
 export interface EnvironmentDecl {
   dns?: DNSPlacement;
   domain?: string;
+  order?: number;
   parameters?: string[];
   settings?: DeployableSettings[];
   target?: string;
@@ -244,6 +261,15 @@ export interface IndexDef {
   keys: string[];
   name?: string;
   unique?: boolean;
+}
+
+export interface Job {
+  comment?: string;
+  name: string;
+  retries?: number;
+  schedule?: string;
+  timeZone?: string;
+  timeout?: string;
 }
 
 export interface MCPIcon {
@@ -499,6 +525,7 @@ export interface TypeDef {
   database?: DatabaseDecl;
   denyUnknownFields?: boolean;
   description?: string;
+  display?: TypeDisplay;
   envVars?: boolean;
   environment?: EnvironmentDecl;
   extends?: string;
@@ -524,6 +551,22 @@ export interface TypeDef {
   versionGraph?: VersionGraphConfig;
   versioned?: boolean;
   versionedConfig?: VersionedConfig;
+}
+
+/**
+ * What a UI reads to render the instances of a type (@display): what to call
+ * one and many, which field is an instance's title, what a create button says,
+ * which fields summarize it in a list, and the labels of its Workflow's states
+ * and transitions.
+ */
+export interface TypeDisplay {
+  createLabel?: string;
+  noun?: string;
+  plural?: string;
+  states?: { [key: string]: DisplayState };
+  summaryFields?: string[];
+  titleField?: string;
+  transitions?: { [key: string]: { [key: string]: string } };
 }
 
 export interface TypeRef {

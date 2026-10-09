@@ -125,7 +125,7 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		if _, err := os.Stat(filepath.Join(opts.ServicePath, "tsconfig.json")); err != nil || sentinel.Skips(opts.Registry, cfg.Kind) {
 			return nil
 		}
-		changed, err := sentinel.EmitService(opts.ServicePath, cfg, opts.Registry, sentinel.ConfigTypeOf(schema))
+		changed, err := sentinel.EmitService(opts.ServicePath, cfg, opts.Registry, sentinel.ConfigTypeOf(schema), sentinel.JobsOf(schema)...)
 		if err != nil {
 			return fmt.Errorf("emitting service sentinel: %w", err)
 		}

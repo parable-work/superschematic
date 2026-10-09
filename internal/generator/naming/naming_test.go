@@ -172,6 +172,22 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 }
 
+// TestBuildContext: the server images build from the repository root unless
+// [paths] build_context names a directory, which may lie above it.
+func TestBuildContext(t *testing.T) {
+	root := filepath.Join("/checkout", "examples", "shop")
+	if got := Default().BuildContext(root); got != root {
+		t.Fatalf("BuildContext with no [paths] = %q, want the repository root %q", got, root)
+	}
+	n, err := Parse([]byte("[paths]\nbuild_context = \"../..\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.BuildContext(root), filepath.Join("/checkout"); got != want {
+		t.Fatalf("BuildContext = %q, want %q", got, want)
+	}
+}
+
 // TestParseRejectsAbsolutePaths: LocalPaths joins every [paths] value under
 // the repository root, so an absolute value would point generated manifests
 // at <root>/<value>, a directory that does not exist. The keys come from the
@@ -355,6 +371,64 @@ func TestNpmTypesPackageKeepsSingleSuffix(t *testing.T) {
 	}
 	if n.NpmTypesPackage("web-db") != "@schemas/web-db-types" {
 		t.Errorf("got %q", n.NpmTypesPackage("web-db"))
+	}
+}
+
+// TestNpmServerPackage: a TypeScript server's package is named after its
+// stack and its name in lower case, a capital starting a word.
+func TestNpmServerPackage(t *testing.T) {
+	n := Default()
+	for server, want := range map[string]string{
+		"shop-storefront": "@schemas/shop-stack-shop-storefront-server",
+		"ShopStorefront":  "@schemas/shop-stack-shop-storefront-server",
+		"Storefront":      "@schemas/shop-stack-storefront-server",
+		"APIGateway":      "@schemas/shop-stack-apigateway-server",
+	} {
+		if got := n.NpmServerPackage("shop-stack", server); got != want {
+			t.Errorf("NpmServerPackage(shop-stack, %s) = %q, want %q", server, got, want)
+		}
+	}
+}
+
+// TestPhysicalRelPath: a path Bun resolves from an output root under a
+// symbolic link climbs from the link's target, which is where Bun runs,
+// and descends to the target as it is named, through a link on the way;
+// with no link it is RelPath's.
+func TestPhysicalRelPath(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"real/out", "repo/runtime", "elsewhere/checkout"} {
+		if err := os.MkdirAll(filepath.Join(base, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"linked": "real", "repo/third_party": "../elsewhere"} {
+		if err := os.Symlink(target, filepath.Join(base, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ out, target, want string }{
+		{"repo/dist", "repo/runtime", "../runtime"},
+		{"linked/out", "repo/runtime", "../../repo/runtime"},
+		{"linked/out/not-yet/built", "repo/runtime", "../../../../repo/runtime"},
+		{"repo/dist", "repo/third_party/checkout", "../third_party/checkout"},
+	} {
+		got, err := PhysicalRelPath(filepath.Join(base, tc.out), filepath.Join(base, tc.target))
+		if err != nil || got != tc.want {
+			t.Errorf("PhysicalRelPath(%s, %s) = %q, %v; want %q", tc.out, tc.target, got, err, tc.want)
+		}
+		// Where the output root exists, the path reaches the target from its
+		// physical path, as Bun resolves it.
+		if from, err := filepath.EvalSymlinks(filepath.Join(base, tc.out)); err == nil {
+			if _, err := os.Stat(filepath.Join(from, filepath.FromSlash(got))); err != nil {
+				t.Errorf("%s from %s does not reach %s: %v", got, from, tc.target, err)
+			}
+		}
+	}
+	if got, err := PhysicalRelPath(filepath.Join(base, "repo/dist"), ""); got != "" || err != nil {
+		t.Errorf("an unset target = %q, %v; want none", got, err)
 	}
 }
 
@@ -545,6 +619,54 @@ func TestHistoryActorSettingRejectsNonSettingNames(t *testing.T) {
 		_, err := Parse([]byte("history_actor_setting = \""+value+"\"\n"), "superschematic.toml")
 		if err == nil || !strings.Contains(err.Error(), "history_actor_setting") {
 			t.Errorf("history_actor_setting %q: err = %v, want a history_actor_setting error", value, err)
+		}
+	}
+}
+
+// TestImplementationPaths: each language's implementation directory is its
+// template under the repository root, typescript/{service} by default for
+// TypeScript (D51); the workspace pattern replaces the service with *; a
+// template that is absolute or names no service is refused.
+func TestImplementationPaths(t *testing.T) {
+	d := Default()
+	if got, want := d.TypeScriptImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "typescript", "shop-api"); got != want {
+		t.Fatalf("TypeScriptImplementationDir = %q, want %q", got, want)
+	}
+	if got, want := d.GoImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "go", "shop-api"); got != want {
+		t.Fatalf("GoImplementationDir = %q, want %q", got, want)
+	}
+	if got := d.TypeScriptImplementationGlob(); got != "typescript/*" {
+		t.Fatalf("TypeScriptImplementationGlob = %q", got)
+	}
+	if got := d.NpmImplementationPackage("shop-api"); got != "@schemas/shop-api-implementation" {
+		t.Fatalf("NpmImplementationPackage = %q", got)
+	}
+	if got := d.NpmWorkspacePackage(); got != "@schemas/workspace" {
+		t.Fatalf("NpmWorkspacePackage = %q", got)
+	}
+
+	n, err := Parse([]byte("[implementation_paths]\ntypescript = \"services/{service}/ts\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.TypeScriptImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "services", "shop-api", "ts"); got != want {
+		t.Fatalf("TypeScriptImplementationDir = %q, want %q", got, want)
+	}
+	if got := n.TypeScriptImplementationGlob(); got != "services/*/ts" {
+		t.Fatalf("TypeScriptImplementationGlob = %q", got)
+	}
+	if got := n.ImplementationPaths.Go; got != "go/{service}" {
+		t.Fatalf("an unset go template = %q, want the default", got)
+	}
+
+	for _, tc := range []struct{ key, value, want string }{
+		{"typescript", "/abs/{service}", "implementation_paths.typescript \"/abs/{service}\" is an absolute path"},
+		{"typescript", "typescript/impl", "implementation_paths.typescript \"typescript/impl\" does not contain {service}"},
+		{"go", "go/impl", "implementation_paths.go \"go/impl\" does not contain {service}"},
+	} {
+		_, err := Parse([]byte("[implementation_paths]\n"+tc.key+" = \""+tc.value+"\"\n"), "test")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("implementation_paths.%s = %q: err = %v, want it to contain %q", tc.key, tc.value, err, tc.want)
 		}
 	}
 }

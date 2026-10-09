@@ -14,17 +14,19 @@ import (
 // internal/stackdeploy.
 type (
 	// Options is what every operation reads; DeployOptions, PlanOptions,
-	// BootstrapOptions and SecretsOptions add each one's own.
+	// BuildOptions, BootstrapOptions, SecretsOptions and RunJobOptions
+	// add each one's own.
 	Options          = stackdeploy.Options
 	DeployOptions    = stackdeploy.DeployOptions
 	PlanOptions      = stackdeploy.PlanOptions
 	BuildOptions     = stackdeploy.BuildOptions
 	BootstrapOptions = stackdeploy.BootstrapOptions
 	SecretsOptions   = stackdeploy.SecretsOptions
+	RunJobOptions    = stackdeploy.RunJobOptions
 
-	// Sources says where a stack's build wrote each server's Dockerfile;
-	// BuildResult is what a build made; Context is a build context a
-	// deploy wrote for a server's image (WriteContext).
+	// Sources says where a stack's build wrote each server's and job's
+	// Dockerfile; BuildResult is what a build made; Context is a build
+	// context a deploy wrote for an image (WriteContext).
 	Sources     = stackdeploy.Sources
 	BuildResult = stackdeploy.BuildResult
 	Context     = stackdeploy.Context
@@ -53,6 +55,16 @@ type (
 
 	// Prompter asks a person for a secret value.
 	Prompter = stackdeploy.Prompter
+
+	// SchemaSource is the stack's schema and its directory, where
+	// bootstrap records the values its target returns, with a
+	// TypeScriptEdit of an EnvironmentValue for a TypeScript schema;
+	// RecordedValue is what it did with one, a RecordOutcome.
+	SchemaSource     = stackdeploy.SchemaSource
+	TypeScriptEdit   = stackdeploy.TypeScriptEdit
+	EnvironmentValue = stackdeploy.EnvironmentValue
+	RecordedValue    = stackdeploy.RecordedValue
+	RecordOutcome    = stackdeploy.RecordOutcome
 
 	// RunOutputs is an outputs file: what one run exported, which the
 	// bindings generator reads.
@@ -87,7 +99,8 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 // internal/stackdeploy.Plan.
 func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) { return stackdeploy.Plan(ctx, o) }
 
-// Build builds the images of a run's servers without deploying them; see
+// Build builds the images of a run's servers and jobs without deploying
+// them; see
 // internal/stackdeploy.Build.
 func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 	return stackdeploy.Build(ctx, o)
@@ -112,9 +125,24 @@ func Destroy(ctx context.Context, o Options) error { return stackdeploy.Destroy(
 // Outputs returns a run's outputs file; see internal/stackdeploy.Outputs.
 func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stackdeploy.Outputs(ctx, o) }
 
-// Bootstrap prepares the cloud project an environment deploys to; see
+// RunJob runs a deployed job once on demand (D52); see
+// internal/stackdeploy.RunJob.
+func RunJob(ctx context.Context, o RunJobOptions) error { return stackdeploy.RunJob(ctx, o) }
+
+// What bootstrap did with a value its target returned.
+const (
+	ValueRecorded = stackdeploy.ValueRecorded
+	ValueUpdated  = stackdeploy.ValueUpdated
+	ValueMatches  = stackdeploy.ValueMatches
+	ValueByHand   = stackdeploy.ValueByHand
+)
+
+// Bootstrap prepares the cloud project an environment deploys to, and
+// records the values its target returns in the schema; see
 // internal/stackdeploy.Bootstrap.
-func Bootstrap(ctx context.Context, o BootstrapOptions) error { return stackdeploy.Bootstrap(ctx, o) }
+func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error) {
+	return stackdeploy.Bootstrap(ctx, o)
+}
 
 // SetSecrets asks for and stores secret values; see
 // internal/stackdeploy.SetSecrets.
@@ -122,11 +150,11 @@ func SetSecrets(ctx context.Context, o SecretsOptions) ([]string, error) {
 	return stackdeploy.SetSecrets(ctx, o)
 }
 
-// ParseImages reads `--image <server>=<image>` values; see
+// ParseImages reads `--image <deployable>=<image>` values; see
 // internal/stackdeploy.ParseImages.
 func ParseImages(values []string) (map[string]string, error) { return stackdeploy.ParseImages(values) }
 
-// PinImages pins each server's image to a digest; see
+// PinImages pins each server's and job's image to a digest; see
 // internal/stackdeploy.PinImages.
 func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.ResolvedEnvironment, error) {
 	return stackdeploy.PinImages(env, images)

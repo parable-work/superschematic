@@ -16,7 +16,7 @@ its own event. It spares a lease renewed after the principal's last beat
 (notRenewedAfter): a worker whose presence beat starved while its lease
 heartbeats went on is alive, and a lease that stops being renewed expires
 on its own. It records the ids it expired, by schema, in its released
-column, which the presence field shows and so the miss's event carries.
+column, which the released field shows and so the miss's event carries.
 The leases are the principal's, not the instance's: while another
 instance of the schema stands for the same principal and is present (not
 missed, before its deadline), a miss leaves them. A
@@ -42,7 +42,8 @@ principalField once it holds a value is refused, whoever asks
 not_principal).
 
 configChange: any config may change except principalField, which names
-where every instance's principal is held. A new ttlMs applies from each
+where every instance's principal is held, and which changes only on a
+schema with no instances. A new ttlMs applies from each
 instance's next beat. Presence can be added to a schema that has
 instances, which have no deadline until their first beat, and cannot be
 removed from one: the deadlines and misses they hold would stay behind
@@ -52,6 +53,8 @@ and come back if it were added again.
 import {
   BehaviorConfigError,
   BehaviorVetoError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
   type ConfigTarget,
   type FrozenJSON,
@@ -89,15 +92,16 @@ export interface PresenceConfig {
   readonly sweepMs: number;
 }
 
-/** The presence field. */
+/** Presence's fields, as a read returns them under behaviors.Presence: a field with no value is absent. */
 export interface PresenceRecord {
-  /** When the instance is missed unless beaten; null for one that has never had one. */
-  readonly deadline: number | null;
-  readonly lastBeatAt: number | null;
+  /** When the instance is missed unless beaten; absent for one that has never had one. */
+  readonly deadline?: number;
+  /** Absent before the first beat. */
+  readonly lastBeatAt?: number;
   /** Whether a miss was applied and no beat came after it. */
   readonly missed: boolean;
-  /** The instances whose lease the last miss expired, by schema; null before a miss. */
-  readonly released: Readonly<Record<string, readonly string[]>> | null;
+  /** The instances whose lease the last miss expired, by schema; absent before a miss. */
+  readonly released?: Readonly<Record<string, readonly string[]>>;
 }
 
 const NAME = 'Presence';
@@ -138,7 +142,7 @@ function vetoed(view: InstanceView<unknown>, operation: string, reason: string, 
 // statusOf reads the instance's Workflow status as the caller; undefined
 // without one.
 function statusOf(context: InstanceContext<PresenceConfig>): string | undefined {
-  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(context.instances.get(context.schema, context.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   return typeof status === 'string' ? status : undefined;
 }
 
@@ -286,11 +290,11 @@ export const presence = defineBehavior<PresenceConfig>({
     };
   },
 
-  configChange(before, after) {
+  configChange(before, after, change) {
     if (before !== undefined && after === undefined) {
       return 'the deadlines and misses its instances hold would stay behind and come back if it were added again';
     }
-    if (before !== undefined && after !== undefined && before.principalField !== after.principalField) {
+    if (before !== undefined && after !== undefined && before.principalField !== after.principalField && change.instances) {
       return `principalField is where every instance holds its principal: it stays ${before.principalField}`;
     }
     return undefined;
@@ -348,7 +352,9 @@ export const presence = defineBehavior<PresenceConfig>({
 
     miss(context) {
       const current = state(context);
+      // Missed already, or not due: nothing changes.
       if (current.missed || current.deadline === null || context.now < current.deadline) {
+        context.unchanged();
         return { missed: false };
       }
       context.columns.set({ missed: 1 });
@@ -367,10 +373,13 @@ export const presence = defineBehavior<PresenceConfig>({
     },
   },
 
+  // Each field reads the presence's columns: an instance never beaten has
+  // no lastBeatAt, and one never missed no released.
   fields: {
-    presence(view): PresenceRecord {
-      return state(view);
-    },
+    deadline: (view): PresenceRecord['deadline'] => state(view).deadline ?? undefined,
+    lastBeatAt: (view): PresenceRecord['lastBeatAt'] => state(view).lastBeatAt ?? undefined,
+    missed: (view): PresenceRecord['missed'] => state(view).missed,
+    released: (view): PresenceRecord['released'] => state(view).released ?? undefined,
   },
 
   schedules: {

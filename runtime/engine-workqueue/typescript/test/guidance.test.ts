@@ -157,7 +157,7 @@ describe('the work-queue behaviors say what their config means', () => {
     assert.match(blueprint, /^The create of a Batch stamps a child per step, /);
     assert.match(blueprint, /Each child is a steps instance whose step holds its step's key and whose batch links to its parent, copying topic;/);
     const create = guidanceOf(engine, 'batches', 'create');
-    assert.match(create.success, /The create stamps the children \(.*\) in its own write; blueprint lists them\./);
+    assert.match(create.success, /The create stamps the children \(.*\) in its own write; behaviors\.Blueprint\.children lists them\./);
     assert.deepEqual(codes(create), ['Blueprint.no_dependencies', 'Blueprint.not_constant']);
   });
 

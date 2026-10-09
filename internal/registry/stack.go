@@ -20,10 +20,11 @@ import (
 // deployable is placed on a platform, an edge between two placed
 // deployables is realized by a connector, a target names a platform for
 // each deployable kind, a DNS platform holds an environment's domain
-// records, and a provisioner turns the resource graph into running
-// resources. The resolver (internal/stack) reads them. The core registers
-// one target, `local`, with its platforms, connectors and provisioner
-// (internal/stack/local); every other target is an extension's.
+// records, a provisioner turns the resource graph into running resources,
+// and a CI renderer writes a stack's workflow (stack_ci.go). The resolver
+// (internal/stack) reads them. The core registers one target, `local`,
+// with its platforms, connectors and provisioner (internal/stack/local),
+// and one CI renderer, `github`; every other target is an extension's.
 
 // StackEnvironment is the environment being resolved, as platforms,
 // connectors and DNS platforms see it. They must not modify it.
@@ -83,9 +84,10 @@ type PlatformSpec struct {
 	// Kind is the deployable kind the platform realizes.
 	Kind ir.DeployableKind
 
-	// Languages are the server languages a server platform runs, as
-	// `outputs.api.language` spells them (APILanguageGo, ...). Required
-	// for a server platform, refused for a database platform.
+	// Languages are the server languages a server or job platform runs,
+	// as `outputs.api.language` spells them (APILanguageGo, ...): a job is
+	// written in its API's language. Required for a server or job
+	// platform, refused for a database platform.
 	Languages []string
 
 	// Dialects are the SQL dialects a database platform runs
@@ -165,9 +167,11 @@ type ConnectorSpec struct {
 	// Edge is the edge kind the connector realizes.
 	Edge ir.EdgeKind
 
-	// From and To name the platforms at the two ends. From is a server
-	// platform; To is a database platform for sql and a server platform for
-	// http.
+	// From and To name the platforms at the two ends. From is a server or
+	// a job platform; To is a database platform for sql and a server
+	// platform for http. A job's edges are its API's (D52), so a target
+	// that places jobs registers a connector from its job platform for
+	// each edge its servers take.
 	From string
 	To   string
 
@@ -242,11 +246,21 @@ type TargetSpec struct {
 	// has a migration to run on the target is refused.
 	Migrations MigrationRunner
 
-	// Builder builds the images of the target's servers from the
+	// Builder builds the images of the target's servers and jobs from the
 	// Dockerfiles a stack's build writes (sections 8.2 and 11.2). Nil
-	// builds none, and every server's image comes from --image or the
-	// deploy manifest.
+	// builds none, and every image comes from --image or the deploy
+	// manifest.
 	Builder ImageBuilder
+
+	// Jobs runs a deployed job once on demand, outside its schedule
+	// (`stack run`, section 8.7, D52). Nil runs none, and `stack run`
+	// refuses the target's environments.
+	Jobs JobRunner
+
+	// CI says how a generated CI job signs in to the target's
+	// environments (section 11.3, D47). Nil gives CI no identity, and the
+	// environments no cloud jobs.
+	CI CIIdentities
 
 	compiledValues *validator.Schema
 }
@@ -406,6 +420,11 @@ type ProvisionerSpec struct {
 
 	// Provisioner is the implementation.
 	Provisioner Provisioner
+
+	// Tools are the command-line tools the provisioner runs, each at the
+	// version it needs, which a generated CI job installs (D47). Nil runs
+	// none.
+	Tools []CLITool
 }
 
 // resourceType is one resource type's properties schema and what
@@ -423,6 +442,7 @@ type stackSpecs struct {
 	targets       map[string]TargetSpec
 	dnsPlatforms  map[string]DNSPlatformSpec
 	provisioners  map[string]ProvisionerSpec
+	ciRenderers   map[string]CIRendererSpec
 	resourceTypes map[string]resourceType
 }
 
@@ -433,12 +453,14 @@ func newStackSpecs() stackSpecs {
 		targets:       map[string]TargetSpec{},
 		dnsPlatforms:  map[string]DNSPlatformSpec{},
 		provisioners:  map[string]ProvisionerSpec{},
+		ciRenderers:   map[string]CIRendererSpec{},
 		resourceTypes: map[string]resourceType{},
 	}
 }
 
 // stackKeyPattern is the shape of a platform, connector, target, DNS
-// platform or provisioner name: lowercase words joined by dots or hyphens.
+// platform, provisioner or CI renderer name: lowercase words joined by dots
+// or hyphens.
 var stackKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9]*([.-][a-z0-9]+)*$`)
 
 func checkStackKey(what, name string) error {
@@ -455,10 +477,10 @@ func checkStackKey(what, name string) error {
 var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeScript}
 
 // RegisterPlatform adds a platform. It refuses a malformed or duplicate
-// name, an unknown kind, a server platform without languages or a database
-// platform without dialects (or either with the other's list), an unknown
-// or repeated language or dialect, a settings schema that does not compile,
-// and a missing NameOf, AddressOf or Lower.
+// name, an unknown kind, a server or job platform without languages or a
+// database platform without dialects (or either with the other's list), an
+// unknown or repeated language or dialect, a settings schema that does not
+// compile, and a missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -470,14 +492,14 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return fmt.Errorf("registry: platform %q is already registered", spec.Name)
 	}
 	switch spec.Kind {
-	case ir.DeployableServer:
+	case ir.DeployableServer, ir.DeployableJob:
 		if len(spec.Languages) == 0 {
-			return fmt.Errorf("registry: server platform %q declares no languages", spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares no languages", spec.Kind, spec.Name)
 		}
 		if len(spec.Dialects) > 0 {
-			return fmt.Errorf("registry: server platform %q declares SQL dialects; only a database platform does", spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares SQL dialects; only a database platform does", spec.Kind, spec.Name)
 		}
-		if err := checkList("server platform "+spec.Name, "language", spec.Languages, serverLanguages); err != nil {
+		if err := checkList(string(spec.Kind)+" platform "+spec.Name, "language", spec.Languages, serverLanguages); err != nil {
 			return err
 		}
 	case ir.DeployableDatabase:
@@ -485,13 +507,13 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: database platform %q declares no SQL dialects", spec.Name)
 		}
 		if len(spec.Languages) > 0 {
-			return fmt.Errorf("registry: database platform %q declares server languages; only a server platform does", spec.Name)
+			return fmt.Errorf("registry: database platform %q declares server languages; only a server or job platform does", spec.Name)
 		}
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
 		}
 	default:
-		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s or %s)", spec.Name, spec.Kind, ir.DeployableDatabase, ir.DeployableServer)
+		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s)", spec.Name, spec.Kind, deployableKindList())
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
@@ -563,10 +585,11 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // values schema or resource type schema that does not compile, a resource
 // type another target registered with a different schema, a policy rule
 // without a name or Check, or with a repeated name, and a deploy seam it
-// cannot use: State, Bootstrap, Migrations or Builder without a
-// provisioner, and Bootstrap, Migrations or Builder without State. Finalize checks that
-// the platforms, the DNS platform and the provisioner it names are
-// registered.
+// cannot use: State, Bootstrap, Migrations, Builder, CI or Jobs without a
+// provisioner, and Bootstrap, Migrations, Builder, CI or Jobs without
+// State.
+// Finalize checks that the platforms, the DNS platform and the provisioner
+// it names are registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {
 	if err := r.registrable("target " + spec.Name); err != nil {
 		return err
@@ -581,7 +604,7 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 	for _, kind := range slices.Sorted(maps.Keys(spec.Platforms)) {
 		platform := spec.Platforms[kind]
 		if !kind.Valid() {
-			return fmt.Errorf("registry: target %q names a platform for deployable kind %q (want %s or %s)", spec.Name, kind, ir.DeployableDatabase, ir.DeployableServer)
+			return fmt.Errorf("registry: target %q names a platform for deployable kind %q (want %s)", spec.Name, kind, deployableKindList())
 		}
 		if platform == "" {
 			return fmt.Errorf("registry: target %q names an empty platform for %s", spec.Name, kind)
@@ -693,7 +716,8 @@ func (r *Registry) RegisterDNSPlatform(spec DNSPlatformSpec) error {
 }
 
 // RegisterProvisioner adds a provisioner. It refuses a malformed or
-// duplicate name and a nil Provisioner.
+// duplicate name, a nil Provisioner, and a tool without a name or a
+// version, or named twice.
 func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 	if err := r.registrable("provisioner " + spec.Name); err != nil {
 		return err
@@ -707,6 +731,17 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 	if spec.Provisioner == nil {
 		return fmt.Errorf("registry: provisioner %q has no Provisioner", spec.Name)
 	}
+	seenTools := map[string]bool{}
+	for _, tool := range spec.Tools {
+		if tool.Name == "" || tool.Version == "" {
+			return fmt.Errorf("registry: provisioner %q has a tool without a name or a version", spec.Name)
+		}
+		if seenTools[tool.Name] {
+			return fmt.Errorf("registry: provisioner %q names tool %q twice", spec.Name, tool.Name)
+		}
+		seenTools[tool.Name] = true
+	}
+	spec.Tools = append([]CLITool(nil), spec.Tools...)
 	r.stack.provisioners[spec.Name] = spec
 	r.noteExtension(spec.Extension)
 	return nil
@@ -726,14 +761,21 @@ func (r *Registry) checkStackReferences() error {
 		}
 		for _, end := range []struct {
 			role, platform string
-			kind           ir.DeployableKind
-		}{{"From", spec.From, ir.DeployableServer}, {"To", spec.To, toKind}} {
+			kinds          []ir.DeployableKind
+		}{
+			{"From", spec.From, []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob}},
+			{"To", spec.To, []ir.DeployableKind{toKind}},
+		} {
 			platform, ok := r.stack.platforms[end.platform]
 			if !ok {
 				return fmt.Errorf("registry: connector %q %s names platform %q, which is not registered (registered platforms: %v)", name, end.role, end.platform, keysOf(r.stack.platforms))
 			}
-			if platform.Kind != end.kind {
-				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), end.kind)
+			if !slices.Contains(end.kinds, platform.Kind) {
+				want := make([]string, len(end.kinds))
+				for i, kind := range end.kinds {
+					want[i] = string(kind)
+				}
+				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), strings.Join(want, " or a "))
 			}
 		}
 	}
@@ -907,4 +949,15 @@ func canonicalJSON(data []byte) ([]byte, error) {
 
 func keysOf[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
+}
+
+// deployableKindList names the deployable kinds for an error message:
+// "database, server or job".
+func deployableKindList() string {
+	kinds := ir.DeployableKinds()
+	names := make([]string, len(kinds))
+	for i, kind := range kinds {
+		names[i] = string(kind)
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }

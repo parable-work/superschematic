@@ -10,7 +10,7 @@ import { Validate, behavior } from "@superschematic/schema";
 @behavior("Rollups", {
   rollups: {
     tasks: { schema: "tasks", link: "project", function: "count" },
-    tasksByStatus: { schema: "tasks", link: "project", function: "countBy", field: "status" },
+    tasksByStatus: { schema: "tasks", link: "project", function: "countBy", field: "Workflow.status" },
     tasksFinished: { schema: "tasks", link: "project", function: "all", gatedStates: ["done"] },
   },
 })

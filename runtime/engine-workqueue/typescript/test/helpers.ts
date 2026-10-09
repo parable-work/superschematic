@@ -124,6 +124,50 @@ export function publish(engine: Engine, document: Record<string, unknown>): void
   engine.schemas.publish(alice, document.name as string);
 }
 
+/** recipesDocument is a schema Recipe whose instances are version graphs of steps (Branches), with the behaviors given first. */
+export function recipesDocument(behaviors: readonly BehaviorRef[] = []): Record<string, unknown> {
+  return {
+    kind: 'General',
+    name: 'Recipe',
+    types: {
+      Recipe: {
+        name: 'Recipe',
+        role: 'EmbeddedStruct',
+        behaviors: [...behaviors, { name: 'Branches', config: { kinds: { step: { type: 'Step', order: 'position' } } } }],
+        fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }],
+      },
+      Step: {
+        name: 'Step',
+        role: 'EmbeddedStruct',
+        fields: [
+          { name: 'instruction', typeRef: { name: 'string' }, required: true },
+          { name: 'position', typeRef: { name: 'Int' }, required: true },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * releaseRecipe releases a new tagged commit of a recipe as alice: a step
+ * saved on a draft, committed and merged into its primary line. It returns
+ * the recipe's Branches release field, the new release's number.
+ */
+export function releaseRecipe(engine: Engine, id: string): number {
+  const invoke = <T>(operation: string, params: Record<string, unknown> = {}) => engine.instances.invoke(alice, 'Recipe', id, operation, params) as T;
+  const version = (engine.instances.get(alice, 'Recipe', id)?.behaviors.Branches?.release as number | undefined) ?? 0;
+  const draft = invoke<{ id: string; version: number }>('branch', { name: `release${version + 1}` });
+  const saved = invoke<{ ref: { version: number } }>('save', {
+    ref: draft.id,
+    version: draft.version,
+    edits: { step: { upsert: [{ instruction: `Step ${version + 1}`, position: version + 1 }] } },
+  });
+  const committed = invoke<{ ref: { id: string } }>('commit', { ref: draft.id, version: saved.ref.version });
+  const [main] = invoke<{ items: Array<{ id: string; version: number }> }>('refs').items;
+  const merged = invoke<{ commit: { id: string } }>('merge', { source: committed.ref.id, target: main.id, targetVersion: main.version, tag: true });
+  return invoke<{ version: number }>('releaseCommit', { commit: merged.commit.id, version }).version;
+}
+
 /**
  * jobsFixture is the General schema-file document the core binary loads
  * with no extension linked (make cli-smoke, fixture-workqueue-json): its

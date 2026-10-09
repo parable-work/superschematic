@@ -44,6 +44,10 @@ type fakeRunner struct {
 	probes   map[string]int
 	// exitOnStart makes every process exit as it starts.
 	exitOnStart bool
+	// exits, by the base name of a binary, are how its next processes
+	// exit, one each, as soon as they start; a process with none left
+	// runs until it is stopped.
+	exits map[string][]error
 }
 
 type rule struct {
@@ -94,6 +98,10 @@ func (f *fakeRunner) Start(cmd local.Command) (local.Process, error) {
 	_, _ = cmd.Stderr.Write([]byte("a line with no end"))
 	if f.exitOnStart {
 		p.exit(errors.New("exit status 2"))
+	}
+	if exits := f.exits[filepath.Base(cmd.Path)]; len(exits) > 0 {
+		f.exits[filepath.Base(cmd.Path)] = exits[1:]
+		p.exit(exits[0])
 	}
 	return p, nil
 }
@@ -201,7 +209,14 @@ func vectorModel(t *testing.T, plan, service string) *sqlmigrate.Model {
 
 func newFixture(t *testing.T, envName string) *fixture {
 	t.Helper()
-	resolved := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), envName)
+	return newFixtureOf(t, shop(), envName)
+}
+
+// newFixtureOf is newFixture of the stack s, whose TypeScript servers, if
+// any, the output root's Bun workspace holds.
+func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
+	t.Helper()
+	resolved := resolve(t, assemble(t), s, stacktest.AcmeShop(), envName)
 	data, err := stack.Marshal(resolved)
 	if err != nil {
 		t.Fatal(err)
@@ -214,11 +229,14 @@ func newFixture(t *testing.T, envName string) *fixture {
 	dir := filepath.Join(root, "program")
 	outputRoot := filepath.Join(root, "dist")
 	for _, d := range env.Deployables {
-		if d.Kind == ir.DeployableServer {
+		if d.Kind.HasImage() {
 			if err := os.MkdirAll(filepath.Join(outputRoot, local.ModulePath(env.Stack, d.Name)), 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}
+	}
+	if err := os.WriteFile(filepath.Join(outputRoot, "package.json"), []byte(`{"name": "@acme/workspace", "private": true, "workspaces": ["server/*/*"]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	model, err := ledgerModel(t, "shop-db").CanonicalJSON()
 	if err != nil {
@@ -322,6 +340,9 @@ func TestApplyFromNothing(t *testing.T) {
 		"DIR/bin/shop-api",
 		"/bin/go build -o DIR/bin/orders .",
 		"DIR/bin/orders",
+		// shop-orders' job builds in the rollout after its callee, and
+		// runs only on its schedule (D52).
+		"/bin/go build -o DIR/bin/shop-orders-ship-orders .",
 	}
 	if got := f.runner.lines(dir); !slices.Equal(got, want) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -427,6 +448,137 @@ func TestApplyFromNothing(t *testing.T) {
 	}
 }
 
+// TestApplyRunsATypeScriptServer applies Dev of the shop with its
+// TypeScript storefront: the Go servers build as before, and the
+// storefront's wave installs the output root's Bun workspace once, then
+// runs its entrypoint's main.ts on Bun in its module, with its resolved
+// environment. Applying the wave again restarts the storefront without a
+// second install.
+func TestApplyRunsATypeScriptServer(t *testing.T) {
+	f := newFixtureOf(t, storefront(), "Dev")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: superschematic-storefront-stack-dev-postgres"},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	senv := registry.StackEnvironment{Stack: f.env.Stack, Name: f.env.Environment, Values: f.env.Values}
+	port := local.ServerPort(senv, *f.env.Deployable("shop-storefront"))
+	module := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, "shop-storefront"))
+	var installs []local.Command
+	var bun *fakeProcess
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/bun" && len(cmd.Args) > 0 && cmd.Args[0] == "install" {
+			installs = append(installs, cmd)
+		}
+	}
+	for _, p := range f.runner.started {
+		if p.cmd.Path == "/bin/bun" {
+			bun = p
+		}
+	}
+	if len(installs) != 1 || installs[0].Dir != f.req.OutputRoot || strings.Join(installs[0].Args, " ") != "install" {
+		t.Errorf("bun install ran %+v, want once, in the output root", installs)
+	}
+	if bun == nil || strings.Join(bun.cmd.Args, " ") != local.TypeScriptEntrypoint || bun.cmd.Dir != module {
+		t.Fatalf("the storefront started as %+v, want bun main.ts in %s", bun, module)
+	}
+	if got := envValue(bun.cmd.Env, "PORT"); got != fmt.Sprint(port) {
+		t.Errorf("the storefront's PORT = %q, want %d", got, port)
+	}
+	if envValue(bun.cmd.Env, "SHOP_DB_DATABASE_URL") != "" {
+		t.Error("the storefront got another server's database")
+	}
+	for _, line := range f.runner.lines(f.req.Dir) {
+		if strings.Contains(line, "go build") && strings.Contains(line, "storefront") {
+			t.Errorf("the storefront was built with go: %s", line)
+		}
+	}
+	for _, want := range []string{
+		"install the TypeScript workspace: bun install in " + f.req.OutputRoot,
+		fmt.Sprintf("[shop-storefront] listening on %d\n", port),
+		"shop-storefront is ready at " + local.ServerURL(port),
+	} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, f.out)
+		}
+	}
+
+	for _, step := range f.env.DeployOrder {
+		if step.Step == ir.StepRollout && slices.Contains(step.Resources, "shop-storefront.process") {
+			if err := f.prov.Apply(context.Background(), f.req, *step); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !bun.stopped {
+		t.Error("applying the storefront's wave again did not restart it")
+	}
+	count := 0
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/bun" && len(cmd.Args) > 0 && cmd.Args[0] == "install" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("bun install ran %d times, want once", count)
+	}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-storefront-stack-dev-postgres"}}
+	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestApplyRefusesATypeScriptServerItCannotRun: without bun on PATH, or
+// with no Bun workspace at the output root, the storefront's wave fails
+// and says why.
+func TestApplyRefusesATypeScriptServerItCannotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, f *fixture)
+		want  string
+	}{
+		{
+			name:  "no bun",
+			setup: func(t *testing.T, f *fixture) { f.runner.missing = []string{"bun"} },
+			want:  "bun is not on PATH; the local target runs each TypeScript server on Bun",
+		},
+		{
+			name: "no workspace",
+			setup: func(t *testing.T, f *fixture) {
+				if err := os.Remove(filepath.Join(f.req.OutputRoot, "package.json")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "no Bun workspace at",
+		},
+		{
+			name: "an install that fails",
+			setup: func(t *testing.T, f *fixture) {
+				f.runner.rules = []rule{{prefix: "/bin/bun install", stderr: "error: lockfile had changes"}}
+			},
+			want: "install the TypeScript workspace at",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixtureOf(t, storefront(), "Dev")
+			f.keys(t)
+			tc.setup(t, f)
+			var err error
+			for _, step := range f.env.DeployOrder {
+				if step.Step == ir.StepRollout && slices.Contains(step.Resources, "shop-storefront.process") {
+					err = f.prov.Apply(context.Background(), f.req, *step)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			_ = f.prov.Destroy(context.Background(), f.req)
+		})
+	}
+}
+
 // TestApplyAgain applies Dev to a machine where the container runs and the
 // database holds the model already: nothing is created, and the migration
 // is up to date.
@@ -489,8 +641,10 @@ func TestPlan(t *testing.T) {
 		"create shop-db.database.shop-db",
 		"migrate shop-db.database.shop-db",
 		"create Orders.calls.shop-api.key",
+		"create shop-orders-ship-orders.calls.shop-api.key",
 		"start shop-api.process",
 		"start Orders.process",
+		"build shop-orders-ship-orders.job",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("plan = %v, want %v", got, want)

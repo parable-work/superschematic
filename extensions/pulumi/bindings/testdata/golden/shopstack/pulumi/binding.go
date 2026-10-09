@@ -21,6 +21,8 @@ type Environment struct {
 	ShopAPI ShopAPI
 	// ShopDB is database shop-db.
 	ShopDB ShopDB
+	// ShopOrdersShipOrders is job shop-orders-ship-orders.
+	ShopOrdersShipOrders ShopOrdersShipOrders
 }
 
 // DNS holds the outputs of the nodes of an environment's DNS records.
@@ -87,6 +89,34 @@ type ShopDB struct {
 	DatabaseShopDB ShopDBDatabaseShopDB
 	// Instance is node shop-db.instance, a fake:sql/instance:Instance.
 	Instance ShopDBInstance
+}
+
+// ShopOrdersShipOrders is job shop-orders-ship-orders: its name and address in
+// an environment, and the outputs of the nodes it owns.
+type ShopOrdersShipOrders struct {
+	// Name is the job's name in the environment.
+	Name pulumi.StringOutput
+	// Account is node shop-orders-ship-orders.account, a
+	// fake:iam/account:Account.
+	Account ShopOrdersShipOrdersAccount
+	// InvokesShopAPI is node shop-orders-ship-orders.invokes.shop-api, a
+	// fake:iam/grant:Grant.
+	InvokesShopAPI ShopOrdersShipOrdersInvokesShopAPI
+	// Job is node shop-orders-ship-orders.job, a fake:run/job:Job.
+	Job ShopOrdersShipOrdersJob
+	// ReadsPaymentsSecretsStripeKey is node
+	// shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, a
+	// fake:iam/grant:Grant.
+	ReadsPaymentsSecretsStripeKey ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey
+	// SQLShopDB is node shop-orders-ship-orders.sql.shop-db, a
+	// fake:iam/grant:Grant.
+	SQLShopDB ShopOrdersShipOrdersSQLShopDB
+	// Schedule is node shop-orders-ship-orders.schedule, a
+	// fake:scheduler/job:Job.
+	Schedule ShopOrdersShipOrdersSchedule
+	// SecretPaymentsSecretsStripeKey is node secret.PaymentsSecrets.STRIPE_KEY, a
+	// fake:secrets/secret:Secret.
+	SecretPaymentsSecretsStripeKey SecretPaymentsSecretsStripeKey
 }
 
 // OrdersAccount holds the outputs of node Orders.account.
@@ -192,6 +222,50 @@ type ShopDBInstance struct {
 	Name pulumi.StringOutput
 }
 
+// ShopOrdersShipOrdersAccount holds the outputs of node
+// shop-orders-ship-orders.account.
+type ShopOrdersShipOrdersAccount struct {
+	// Email is the node's email output.
+	Email pulumi.StringOutput
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
+// ShopOrdersShipOrdersInvokesShopAPI holds the outputs of node
+// shop-orders-ship-orders.invokes.shop-api.
+type ShopOrdersShipOrdersInvokesShopAPI struct {
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
+// ShopOrdersShipOrdersJob holds the outputs of node
+// shop-orders-ship-orders.job.
+type ShopOrdersShipOrdersJob struct {
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
+// ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey holds the outputs of node
+// shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.
+type ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey struct {
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
+// ShopOrdersShipOrdersSchedule holds the outputs of node
+// shop-orders-ship-orders.schedule.
+type ShopOrdersShipOrdersSchedule struct {
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
+// ShopOrdersShipOrdersSQLShopDB holds the outputs of node
+// shop-orders-ship-orders.sql.shop-db.
+type ShopOrdersShipOrdersSQLShopDB struct {
+	// ID is the node's id output.
+	ID pulumi.StringOutput
+}
+
 // Staging reads environment Staging over a stack reference to its stack,
 // staging. A field the environment lacks reads as an error when used.
 func Staging(ctx *pulumi.Context, opts ...pulumi.ResourceOption) (*Environment, error) {
@@ -228,6 +302,16 @@ func Staging(ctx *pulumi.Context, opts ...pulumi.ResourceOption) (*Environment, 
 			Address:        ref.GetStringOutput(pulumi.String("shop-db.instance.connectionName")),
 			DatabaseShopDB: readShopDBDatabaseShopDB(ref),
 			Instance:       readShopDBInstance(ref),
+		},
+		ShopOrdersShipOrders: ShopOrdersShipOrders{
+			Name:                           pulumi.String("shop-orders-ship-orders").ToStringOutput(),
+			Account:                        readShopOrdersShipOrdersAccount(ref),
+			InvokesShopAPI:                 readShopOrdersShipOrdersInvokesShopAPI(ref),
+			Job:                            readShopOrdersShipOrdersJob(ref),
+			ReadsPaymentsSecretsStripeKey:  readShopOrdersShipOrdersReadsPaymentsSecretsStripeKey(ref),
+			SQLShopDB:                      readShopOrdersShipOrdersSQLShopDB(ref),
+			Schedule:                       readShopOrdersShipOrdersSchedule(ref),
+			SecretPaymentsSecretsStripeKey: readSecretPaymentsSecretsStripeKey(ref),
 		},
 	}, nil
 }
@@ -269,6 +353,16 @@ func Production(ctx *pulumi.Context, opts ...pulumi.ResourceOption) (*Environmen
 			DatabaseShopDB: readShopDBDatabaseShopDB(ref),
 			Instance:       readShopDBInstance(ref),
 		},
+		ShopOrdersShipOrders: ShopOrdersShipOrders{
+			Name:                           pulumi.String("shop-orders-ship-orders").ToStringOutput(),
+			Account:                        readShopOrdersShipOrdersAccount(ref),
+			InvokesShopAPI:                 readShopOrdersShipOrdersInvokesShopAPI(ref),
+			Job:                            readShopOrdersShipOrdersJob(ref),
+			ReadsPaymentsSecretsStripeKey:  readShopOrdersShipOrdersReadsPaymentsSecretsStripeKey(ref),
+			SQLShopDB:                      readShopOrdersShipOrdersSQLShopDB(ref),
+			Schedule:                       readShopOrdersShipOrdersSchedule(ref),
+			SecretPaymentsSecretsStripeKey: readSecretPaymentsSecretsStripeKey(ref),
+		},
 	}, nil
 }
 
@@ -309,6 +403,16 @@ func Preview(ctx *pulumi.Context, pr string, opts ...pulumi.ResourceOption) (*En
 			Address:        ref.GetStringOutput(pulumi.String("shop-db.instance.connectionName")),
 			DatabaseShopDB: readShopDBDatabaseShopDB(ref),
 			Instance:       readShopDBInstance(ref),
+		},
+		ShopOrdersShipOrders: ShopOrdersShipOrders{
+			Name:                           pulumi.Sprintf("shop-orders-ship-orders-%s", pr),
+			Account:                        readShopOrdersShipOrdersAccount(ref),
+			InvokesShopAPI:                 readShopOrdersShipOrdersInvokesShopAPI(ref),
+			Job:                            readShopOrdersShipOrdersJob(ref),
+			ReadsPaymentsSecretsStripeKey:  readShopOrdersShipOrdersReadsPaymentsSecretsStripeKey(ref),
+			SQLShopDB:                      readShopOrdersShipOrdersSQLShopDB(ref),
+			Schedule:                       readShopOrdersShipOrdersSchedule(ref),
+			SecretPaymentsSecretsStripeKey: readSecretPaymentsSecretsStripeKey(ref),
 		},
 	}, nil
 }
@@ -402,5 +506,42 @@ func readShopDBInstance(ref *pulumi.StackReference) ShopDBInstance {
 		ConnectionName: ref.GetStringOutput(pulumi.String("shop-db.instance.connectionName")),
 		ID:             ref.GetStringOutput(pulumi.String("shop-db.instance.id")),
 		Name:           ref.GetStringOutput(pulumi.String("shop-db.instance.name")),
+	}
+}
+
+func readShopOrdersShipOrdersAccount(ref *pulumi.StackReference) ShopOrdersShipOrdersAccount {
+	return ShopOrdersShipOrdersAccount{
+		Email: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.account.email")),
+		ID:    ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.account.id")),
+	}
+}
+
+func readShopOrdersShipOrdersInvokesShopAPI(ref *pulumi.StackReference) ShopOrdersShipOrdersInvokesShopAPI {
+	return ShopOrdersShipOrdersInvokesShopAPI{
+		ID: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.invokes.shop-api.id")),
+	}
+}
+
+func readShopOrdersShipOrdersJob(ref *pulumi.StackReference) ShopOrdersShipOrdersJob {
+	return ShopOrdersShipOrdersJob{
+		ID: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.job.id")),
+	}
+}
+
+func readShopOrdersShipOrdersReadsPaymentsSecretsStripeKey(ref *pulumi.StackReference) ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey {
+	return ShopOrdersShipOrdersReadsPaymentsSecretsStripeKey{
+		ID: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id")),
+	}
+}
+
+func readShopOrdersShipOrdersSchedule(ref *pulumi.StackReference) ShopOrdersShipOrdersSchedule {
+	return ShopOrdersShipOrdersSchedule{
+		ID: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.schedule.id")),
+	}
+}
+
+func readShopOrdersShipOrdersSQLShopDB(ref *pulumi.StackReference) ShopOrdersShipOrdersSQLShopDB {
+	return ShopOrdersShipOrdersSQLShopDB{
+		ID: ref.GetStringOutput(pulumi.String("shop-orders-ship-orders.sql.shop-db.id")),
 	}
 }

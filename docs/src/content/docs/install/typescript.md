@@ -76,21 +76,31 @@ superschematic build schemas/services/catalog
 TypeScript types land under `schemas/dist/types/typescript/catalog` as
 `@schemas/catalog-types` (the default `npm_scope` is `@schemas`). Until you
 publish the generated package, consume it from a Bun workspace that
-contains it: the types workspace below, or your own workspace root with
-the generated directories in its `workspaces`. A `file:` specifier from an
-app outside a workspace does not install a types package that has a
-`file:` or `workspace:` dependency of its own.
+contains it: the output root's workspace below, of which an
+implementation at the
+[`typescript` implementation path](/superschematic/reference/naming/#implementation_pathstypescript)
+is a member. A `file:` specifier from an app outside a workspace does not
+install a types package that has a `file:` or `workspace:` dependency of
+its own.
 
-`schemas/dist/types/typescript/package.json` is a private Bun workspace
-root (`@schemas/types-workspace`) whose workspaces are the generated types
-packages next to it. A types package whose schema declares a
+`schemas/dist/package.json` is a private Bun workspace root
+(`@schemas/workspace`) whose workspaces are every generated TypeScript
+package (`types/typescript/*`, `sdk/typescript/*`, `api/*` and the
+stacks' servers, `server/*/*`) and the TypeScript implementations, at the
+naming file's `[implementation_paths]` `typescript` template under the
+parent of the schemas root. A types package whose schema declares a
 [version graph](/superschematic/reference/version-graphs/) depends on
 `@superschematic/versiongraph`, with a `file:` path when
 [`paths.versiongraph_typescript`](/superschematic/reference/naming/#pathsversiongraph_typescript)
 is set and `*` otherwise. A types package depends on the scalar library
 (`superscalar`) the same way, through
 [`paths.scalar_typescript`](/superschematic/reference/naming/#pathsscalar_typescript),
-and on another schema's types package with `workspace:*`.
+and on another schema's types package with `workspace:*`. The root
+depends on `superscalar` too, and where `[paths]` names a checkout of
+`superscalar`, the version-graph runtime or the
+[HTTP runtime](/superschematic/reference/naming/#pathshttp_runtime_typescript),
+its `overrides` point every dependency on that package at the checkout
+with a `file:` path from the root.
 
 `@superschematic/versiongraph` is unpublished until the first tag, and
 `superscalar` until superscalar's first release. Until then a `*`
@@ -106,10 +116,32 @@ and keeps a graph in Postgres (`pg`) or SQLite (`node:sqlite` or
 `bun:sqlite`); see
 [The engine and its adapters](/superschematic/reference/version-graphs/#the-engine-and-its-adapters).
 
-Run `bun install` in `schemas/dist/types/typescript` or in any package
-under it, and again after each build. Every install writes the one
-`bun.lock` at the root.
+Run `bun install` in `schemas/dist` or in any generated package under
+it, and again after each build. Every install writes the one `bun.lock`
+at the root, and links each implementation's dependencies into its own
+`node_modules`. An install inside an implementation does not find the
+root, which sits in the output root, not above it, so add a dependency
+to an implementation's `package.json` and install in `schemas/dist`.
 Install with Bun: npm rejects the `workspace:` protocol.
+
+Commit `schemas/dist/bun.lock`, so every install of one commit takes the
+same versions: a TypeScript server's image and the generated CI install
+frozen to it. No build removes it, and the root `package.json` it pairs
+with is the same on every build of the same schemas, so the lockfile is
+the one file of `schemas/dist` to commit. Write it after building every
+service (`build-all`), so it names every package. Git cannot take back a
+file under an ignored directory, so ignore the output root's contents
+rather than the directory:
+
+```gitignore
+schemas/dist/*
+!schemas/dist/bun.lock
+```
+
+Where a broader rule such as `dist/` ignores the directory, add `!/dist/`,
+`/dist/*` and `!/dist/bun.lock` to `schemas/.gitignore`. The build of a
+stack with a TypeScript server names the rule that hides the lockfile in
+one line, and never edits your ignore files.
 
 ## Consume generated types
 
@@ -230,7 +262,8 @@ outputs: {
 
 The server needs `outputs.types` for TypeScript, as above: the router
 validates requests with the types package's decoders, a peer dependency,
-and the build refuses the config without it.
+and the build refuses the config without it. Each API it `calls` needs
+`outputs.sdk` for TypeScript, for the client its `Deps` holds.
 
 The build writes `schemas/dist/api/<name>` as `@schemas/<name>-api`:
 `interfaces.ts` has one `<Namespace>Implementation` interface per operation
@@ -242,6 +275,49 @@ JSON bodies with the generated `parse<Input>Json` decoder, applies
 RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
 (the `http_runtime_npm_package` naming key) and Hono, which are its peer
 dependencies.
+
+The package also says what the implementation is built from, as the Go
+server's does
+([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
+`deps.ts` declares `Deps`, which holds the API's `config` when it has
+one, a `pg` Pool `db` for its database (its `authDb`, or its one DB
+dependency), a TypeScript SDK client of each API it `calls` (`shopApi`
+for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
+`Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
+is the type of the implementation's `create`, and an API with a route
+that needs an end user also declares `AuthenticatorFactory`, the type of
+its `authenticate`, which builds the `Authenticator` from `Deps`.
+`config.ts` declares `EnvConfig` and `loadEnvConfig()`, which reads the
+`@envVars` settings through the types package's loader, and the fields a
+[stack](/superschematic/guides/stacks/) derives for the API's edges through
+the HTTP runtime's `loadDatabase`, `loadService` and `loadCallers`: a
+`Database` per database, a `Service` per `calls` entry and, for an API
+with `@requireService` or `@allowService`, its callers field
+(`SHOP_API_CALLERS`), what its `serviceAuthenticator` checks. It throws a
+`StackConfigError` that names every variable missing or invalid.
+
+The implementation is a package of its own at the naming file's
+[`[implementation_paths]`](/superschematic/reference/naming/#implementation_pathstypescript)
+`typescript` template, `typescript/<service>` from the parent of the
+schemas root by default. A stack's build writes a missing one for each
+API its servers serve, and so do `build --scaffold` and
+`build-all --scaffold` for each TypeScript API built: `package.json`
+(`@schemas/<service>-implementation`), `tsconfig.json`, and an `index.ts`
+whose `create` is a `Constructor` and whose methods throw the runtime's
+`notImplemented()`, which answers 501, with an `authenticate` that
+establishes no end user and a verifier for each `@hmacVerified` provider
+that refuses every request. It never writes into a directory that holds
+a `.ts` file.
+
+In a [stack](/superschematic/guides/stacks/), the build writes each
+TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
+a `package.json` in the output root's Bun workspace, which depends on the
+API packages, the implementations by their `package.json` names and the
+SDKs of the APIs called, a `main.ts` that builds each implementation from
+its `Deps` with `create(deps)` and `authenticate(deps)`, mounts each
+router on one Hono app and serves it with `Bun.serve` beside `/healthz`
+and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
+`bun main.ts` after one `bun install` in `schemas/dist`.
 
 An operation without an input type reads its other arguments from the JSON
 body object (on `GET`, from the query string). Each body argument is the

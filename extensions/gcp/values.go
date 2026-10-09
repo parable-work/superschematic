@@ -9,6 +9,9 @@ const (
 	TypeProjectIAMMember    = "gcp:projects/iAMMember:IAMMember"
 	TypeService             = "gcp:cloudrunv2/service:Service"
 	TypeServiceIAMMember    = "gcp:cloudrunv2/serviceIamMember:ServiceIamMember"
+	TypeJob                 = "gcp:cloudrunv2/job:Job"
+	TypeJobIAMMember        = "gcp:cloudrunv2/jobIamMember:JobIamMember"
+	TypeSchedulerJob        = "gcp:cloudscheduler/job:Job"
 	TypeSecret              = "gcp:secretmanager/secret:Secret"
 	TypeSecretIAMMember     = "gcp:secretmanager/secretIamMember:SecretIamMember"
 	TypeInstance            = "gcp:sql/databaseInstance:DatabaseInstance"
@@ -41,13 +44,16 @@ const (
 )
 
 // targetValues is the schema of an environment's gcp values: the project
-// and region every resource lands in, and whether the environment is
-// production, which the defaults and the policy rules read (section 7.5).
+// and region every resource lands in, the project's number, which
+// bootstrap records and the generated CI's identity names (D47), and
+// whether the environment is production, which the defaults and the policy
+// rules read (section 7.5).
 const targetValues = `{
   "type": "object",
   "required": ["project", "region"],
   "properties": {
     "project": {"type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"},
+    "projectNumber": {"type": "string", "pattern": "^[1-9][0-9]{5,19}$"},
     "region": {"type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]+$"},
     "production": {"type": "boolean"}
   },
@@ -61,6 +67,17 @@ const cloudRunSettings = `{
     "minInstances": {"type": "integer", "minimum": 0},
     "maxInstances": {"type": "integer", "minimum": 1},
     "concurrency": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+  },
+  "additionalProperties": false
+}`
+
+// cloudRunJobSettings is the schema of a job's settings on Cloud Run
+// (D52): the resources of its one task, as a server's container takes.
+const cloudRunJobSettings = `{
+  "type": "object",
+  "properties": {
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
@@ -93,17 +110,19 @@ const cloudDNSValues = `{
 
 // values are an environment's gcp values.
 type values struct {
-	project    string
-	region     string
-	production bool
+	project       string
+	projectNumber string
+	region        string
+	production    bool
 }
 
 // valuesOf reads the values resolution checked against targetValues.
 func valuesOf(env registry.StackEnvironment) values {
 	project, _ := env.Values["project"].(string)
+	projectNumber, _ := env.Values["projectNumber"].(string)
 	region, _ := env.Values["region"].(string)
 	production, _ := env.Values["production"].(bool)
-	return values{project: project, region: region, production: production}
+	return values{project: project, projectNumber: projectNumber, region: region, production: production}
 }
 
 // The defaults section 7.5 and the platforms' settings fall back to.
@@ -132,6 +151,10 @@ const (
 	livenessPeriod   = 15
 	livenessTimeout  = 5
 	livenessFailures = 3
+
+	// maxJobRetries is the most retries Cloud Run gives a job's task
+	// (D52).
+	maxJobRetries = 10
 
 	defaultCPU      = "1"
 	defaultMemory   = "512Mi"

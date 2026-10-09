@@ -7,6 +7,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/profile"
+	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -77,10 +78,10 @@ type Options struct {
 	Stage BuildStage
 
 	// ImplementationRoot, when set, is the repository root under which the
-	// Go API generator scaffolds a missing implementation, at the naming
-	// file's [implementation_paths] template (docs/stack-model.md, section
-	// 8.5). Empty writes no scaffold; build and build-all set it under
-	// --scaffold.
+	// Go and TypeScript API generators scaffold a missing implementation,
+	// at the naming file's [implementation_paths] template of the API's
+	// language (docs/stack-model.md, sections 8.5 and 8.6). Empty writes no
+	// scaffold; build and build-all set it under --scaffold.
 	ImplementationRoot string
 
 	// RepositoryRoot is the repository root, the parent of the schemas
@@ -91,6 +92,22 @@ type Options struct {
 	// (docs/stack-model.md, sections 8.1, 8.2 and 8.5). Empty writes no
 	// entrypoint.
 	RepositoryRoot string
+
+	// Release is the release of superschematic the generated code pins:
+	// the one a stack's workflow installs, and the modules and static
+	// archives a server takes when no [paths] key names a checkout of them
+	// (docs/stack-model.md, sections 8.2 and 11.3). Nil is the running
+	// binary's, release.Current; tests set it.
+	Release *release.Release
+}
+
+// ReleaseInfo is the release the generated code pins: Release, else the
+// running binary's.
+func (o Options) ReleaseInfo() release.Release {
+	if o.Release != nil {
+		return *o.Release
+	}
+	return release.Current()
 }
 
 // BuildStage is the part of a service's generator pipeline one run

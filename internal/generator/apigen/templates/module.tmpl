@@ -38,8 +38,8 @@ require (
 {{- end }}
 {{- authSnippet "moduleRequires" . }}
 	{{ .TypesModule }} v0.0.0-00010101000000-000000000000
-	{{ $.Naming.HTTPRuntimeGoModule }} v0.0.0-00010101000000-000000000000
-	{{ $.Naming.ScalarGoModule }} v1.0.0
+	{{ $.Naming.HTTPRuntimeGoModule }} {{ .Pins.Version $.Naming.HTTPRuntimeGoModule "v0.0.0-00010101000000-000000000000" }}
+	{{ $.Naming.ScalarGoModule }} {{ .Pins.Version $.Naming.ScalarGoModule "v1.0.0" }}
 	go.uber.org/zap v1.28.0
 {{- if .HasFileUpload }}
 	golang.org/x/image v0.18.0
@@ -81,5 +81,16 @@ replace {{ .Module }} => ../../sdk/go/{{ .Service }}
 {{- end }}
 {{- if .VersionGraphReplacePath }}
 replace {{ $.Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}
+{{- end }}
+{{- if .Pins }}
+
+// The release of superschematic that generated this module pins the
+// runtime modules it reaches, which the module proxy serves, whatever
+// version the modules it requires ask for.
+replace (
+{{- range .Pins.List }}
+	{{ .Module }} => {{ .Module }} {{ .Version }}
+{{- end }}
+)
 {{- end }}
 {{- authSnippet "moduleReplaces" . }}

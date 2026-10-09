@@ -90,6 +90,7 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	root.AddCommand(newJSONSchemaCmd(a))
 	root.AddCommand(newFormatCmd(a))
 	root.AddCommand(newBehaviorsCmd(a))
+	root.AddCommand(newEngineClientCmd(a))
 	root.AddCommand(newStackCmd(a))
 	for _, ext := range exts {
 		if provider, ok := ext.(CommandProvider); ok {

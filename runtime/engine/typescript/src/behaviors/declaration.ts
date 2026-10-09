@@ -101,8 +101,12 @@ export type JSONSchema = boolean | { readonly [key: string]: unknown };
 /** A behavior name the engine takes. */
 export const BEHAVIOR_NAME = /^(?:[A-Za-z][A-Za-z0-9_-]*\.)?[A-Z][A-Za-z0-9]*$/;
 
-/** The operations every schema has, which no behavior may declare. */
-export const BUILTIN_OPERATIONS: readonly string[] = ['create', 'get', 'list', 'update', 'delete'];
+/**
+ * The operations the engine serves on a schema itself, which no behavior
+ * may declare: every schema has create, get, list, update and delete, and
+ * one whose instance type has a unique field lookup.
+ */
+export const BUILTIN_OPERATIONS: readonly string[] = ['create', 'get', 'list', 'update', 'delete', 'lookup'];
 
 /** A veto code: lowercase snake case, at most 64 characters. */
 export const VETO_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
@@ -278,7 +282,7 @@ function checkOperations(operations: unknown, problems: string[]): void {
     } else {
       at = `operation ${name}`;
       if (BUILTIN_OPERATIONS.includes(name)) {
-        problems.push(`${at} has the name of an operation every schema has (${BUILTIN_OPERATIONS.join(', ')})`);
+        problems.push(`${at} has the name of an operation the engine serves on a schema (${BUILTIN_OPERATIONS.join(', ')})`);
       }
       if (seen.has(name)) {
         problems.push(`${at} is declared twice`);

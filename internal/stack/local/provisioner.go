@@ -50,8 +50,10 @@ var inheritedVariables = []string{
 //     ModelsDir, and applies it with the migration runner, expand and
 //     contract back to back, since no server of a previous version runs;
 //     migrate contract has nothing left to run;
-//   - rollout: it builds each server's entrypoint module with `go build`,
-//     starts it with its environment (its literals, its secrets from the
+//   - rollout: it builds each Go server's entrypoint module with `go
+//     build`, and installs the output root's Bun workspace once for the
+//     TypeScript servers, whose main.ts Bun runs as it is (D51); it starts
+//     each server with its environment (its literals, its secrets from the
 //     environment's secrets file, its derived variables, and PORT), and
 //     waits until it answers ReadinessPath.
 //
@@ -88,9 +90,21 @@ type Provisioner struct {
 	// 200ms.
 	PollInterval time.Duration
 
+	// Clock is the time the jobs' schedules read; nil is the system's.
+	Clock Clock
+
 	mu      sync.Mutex
 	console *console
 	running map[string][]*runningServer
+
+	// installed are the output roots whose Bun workspace this provisioner
+	// installed: one `bun install` serves every TypeScript server of every
+	// wave.
+	installed map[string]bool
+
+	// jobs are the jobs each environment's rollout built, which Wait runs
+	// on their schedules (jobs.go).
+	jobs map[string][]*builtJob
 }
 
 var _ registry.Provisioner = (*Provisioner)(nil)
@@ -256,6 +270,9 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 		}
 		changes = append(changes, registry.PlannedChange{Resource: s.ID, Action: action})
 	}
+	for _, j := range prog.Jobs {
+		changes = append(changes, registry.PlannedChange{Resource: j.ID, Action: "build"})
+	}
 	return changes, nil
 }
 
@@ -285,6 +302,7 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	var databases []*Database
 	var keyPairs []*KeyPair
 	var servers []*Server
+	var jobs []*Job
 	for _, id := range step.Resources {
 		if c := prog.container(id); c != nil {
 			containers = append(containers, c)
@@ -294,6 +312,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			keyPairs = append(keyPairs, k)
 		} else if s := prog.server(id); s != nil {
 			servers = append(servers, s)
+		} else if j := prog.job(id); j != nil {
+			jobs = append(jobs, j)
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
 		}
@@ -338,7 +358,12 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 		}
 	}
 	if len(servers) > 0 {
-		return p.startServers(ctx, req, prog, servers)
+		if err := p.startServers(ctx, req, prog, servers); err != nil {
+			return err
+		}
+	}
+	if len(jobs) > 0 {
+		return p.buildJobs(ctx, req, prog, jobs)
 	}
 	return nil
 }
@@ -433,11 +458,24 @@ func (prog *Program) outputs() map[string]map[string]any {
 }
 
 // Wait blocks until ctx is done, and returns nil, or until a server of the
-// environment exits, and returns an error that names it.
+// environment exits, and returns an error that names it. Meanwhile it runs
+// each job the rollout built on its schedule (jobs.go): a job's run that
+// ends, however it ends, never stops the environment. Before it returns,
+// it stops the runs going.
 func (p *Provisioner) Wait(ctx context.Context, req registry.ProvisionRequest) error {
 	if req.Environment == nil {
 		return errors.New("local: no environment")
 	}
+	jobsCtx, stopJobs := context.WithCancel(ctx)
+	scheduled := make(chan struct{})
+	go func() {
+		defer close(scheduled)
+		p.scheduleJobs(jobsCtx, req)
+	}()
+	defer func() {
+		stopJobs()
+		<-scheduled
+	}()
 	p.mu.Lock()
 	servers := slices.Clone(p.running[key(req.Environment)])
 	p.mu.Unlock()
@@ -486,7 +524,9 @@ func (p *Provisioner) lookPath(name string) (string, error) {
 		case "docker":
 			return "", fmt.Errorf("local: docker is not on PATH; the local target runs Postgres in a Docker container: %w", err)
 		case "go":
-			return "", fmt.Errorf("local: go is not on PATH; the local target builds each server with go build: %w", err)
+			return "", fmt.Errorf("local: go is not on PATH; the local target builds each Go server with go build: %w", err)
+		case "bun":
+			return "", fmt.Errorf("local: bun is not on PATH; the local target runs each TypeScript server on Bun (https://bun.sh): %w", err)
 		}
 		return "", fmt.Errorf("local: %s is not on PATH: %w", name, err)
 	}
@@ -669,62 +709,68 @@ func (p *Provisioner) ensureDatabase(ctx context.Context, docker string, c *Cont
 	return nil
 }
 
-// startServers builds each server's entrypoint module, then starts each,
-// and waits until every one is ready. A server this provisioner already
-// runs is stopped first.
+// startServers builds each Go server's entrypoint module, and installs
+// the output root's Bun workspace once for the TypeScript servers, then
+// starts each server, and waits until every one is ready. A server this
+// provisioner already runs is stopped first.
 func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRequest, prog *Program, servers []*Server) error {
 	if req.OutputRoot == "" {
 		return errors.New("local: the request names no output root, where the build wrote each server's entrypoint module")
 	}
-	secrets, err := p.secretsFor(req, servers)
+	envs := make([][]EnvVar, len(servers))
+	for i, s := range servers {
+		envs[i] = s.Env
+	}
+	secrets, err := p.secretsFor(req, envs)
 	if err != nil {
 		return err
 	}
-	goTool, err := p.lookPath("go")
-	if err != nil {
-		return err
+	tools := map[string]string{}
+	for _, s := range servers {
+		tool := "go"
+		if s.Language == LanguageTypeScript {
+			tool = "bun"
+		}
+		if tools[s.Language] == "" {
+			if tools[s.Language], err = p.lookPath(tool); err != nil {
+				return err
+			}
+		}
 	}
 	type built struct {
 		server *Server
-		binary string
-		module string
-		env    []string
+		cmd    Command
 	}
 	var builds []built
-	outputs := prog.outputs()
-	keys, err := p.keysFor(req, prog)
+	outputs, err := p.runOutputs(req, prog)
 	if err != nil {
 		return err
-	}
-	for id, key := range keys {
-		private, err := json.Marshal(key)
-		if err != nil {
-			return err
-		}
-		public, err := json.Marshal(key.Public())
-		if err != nil {
-			return err
-		}
-		outputs[id] = map[string]any{"kid": key.Kid, "publicJwk": string(public), "privateJwk": string(private)}
 	}
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
 			return fmt.Errorf("local: server %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.Deployable, module)
 		}
-		binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(s.Binary)))
-		if err != nil {
-			return err
-		}
 		env, err := serverEnv(s, secrets, req.Parameters, outputs)
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
 		}
+		if s.Language == LanguageTypeScript {
+			if err := p.installWorkspace(ctx, req.OutputRoot, tools[s.Language]); err != nil {
+				return err
+			}
+			builds = append(builds, built{server: s, cmd: Command{Path: tools[s.Language], Args: []string{TypeScriptEntrypoint}, Dir: module, Env: env}})
+			continue
+		}
+		binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(s.Binary)))
+		if err != nil {
+			return err
+		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
-		builds = append(builds, built{server: s, binary: binary, module: module, env: env})
+		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
 	}
 	k := key(req.Environment)
 	for _, b := range builds {
@@ -736,7 +782,9 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		c := p.out()
 		stdout, stderr := c.writer(b.server.Deployable), c.writer(b.server.Deployable)
-		proc, err := p.runner().Start(Command{Path: b.binary, Dir: b.module, Env: b.env, Stdout: stdout, Stderr: stderr})
+		cmd := b.cmd
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		proc, err := p.runner().Start(cmd)
 		if err != nil {
 			return fmt.Errorf("local: start server %s: %w", b.server.Deployable, err)
 		}
@@ -755,6 +803,65 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		p.printf("%s is ready at %s", b.server.Deployable, b.server.URL)
 	}
 	return nil
+}
+
+// TypeScriptEntrypoint is the file of a TypeScript server's entrypoint
+// module that Bun runs (docs/stack-model.md, section 8.6).
+const TypeScriptEntrypoint = "main.ts"
+
+// installWorkspace installs the Bun workspace whose root is the output
+// root, which links each TypeScript server to the generated packages and
+// the implementations it imports, unless this provisioner installed it
+// already. The build writes the root's package.json; the install writes
+// the lockfile beside it, or brings the one there up to date, as an
+// engineer's own bun install does, so the lockfile the project commits
+// (D51, amended) follows the schemas through stack dev. It is not frozen:
+// the generated CI's frozen install is what refuses a stale lockfile.
+func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun string) error {
+	p.mu.Lock()
+	done := p.installed[outputRoot]
+	p.mu.Unlock()
+	if done {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(outputRoot, "package.json")); err != nil {
+		return fmt.Errorf("local: no Bun workspace at %s, whose package.json the stack's build writes for its TypeScript servers (docs/stack-model.md, section 8.6): %w", outputRoot, err)
+	}
+	p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
+	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: []string{"install"}, Dir: outputRoot, Env: os.Environ()}); err != nil {
+		return fmt.Errorf("local: install the TypeScript workspace at %s: %w", outputRoot, err)
+	}
+	p.mu.Lock()
+	if p.installed == nil {
+		p.installed = map[string]bool{}
+	}
+	p.installed[outputRoot] = true
+	p.mu.Unlock()
+	return nil
+}
+
+// runOutputs are the outputs a process's env references resolve against:
+// the program's, and each key pair's, its private key included, read from
+// the environment's state directory, where applying its infrastructure
+// generated them.
+func (p *Provisioner) runOutputs(req registry.ProvisionRequest, prog *Program) (map[string]map[string]any, error) {
+	outputs := prog.outputs()
+	keys, err := p.keysFor(req, prog)
+	if err != nil {
+		return nil, err
+	}
+	for id, key := range keys {
+		private, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		public, err := json.Marshal(key.Public())
+		if err != nil {
+			return nil, err
+		}
+		outputs[id] = map[string]any{"kid": key.Kid, "publicJwk": string(public), "privateJwk": string(private)}
+	}
+	return outputs, nil
 }
 
 // buildEnv is the environment `go build` runs a server module in. Each
@@ -892,12 +999,13 @@ func (p *Provisioner) keysFor(req registry.ProvisionRequest, prog *Program) (map
 	return keys, nil
 }
 
-// secretsFor reads the environment's secrets file when a server reads a
-// secret, and refuses a secret that has no value.
-func (p *Provisioner) secretsFor(req registry.ProvisionRequest, servers []*Server) (map[string]string, error) {
+// secretsFor reads the environment's secrets file when a server or a job
+// reads a secret, given each one's env, and refuses a secret that has no
+// value.
+func (p *Provisioner) secretsFor(req registry.ProvisionRequest, envs [][]EnvVar) (map[string]string, error) {
 	var ids []string
-	for _, s := range servers {
-		for _, v := range s.Env {
+	for _, env := range envs {
+		for _, v := range env {
 			if v.Secret != "" && !slices.Contains(ids, v.Secret) {
 				ids = append(ids, v.Secret)
 			}
@@ -932,13 +1040,25 @@ func (p *Provisioner) secretsFor(req registry.ProvisionRequest, servers []*Serve
 // serverEnv is a server process's whole environment: the variables it
 // inherits, each of its env entries, and PORT.
 func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
+	env, err := processEnviron(s.Env, secrets, params, outputs)
+	if err != nil {
+		return nil, err
+	}
+	return append(env, PortVariable+"="+strconv.Itoa(s.Port)), nil
+}
+
+// processEnviron is the environment of a server or a job process before
+// any variable the platform sets itself: the variables it inherits, and
+// each of its env entries, a secret read from secrets and a value with its
+// references resolved.
+func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
 	var env []string
 	for _, name := range inheritedVariables {
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
-	for _, v := range s.Env {
+	for _, v := range entries {
 		if v.Secret != "" {
 			env = append(env, v.Name+"="+secrets[v.Secret])
 			continue
@@ -949,7 +1069,7 @@ func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]
 		}
 		env = append(env, v.Name+"="+value)
 	}
-	return append(env, PortVariable+"="+strconv.Itoa(s.Port)), nil
+	return env, nil
 }
 
 // resolveValue renders a value as an environment variable's text: a string

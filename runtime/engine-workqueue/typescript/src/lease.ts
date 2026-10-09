@@ -9,9 +9,10 @@ presents another token, whoever calls (token_stale), so a process of the
 holder's principal that lost its lease cannot write once a sibling holds
 a new one. A heartbeat, an acknowledgement and the holder's release need
 the token; with requireToken, so does every other write while a lease is
-active, the holder's own included. The token is no capability: the lease
-field shows it to every reader, and the guard still checks who calls. It
-fences a principal's processes from each other, not principals.
+active, the holder's own included. The token is no capability: its
+field, Lease.token, shows it to every reader, and the guard still checks
+who calls. It fences a principal's processes from each other, not
+principals.
 
 A lease is active while it is held, before its expiry time and within its
 longest hold since acquire (maxHoldMs, or the instance's own maxHoldField).
@@ -40,8 +41,8 @@ A release applies onExpiry too, without counting an expiry, so a holder
 that hands work back leaves it where it can be taken again; a release
 with abandon is the holder giving the work up as failed, and counts as
 an expiry, escalate included, so a worker that keeps taking and dropping
-an instance reaches maxExpiries. The lease field's ended says how the
-last lease ended: release, abandon, or the expiry's reason, ttl (its
+an instance reaches maxExpiries. The ended field says how the last lease
+ended: release, abandon, or the expiry's reason, ttl (its
 holder stopped renewing it), maxHold (it reached its longest hold) or
 holder (it was active and expired by its holder's name). acquire clears
 it, so every end's event carries it.
@@ -73,6 +74,29 @@ the principal it runs for, with none, as a budget does when its usage
 runs over. When the token advances, the directives
 of the lease it ends are deleted, so none reaches the next holder.
 
+directOn sends one when the target of a link of the type's Links moves
+on, as Reactions' revised hears it (the engine's targetMove): a new
+revision of Revisions, or a release of Branches. Lease's reactions hear
+the link's schema on the runner, as its principal, and invoke direct on
+each instance the move reaches (movedOn: where the link pins what the
+move made, a revision or a release, the ones the target moved past)
+whose lease has a holder, with the entry's data and revised (the link,
+the target, its revision, or its release and the release's commit) and a
+dedupeKey per move, so a holder hears each move once. direct refuses a lapsed lease, which the reaction passes
+over; a free instance hears nothing, and nothing waits for its next
+holder. The runner's principal needs directPermission, or
+overridePermission, which parseConfig requires a directOn config to
+name; one that lacks it fails the subscription, forbidden. Without
+directOn the reactions are off (watches returns null), and the version
+that adds it starts the subscription at its publish.
+
+A list filters on the holder (where: { 'Lease.holder': 'wren' }), the
+holder's column through an index on it: a lapsed lease's holder until
+its expiry is applied, as the field reads, and null for a free instance,
+whose holder field is absent.
+Whether a lease is active turns on the clock, which no column holds, so
+active is not filtered on.
+
 Every refusal is a veto with a code the declaration lists: held_by_another,
 held_by_caller, not_leased, not_holder, lapsed, token_stale,
 token_required, max_expiries, hold_limit_fixed and not_configured.
@@ -88,17 +112,25 @@ import {
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
+  WORKFLOW_STATUS,
+  behaviorField,
   defineBehavior,
   isTerminalState,
+  linkPin,
+  movedOn,
+  targetMove,
   type BehaviorScope,
   type ConfigTarget,
   type FrozenJSON,
   type GuardAnswer,
   type GuardRequest,
   type InstanceView,
+  type LinkPin,
   type OperationContext,
+  type ReactionContext,
   type Row,
   type SqlValue,
+  type TargetMove,
   type WorkflowStates,
 } from '@superschematic/engine';
 
@@ -129,6 +161,24 @@ export interface LeaseTransition {
   readonly from: readonly string[];
 }
 
+/**
+ * A directive the runner sends the holder of an instance's active lease
+ * when the target of one of its links moves on: a new revision, or a
+ * release.
+ */
+export interface LeaseDirectOn {
+  /** The link of the type's Links whose target's move sends it. */
+  readonly link: string;
+  /** The link's schema, as the type's Links config gives it. */
+  readonly schema: string;
+  /** What the link pins, a revision or a release: a move of that kind sends it only to the instances the target moved past. */
+  readonly pin?: LinkPin;
+  /** The directive's name. */
+  readonly name: string;
+  /** Its data, beside the revised member the runner adds. */
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
 /** Lease's config, parsed: the defaults filled in. */
 export interface LeaseConfig {
   readonly ttlMs: number;
@@ -146,24 +196,27 @@ export interface LeaseConfig {
   readonly acquirePermission?: string;
   readonly overridePermission?: string;
   readonly directPermission?: string;
+  /** The directives the runner sends the holder when a link's target moves on, one per link. */
+  readonly directOn: readonly LeaseDirectOn[];
 }
 
-/** The lease field. */
+/** Lease's fields, as a read returns them under behaviors.Lease: a field with no value is absent. */
 export interface LeaseRecord {
-  /** The principal that holds the lease; null when it is free. */
-  readonly holder: string | null;
+  /** The principal that holds the lease; absent when it is free. */
+  readonly holder?: string;
   readonly token: number;
-  readonly acquiredAt: number | null;
-  /** When its holder last acquired or renewed it; null when free. */
-  readonly renewedAt: number | null;
-  /** When the lease stops being active: its expiry time, or its longest hold if that comes first; null when free. */
-  readonly expiresAt: number | null;
+  /** Absent when free. */
+  readonly acquiredAt?: number;
+  /** When its holder last acquired or renewed it; absent when free. */
+  readonly renewedAt?: number;
+  /** When the lease stops being active: its expiry time, or its longest hold if that comes first; absent when free. */
+  readonly expiresAt?: number;
   /** Whether it is held and neither expired nor past its longest hold. */
   readonly active: boolean;
   /** How many expiries the instance has had, abandons included. */
   readonly expiries: number;
-  /** How and when the last lease ended; null while one is held, and before the first. */
-  readonly ended: { readonly reason: LeaseEnd; readonly at: number } | null;
+  /** How and when the last lease ended; absent while one is held, and before the first. */
+  readonly ended?: { readonly reason: LeaseEnd; readonly at: number };
 }
 
 /** A directive, as heartbeat returns it. */
@@ -316,7 +369,7 @@ function statusOf(view: InstanceView<LeaseConfig>): Status | undefined {
   if (flow === undefined) {
     return undefined;
   }
-  const status = view.instances.get(view.schema, view.id, { fields: ['status'] })?.data.status;
+  const status = behaviorField(view.instances.get(view.schema, view.id, { fields: [WORKFLOW_STATUS] }), 'Workflow', 'status');
   return typeof status === 'string' ? { flow, status } : undefined;
 }
 
@@ -550,9 +603,10 @@ function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { ho
 }
 
 // acknowledgeDirectives marks directives of the lease handled, for
-// acknowledge and heartbeat's acknowledge; an id not sent under its token
+// acknowledge and heartbeat's acknowledge, and returns how many it marked:
+// none when each was handled already. An id not sent under its token
 // refuses the call.
-function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation: string, path: string, lease: Held, ids: readonly number[]): void {
+function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation: string, path: string, lease: Held, ids: readonly number[]): number {
   const table = context.sql.table('directives');
   const marks = ids.map(() => '?').join(', ');
   const found = new Set(
@@ -568,10 +622,93 @@ function acknowledgeDirectives(context: OperationContext<LeaseConfig>, operation
   if (missing.length > 0) {
     throw new OperationParamsError(NAME, operation, [{ path, message: `no directive ${missing.join(', ')} was sent under token ${lease.token}` }]);
   }
-  context.sql.run(
-    `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
-    [context.now, ...key(context), lease.token, ...ids]
+  return Number(
+    context.sql.run(
+      `UPDATE ${table} SET acknowledged_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND token = ? AND directive IN (${marks}) AND acknowledged_at IS NULL`,
+      [context.now, ...key(context), lease.token, ...ids]
+    ).changes
   );
+}
+
+/** A directOn entry as the config gives it. */
+interface RawDirectOn {
+  readonly revised: { readonly link: string };
+  readonly name: string;
+  readonly data?: Record<string, unknown>;
+}
+
+// checkDirectOn holds directOn to the type's Links, one entry per link,
+// and to a permission that sends directives, which the runner's principal
+// needs, and returns each entry with its link's schema.
+function checkDirectOn(raw: { directOn?: readonly RawDirectOn[]; directPermission?: string; overridePermission?: string }, target: ConfigTarget): LeaseDirectOn[] {
+  const entries = raw.directOn ?? [];
+  if (entries.length === 0) {
+    return [];
+  }
+  if (!target.behaviors.includes('Links')) {
+    throw new BehaviorConfigError(`directOn names links of Links, which the type does not list`);
+  }
+  if (raw.directPermission === undefined && raw.overridePermission === undefined) {
+    throw new BehaviorConfigError(
+      "directOn sends directives as the runner's principal, which needs directPermission, or overridePermission when that is absent; the config names neither"
+    );
+  }
+  const links = (target.configs.Links as { links?: Record<string, { schema?: unknown; pinned?: unknown }> } | undefined)?.links;
+  const seen = new Set<string>();
+  const checked: LeaseDirectOn[] = [];
+  entries.forEach((entry, index) => {
+    const at = `directOn[${index}]`;
+    const name = entry.revised.link;
+    if (seen.has(name)) {
+      throw new BehaviorConfigError(`${at} names link ${name} again: one directive per link`);
+    }
+    seen.add(name);
+    if (entry.data !== undefined && Object.prototype.hasOwnProperty.call(entry.data, 'revised')) {
+      throw new BehaviorConfigError(`${at}.data holds revised, the member the runner sets to the link's move`);
+    }
+    // A Links config of the wrong shape is Links' to refuse.
+    if (links === undefined || typeof links !== 'object' || links === null) {
+      return;
+    }
+    const link = Object.prototype.hasOwnProperty.call(links, name) ? links[name] : undefined;
+    if (link === undefined) {
+      throw new BehaviorConfigError(`${at}.revised names link ${name}, which is not a link of the type's Links (${Object.keys(links).join(', ')})`);
+    }
+    const pin = linkPin(link);
+    checked.push({
+      link: name,
+      schema: String(link.schema),
+      ...(pin === undefined ? {} : { pin }),
+      name: entry.name,
+      ...(entry.data === undefined ? {} : { data: { ...entry.data } }),
+    });
+  });
+  return checked;
+}
+
+// directKey is the dedupe key of a directOn directive: one per lease for
+// each move of the link's target, a revision by its number and a release
+// by the release pointer's version it made.
+function directKey(rule: LeaseDirectOn, move: TargetMove): string {
+  return move.kind === 'revision' ? `revised ${rule.link} ${move.revision}` : `released ${rule.link} ${move.release}`;
+}
+
+// heldAmong lists the ids, of the given ones, whose lease has a holder in
+// Lease's column, a page of ids at a time: the instances a directive can
+// reach, or that direct refuses as lapsed.
+function heldAmong(context: ReactionContext<LeaseConfig>, ids: readonly string[]): string[] {
+  const relation = context.sql.instances();
+  const held: string[] = [];
+  for (let start = 0; start < ids.length; start += BATCH) {
+    const page = ids.slice(start, start + BATCH);
+    held.push(
+      ...context.sql
+        .all(`SELECT id FROM ${relation} WHERE holder IS NOT NULL AND id IN (${page.map(() => '?').join(', ')})`, page)
+        .map((row) => String(row.id))
+    );
+  }
+  const kept = new Set(held);
+  return ids.filter((id) => kept.has(id));
 }
 
 export const lease = defineBehavior<LeaseConfig>({
@@ -596,6 +733,7 @@ export const lease = defineBehavior<LeaseConfig>({
       acquirePermission?: string;
       overridePermission?: string;
       directPermission?: string;
+      directOn?: RawDirectOn[];
     };
     const ttlMs = raw.ttlMs ?? DEFAULT_TTL_MS;
     const heartbeatMs = raw.heartbeatMs ?? Math.floor(ttlMs / 3);
@@ -647,6 +785,7 @@ export const lease = defineBehavior<LeaseConfig>({
       ...(raw.acquirePermission === undefined ? {} : { acquirePermission: raw.acquirePermission }),
       ...(raw.overridePermission === undefined ? {} : { overridePermission: raw.overridePermission }),
       ...(raw.directPermission === undefined ? {} : { directPermission: raw.directPermission }),
+      directOn: checkDirectOn(raw, target),
     };
   },
 
@@ -699,7 +838,18 @@ export const lease = defineBehavior<LeaseConfig>({
         sql.run(`ALTER TABLE ${sql.table('directives')} ADD COLUMN dedupe_key TEXT`);
       },
     },
+    // The holder alone, which a list that filters on Lease.holder reads in
+    // creation order; held, which leads with it, orders by expires_at.
+    { version: 4, name: 'holder index', indexes: { holder: ['holder'] } },
   ],
+
+  filters: {
+    holder: {
+      column: 'holder',
+      type: 'string',
+      description: 'The principal that holds its lease, a lapsed one included until its expiry is applied; null for a free instance.',
+    },
+  },
 
   // The lease's exclusion and its fence: see the header. A new instance
   // holds no lease, so a create has nothing to exclude or fence.
@@ -848,12 +998,15 @@ export const lease = defineBehavior<LeaseConfig>({
         requireOverride(context, 'expire the lease of another holder of');
       }
       const lease = held(context);
+      // A lease it does not expire is left as it was: no event, no seq.
       if (lease.holder === null || (holder === undefined ? isActive(context, lease) : lease.holder !== holder)) {
+        context.unchanged();
         return { expired: false };
       }
       const active = isActive(context, lease);
       // Its holder renewed it after the time: the process holding it is alive.
       if (active && notRenewedAfter !== undefined && (lease.renewedAt ?? lease.acquiredAt ?? 0) > notRenewedAfter) {
+        context.unchanged();
         return { expired: false };
       }
       const reason: ExpiryReason = active ? 'holder' : lapseReason(context, lease);
@@ -879,6 +1032,8 @@ export const lease = defineBehavior<LeaseConfig>({
           dedupeKey,
         ]);
         if (sent !== undefined) {
+          // Sent already: the directive stands as it was sent.
+          context.unchanged();
           return { id: Number(sent.directive), created: false };
         }
       }
@@ -908,7 +1063,10 @@ export const lease = defineBehavior<LeaseConfig>({
     acknowledge(context, params) {
       const lease = held(context);
       checkGuarded(context, 'acknowledge', lease);
-      acknowledgeDirectives(context, 'acknowledge', '/ids', lease, params.ids as number[]);
+      // Every one acknowledged already: nothing changes.
+      if (acknowledgeDirectives(context, 'acknowledge', '/ids', lease, params.ids as number[]) === 0) {
+        context.unchanged();
+      }
       return {};
     },
 
@@ -921,6 +1079,10 @@ export const lease = defineBehavior<LeaseConfig>({
         throw forbidden(context, 'reset the expiries of', permission);
       }
       const { expiries } = held(context);
+      if (expiries === 0) {
+        context.unchanged();
+        return { expiries };
+      }
       context.columns.set({ expiries: 0 });
       return { expiries };
     },
@@ -989,19 +1151,62 @@ export const lease = defineBehavior<LeaseConfig>({
     },
   },
 
+  // directOn: when a link's target moves on, the holder of each instance
+  // it moves on hears the entry's directive. Without directOn the
+  // reactions are off on the schema, so the runner reads none of its
+  // events.
+  reactions: {
+    watches(config) {
+      return config.directOn.length === 0 ? null : [...new Set(config.directOn.map((rule) => rule.schema))];
+    },
+
+    react(context, event) {
+      for (const rule of context.config.directOn) {
+        const move = targetMove(context, NAME, 'directOn', rule.link, rule.schema, event);
+        if (move === undefined) {
+          continue;
+        }
+        const target = event.instanceId as string;
+        const revised =
+          move.kind === 'revision'
+            ? { link: rule.link, schema: rule.schema, id: target, revision: move.revision }
+            : { link: rule.link, schema: rule.schema, id: target, release: move.release, commit: move.commit };
+        const params = { name: rule.name, data: { ...rule.data, revised }, dedupeKey: directKey(rule, move) };
+        for (const id of heldAmong(context, movedOn(context, rule.link, rule.pin, target, move))) {
+          try {
+            context.instances.invoke(context.schema, id, 'direct', params as unknown as FrozenJSON);
+          } catch (error) {
+            // A lease that lapsed or ended since, or a guard's veto: the
+            // instance has no holder to tell, and the next holder starts
+            // from the target as it is.
+            if (!(error instanceof BehaviorVetoError)) {
+              throw error;
+            }
+          }
+        }
+      }
+    },
+  },
+
+  // Each field reads the lease's columns; a free instance has no holder,
+  // acquiredAt, renewedAt or expiresAt, and a held one no ended.
   fields: {
-    lease(view): LeaseRecord {
+    holder: (view): LeaseRecord['holder'] => held(view).holder ?? undefined,
+    token: (view): LeaseRecord['token'] => held(view).token,
+    acquiredAt: (view): LeaseRecord['acquiredAt'] => held(view).acquiredAt ?? undefined,
+    renewedAt(view): LeaseRecord['renewedAt'] {
       const lease = held(view);
-      return {
-        holder: lease.holder,
-        token: lease.token,
-        acquiredAt: lease.acquiredAt,
-        renewedAt: lease.holder === null ? null : (lease.renewedAt ?? lease.acquiredAt),
-        expiresAt: lease.holder === null ? null : deadline(view, lease),
-        active: isActive(view, lease),
-        expiries: lease.expiries,
-        ended: lease.endedReason === null ? null : { reason: lease.endedReason, at: lease.endedAt as number },
-      };
+      return lease.holder === null ? undefined : (lease.renewedAt ?? lease.acquiredAt ?? undefined);
+    },
+    expiresAt(view): LeaseRecord['expiresAt'] {
+      const lease = held(view);
+      return lease.holder === null ? undefined : deadline(view, lease);
+    },
+    active: (view): LeaseRecord['active'] => isActive(view, held(view)),
+    expiries: (view): LeaseRecord['expiries'] => held(view).expiries,
+    ended(view): LeaseRecord['ended'] {
+      const lease = held(view);
+      return lease.endedReason === null ? undefined : { reason: lease.endedReason, at: lease.endedAt as number };
     },
   },
 

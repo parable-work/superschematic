@@ -82,8 +82,9 @@ for (const driver of drivers) {
   const claimNext = (engine: Engine, who: Principal, params: Record<string, unknown> = {}) =>
     (engine.instances.invokeSchema(who, 'Job', 'claimNext', params) as { claimed: { id: string } | null }).claimed;
   const next = (engine: Engine, who: Principal, params: Record<string, unknown> = {}) => claimNext(engine, who, params)?.id ?? null;
-  const read = (engine: Engine, id: string) => engine.instances.get(alice, 'Job', id)?.data as Record<string, unknown>;
-  const leaseOf = (engine: Engine, id: string) => read(engine, id).lease as { holder: string | null; token: number; expiries: number; active: boolean };
+  const statusOf = (engine: Engine, id: string) => engine.instances.get(alice, 'Job', id)?.behaviors.Workflow?.status;
+  const leaseOf = (engine: Engine, id: string) =>
+    engine.instances.get(alice, 'Job', id)?.behaviors.Lease as { holder?: string; token: number; expiries: number; active: boolean };
   const veto = (fn: () => unknown) => thrown(fn, BehaviorVetoError);
 
   describe(`Queue: claim (${driver})`, () => {
@@ -91,12 +92,12 @@ for (const driver of drivers) {
       const { engine } = world();
       create(engine, 'j1');
       assert.deepEqual(claim(engine, worker, 'j1'), { id: 'j1', token: 1, expiresAt: T0 + 60000, heartbeatMs: 20000 });
-      assert.equal(read(engine, 'j1').status, 'running');
+      assert.equal(statusOf(engine, 'j1'), 'running');
       assert.equal(leaseOf(engine, 'j1').holder, 'wren');
       // One event records both.
       const last = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.at(-1);
       assert.deepEqual([last?.actor, (last?.change as { operation: string }).operation], ['wren', 'claim']);
-      assert.equal((last?.change as { patch: { status?: string } }).patch.status, 'running');
+      assert.equal((last?.change as { patch: { behaviors: { Workflow: { status?: string } } } }).patch.behaviors.Workflow.status, 'running');
       // A claimed instance is another principal's lease.
       assert.equal(veto(() => claim(engine, other, 'j1')).behavior, 'Lease');
       // The lease's length is Lease's acquire's.
@@ -115,7 +116,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Job', 'j2', 'addBlocker', { id: 'j3' });
       const blocked = veto(() => claim(engine, worker, 'j2'));
       assert.deepEqual([blocked.behavior, blocked.reason, blocked.vetoCode], ['Queue', 'a blocker holds it up', 'blocked']);
-      assert.deepEqual([leaseOf(engine, 'j2').token, read(engine, 'j2').status], [0, 'queued']);
+      assert.deepEqual([leaseOf(engine, 'j2').token, statusOf(engine, 'j2')], [0, 'queued']);
     });
 
     test('a lease on a type that composes Queue is taken only by claiming it', () => {
@@ -133,7 +134,7 @@ for (const driver of drivers) {
       create(engine, 'held');
       const refused = veto(() => claim(engine, worker, 'held'));
       assert.deepEqual([refused.behavior, refused.action, refused.reason], ['test.Gate', 'transition', 'it is held']);
-      assert.deepEqual([leaseOf(engine, 'held').holder, leaseOf(engine, 'held').token, read(engine, 'held').status], [null, 0, 'queued']);
+      assert.deepEqual([leaseOf(engine, 'held').holder, leaseOf(engine, 'held').token, statusOf(engine, 'held')], [undefined, 0, 'queued']);
     });
 
     test('claim expires a lapsed lease first, and checks the status its expiry leaves', () => {
@@ -142,7 +143,7 @@ for (const driver of drivers) {
       claim(engine, worker, 'j1');
       clock.advance(60000);
       assert.deepEqual(claim(engine, other, 'j1'), { id: 'j1', token: 3, expiresAt: T0 + 120000, heartbeatMs: 20000 });
-      assert.deepEqual([read(engine, 'j1').status, leaseOf(engine, 'j1').holder, leaseOf(engine, 'j1').expiries], ['running', 'otto', 1]);
+      assert.deepEqual([statusOf(engine, 'j1'), leaseOf(engine, 'j1').holder, leaseOf(engine, 'j1').expiries], ['running', 'otto', 1]);
     });
 
     test("with Budget on the type, claim reserves after the lease and before the transition, and a reservation that does not fit refuses it", () => {
@@ -153,7 +154,7 @@ for (const driver of drivers) {
       claim(engine, worker, 'j1');
       assert.deepEqual(reserved, [{ id: 'j1', params: {}, holder: 'wren', status: 'queued' }]);
       assert.equal(veto(() => claim(engine, worker, 'broke')).reason, 'the reservation does not fit');
-      assert.deepEqual([leaseOf(engine, 'broke').holder, leaseOf(engine, 'broke').token, read(engine, 'broke').status], [null, 0, 'queued']);
+      assert.deepEqual([leaseOf(engine, 'broke').holder, leaseOf(engine, 'broke').token, statusOf(engine, 'broke')], [undefined, 0, 'queued']);
       // claimNext does not try it, since Budget's checkReserve says it does not fit.
       reserved.length = 0;
       assert.equal(next(engine, other), null);
@@ -318,6 +319,20 @@ for (const driver of drivers) {
       assert.equal(next(engine, worker), 'j1');
     });
 
+    test('a refresh that finds the copies right changes nothing and appends no event; one that finds them wrong writes', () => {
+      const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
+      publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
+      engine.instances.create(alice, 'Step', { title: 'Approve' }, { id: 's1' });
+      engine.instances.create(alice, 'Job', { title: 'j1' }, { id: 'j1', behaviors: { Dependencies: { blockers: [{ schema: 'Step', id: 's1' }] } } });
+      const seq = engine.instances.get(alice, 'Job', 'j1')?.seq;
+      assert.deepEqual(engine.instances.operate(alice, 'Job', 'j1', 'refresh', {}), { result: {}, seq });
+      assert.deepEqual(engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.map((event) => event.kind), ['create']);
+      // A copy out of step, as one a version before the copies kept would be, is set right by a refresh with its event.
+      engine.storage.run(`UPDATE engine_instances SET bhv_queue__blocked = 0 WHERE schema = 'Job' AND id = 'j1'`);
+      assert.deepEqual(engine.instances.operate(alice, 'Job', 'j1', 'refresh', {}), { result: {}, seq: (seq as number) + 1 });
+      assert.equal(engine.storage.get(`SELECT bhv_queue__blocked AS blocked FROM engine_instances WHERE schema = 'Job' AND id = 'j1'`)?.blocked, 1);
+    });
+
     test("a blocker's change refreshes a dependent another principal holds the lease of: Lease's guard lets refresh through", () => {
       const { engine } = world({ extra: [{ name: 'Dependencies', config: { schemas: ['Job', 'Step'] } }] });
       publish(engine, { kind: 'General', name: 'Step', types: { Step: { name: 'Step', role: 'EmbeddedStruct', behaviors: [{ name: 'Workflow', config: stepFlow }], fields: [{ name: 'title', typeRef: { name: 'string' }, required: true }] } } });
@@ -329,7 +344,7 @@ for (const driver of drivers) {
       assert.equal(veto(() => engine.instances.update(other, 'Job', 'j1', { title: 'Mine' })).behavior, 'Lease');
       // ...but finishing the step, which refreshes j1 as otto, goes through.
       engine.instances.invoke(other, 'Step', 's1', 'transition', { to: 'done' });
-      assert.equal(engine.instances.get(alice, 'Step', 's1')?.data.status, 'done');
+      assert.equal(engine.instances.get(alice, 'Step', 's1')?.behaviors.Workflow?.status, 'done');
     });
 
     test('a stale copy costs a skipped candidate, never a wrong claim; maxCandidates caps the tries', () => {
@@ -345,10 +360,10 @@ for (const driver of drivers) {
       }
       // Two tries, both stale: nothing claimed, nothing changed.
       assert.equal(next(engine, worker), null);
-      assert.deepEqual(['s1', 's2'].map((id) => [read(engine, id).status, leaseOf(engine, id).holder]), [['failed', null], ['failed', null]]);
+      assert.deepEqual(['s1', 's2'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder]), [['failed', undefined], ['failed', undefined]]);
       publish(engine, jobs({ queue: { ...claimable, maxCandidates: 4 } }));
       assert.equal(next(engine, worker), 'good');
-      assert.equal(read(engine, 'good').status, 'running');
+      assert.equal(statusOf(engine, 'good'), 'running');
     });
 
     test('an instance at maxExpiries is no candidate until its expiries are reset', () => {
@@ -357,7 +372,7 @@ for (const driver of drivers) {
       claim(engine, worker, 'j1');
       clock.advance(60000);
       engine.instances.invoke(other, 'Job', 'j1', 'expire');
-      assert.deepEqual([read(engine, 'j1').status, leaseOf(engine, 'j1').expiries], ['queued', 1]);
+      assert.deepEqual([statusOf(engine, 'j1'), leaseOf(engine, 'j1').expiries], ['queued', 1]);
       assert.equal(next(engine, other), null);
       assert.match(veto(() => claim(engine, other, 'j1')).reason, /expired 1 times/);
       engine.instances.invoke(operator, 'Job', 'j1', 'resetExpiries');
@@ -372,7 +387,7 @@ for (const driver of drivers) {
       assert.equal(next(engine, other), null);
       clock.advance(60000);
       assert.equal(engine.runner.runDue().scheduled, 1);
-      assert.deepEqual([read(engine, 'j1').status, leaseOf(engine, 'j1').holder], ['queued', null]);
+      assert.deepEqual([statusOf(engine, 'j1'), leaseOf(engine, 'j1').holder], ['queued', undefined]);
       assert.equal(next(engine, other), 'j1');
     });
   });

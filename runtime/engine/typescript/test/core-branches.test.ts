@@ -79,7 +79,9 @@ for (const driver of drivers) {
           updatedBy: 'alice',
         }
       );
-      assert.deepEqual(engine.instances.get(alice, 'Recipe', 'soup')?.data, { title: 'Soup' });
+      // Branches' entry is empty until a release gives its release field a value.
+      const read = engine.instances.get(alice, 'Recipe', 'soup');
+      assert.deepEqual([read?.data, read?.behaviors], [{ title: 'Soup' }, { Branches: {} }]);
       // The config names the primary line.
       const trunk = opened({ ...recipeConfig, primary: 'trunk' });
       assert.deepEqual(
@@ -167,7 +169,17 @@ for (const driver of drivers) {
         ['not_found', 'Recipe soup has not been released']
       );
       const first = merged.commit as Commit;
+      // The release field is the release pointer's version, absent before the first release.
+      const release = () => soup.engine.instances.get(alice, 'Recipe', 'soup')?.behaviors.Branches.release;
+      assert.equal(release(), undefined);
       assert.deepEqual(soup.invoke('releaseCommit', { commit: first.id, version: 0 }), { commit: first.id, version: 1 });
+      assert.equal(release(), 1);
+      assert.deepEqual(soup.engine.events.read(alice, { schema: 'Recipe', instanceId: 'soup' }).events.at(-1)?.change, {
+        behavior: 'Branches',
+        operation: 'releaseCommit',
+        params: { commit: first.id, version: 0 },
+        patch: { behaviors: { Branches: { release: 1 } } },
+      });
       assert.equal(vetoOf(() => soup.invoke('releaseCommit', { commit: first.id, version: 0 })), 'version_conflict');
       const second = soup.as(bob).change('more', { cover: { upsert: [{ photoUrl: 'soup.jpg' }] } });
       assert.deepEqual(soup.as(bob).invoke('releaseCommit', { commit: second.id, version: 1 }), { commit: second.id, version: 2 });
@@ -176,6 +188,7 @@ for (const driver of drivers) {
       soup.invoke('releaseCommit', { commit: first.id, version: 2 });
       const released = soup.invoke<{ release: { commit: string; version: number }; tree: Tree }>('released');
       assert.deepEqual([released.release, Object.keys(released.tree)], [{ commit: first.id, version: 3 }, ['step']]);
+      assert.equal(release(), 3);
       const log = soup.invoke<{ items: Array<{ version: number; commit: string; releasedBy: string; releasedAt: string }>; next: string | null }>('releases', {
         limit: 2,
       });
@@ -757,6 +770,13 @@ for (const driver of drivers) {
         refused(() => engine.schemas.define(alice, recipeDocument(null) as unknown as Record<string, unknown>)),
         /the graphs its instances root would stay behind with nothing to delete them/
       );
+      // Deleting the last instance deletes its graph: with no instance, a
+      // kind may go and a singleton change.
+      engine.instances.delete(alice, 'Recipe', 'soup');
+      next((config) => {
+        delete (config.kinds as Record<string, unknown>).cover;
+        (config.kinds.step as Record<string, unknown>).units = {};
+      })();
     });
 
     test("after a new version adds a field to a kind's type, materialize of a commit made before returns the contentHash history stored", () => {

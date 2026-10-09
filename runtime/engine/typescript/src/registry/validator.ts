@@ -11,14 +11,26 @@ stored instance can hold:
 - the value is JSON: plain objects and arrays, strings, finite numbers,
   booleans and null. A member whose value is undefined counts as absent;
 - an object holds no key its type does not declare, at every level, so a
-  new optional field never meets a value an older version let through. A
-  field a behavior on the instance type adds is declared too, but it is
-  the behavior's to change: an instance written with one is refused with
-  the `readOnly` rule rather than `unknown`.
+  new optional field never meets a value an older version let through. An
+  instance's data holds its own fields only: its behaviors' sit apart,
+  under each behavior's name, so a key named like one of them is unknown
+  as any other.
 
 validateType holds a value to another type of the document by the same
 rules, for a behavior that types a field the document leaves open (a
 Generic.JSON field Variants types by another field's value).
+
+normalize is what a write stores (D16, amended: a write stores what the
+schema's parse makes of it): the schema runtime's strict parse of the
+instance type, which puts each scalar value in the canonical form its
+scalar's normalize and parse steps give it, at every depth (an email
+lowercased, a color as #RRGGBBAA, a UUID in base62, a JSON object
+scalar's JSON text read into the object), and fills each absent field's
+default. A create fills defaults; a merge patch, whose null removes a
+member, fills none. What the parse cannot read, a value of the wrong type,
+a key the type does not declare, a field a behavior adds, is left as it
+was for validate to report; a scalar parser's own refusal is returned for
+the write to report when validate finds nothing.
 */
 
 import { Runtime, parseSchemaIR } from '@superschematic/schema-runtime';
@@ -34,14 +46,7 @@ export class SchemaValidator {
   // The runtime's object types; every other type of the document is an input.
   private readonly objectTypes: ReadonlySet<string>;
 
-  /**
-   * behaviorFields maps each field the instance type's behaviors add to
-   * the behavior that adds it.
-   */
-  constructor(
-    readonly model: SchemaModel,
-    private readonly behaviorFields: ReadonlyMap<string, string> = new Map()
-  ) {
+  constructor(readonly model: SchemaModel) {
     const schema = parseSchemaIR(runtimeDocument(model.document));
     this.runtime = new Runtime(schema);
     this.objectTypes = new Set(Object.keys(schema.types ?? {}));
@@ -63,15 +68,44 @@ export class SchemaValidator {
     if (issues.length > 0) {
       return issues;
     }
-    for (const key of Object.keys(value)) {
-      const behavior = this.behaviorFields.get(key);
-      if (behavior !== undefined && value[key] !== undefined) {
-        issues.push(readOnlyIssue(key, behavior));
-      }
-    }
-    undeclaredKeys(this.model.document, this.model.instanceType, value, '', issues, this.behaviorFields);
+    undeclaredKeys(this.model.document, this.model.instanceType, value, '', issues);
     flatten(this.errorsOf(this.model.instanceType, value), '', issues);
     return issues;
+  }
+
+  /**
+   * normalize returns value as the version stores it, and the issues a
+   * scalar's parser found that validate does not report: `create` fills
+   * each absent field's default, at every depth; `patch` reads a merge
+   * patch and fills none. A value that is not a JSON object, or holds
+   * anything that is not JSON, comes back as it is.
+   */
+  normalize(value: unknown, mode: NormalizeMode): Normalized {
+    if (!isPlainObject(value)) {
+      return { value, issues: [] };
+    }
+    const notJSON: ValidationIssue[] = [];
+    jsonIssues(value, '', notJSON);
+    if (notJSON.length > 0) {
+      return { value, issues: [] };
+    }
+    const type = this.model.instanceType;
+    const parsed = this.objectTypes.has(type)
+      ? this.runtime.parseType(type, value, { strict: true })
+      : this.runtime.parseInput(type, value, { strict: true });
+    const issues: ValidationIssue[] = [];
+    flatten(parsed.errors, '', issues);
+    return { value: overlay(value, parsed.data, mode === 'create'), issues: issues.filter((issue) => !VALIDATE_REPORTS.has(issue.rule)) };
+  }
+
+  /**
+   * normalizeField returns one value of a top-level own field as a write
+   * would store it, for a lookup's key and a list's where, which compare
+   * with what is stored; any other key's value comes back as it is.
+   */
+  normalizeField(key: string, value: unknown): unknown {
+    const normalized = this.normalize({ [key]: value }, 'patch').value as Record<string, unknown>;
+    return Object.prototype.hasOwnProperty.call(normalized, key) ? normalized[key] : value;
   }
 
   /**
@@ -100,9 +134,51 @@ export class SchemaValidator {
   }
 }
 
-/** readOnlyIssue refuses a value for a field a behavior adds. */
-export function readOnlyIssue(field: string, behavior: string): ValidationIssue {
-  return { path: field, rule: 'readOnly', message: `${field} is a field of behavior ${behavior}, which only its operations change` };
+/** How normalize reads a write: a create's instance, which takes defaults, or a merge patch, which takes none. */
+export type NormalizeMode = 'create' | 'patch';
+
+/** A write as the version stores it, and what a scalar's parser refused in it. */
+export interface Normalized {
+  readonly value: unknown;
+  /** A scalar parser's refusals (rule `parse`), which the write reports when validate reports nothing. */
+  readonly issues: ValidationIssue[];
+}
+
+// The parse's findings validate reports itself, under its own rules: a
+// value of the wrong type, a key no type declares, and a default whose
+// text the field's type cannot read, which leaves the field absent.
+const VALIDATE_REPORTS: ReadonlySet<string> = new Set(['type', 'unknown_field', 'default']);
+
+// overlay is given with each value the parse read in its place: the
+// parse's value for each member it read, at every depth, and the given one
+// for a member it did not (an undeclared key, a behavior's field), so
+// validate still sees it; with defaults, also the members the parse filled.
+function overlay(given: unknown, parsed: unknown, defaults: boolean): unknown {
+  if (isPlainObject(given) && isPlainObject(parsed)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, member] of Object.entries(given)) {
+      if (member !== undefined) {
+        setMember(out, key, Object.prototype.hasOwnProperty.call(parsed, key) ? overlay(member, parsed[key], defaults) : member);
+      }
+    }
+    if (defaults) {
+      for (const [key, member] of Object.entries(parsed)) {
+        if (member !== undefined && (!Object.prototype.hasOwnProperty.call(given, key) || given[key] === undefined)) {
+          setMember(out, key, member);
+        }
+      }
+    }
+    return out;
+  }
+  if (Array.isArray(given) && Array.isArray(parsed) && given.length === parsed.length) {
+    return given.map((element, index) => overlay(element, parsed[index], defaults));
+  }
+  return parsed === undefined ? given : parsed;
+}
+
+// setMember sets an own member, so one named __proto__ stays a member.
+function setMember(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
 function jsonIssues(value: unknown, path: string, issues: ValidationIssue[]): void {
@@ -144,13 +220,12 @@ function undeclaredKeys(
   typeName: string,
   value: Record<string, unknown>,
   path: string,
-  issues: ValidationIssue[],
-  behaviorFields: ReadonlyMap<string, string> = new Map()
+  issues: ValidationIssue[]
 ): void {
   const type = (document.types ?? {})[typeName] as TypeDef;
   const fields = new Map<string, FieldDef>((type.fields ?? []).map((field) => [jsonKey(field), field]));
   for (const [key, member] of Object.entries(value)) {
-    if (member !== undefined && !fields.has(key) && !behaviorFields.has(key)) {
+    if (member !== undefined && !fields.has(key)) {
       issues.push({ path: join(path, key), rule: 'unknown', message: `${typeName} has no field ${key}` });
     }
   }

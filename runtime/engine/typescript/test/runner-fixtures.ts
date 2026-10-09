@@ -24,6 +24,8 @@ export const runnerPrincipal: Principal = { subject: 'runner', permissions: [] }
 export interface LedgerConfig {
   /** The schemas besides its own whose events its reactions hear. */
   readonly watch?: readonly string[];
+  /** Whether its watches turns its reactions off on the schema. */
+  readonly off?: boolean;
 }
 
 export interface PacerConfig {
@@ -35,7 +37,7 @@ export interface PacerConfig {
 export const probe: {
   react?: (context: ReactionContext<LedgerConfig>, event: EngineEvent) => void;
   sweep?: (context: ScheduleContext<LedgerConfig>) => void;
-  watches?: (config: LedgerConfig) => readonly string[];
+  watches?: (config: LedgerConfig) => readonly string[] | null;
   /** test.Pacer's interval for a config, in place of its everyMs. */
   every?: (config: PacerConfig) => unknown;
   tick?: (context: ScheduleContext<PacerConfig>) => void;
@@ -55,7 +57,7 @@ export const ledgerDeclaration: BehaviorDeclaration = {
   configSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: { watch: { type: 'array', items: { type: 'string' } } },
+    properties: { watch: { type: 'array', items: { type: 'string' } }, off: { type: 'boolean' } },
   },
   fields: [{ name: 'notes', description: 'The notes, in the order they were written.' }],
   operations: [
@@ -142,7 +144,7 @@ export const ledger = defineBehavior<LedgerConfig>({
     }
   },
   reactions: {
-    watches: (config) => (probe.watches ? probe.watches(config) : (config.watch ?? [])),
+    watches: (config) => (probe.watches ? probe.watches(config) : config.off === true ? null : (config.watch ?? [])),
     react(context, event) {
       probe.react?.(context, event);
     },

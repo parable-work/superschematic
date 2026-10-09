@@ -70,7 +70,9 @@ var (
 	// Every key of @environment's argument other than those named here
 	// holds the values of the target the environment names, under the
 	// target's name (`gcp: { project, region }`). A settings element's keys
-	// other than of, platform and env are the platform settings.
+	// other than of, job, platform, env, schedule, timeZone and enabled are
+	// the platform settings. job names a job of the API of; schedule,
+	// timeZone and enabled change that job's schedule (D52).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -84,6 +86,10 @@ var (
 				"required": ["of"],
 				"properties": {
 					"of": ` + stackRefSchema + `,
+					"job": {"type": "string", "minLength": 1},
+					"schedule": {"type": "string", "minLength": 1},
+					"timeZone": {"type": "string", "minLength": 1},
+					"enabled": {"type": "boolean"},
 					"platform": {"type": "string", "minLength": 1},
 					"env": {"type": "object", "additionalProperties": {"oneOf": [
 						{"type": ["string", "number", "boolean"]},
@@ -221,10 +227,12 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 	return nil
 }
 
-// deployableSettings reads one settings element: of, platform and env, and
-// the platform settings in every other key.
+// deployableSettings reads one settings element: of, job, platform, env,
+// and a job's schedule, timeZone and enabled, and the platform settings in
+// every other key.
 func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) {
 	settings := &ir.DeployableSettings{}
+	var job string
 	for _, key := range sortedKeys(element) {
 		value := element[key]
 		switch key {
@@ -234,6 +242,15 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 				return nil, fmt.Errorf("of: %w", err)
 			}
 			settings.Of = ref
+		case "job":
+			job, _ = value.(string)
+		case "schedule":
+			settings.Schedule, _ = value.(string)
+		case "timeZone":
+			settings.TimeZone, _ = value.(string)
+		case "enabled":
+			enabled, _ := value.(bool)
+			settings.Enabled = &enabled
 		case "platform":
 			settings.Platform, _ = value.(string)
 		case "env":
@@ -254,6 +271,12 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 			}
 			settings.Values[key] = value
 		}
+	}
+	if job != "" {
+		if settings.Of.Service == nil {
+			return nil, fmt.Errorf("job %s names a job of the API service of names, but of names no service; write `of: <API handle>, job: %q`", job, job)
+		}
+		settings.Of.Job = job
 	}
 	return settings, nil
 }
@@ -284,9 +307,10 @@ func nonEmpty(m map[string]any) map[string]any {
 // section 4.1), in every form: the schema declares one @stack class, every
 // class declares exactly one of @stack, @server, @database and
 // @environment and holds no fields, only an @environment class extends
-// another and then another @environment class, and every class a
-// declaration names is an @server or @database class of the schema.
-// Resolution checks the handles against the services they name.
+// another and then another @environment class, every class a declaration
+// names is an @server or @database class of the schema, and no two
+// environments share an order. Resolution checks the handles against the
+// services they name.
 func verifyStack(schema *ir.Schema, r VerifyReporter) {
 	names := make([]string, 0, len(schema.Types))
 	for name := range schema.Types {
@@ -294,6 +318,10 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 	}
 	sort.Strings(names)
 	var stacks []string
+	// ordered holds the environment that took each order first, by name.
+	// The TypeScript reader numbers the classes, so only a data form
+	// writes two alike.
+	ordered := map[int]string{}
 	for _, name := range names {
 		td := schema.Types[name]
 		if td == nil {
@@ -345,18 +373,36 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if d := schema.Types[ref.Deployable]; d == nil || (d.Server == nil && d.Database == nil) {
 					r.Errorf(td.Owner, "%s names class %s, which is not an @server or @database class of this schema", where, ref.Deployable)
 				}
+				if ref.Job != "" {
+					r.Errorf(td.Owner, "%s names job %s of deployable %s; a job belongs to an API service, so name the API's handle", where, ref.Job, ref.Deployable)
+				}
 			}
 		}
 		if td.Stack != nil {
 			for i, ref := range td.Stack.Expose {
-				checkRef(fmt.Sprintf("@stack class %s expose[%d]", name, i), ref)
+				where := fmt.Sprintf("@stack class %s expose[%d]", name, i)
+				checkRef(where, ref)
+				if ref.Job != "" {
+					r.Errorf(td.Owner, "%s names job %s; only a server is exposed", where, ref.Job)
+				}
 			}
 		}
 		if td.Environment != nil {
 			for i, settings := range td.Environment.Settings {
 				if settings != nil {
-					checkRef(fmt.Sprintf("@environment class %s settings[%d] of", name, i), settings.Of)
+					where := fmt.Sprintf("@environment class %s settings[%d]", name, i)
+					checkRef(where+" of", settings.Of)
+					checkJobSettings(where, td.Owner, settings, r)
 				}
+			}
+			switch order := td.Environment.Order; {
+			case order < 0:
+				r.Errorf(td.Owner, "@environment class %s has order %d; an order counts from 1, and an environment without one leaves it out", name, order)
+			case order == 0:
+			case ordered[order] != "":
+				r.Errorf(td.Owner, "@environment classes %s and %s both have order %d; each environment takes its own place in the order", ordered[order], name, order)
+			default:
+				ordered[order] = name
 			}
 		}
 	}
@@ -366,5 +412,38 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 	case 1:
 	default:
 		r.Errorf("", "Stack schema %s declares @stack on %s; a schema declares one stack", schema.Name, strings.Join(stacks, " and "))
+	}
+}
+
+// checkJobSettings checks a settings element's job settings (D52): only an
+// element whose of names a job sets a schedule, a time zone or enabled, a
+// schedule is a five-field cron and a time zone an IANA one. Whether the
+// API declares the job is resolution's to check.
+func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r VerifyReporter) {
+	if settings.Of.Job == "" {
+		var keys []string
+		if settings.Schedule != "" {
+			keys = append(keys, "schedule")
+		}
+		if settings.TimeZone != "" {
+			keys = append(keys, "timeZone")
+		}
+		if settings.Enabled != nil {
+			keys = append(keys, "enabled")
+		}
+		if len(keys) > 0 {
+			r.Errorf(owner, "%s sets %s, which only a job takes; name the job beside its API's handle, `of: <API handle>, job: \"<job class>\"`", where, strings.Join(keys, " and "))
+		}
+		return
+	}
+	if settings.Schedule != "" {
+		if err := CheckSchedule(settings.Schedule); err != nil {
+			r.Errorf(owner, "%s schedule: %v", where, err)
+		}
+	}
+	if settings.TimeZone != "" {
+		if err := CheckTimeZone(settings.TimeZone); err != nil {
+			r.Errorf(owner, "%s timeZone: %v", where, err)
+		}
 	}
 }

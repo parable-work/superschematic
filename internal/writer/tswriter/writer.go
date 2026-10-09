@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -115,7 +116,7 @@ var symbolPackages = map[string]string{
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
-	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema",
+	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
 	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.
@@ -136,9 +137,12 @@ var symbolPackages = map[string]string{
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
-	"mcp": "@superschematic/api",
+	"mcp": "@superschematic/api", "job": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
+	// @superschematic/stack
+	"stack": "@superschematic/stack", "server": "@superschematic/stack",
+	"database": "@superschematic/stack", "environment": "@superschematic/stack",
 }
 
 // use records a toolchain symbol import and returns the symbol for inline use.
@@ -210,6 +214,37 @@ func (e *emitter) emitDocument() {
 	for _, set := range e.doc.OperationSets {
 		e.emitOperationSet(set)
 	}
+	for _, job := range e.doc.Jobs {
+		e.emitJob(job)
+	}
+}
+
+// emitJob renders a job as the class the reader reads it from (D52):
+// `@job({ ... })` on an abstract class with no members.
+func (e *emitter) emitJob(job *ir.Job) {
+	if job == nil {
+		return
+	}
+	var parts []string
+	if job.Schedule != "" {
+		parts = append(parts, "schedule: "+quote(job.Schedule))
+	}
+	if job.TimeZone != "" {
+		parts = append(parts, "timeZone: "+quote(job.TimeZone))
+	}
+	if job.Timeout != "" {
+		parts = append(parts, "timeout: "+quote(job.Timeout))
+	}
+	if job.Retries != 0 {
+		parts = append(parts, fmt.Sprintf("retries: %d", job.Retries))
+	}
+	arg := ""
+	if len(parts) > 0 {
+		arg = objectLiteral(parts)
+	}
+	e.body.WriteString("\n")
+	e.comment("", job.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("job"), arg, e.ident(job.Name, "job"))
 }
 
 // checkScalars verifies every declared scalar is expressible: TypeScript
@@ -316,11 +351,20 @@ func equalOptionalInt64(left, right *int64) bool {
 }
 
 // sortedTypes returns type names topologically sorted so heritage, @source
-// and @graphMember targets are declared before the classes that reference them
-// (decorator arguments and extends clauses are value positions in
-// TypeScript: forward references do not compile).
+// and @graphMember targets, and the classes a Stack declaration names, are
+// declared before the classes that reference them (decorator arguments and
+// extends clauses are value positions in TypeScript: forward references do
+// not compile). The @environment classes come last, in declaration order
+// (ir.EnvironmentNames), since the reader numbers them by their place.
 func (e *emitter) sortedTypes() []string {
-	names := sortedKeys(e.doc.Types)
+	var names []string
+	for _, name := range sortedKeys(e.doc.Types) {
+		if def := e.doc.Types[name]; def == nil || def.Environment == nil {
+			names = append(names, name)
+		}
+	}
+	environments := ir.EnvironmentNames(e.doc.Types)
+	names = append(names, environments...)
 	deps := make(map[string][]string, len(names))
 	for _, name := range names {
 		def := e.doc.Types[name]
@@ -352,6 +396,12 @@ func (e *emitter) sortedTypes() []string {
 				}
 			}
 		}
+		// A Stack declaration names a declared deployable by its class.
+		for _, ref := range stackClassRefs(def) {
+			if _, ok := e.doc.Types[ref]; ok && ref != name {
+				d = append(d, ref)
+			}
+		}
 		deps[name] = d
 	}
 
@@ -376,7 +426,50 @@ func (e *emitter) sortedTypes() []string {
 	for _, name := range names {
 		visit(name)
 	}
+
+	// The environments with an order come first, and the reader numbers
+	// the classes in the order they are written, so those must be written
+	// first and in their order. An environment whose order comes before the
+	// class it extends cannot be: the parent is written first. Those
+	// without an order come by name, which no order declared, so their
+	// parents may move them.
+	var written []string
+	ordered := 0
+	for _, name := range order {
+		if def := e.doc.Types[name]; def != nil && def.Environment != nil {
+			written = append(written, name)
+			if def.Environment.Order > 0 {
+				ordered++
+			}
+		}
+	}
+	if !slices.Equal(written[:ordered], environments[:ordered]) {
+		e.failf("the @environment classes in their order, %s, have no TypeScript form: a class is declared after the class it extends, so the reader would number them %s",
+			strings.Join(environments[:ordered], ", "), strings.Join(written, ", "))
+	}
 	return order
+}
+
+// stackClassRefs returns the declared deployables' classes def's Stack
+// declarations name: @stack's exposed classes and each settings element's
+// of.
+func stackClassRefs(def *ir.TypeDef) []string {
+	var refs []string
+	if def.Stack != nil {
+		for _, ref := range def.Stack.Expose {
+			if ref.Deployable != "" {
+				refs = append(refs, ref.Deployable)
+			}
+		}
+	}
+	if def.Environment != nil {
+		for _, settings := range def.Environment.Settings {
+			if settings != nil && settings.Of.Deployable != "" {
+				refs = append(refs, settings.Of.Deployable)
+			}
+		}
+	}
+	return refs
 }
 
 // localSourceTarget resolves an @source target ("svc.Type") to the local

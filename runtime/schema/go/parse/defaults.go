@@ -52,17 +52,20 @@ func applyDefault(field *ir.FieldDef, scalar *ir.ScalarDef) (any, bool) {
 }
 
 // primitiveForBuiltin returns the primitive identifier matching a built-in
-// GraphQL scalar name. Empty string is returned for non-builtin names so
-// callers know to consult ScalarDef instead.
+// name: a GraphQL scalar's, or the IR's number, boolean and string, whose
+// default text stands for a number, a boolean and the text itself (D14,
+// amended: the loader checks defaults and examples by the validators'
+// rules). Empty string is returned for other names so callers know to
+// consult ScalarDef instead.
 func primitiveForBuiltin(name string) string {
 	switch name {
 	case "Int":
 		return "Int"
-	case "Float":
+	case "Float", "number":
 		return "Float"
-	case "Boolean":
+	case "Boolean", "boolean":
 		return "Boolean"
-	case "String", "ID":
+	case "String", "ID", "string":
 		return "String"
 	default:
 		return ""

@@ -98,6 +98,29 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 		t.Errorf("@environment wrote %+v, want %+v", prod.Environment, wantEnv)
 	}
 
+	// A job's element names the job beside its API's handle and changes
+	// its schedule; its other keys are the job platform's settings (D52).
+	staging := &ir.TypeDef{Name: "Staging"}
+	if err := applyStackDecorator(t, "environment", staging, map[string]any{"settings": []any{
+		map[string]any{"of": handle("shop-orders", "API"), "job": "ShipOrders", "schedule": "0 * * * *", "timeZone": "Europe/Paris", "enabled": false, "cpu": "2"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	off := false
+	wantJob := &ir.DeployableSettings{
+		Of: ir.DeployableRef{Service: &orders, Job: "ShipOrders"}, Schedule: "0 * * * *", TimeZone: "Europe/Paris", Enabled: &off,
+		Values: map[string]any{"cpu": "2"},
+	}
+	if got := staging.Environment.Settings; len(got) != 1 || !reflect.DeepEqual(got[0], wantJob) {
+		t.Errorf("@environment wrote job settings %+v, want %+v", got, wantJob)
+	}
+	if err := applyStackDecorator(t, "environment", &ir.TypeDef{Name: "E"}, map[string]any{"settings": []any{
+		map[string]any{"of": class("Backend"), "job": "ShipOrders"},
+	}}); err == nil || !strings.Contains(err.Error(), "job ShipOrders names a job of the API service of names, but of names no service") {
+		t.Errorf("a job beside a class: %v", err)
+	}
+
 	// A DNS platform with no values and an environment with no target
 	// values leave both out, as the data forms do.
 	manual := &ir.TypeDef{Name: "Manual"}
@@ -162,7 +185,9 @@ func TestVerifyStack(t *testing.T) {
 		s := ir.NewSchema("shop-stack", ir.SchemaKindStack)
 		s.Types["Shop"] = &ir.TypeDef{Name: "Shop", Stack: &ir.StackDecl{Deploy: []ir.ServiceRef{api}, Expose: []ir.DeployableRef{{Deployable: "Backend"}}}}
 		s.Types["Backend"] = &ir.TypeDef{Name: "Backend", Server: &ir.ServerDecl{Serves: []ir.ServiceRef{api}}}
-		s.Types["Staging"] = &ir.TypeDef{Name: "Staging", Environment: &ir.EnvironmentDecl{Target: "fake", Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}}}}}
+		// An environment with an order and one without, as a data form
+		// may write them.
+		s.Types["Staging"] = &ir.TypeDef{Name: "Staging", Environment: &ir.EnvironmentDecl{Target: "fake", Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}}}, Order: 1}}
 		s.Types["Preview"] = &ir.TypeDef{Name: "Preview", Extends: "Staging", Environment: &ir.EnvironmentDecl{}}
 		return s
 	}
@@ -200,6 +225,23 @@ func TestVerifyStack(t *testing.T) {
 		{"settings of both", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0].Of = ir.DeployableRef{Service: &api, Deployable: "Backend"}
 		}, "names both service shop-api and deployable Backend"},
+		{"a schedule on a server", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0].Schedule = "0 * * * *"
+		}, "@environment class Staging settings[0] sets schedule, which only a job takes"},
+		{"a job of a declared server", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0].Of.Job = "ShipOrders"
+		}, "names job ShipOrders of deployable Backend; a job belongs to an API service"},
+		{"a job's schedule that is no cron", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Job: "ShipOrders"}, Schedule: "every hour"}
+		}, `@environment class Staging settings[0] schedule: "every hour" has 2 fields`},
+		{"a job's time zone the IANA database lacks", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Job: "ShipOrders"}, TimeZone: "Mars/Olympus"}
+		}, `@environment class Staging settings[0] timeZone: "Mars/Olympus" is no IANA time zone`},
+		{"an exposed job", func(s *ir.Schema) {
+			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Job: "ShipOrders"}}
+		}, "@stack class Shop expose[0] names job ShipOrders; only a server is exposed"},
+		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
+		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := valid()

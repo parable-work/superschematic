@@ -1,6 +1,7 @@
-// Behaviors on instances: initialization, the fields they add, guards,
-// operations and the calls between behaviors, after-change hooks, events,
-// the access policy and rollback.
+// Behaviors on instances: initialization, the fields they add, which a
+// read keeps under each behavior's name, guards, operations and the calls
+// between behaviors, after-change hooks, events, the access policy and
+// rollback.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -17,7 +18,7 @@ import {
   type OperationChange,
 } from '../dist/index.js';
 import { counter, openBehaviorEngine, publishItem, tally } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -97,38 +98,41 @@ for (const driver of drivers) {
   const open = (options: Partial<EngineOptions> = {}): Engine => openBehaviorEngine({ driver, ...options });
 
   describe(`behaviors on instances (${driver})`, () => {
-    test("create initializes each behavior, and reads carry their fields beside the type's own", () => {
+    test("create initializes each behavior, and reads carry their fields under each behavior's name, apart from the type's own", () => {
       const engine = open({ clock: () => 50 });
       publishItem(engine, [{ name: 'test.Counter', config: { start: 3 } }, { name: 'test.Flag' }]);
       const created = engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-      assert.deepEqual(created.data, { title: 'Desk', count: 3, flagged: false });
-      assert.deepEqual(Object.keys(created.data), ['title', 'count', 'flagged']);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, created.data);
+      assert.deepEqual(created.data, { title: 'Desk' });
+      assert.deepEqual(created.behaviors, { 'test.Counter': { count: 3 }, 'test.Flag': { flagged: false } });
+      assert.deepEqual(Object.keys(created.behaviors), ['test.Counter', 'test.Flag'], "in the type's behavior order");
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), fieldsOf(created));
       assert.deepEqual(
-        engine.instances.list(alice, 'Item').items.map((item) => item.data),
-        [created.data]
+        engine.instances.list(alice, 'Item').items.map((item) => fieldsOf(item)),
+        [fieldsOf(created)]
       );
       // The row holds only the type's own fields; the behaviors keep theirs.
       assert.equal(engine.storage.get('SELECT data FROM engine_instances')?.data, '{"title":"Desk"}');
-      assert.deepEqual(eventsOf(engine), [{ kind: 'create', seq: 1, change: { title: 'Desk', count: 3, flagged: false } }]);
+      assert.deepEqual(eventsOf(engine), [{ kind: 'create', seq: 1, change: fieldsOf(created) }]);
     });
 
-    test('a behavior field is read-only: create and update refuse it', () => {
+    test("a behavior field's name is no field of the type's: create and update refuse it as unknown", () => {
       const engine = open();
       publishItem(engine, [{ name: 'test.Counter' }]);
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-      const readOnly = { path: 'count', rule: 'readOnly', message: 'count is a field of behavior test.Counter, which only its operations change' };
-      assert.deepEqual(thrown(() => engine.instances.create(alice, 'Item', { title: 'Lamp', count: 5 }), InstanceValidationError).issues, [readOnly]);
-      for (const patch of [{ count: 5 }, { count: null }, { title: 'Lamp', count: 0 }]) {
+      const unknown = { path: 'count', rule: 'unknown', message: 'Item has no field count' };
+      assert.deepEqual(thrown(() => engine.instances.create(alice, 'Item', { title: 'Lamp', count: 5 }), InstanceValidationError).issues, [unknown]);
+      for (const patch of [{ count: 5 }, { title: 'Lamp', count: 0 }]) {
         const error = thrown(() => engine.instances.update(alice, 'Item', 'i1', patch), InstanceValidationError);
         assert.equal(error.code, 'invalid_instance');
-        assert.deepEqual(error.issues, [readOnly]);
+        assert.deepEqual(error.issues, [unknown]);
       }
+      // A patch that removes it removes no own field: it changes nothing.
+      assert.equal(engine.instances.update(alice, 'Item', 'i1', { count: null }).seq, 1);
       assert.deepEqual(engine.schemas.validate(alice, 'Item', { title: 'Lamp', count: 1, colour: 'red' }), [
-        readOnly,
+        unknown,
         { path: 'colour', rule: 'unknown', message: 'Item has no field colour' },
       ]);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 0 } } });
       assert.equal(eventsOf(engine).length, 1);
     });
 
@@ -139,12 +143,12 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'increment', { by: 2 }), { count: 2 });
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'increment'), { count: 3 });
       const instance = engine.instances.get(alice, 'Item', 'i1');
-      assert.deepEqual(instance?.data, { title: 'Desk', count: 3 });
+      assert.deepEqual(fieldsOf(instance), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 3 } } });
       assert.equal(instance?.seq, 3);
-      const change: OperationChange = { behavior: 'test.Counter', operation: 'increment', params: { by: 2 }, patch: { count: 2 } };
+      const change: OperationChange = { behavior: 'test.Counter', operation: 'increment', params: { by: 2 }, patch: { behaviors: { 'test.Counter': { count: 2 } } } };
       assert.deepEqual(eventsOf(engine).slice(1), [
         { kind: 'operation', seq: 2, change },
-        { kind: 'operation', seq: 3, change: { behavior: 'test.Counter', operation: 'increment', params: {}, patch: { count: 3 } } },
+        { kind: 'operation', seq: 3, change: { behavior: 'test.Counter', operation: 'increment', params: {}, patch: { behaviors: { 'test.Counter': { count: 3 } } } } },
       ]);
     });
 
@@ -183,7 +187,7 @@ for (const driver of drivers) {
       );
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Item', 'missing', 'increment'), EngineError).code, 'not_found');
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Order', 'i1', 'increment'), EngineError).code, 'not_found');
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 0);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 0);
     });
 
     test('a guard vetoes an update, a delete and an operation; the first veto wins and nothing changes', () => {
@@ -210,7 +214,10 @@ for (const driver of drivers) {
       // The counter's guard comes first in list order.
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Item', 'i1', 'increment', { by: 4 }), BehaviorVetoError).behavior, 'test.Counter');
       assert.equal(eventsOf(engine).length, events);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 0, flagged: true, flagReason: 'audit' });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), {
+        data: { title: 'Desk' },
+        behaviors: { 'test.Counter': { count: 0 }, 'test.Flag': { flagged: true, flagReason: 'audit' } },
+      });
       // A patch that changes nothing is no update, and asks no guard.
       assert.equal(engine.instances.update(alice, 'Item', 'i1', { title: 'Desk' }).seq, 2);
 
@@ -317,11 +324,14 @@ for (const driver of drivers) {
         behavior: 'test.Tally',
         operation: 'bump',
         params: { times: 2 },
-        patch: { count: 2 },
+        patch: { behaviors: { 'test.Counter': { count: 2 } } },
       });
       // A caller that catches the veto goes on; its own writes stay.
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'tryBump'), { vetoed: true });
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 2, edits: 100 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), {
+        data: { title: 'Desk' },
+        behaviors: { 'test.Counter': { count: 2 }, 'test.Tally': { edits: 100 } },
+      });
     });
 
     test("a guard sees who called, the caller's behavior for a call(), and whether the operation writes", () => {
@@ -352,8 +362,9 @@ for (const driver of drivers) {
       publishItem(engine, [{ name: 'test.Counter' }, { name: 'test.Tally' }]);
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
       const updated = engine.instances.update(alice, 'Item', 'i1', { title: 'Lamp' });
-      assert.deepEqual(updated.data, { title: 'Lamp', count: 0, edits: 1 });
-      assert.deepEqual(eventsOf(engine).at(-1), { kind: 'update', seq: 2, change: { title: 'Lamp', edits: 1 } });
+      assert.deepEqual(fieldsOf(updated), { data: { title: 'Lamp' }, behaviors: { 'test.Counter': { count: 0 }, 'test.Tally': { edits: 1 } } });
+      // The caller's patch under data, what its behaviors' fields moved under behaviors.
+      assert.deepEqual(eventsOf(engine).at(-1), { kind: 'update', seq: 2, change: { data: { title: 'Lamp' }, behaviors: { 'test.Tally': { edits: 1 } } } });
     });
 
     test("a delete runs guards before and afterChange after, which cleans up the behavior's tables", () => {
@@ -365,7 +376,7 @@ for (const driver of drivers) {
       assert.equal(engine.instances.delete(alice, 'Item', 'i1'), true);
       assert.equal(engine.storage.get('SELECT COUNT(*) AS n FROM bhv_test_counter__history')?.n, 0);
       // A re-created instance starts over.
-      assert.equal(engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' }).data.count, 0);
+      assert.equal(engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' }).behaviors['test.Counter']?.count, 0);
     });
 
     test('a handler that throws rolls everything back', () => {
@@ -373,11 +384,11 @@ for (const driver of drivers) {
       publishItem(engine, [{ name: 'test.Faulty' }, { name: 'test.Caller' }]);
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
       assert.throws(() => engine.instances.invoke(alice, 'Item', 'i1', 'markThenThrow'), /^Error: the handler failed after writing$/);
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', marks: 0, calls: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Faulty': { marks: 0 }, 'test.Caller': { calls: 0 } } });
       assert.equal(eventsOf(engine).length, 1);
       // A called operation that throws rolls back alone when its caller catches.
       assert.equal(engine.instances.invoke(alice, 'Item', 'i1', 'callFaulty'), 'caught');
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', marks: 0, calls: 1 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Faulty': { marks: 0 }, 'test.Caller': { calls: 1 } } });
     });
 
     test('defects in behavior code are BehaviorErrors, and roll back', () => {
@@ -399,7 +410,7 @@ for (const driver of drivers) {
         assert.equal(error.behavior, 'test.Faulty');
         assert.ok(!(error instanceof EngineError));
       }
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 0, marks: 0 });
+      assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'i1')), { data: { title: 'Desk' }, behaviors: { 'test.Counter': { count: 0 }, 'test.Faulty': { marks: 0 } } });
       assert.equal(eventsOf(engine).length, 1);
     });
 
@@ -429,7 +440,7 @@ for (const driver of drivers) {
         }
         assert.deepEqual(asked, [{ principal, action, namespace: 'default', schema: 'Item', operation }]);
       }
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 1);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 1);
       // An operation the schema lacks is not_found to a reader, and forbidden
       // to a principal that may not read.
       asked.length = 0;

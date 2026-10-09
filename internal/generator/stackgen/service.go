@@ -20,7 +20,8 @@ import (
 //     (stack.OperationsOf), against which the resolver checks each edge to
 //     the API (D37);
 //   - an API's @envVars type, read as the env loaders read it
-//     (envgen), with each field's Secret, Default and InheritedFrom.
+//     (envgen), with each field's Secret, Default and InheritedFrom;
+//   - an API's jobs, each a deployable of the stack (D52).
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -45,6 +46,13 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		}
 		svc.Config = config
 		svc.Operations = stack.OperationsOf(schema)
+		for _, job := range schema.Jobs {
+			if job != nil {
+				fact := *job
+				fact.Comment = ""
+				svc.Jobs = append(svc.Jobs, fact)
+			}
+		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
 	}

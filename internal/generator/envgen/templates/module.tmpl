@@ -23,3 +23,14 @@ replace {{ .Naming.ScalarGoModule }} => {{ .ScalarLibReplacePath }}
 {{- if .SchemaIRReplacePath }}
 replace {{ .Naming.SchemaIRGoModule }} => {{ .SchemaIRReplacePath }}
 {{- end }}
+{{- if .Pins }}
+
+// The release of superschematic that generated this module pins the
+// runtime modules it reaches, which the module proxy serves, whatever
+// version the modules it requires ask for.
+replace (
+{{- range .Pins.List }}
+	{{ .Module }} => {{ .Module }} {{ .Version }}
+{{- end }}
+)
+{{- end }}

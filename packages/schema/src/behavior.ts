@@ -31,7 +31,7 @@ export interface BehaviorConfigs {
   Revisions: RevisionsConfig;
   /** Blockers between instances, which hold up the type's Workflow; it requires Workflow. */
   Dependencies: DependenciesConfig;
-  /** Typed links to instances of the schemas it names, optionally pinned to a revision. */
+  /** Typed links to instances of the schemas it names, optionally pinned to a revision or a release. */
   Links: LinksConfig;
   /** Values derived from the instances that point at this one through a link, computed when it is read. */
   Rollups: RollupsConfig;
@@ -125,8 +125,13 @@ export interface LinkConfig {
   readonly schema: string;
   /** Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. */
   readonly required?: boolean;
-  /** The link records the target's revision and reports whether the target has moved past it; the schema must compose Revisions. */
-  readonly pinned?: boolean;
+  /**
+   * What the link records of the target, reporting the target's latest
+   * beside it and whether the target has moved past it: true or
+   * "revision", its revision, whose schema must compose Revisions;
+   * "release", its release, whose schema must compose Branches.
+   */
+  readonly pinned?: boolean | "revision" | "release";
 }
 
 /** Rollups' config. */
@@ -145,14 +150,16 @@ export interface RollupSource {
 
 /**
  * One rollup of a Rollups config. count, all and any take no field;
- * countBy takes a string, enum or boolean field, or status, and sum, min
- * and max a number or integer field. all and any may gate states of the
- * type's Workflow, and count only terminal states with the outcomes they
- * list.
+ * countBy takes a string, enum or boolean field, or "Workflow.status",
+ * the linked instances' Workflow status; sum, min and max a number or
+ * integer field; and latest any field, or "Workflow.status": its value on
+ * the linked instance created last. all and any may gate states
+ * of the type's Workflow, and count only terminal states with the
+ * outcomes they list.
  */
 export type RollupConfig =
   | (RollupSource & { readonly function: "count" })
-  | (RollupSource & { readonly function: "countBy" | "sum" | "min" | "max"; readonly field: string })
+  | (RollupSource & { readonly function: "countBy" | "sum" | "min" | "max" | "latest"; readonly field: string })
   | (RollupSource & {
       readonly function: "all" | "any";
       /** The states of the type's Workflow that a transition into waits for the rollup to hold. */
@@ -230,8 +237,8 @@ export type ReactionWhen =
       /**
        * The rule fires on an instance when the instance its link points to
        * gains a new revision of Revisions, or, when its schema composes
-       * Branches, a new release; for a pinned link, only on an instance the
-       * new revision leaves stale.
+       * Branches, a new release; for a link pinned to the one it gains, only
+       * on an instance the new revision or release leaves stale.
        */
       readonly revised: { readonly link: string };
     };
@@ -360,12 +367,30 @@ export interface LeaseConfig {
   readonly overridePermission?: string;
   /** The permission a principal needs to send the holder a directive. */
   readonly directPermission?: string;
+  /**
+   * Directives the engine's runner sends the holder of an instance's
+   * active lease when the target of one of its links moves on: a new
+   * revision, or a release. One entry per link of the type's Links; needs
+   * directPermission or overridePermission, which the runner's principal
+   * must hold.
+   */
+  readonly directOn?: readonly LeaseDirectOn[];
 }
 
 /** A move of the status a lease's end makes: to transition, from one of from. */
 export interface LeaseTransition {
   readonly transition: string;
   readonly from: readonly string[];
+}
+
+/** A directive Lease's directOn sends when a link's target moves on. */
+export interface LeaseDirectOn {
+  /** The link of the type's Links whose target's new revision or release sends it. */
+  readonly revised: { readonly link: string };
+  /** The directive's name. */
+  readonly name: string;
+  /** Its data, beside revised, which the runner sets to what moved. */
+  readonly data?: Readonly<Record<string, unknown>>;
 }
 
 /** Assignment's config. */
@@ -386,8 +411,8 @@ export interface QueueConfig {
   readonly maxCandidates?: number;
   /**
    * Pinned links of the type's Links config: an instance one of which is
-   * pinned to a revision its target has moved past is not claimed, and is
-   * no candidate until a change of it lets it back in.
+   * pinned to a revision or a release its target has moved past is not
+   * claimed, and is no candidate until a change of it lets it back in.
    */
   readonly excludeStale?: readonly string[];
 }
@@ -427,7 +452,7 @@ export interface BlueprintBase {
   readonly keyField: string;
   /** Fields of this type copied to every child. */
   readonly copyFields?: readonly string[];
-  /** Links of this type copied to every child, keeping a pinned one's revision: the ones the instance holds when it is stamped. */
+  /** Links of this type copied to every child, keeping the revision or release a pinned one records where the child's pins the same: the ones the instance holds when it is stamped. */
   readonly copyLinks?: readonly string[];
 }
 
@@ -444,7 +469,7 @@ export interface BlueprintStep {
   readonly data?: Readonly<Record<string, unknown>>;
 }
 
-/** Where a Blueprint's steps are kept: a pinned link of the type, and the field of the linked instance that holds them. */
+/** Where a Blueprint's steps are kept: a link of the type pinned to a revision, and the field of the linked instance that holds them. */
 export interface BlueprintSource {
   readonly link: string;
   readonly field: string;
@@ -464,9 +489,9 @@ export interface BudgetConfig {
 
 /** One meter of a Budget config. */
 export interface BudgetMeter {
-  /** The most the instance may have used and reserved together; no limit of its own without this or limitField. */
+  /** The most the instance may have used and reserved together; with limitField, the limit while the field holds none. No limit of its own without either. */
   readonly limit?: number;
-  /** An integer field of the type that holds the instance's limit; not with limit. */
+  /** An integer field of the type that holds the instance's limit; limit is the limit while it holds no value of at least 0. */
   readonly limitField?: string;
   /** The amount reserve takes for the meter when it is given no meter; with reserveField, when the field holds no positive integer. */
   readonly reserve?: number;

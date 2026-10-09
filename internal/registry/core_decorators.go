@@ -98,6 +98,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// @environment (core_stack.go).
 	specs = append(specs, stackDecorators()...)
 
+	// An API service's jobs, a class each (core_jobs.go, D52).
+	specs = append(specs, jobDecorator())
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })
@@ -229,6 +232,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	})
 	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
 	specs = append(specs, behaviorDecorator(r.Behavior, r.BehaviorNames))
+	specs = append(specs, displayDecorator())
 	return specs
 }
 

@@ -5,9 +5,10 @@ export {};
 declare module "@superschematic/stack" {
   interface Targets {
     fake: {
-      values: { project: string; region: string; production?: boolean };
+      values: { project: string; projectNumber?: string; region: string; production?: boolean };
       server: { minInstances?: number; public?: boolean };
       database: { tier?: "small" | "large"; highAvailability?: boolean };
+      job: { cpu?: string };
     };
   }
 }

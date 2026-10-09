@@ -9,6 +9,11 @@
 // (SHOP_DB_DATABASE_URL, SHOP_API_SERVICE_CREDENTIAL_SOURCE,
 // SHOP_API_CALLERS_ISSUERS_0_AUDIENCE). The members are those of
 // ir.DatabaseConnection, ir.ServiceEndpoint and ir.ServiceAuth.
+//
+// The TypeScript HTTP runtime's loadDatabase, loadService and loadCallers
+// read the same variables with the same refusals (D51). The vectors in
+// runtime/http/testdata/stackconfig_parity.json, which this package's
+// tests write with -update, hold both to one encoding.
 package stackconfig
 
 import (

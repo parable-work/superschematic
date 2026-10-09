@@ -12,6 +12,9 @@ Queue's claim by every principal but the assignee, whoever made the call
 (a claim calls acquire for its caller), so an assigned instance is
 claimed only by its assignee.
 
+A list filters on the assignee (where: { 'Assignment.assignee': 'alice' }),
+null keeping the unassigned instances, through an index on its column.
+
 Every refusal is a veto with a code the declaration lists
 (assigned_to_another, already_assigned, not_assigned, not_configured),
 but a move the config's permission allows and the caller lacks, which is
@@ -88,7 +91,12 @@ export const assignment = defineBehavior<AssignmentConfig>({
         assigned_by: { type: 'text' },
       },
     },
+    // The index lets a list that filters on the assignee read only one
+    // principal's instances, or the unassigned ones, in creation order.
+    { version: 2, name: 'assignee index', indexes: { assignee: ['assignee'] } },
   ],
+
+  filters: { assignee: { column: 'assignee', type: 'string' } },
 
   guard(view, request) {
     if (request.kind !== 'operation' || !GATED.has(`${request.behavior}.${request.operation}`)) {

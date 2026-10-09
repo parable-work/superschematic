@@ -780,8 +780,12 @@ engine.schemas.define(me, { kind: "General", name: "Product", ...productSchemaJS
 engine.schemas.publish(me, "Product");
 engine.instances.create(me, "Product", { sku: "walnut-desk", name: "Walnut desk" }, { id: "p1" });
 engine.instances.invoke(me, "Product", "p1", "rate", { stars: 4 });  // { ratingCount: 1, ratingAverage: 4 }
-engine.instances.get(me, "Product", "p1")?.data;                     // ..., ratingCount: 1, ratingAverage: 4
+engine.instances.get(me, "Product", "p1")?.behaviors["acme.Rating"]; // { ratingCount: 1, ratingAverage: 4 }
 ```
+
+A read keeps the behavior's fields under its name, apart from the
+product's own fields in `data`, so `Product` could declare a
+`ratingCount` of its own without colliding.
 
 `metaSchema` is `acme-schematic json-schema`'s output, which declares
 `acme.Rating`. `tools` is the invocation policy and the vendor keys acme's

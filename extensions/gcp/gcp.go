@@ -1,7 +1,8 @@
 // Package gcp is the gcp target of the stack model (docs/stack-model.md,
-// section 7): Cloud Run servers, Cloud SQL Postgres databases, Secret
-// Manager secrets, a global external Application Load Balancer for exposed
-// servers, and Cloud DNS for their records. It registers through the
+// section 7): Cloud Run servers, Cloud Run jobs and their Cloud Scheduler
+// schedules, Cloud SQL Postgres databases, Secret Manager secrets, a global
+// external Application Load Balancer for exposed servers, and Cloud DNS for
+// their records. It registers through the
 // public registry package alone, as any extension does (D10), in a Go
 // module of its own (D1), so the GCP vocabulary stays out of the core.
 //
@@ -30,10 +31,12 @@ const (
 	// Target is the target's name.
 	Target = "gcp"
 
-	// CloudRun runs servers as Cloud Run services; CloudSQL runs Postgres
-	// databases on Cloud SQL instances.
-	CloudRun = "gcp.cloudrun"
-	CloudSQL = "gcp.cloudsql"
+	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
+	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
+	// CloudSQL runs Postgres databases on Cloud SQL instances.
+	CloudRun    = "gcp.cloudrun"
+	CloudRunJob = "gcp.cloudrunjob"
+	CloudSQL    = "gcp.cloudsql"
 
 	// CloudDNS writes an environment's records into a Cloud DNS managed
 	// zone. It is the target's default DNS platform.
@@ -43,6 +46,11 @@ const (
 	// HTTPConnector connects a Cloud Run server to one it calls.
 	SQLConnector  = "gcp.cloudrun-cloudsql"
 	HTTPConnector = "gcp.cloudrun-cloudrun"
+
+	// JobSQLConnector and JobHTTPConnector connect a Cloud Run job, whose
+	// edges are its API's, as the server's connectors do (D52).
+	JobSQLConnector  = "gcp.cloudrunjob-cloudsql"
+	JobHTTPConnector = "gcp.cloudrunjob-cloudrun"
 
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
@@ -94,7 +102,9 @@ func (Extension) Name() string { return Name }
 // Register adds the gcp target, its platforms, connectors and DNS
 // platform, the pinned schema of every resource type they and bootstrap
 // emit, and the target's deploy seams: the state bucket, Secret Manager,
-// bootstrap, image builds with Cloud Build and the migration job.
+// bootstrap, image builds with Cloud Build, the migration job, the
+// generated CI's sign-in through Workload Identity Federation, and a job's
+// run on demand as an execution of its Cloud Run job (D52).
 func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
@@ -106,6 +116,16 @@ func (e Extension) Register(r *registry.Registry) error {
 			NameOf:    serviceName,
 			AddressOf: serviceAddress,
 			Lower:     lowerService,
+		},
+		{
+			Name:      CloudRunJob,
+			Extension: Name,
+			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
+			Settings:  json.RawMessage(cloudRunJobSettings),
+			NameOf:    serviceName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerJob,
 		},
 		{
 			Name:      CloudSQL,
@@ -125,6 +145,8 @@ func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.ConnectorSpec{
 		{Name: SQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRun, To: CloudSQL, Connect: connectSQL},
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
+		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
+		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunJob, To: CloudRun, Connect: connectHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -145,6 +167,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Platforms: map[ir.DeployableKind]string{
 			ir.DeployableServer:   CloudRun,
 			ir.DeployableDatabase: CloudSQL,
+			ir.DeployableJob:      CloudRunJob,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,
@@ -159,6 +182,8 @@ func (e Extension) Register(r *registry.Registry) error {
 		Bootstrap:  bootstrapper{ext: e},
 		Migrations: e.migrations(),
 		Builder:    imageBuilder{ext: e},
+		CI:         ciIdentities{},
+		Jobs:       jobRunner{ext: e},
 	})
 }
 

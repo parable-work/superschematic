@@ -6,7 +6,17 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { allowAll, isBun, openEngine, type DriverName, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+import {
+  allowAll,
+  isBun,
+  openEngine,
+  type DriverName,
+  type Engine,
+  type EngineOptions,
+  type InstanceFields,
+  type InstanceRecord,
+  type Principal,
+} from '../dist/index.js';
 
 /** The principal most tests act as; openTestEngine allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
@@ -57,6 +67,15 @@ export function thrown<T extends Error>(fn: () => unknown, type: new (...args: n
     return error;
   }
   assert.fail(`expected ${type.name} to be thrown`);
+}
+
+/**
+ * fieldsOf is an instance's fields as a read returns them, its own in data
+ * and its behaviors' in behaviors, without the rest of its record;
+ * undefined for none.
+ */
+export function fieldsOf(record: InstanceRecord | undefined): InstanceFields | undefined {
+  return record === undefined ? undefined : { data: record.data, behaviors: record.behaviors };
 }
 
 export type Field = Record<string, unknown> & { name: string; typeRef: Record<string, unknown> };
@@ -123,6 +142,20 @@ export function clone<T>(value: T): T {
 export function documentsDocument(): Record<string, unknown> {
   return JSON.parse(
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-behaviors-json/src/document.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
+ * ticketsDocument is the General schema-file document the core binary
+ * loads with no extension linked (fixture-display-json, which
+ * `superschematic format --to=json` wrote from its TypeScript twin): its
+ * Ticket type composes Workflow and Comments and declares @display over
+ * its fields, its states and its transitions, and its fields' titles and
+ * icons.
+ */
+export function ticketsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-display-json/src/ticket.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 
