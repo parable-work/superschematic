@@ -13,8 +13,9 @@ Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
 rules. For the operations a page can call, the crate also has a form per
-input type and a record per result type, with components that render each
-record, and it mounts the JSON API beside the pages.
+input type, nested objects and lists included, and a record per result
+type, with components that render each record, and it mounts the JSON API
+beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
@@ -102,9 +103,8 @@ only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 
-An input type gets a form when an operation a page can call takes it,
-each of its fields is a string, a number, a boolean or an enum, alone,
-and the service declares it; the build log names any other and why.
+An input type gets a form when an operation a page can call takes it and
+the service declares it; the build log names any other and why.
 `forms::WriteReviewInputForm` holds the form's fields as the browser sends
 them, each an `Option<String>`, so a refused form renders again as it was
 sent. `parse()` reads them by `WriteReviewInput`'s rules, and
@@ -117,6 +117,67 @@ messages:
 the input type's rules give them: `required`, `min` and `max` on the
 rating, `maxlength` on the title. A browser checks them before it sends the
 form, and `parse()` checks every rule again.
+
+### Nested objects and lists
+
+A control is named by its field's path in the input, so a form holds an
+input of any shape. `shop-orders`' `PlaceOrderInput` has a nested
+`shippingAddress` and a list of `lines`, each a product and a quantity:
+`place_order_input_fields` renders the address in a `<fieldset>` whose
+controls are `shippingAddress.city` and the rest, and each line in a
+fieldset of its own, `lines[0].productId` and `lines[0].quantity`.
+`PlaceOrderInputForm` holds them as `ShippingAddressForm` and a
+`Vec<PlaceOrderLineForm>`, and `Form<PlaceOrderInputForm>` decodes a post
+into it, a list's rows in the order of their indexes. An error, `parse`'s
+or the operation's, is keyed by the same path, so it renders at its
+control: a quantity over 99 on the second line is shown on
+`lines[1].quantity`.
+
+A new form, `PlaceOrderInputForm::new()` and the component's default,
+holds each field's `@default` and each list's first rows: `listMin`, or
+one for a required list. A list of an enum's members is a group of
+checkboxes, and an optional nested object is sent only when one of its
+fields is, so none of its controls is required.
+
+### Rows without JavaScript
+
+A list's rows are added and removed by submit buttons named `_action`:
+`add:lines` after the rows, until the list holds its `listMax`, and
+`remove:lines[1]` in each row while it holds more than its `listMin`. The
+form keeps the button pressed, and `apply_action()` applies it and says
+whether a row button submitted the form, in which case the page renders
+the form again without calling the operation:
+
+```rust
+let mut form = form;
+if form.apply_action() {
+    return Ok(view! { <form method="post">place_order_input_fields(form: form)</form> });
+}
+```
+
+The buttons skip the browser's checks (`formnovalidate`), so a row can be
+added before the others are valid, and Enter still submits the form.
+
+### Typed controls
+
+A `Temporal.Date` field is `type="date"` and a `Temporal.Time` field
+`type="time"`. A `Temporal.DateTime` field is `type="datetime-local"`,
+which carries no offset, so the form reads it as UTC and its label says
+so. A `@secret` field is `type="password"` and is never rendered with its
+value, so a refused form asks for it again. A value no control holds, a
+union, any JSON value or a map, is a `<textarea>` of its JSON text.
+
+### Choices the app supplies
+
+An input type does not say which product a `productId` names. The page
+says, with `Choices`, which turns the text or number fields it names into
+a `<select>`: `lines.productId` for every line's product, or
+`lines[0].productId` for one line's.
+
+```rust
+let choices = Choices::new().with("lines.productId", products.iter().map(|p| (p.id.clone(), p.name.clone())));
+view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
+```
 
 ## Records
 
