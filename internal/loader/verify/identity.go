@@ -135,10 +135,9 @@ func checkLoginField(schema *ir.Schema, td *ir.TypeDef, login *ir.FieldDef, r *R
 // text name and its list of permissions.
 func checkUserRoleTable(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 	checkIdentityKey(td, "UserRole", r)
-	switch name := fieldNamed(td, ir.IdentityRoleNameField); {
-	case name == nil:
+	if name := fieldNamed(td, ir.IdentityRoleNameField); name == nil {
 		r.errorf(td.Owner, "%s: the UserRole trait needs a %s field, the role's @unique text name", td.Name, ir.IdentityRoleNameField)
-	default:
+	} else {
 		if !name.Unique {
 			r.errorf(td.Owner, "%s.%s: the UserRole trait's %s must be @unique", td.Name, name.Name, ir.IdentityRoleNameField)
 		}

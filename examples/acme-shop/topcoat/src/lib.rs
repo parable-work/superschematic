@@ -1,29 +1,31 @@
 //! The acme shop as a Topcoat app over shop-orders. Its pages call the
 //! operations in-process through the crate the Topcoat extension writes
 //! (`acme_shop_orders_topcoat`), by each route's rules: a shopper signs in
-//! with a Topcoat session, writes a review through the form the extension
-//! builds from `WriteReviewInput`, and lists their orders. The JSON API is
-//! mounted at `/api` beside the pages, on the same implementations.
+//! with their email and password, writes a review through the form the
+//! extension builds from `WriteReviewInput`, and lists their orders. The
+//! JSON API is mounted at `/api` beside the pages, on the same
+//! implementations, and the shop's users are the core user model's (D50):
+//! one session cookie signs the shopper in on both.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use acme_shop_orders_server::{Shop, implementations};
-use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
+use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
 use acme_shop_orders_topcoat::api::{
     OrderListOrdersArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{FormErrors, WriteReviewInputForm, write_review_input_fields};
 use acme_shop_orders_topcoat::records::ReviewViewRecord;
-use acme_shop_orders_topcoat::{PageAuthenticator, RouterBuilderShopOrdersExt, operations};
-use async_trait::async_trait;
+use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations};
+use serde::Deserialize;
 use topcoat::context::{Cx, app_context};
-use topcoat::cookie::RouterBuilderCookieExt;
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
-use topcoat::router::{Router, RouterBuilderDiscoverExt, StatusCode, page};
+use topcoat::router::header::SET_COOKIE;
+use topcoat::router::request::parts;
+use topcoat::router::response::response_headers;
+use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, StatusCode, page};
 use topcoat::runtime::shard;
-use topcoat::session::{self, RouterBuilderSessionExt, SessionConfig};
 use topcoat::view::{View, component, view};
 
 /// The one product the shop sells, at 19.99.
@@ -33,48 +35,84 @@ pub fn product() -> types::IdentityUUID {
     PRODUCT.parse().expect("a UUID")
 }
 
-/// The signed-in shoppers by session token hash. An app keeps them in its
-/// database, with their expiry.
-#[derive(Default)]
-pub struct Sessions(Mutex<HashMap<[u8; 32], Principal>>);
+/// The identity config the app serves with: plain HTTP on a local port, so
+/// the session cookie is not `Secure`.
+pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 
-/// A page's caller: the shopper its session signed in.
-struct SessionCaller(Arc<Sessions>);
-
-#[async_trait]
-impl PageAuthenticator for SessionCaller {
-    async fn principal(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
-        let hash = session::token_hash(cx)
-            .await
-            .map_err(|err| ApiError::internal(err.to_string()))?;
-        Ok(hash.and_then(|hash| self.0.0.lock().unwrap().get(&*hash).cloned()))
-    }
-}
-
-/// The app: its pages, the session they sign in with, and shop-orders'
-/// JSON API and in-process operations over `shop`.
-pub fn app(shop: Arc<Shop>) -> Router {
-    let sessions = Arc::new(Sessions::default());
+/// The app: its pages, and shop-orders' JSON API and in-process operations
+/// over `shop`, whose callers are `users`' users. A page's caller is the
+/// user whose session the request carries, read by the identity runtime as
+/// the JSON API reads it. Topcoat's origin policy runs before that check,
+/// so an origin the identity config trusts must be one the router's
+/// `OriginPolicy` trusts too; this app trusts none.
+pub fn app(shop: Arc<Shop>, users: Arc<Service>) -> Router {
+    let implementations = implementations(shop, Arc::clone(&users));
+    let pages = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
         .discover()
-        .cookies()
-        .sessions(SessionConfig::default())
-        .app_context(Arc::clone(&sessions))
-        .shop_orders(implementations(shop), SessionCaller(sessions))
+        .app_context(users)
+        .shop_orders(implementations, pages)
         .build()
 }
 
-/// Signs the demo shopper in: a new session, whose caller holds `orders`.
-/// A real app checks a password or a passkey first.
+/// The sign-in form, as the browser sends it.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+pub struct SignInForm {
+    login: String,
+    password: String,
+}
+
+/// Signs a shopper in with their email and password: the identity service
+/// checks them, after the cross-origin check a cookie login passes, and
+/// starts a cookie session, which every page and the JSON API read. A
+/// refusal renders the form again with its status, 401 for a wrong
+/// password.
 #[page(POST "/sign-in")]
-async fn sign_in(cx: &Cx) -> topcoat::Result<impl View> {
-    let started = session::start(cx).await?;
-    let sessions: &Arc<Sessions> = app_context(cx);
-    sessions.0.lock().unwrap().insert(
-        *started.token_hash,
-        Principal::new("00000000-0000-4000-8000-0000000000a1", ["orders"]),
-    );
-    Err::<(), _>(see_other("/reviews").into())
+async fn sign_in(cx: &Cx, Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
+    let users: &Arc<Service> = app_context(cx);
+    let input = LoginInput { login: form.login.clone(), password: form.password, session: "cookie".to_owned() };
+    let signed_in = match users.check_cookie_login(parts(cx), &input.session) {
+        Ok(()) => users.login(&input).await,
+        Err(err) => Err(err),
+    };
+    let refused = match signed_in {
+        Ok(session) => {
+            let cookie = users.config().session_cookie(&session.token, users.config().session_ttl());
+            response_headers(cx).append(SET_COOKIE, HeaderValue::from_str(&cookie)?);
+            return Err(see_other("/reviews").into());
+        }
+        Err(err) => err,
+    };
+    Ok(view! {
+        (refused.status)
+        sign_in_page(login: form.login, refused: Some(refused.message))
+    })
+}
+
+/// The sign-in page.
+#[page("/sign-in")]
+async fn show_sign_in() -> topcoat::Result<impl View> {
+    Ok(view! { sign_in_page() })
+}
+
+/// The sign-in form, with the login as sent and why the sign-in was
+/// refused.
+#[component]
+async fn sign_in_page(#[default] login: String, #[default] refused: Option<String>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <h1>"Sign in"</h1>
+        if let Some(message) = refused {
+            <p class="form-error">(message)</p>
+        }
+        <form method="post" action="/sign-in">
+            <label for="login">"Email"</label>
+            <input id="login" name="login" type="email" required=(true) value=(login)>
+            <label for="password">"Password"</label>
+            <input id="password" name="password" type="password" required=(true)>
+            <button type="submit">"Sign in"</button>
+        </form>
+    })
 }
 
 /// One review, as a shard: the browser can render it again from its record.

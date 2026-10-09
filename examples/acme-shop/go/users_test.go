@@ -2,6 +2,8 @@ package shop_test
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -10,18 +12,22 @@ import (
 
 	shopapi "example.com/acme/api/shop-api"
 	shoporders "example.com/acme/api/shop-orders"
+	db "example.com/acme/types/go/shop-db"
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
+	_ "modernc.org/sqlite"
 )
 
 // users are the shop's users as the tests serve them: the identity
 // runtime's config, at a low password cost, and a store both APIs' identity
 // services read, as the stack's servers share shop-db. The store is in
 // memory: the tests serve the ORM's no-op database, and shop-db's tables
-// have no SQLite form (its search fields are Postgres's), so the runtime's
-// SQLStore runs in TestStackDevRunsTheShop, over Postgres.
+// have no SQLite form (its search fields are Postgres's). The runtime's
+// SQLStore runs over Postgres in TestStackDevRunsTheShop, and over SQLite,
+// on shop-db's identity tables alone, in TestEverySDKCallsTheRustServer,
+// whose server is another process.
 type users struct {
-	store *memoryStore
+	store identity.Store
 	cfg   identity.Config
 }
 
@@ -36,6 +42,32 @@ func newUsers(t *testing.T) *users {
 		t.Fatal(err)
 	}
 	return &users{store: newMemoryStore(), cfg: cfg}
+}
+
+// newSQLiteUsers are users in a new SQLite database at path, which holds
+// shop-db's identity tables as rust-server/identity.sql creates them, so the
+// Rust server reads the same users and sessions.
+func newSQLiteUsers(t *testing.T, path string) *users {
+	t.Helper()
+	ddl, err := os.ReadFile("../rust-server/identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Exec(string(ddl)); err != nil {
+		t.Fatalf("create the identity tables: %v", err)
+	}
+	store, err := identity.NewSQLStore(database, identity.SQLite, []byte(db.IdentityDescriptor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := newUsers(t)
+	u.store = store
+	return u
 }
 
 // add creates a user with password and, with permissions, a role of their
@@ -358,6 +390,42 @@ func (s *memoryStore) RevokeRole(_ context.Context, userID, roleID string) error
 	}
 	s.grants[userID] = slices.DeleteFunc(s.grants[userID], func(r string) bool { return r == roleID })
 	return nil
+}
+
+// Bootstrap creates a role, a user who holds it and the grant at once, and
+// refuses when any user holds a role, as the runtime's SQLStore does.
+func (s *memoryStore) Bootstrap(_ context.Context, b identity.NewBootstrap) (identity.Role, identity.User, error) {
+	login, err := scalars.ParseContactEmail(b.User.Login)
+	if err != nil {
+		return identity.Role{}, identity.User{}, &identity.InvalidLoginError{Scalar: "Contact.Email", Err: err}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, roles := range s.grants {
+		if len(roles) > 0 {
+			return identity.Role{}, identity.User{}, identity.ErrGrantExists
+		}
+	}
+	for _, role := range s.roles {
+		if role.Name == b.Role {
+			return identity.Role{}, identity.User{}, identity.ErrRoleNameTaken
+		}
+	}
+	for _, u := range s.users {
+		if u.user.Login == login {
+			return identity.Role{}, identity.User{}, identity.ErrLoginTaken
+		}
+	}
+	name := b.User.Name
+	if name == "" {
+		name = login
+	}
+	role := &identity.Role{ID: scalars.NewUUID().String(), Name: b.Role, Permissions: slices.Clone(b.Permissions)}
+	user := identity.User{ID: scalars.NewUUID().String(), Login: login, Name: name}
+	s.roles[role.ID] = role
+	s.users[user.ID] = &memoryUser{user: user, hash: b.User.PasswordHash}
+	s.grants[user.ID] = []string{role.ID}
+	return *role, s.withRoles(user), nil
 }
 
 // rolesOf is the roles the user holds, by name.

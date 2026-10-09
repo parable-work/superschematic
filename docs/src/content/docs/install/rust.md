@@ -518,6 +518,10 @@ own.
 schemas-catalog-api = { path = "schemas/dist/api/catalog", features = ["identity-postgres"] }
 ```
 
+The acme-shop example's Rust server builds both over SQLite, with
+`identity-sqlite`
+([The Rust server](/superschematic/guides/api-routes/#the-rust-server)).
+
 `identity::service` hands `capabilities` the route table of every
 operation (`identity::routes`, keyed by OpenAPI operation id) and the
 administration routes' permission prefix; set a clock or another

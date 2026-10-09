@@ -22,8 +22,8 @@ kind, decorators and auth provider.
 | `typescript/` | implements `shop-storefront` and tests it through the TypeScript SDK; a `shop-orders` client; type tests |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
-| `rust-server/` | implements `shop-orders` on the generated Rust server, in memory; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`) |
+| `rust-server/` | implements `shop-orders` on the generated Rust server, its orders and reviews in memory, and authenticates with the identity runtime over the shop's users in SQLite, in `identity.sql`'s tables (shop-db's identity tables; shop-db as a whole has no SQLite form); built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`); a shopper signs in with their password, and one session cookie signs them in on the pages and the mounted JSON API |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `scripts/check.sh` | builds, compiles and tests all of it |
 
@@ -66,7 +66,9 @@ with the identity runtime over a store in memory (`go/users_test.go`), since
 `TestStackDevRunsTheShop` needs Postgres, which `stack dev` runs in Docker,
 and it skips without Docker. It creates a user with the identity runtime's
 store over Postgres and signs them in through `shop-api`'s login. The
-clients take the shopper's bearer token as their second argument: the Go
-server's comes from a sign-in, and the Rust server accepts `token-1`.
+clients take the shopper's bearer token as their second argument, from a
+sign-in through `shop-api`'s login. For the Rust server, `shop-api` serves
+over a SQLite database of `rust-server/identity.sql`'s tables, which the
+Rust server, another process, reads its users and sessions from.
 `go/go.mod` and the `[paths]` table in `schemas/superschematic.toml` point
 at this checkout until the modules and packages are published.

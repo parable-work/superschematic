@@ -398,7 +398,7 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("identity: list users: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	users := []User{}
 	for rows.Next() {
 		rec, err := s.scanUser(rows)
@@ -678,7 +678,7 @@ func (s *SQLStore) queryRoles(ctx context.Context, q querier, query string, with
 	if err != nil {
 		return nil, fmt.Errorf("identity: read roles: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []grantedRole
 	for rows.Next() {
 		var user, key, name string

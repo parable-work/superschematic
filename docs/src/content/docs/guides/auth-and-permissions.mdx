@@ -137,12 +137,20 @@ project with its own permission vocabulary.
 
 ## Say who the caller is: Rust
 
-The Rust router asks `Implementations.authenticator`, an `Authenticator`
-you write, which the crate has when an operation needs a caller. It reads
-the request's head (`bearer_token` reads the token) and returns a
-`Principal` or `None`. The router applies the same 401 and 403 rules and
-the same nesting; overriding the trait's `permits` replaces the matching
-rule. The implementation finds the caller on `ctx.principal`. See
+The Rust router asks `Implementations.authenticator`, which the crate has
+when an operation needs a caller. Over the user model it is an
+`Arc<IdentityAuthenticator>`, so another authenticator does not compile.
+The crate's `identity` module builds the store over the `authDb`'s tables
+and the service over the store. The shop's Rust server keeps its users in
+SQLite:
+
+<Snippet file="rust-server/src/lib.rs" symbol={['users', 'implementations']} />
+
+The caller's `subject` is the user's id, its permissions those of the
+user's roles. The router applies the same 401 and 403 rules and the same
+nesting. The implementation finds the caller on `ctx.principal`. Without
+the user model the field is any `Authenticator` you write, which reads the
+request's head and returns a `Principal` or `None`. See
 [Rust](/superschematic/install/rust/#serve-a-generated-api).
 
 ## What the server does
@@ -177,10 +185,11 @@ after a 401. An SDK given no token sends none.
   </TabItem>
 </Tabs>
 
-`public` and the `authDb` matter only to the Go server, which wires its
-auth from them. The storefront is served by the TypeScript router, which
-takes its own `authenticate`, so its config sets neither; its SDK still
-sends the token, and the app's `authenticate` reads it. See
+`public` matters only to the Go server. An `authDb` with a `User` table
+matters to every server, since each then authenticates with the identity
+runtime. The storefront's config sets neither, so its TypeScript router
+takes its own `authenticate`; its SDK still sends the token, and the
+app's `authenticate` reads it. See
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/#call-it-from-typescript).
 
 ## Service callers

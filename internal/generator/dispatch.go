@@ -537,7 +537,7 @@ func (r run) generateTypeScriptAPI() error {
 		return err
 	}
 
-	authDB, err := r.authDBSchema()
+	authDB, err := r.authDB()
 	if err != nil {
 		return err
 	}
@@ -580,39 +580,55 @@ func (r run) generateTypeScriptAPI() error {
 	return nil
 }
 
-// authDBSchema loads the schema the API's config names as its authDb, or
-// returns nil when it names none. A TypeScript server and SDK read it for
-// its User table (D50): with one, the server authenticates with the identity
-// runtime and the SDK takes a cookie session's credentials.
-func (r run) authDBSchema() (*ir.Schema, error) {
+// authDB is the schema the API's config names as its authDb, whose User
+// table every server of the API and its TypeScript SDK read (D50): with
+// one, a server authenticates with the identity runtime and the SDK takes a
+// cookie session's credentials. It is nil when the config names no authDb
+// or names the API itself, and nil when the build configures no dependency
+// loader and the API serves none of the user model's routes, so a build
+// that loads no dependency writes what it wrote before the model. Every
+// other authDb that does not load is an error.
+func (r run) authDB() (*ir.Schema, error) {
 	name := r.Config.AuthDB
 	if name == "" || name == r.Config.Name {
 		return nil, nil
 	}
-	authDB, err := r.LoadDependency(name)
-	if err != nil {
-		return nil, fmt.Errorf("generator: load the authDb %s of %s, whose User table its TypeScript server and SDK read (D50): %w", name, r.Config.Name, err)
+	if r.Options.LoadDependency == nil && !servesIdentityRoutes(r.Schema) {
+		return nil, nil
 	}
-	return authDB, nil
+	schema, err := r.LoadDependency(name)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load %s, the authDb of %s, whose User table its servers read (D50): %w", name, r.Config.Name, err)
+	}
+	return schema, nil
+}
+
+// servesIdentityRoutes reports whether schema has one of the user model's
+// operations, which the loader expands from @userSessions and
+// @userAdministration.
+func servesIdentityRoutes(schema *ir.Schema) bool {
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			if op.IdentityOperation != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveUpstreamAuth determines the DB schema backing authentication for a
 // public API: the authDb config value when set, otherwise the single DB-kind
 // dependency. A non-public API carries no upstream auth, except the IR of an
-// authDb that declares the user model (D50), whose server authenticates
-// with the identity runtime whether or not the API is public: it returns
-// that IR alone, with no name, so the upstream ORM wiring stays public's.
+// authDb that declares the user model (D50), as authDB loads it, whose
+// server authenticates with the identity runtime whether or not the API is
+// public: it returns that IR alone, with no name, so the upstream ORM
+// wiring stays public's.
 func (r run) resolveUpstreamAuth() (string, *ir.Schema, error) {
 	if !r.Config.Public {
-		if r.Config.AuthDB == "" || r.Options.LoadDependency == nil {
-			return "", nil, nil
-		}
-		upstream, err := r.LoadDependency(r.Config.AuthDB)
-		if err != nil {
-			return "", nil, fmt.Errorf("generator: load the authDb %s of %s: %w", r.Config.AuthDB, r.Config.Name, err)
-		}
-		if upstream.UserTable() == nil {
-			return "", nil, nil
+		upstream, err := r.authDB()
+		if err != nil || upstream == nil || upstream.UserTable() == nil {
+			return "", nil, err
 		}
 		return "", upstream, nil
 	}
@@ -927,7 +943,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	authDB, err := r.identityAuthDB(apiOutput)
+	authDB, err := r.authDB()
 	if err != nil {
 		return nil, err
 	}
@@ -951,39 +967,6 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 		return nil, err
 	}
 	return output, nil
-}
-
-// identityAuthDB is the schema the API's authDb names, whose User table
-// the Rust server reads its users from (D50): nil without an authDb, and
-// nil when the build configures no dependency loader for an API that
-// serves none of the user model's routes, as before the model.
-func (r run) identityAuthDB(api *apigen.APIOutput) (*ir.Schema, error) {
-	name := r.Config.AuthDB
-	if name == "" {
-		return nil, nil
-	}
-	if r.Options.LoadDependency == nil && !servesIdentityRoutes(api) {
-		return nil, nil
-	}
-	schema, err := r.LoadDependency(name)
-	if err != nil {
-		return nil, fmt.Errorf("generator: load %s, the authDb of %s: %w", name, r.Config.Name, err)
-	}
-	return schema, nil
-}
-
-// servesIdentityRoutes reports whether api has one of the user model's
-// operations.
-func servesIdentityRoutes(api *apigen.APIOutput) bool {
-	if api == nil {
-		return false
-	}
-	for _, endpoint := range api.Endpoints {
-		if endpoint.IdentityOperation != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // generateRustAPI emits the Rust REST API server and route scaffolds. The
@@ -1175,7 +1158,7 @@ func (r run) generateTypeScriptSDK() error {
 	// another API's login set, so its SDK takes the credentials mode too
 	// (D50).
 	if sdkOutput != nil && !sdkOutput.CookieSessions {
-		authDB, err := r.authDBSchema()
+		authDB, err := r.authDB()
 		if err != nil {
 			return err
 		}

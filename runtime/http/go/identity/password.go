@@ -146,7 +146,7 @@ func parsePHC(phc string) (phcHash, error) {
 func isBase64Text(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !('A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '+' || c == '/') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '+' && c != '/' {
 			return false
 		}
 	}

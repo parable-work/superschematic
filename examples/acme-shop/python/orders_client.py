@@ -2,8 +2,8 @@
 
 go/clients_test.go runs it against the Go server and compares what it
 prints with the other languages' clients. Its arguments are the server's
-base URL and the shopper's bearer token, token-1 when absent, as the Rust
-server accepts it; the Go server takes a session token its sign-in issued.
+base URL and the shopper's bearer token, which shop-api's login issued: the
+Go and the Rust server both read its session from shop-db's users.
 """
 
 import sys
@@ -52,4 +52,4 @@ def main(base_url: str, token: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "token-1")
+    main(sys.argv[1], sys.argv[2])

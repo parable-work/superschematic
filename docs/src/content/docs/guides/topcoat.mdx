@@ -16,8 +16,9 @@ rules. The crate also has a form per input type and a record per result
 type, and mounts the JSON API beside the pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
-the in-memory implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
-serves.
+the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
+serves, with the orders and reviews in memory and the shop's users in
+SQLite.
 
 ## Build the crate
 
@@ -57,23 +58,29 @@ which carry their arguments and results as records.
 
 `shop_orders` keeps the API's `Implementations` for the in-process calls
 and mounts the JSON API at `/api`. It also takes a `PageAuthenticator`,
-which establishes a page's caller. Here that caller comes from a Topcoat
-session:
+which establishes a page's caller. The shop's users are the core user
+model's, so the crate offers `IdentityPageAuthenticator::of(&implementations)`,
+which reads a page's caller from the session cookie or bearer token as
+the JSON API does. One sign-in serves the pages and the JSON API, and a
+refused cookie is cleared on the page's response. An app whose users are
+its own writes a `PageAuthenticator` instead, over a Topcoat session, say.
 
-<Snippet file="topcoat/src/lib.rs" symbol={['app', 'sign_in']} />
+<Snippet file="topcoat/src/lib.rs" symbol={['app', 'SignInForm', 'sign_in']} />
 
-The API's own `Authenticator` still decides whether a caller's permissions
+`shop-orders` serves no login route (`shop-api` does), so the sign-in page
+calls the identity service in process: `login` with a cookie session,
+after the cross-origin check a cookie login passes, then the session
+cookie on the page's response. Where the mounted API serves
+`@userSessions`, the browser can post JSON to `/api/auth/login` with
+`session: "cookie"` instead. The app serves plain HTTP locally, so its
+identity config turns the cookie's `Secure` off. Topcoat's origin policy
+runs before the identity check, so an origin the identity config trusts
+must be one the app's `OriginPolicy` trusts too.
+
+The API's own authenticator still decides whether a caller's permissions
 cover an operation's. A page and the JSON API therefore admit the same
 callers. The app names the crate, so the linker keeps it and `.discover()`
 finds its procedures.
-
-When the API's users are the core user model's (`@userSessions`), the
-crate also offers `IdentityPageAuthenticator::of(&implementations)`. It
-reads a page's caller from the session cookie or bearer token as the JSON
-API does, so a user who signs in at `/api/auth/login` is signed in on
-every page, and a refused cookie is cleared on the page's response.
-Topcoat's origin policy runs before both, so an origin the identity
-config trusts must be one the app's `OriginPolicy` trusts too.
 
 ## Call an operation from a page
 
@@ -114,8 +121,9 @@ which a page hands the browser, here through a shard:
 <Snippet file="topcoat/src/lib.rs" symbol="review_card" />
 
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
-enums are strings, a map is its entries, and an `@uiHidden` field is left
-out, since a record reaches the browser.
+enums are strings, a map is its entries, and an `@uiHidden` or secret
+field is left out, since a record reaches the browser. The user model's
+routes have no records, since a page does not call them in-process.
 
 ## Procedures
 
@@ -131,8 +139,10 @@ turns the procedure itself into a value Rust cannot call.
 ## Test the app
 
 `Router::handle` drives the app as a browser would. The acme app's tests
-sign in, post a review signed out (422, "Authentication required"), post
-one with a rating out of range (422, the field marked invalid), post a
-valid one, and read it back from the page and from the JSON API:
+keep the shop's users in SQLite in memory. They post a review signed out
+(422, "Authentication required"), sign the shopper in with their
+password, post one with a rating out of range (422, the field marked
+invalid), post a valid one, and read it back from the page and from the
+JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
