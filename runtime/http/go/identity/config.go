@@ -91,6 +91,11 @@ type Argon2Config struct {
 // its defaults filled in.
 func ParseConfig(data []byte) (Config, error) {
 	var cfg Config
+	// encoding/json reads null into a struct as no change at all, which
+	// would make null every default; the config is an object.
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return Config{}, errors.New("identity: config: the config must be a JSON object")
+	}
 	if err := checkMemberNames(data, reflect.TypeOf(cfg)); err != nil {
 		return Config{}, fmt.Errorf("identity: config: %w", err)
 	}

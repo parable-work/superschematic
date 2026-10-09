@@ -515,6 +515,7 @@ func configCorpus(t *testing.T) []configCase {
 		{"a string where a number goes is refused", `{"sessionTtlSeconds": "3600"}`, false},
 		{"a fractional number of seconds is refused", `{"sessionTtlSeconds": 1.5}`, false},
 		{"a config that is not an object is refused", `[]`, false},
+		{"a null config is refused", `null`, false},
 	}
 	out := make([]configCase, len(inputs))
 	for i, in := range inputs {

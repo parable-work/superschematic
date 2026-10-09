@@ -666,6 +666,11 @@
       "name": "a config that is not an object is refused",
       "input": [],
       "want": null
+    },
+    {
+      "name": "a null config is refused",
+      "input": null,
+      "want": null
     }
   ],
   "passwordRule": [

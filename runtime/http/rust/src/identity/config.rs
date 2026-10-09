@@ -114,8 +114,8 @@ impl Config {
         Config::from_value(&value)
     }
 
-    /// [`Config::parse`] of a JSON value already read. A null config is
-    /// every default, as Go reads `null` into a struct.
+    /// [`Config::parse`] of a JSON value already read. The config is an
+    /// object; `{}` is every default, and `null` is refused.
     pub fn from_value(value: &Value) -> Result<Config, ConfigError> {
         let config = read(value).map_err(ConfigError)?;
         config.validate()?;
@@ -239,9 +239,6 @@ impl CookieConfig {
 /// The config's members, read with Go's rules and the defaults filled in.
 fn read(value: &Value) -> Result<Config, String> {
     let mut config = Config::default();
-    if value.is_null() {
-        return Ok(config);
-    }
     let object = json::object(value, "the config")?;
     let [ttl, idle, touch, cookie, origins, password] = take(
         object,

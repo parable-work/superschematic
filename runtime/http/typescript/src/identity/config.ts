@@ -139,7 +139,9 @@ function hasNonIntegerLexeme(text: string): boolean {
 export function parseIdentityConfig(input: unknown): IdentityConfig {
   const problems: string[] = [];
   const add = (problem: string) => problems.push(problem);
-  const root = objectOf(input ?? {}, 'the config', add);
+  // No argument is every default; a null config is refused, as an object
+  // is what a deployment writes.
+  const root = objectOf(input === undefined ? {} : input, 'the config', add);
 
   const integer = (from: JsonObject | undefined, path: string, name: string, max = Number.MAX_SAFE_INTEGER, min = Number.MIN_SAFE_INTEGER): number | undefined => {
     const value = from?.[name];
