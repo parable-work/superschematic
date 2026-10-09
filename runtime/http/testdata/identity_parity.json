@@ -613,6 +613,22 @@
       "want": null
     },
     {
+      "name": "a member named in another case is refused",
+      "input": {
+        "SessionTtlSeconds": 3600
+      },
+      "want": null
+    },
+    {
+      "name": "a cookie member named in another case is refused",
+      "input": {
+        "cookie": {
+          "Secure": false
+        }
+      },
+      "want": null
+    },
+    {
       "name": "an unknown cookie member is refused",
       "input": {
         "cookie": {
@@ -1046,8 +1062,38 @@
       }
     },
     {
+      "name": "a carriage return in the hash is not read",
+      "phc": "$argon2id$v=19$m=64,t=1,p=1$AAECAwQFBgcICQoLDA0ODw$VYd2\roowjLaKFDCuPzjEbwOnRLksrkQE1AXAXWa+/2xg",
+      "password": "correct horse battery",
+      "current": {
+        "memoryKiB": 64,
+        "iterations": 1,
+        "parallelism": 1
+      },
+      "want": {
+        "malformed": true,
+        "ok": false,
+        "rehash": false
+      }
+    },
+    {
       "name": "a leading zero is not read",
       "phc": "$argon2id$v=19$m=064,t=1,p=1$AAECAwQFBgcICQoLDA0ODw$VYd2oowjLaKFDCuPzjEbwOnRLksrkQE1AXAXWa+/2xg",
+      "password": "correct horse battery",
+      "current": {
+        "memoryKiB": 64,
+        "iterations": 1,
+        "parallelism": 1
+      },
+      "want": {
+        "malformed": true,
+        "ok": false,
+        "rehash": false
+      }
+    },
+    {
+      "name": "a line break in the salt is not read",
+      "phc": "$argon2id$v=19$m=64,t=1,p=1$AAEC\nAwQFBgcICQoLDA0ODw$VYd2oowjLaKFDCuPzjEbwOnRLksrkQE1AXAXWa+/2xg",
       "password": "correct horse battery",
       "current": {
         "memoryKiB": 64,
