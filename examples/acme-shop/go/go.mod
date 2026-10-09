@@ -30,11 +30,11 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0 // indirect
-	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect

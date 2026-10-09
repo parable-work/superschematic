@@ -278,6 +278,13 @@ type APIOutput struct {
 	Endpoints  []EndpointInfo
 	Namespaces []string
 
+	// IdentityEndpoints are the user model's operations (D50), which the
+	// identity runtime serves: ImplementedOutput moves them here from
+	// Endpoints, so the Go server mounts them on the runtime's handlers
+	// and implements none of them. Nil in the output Generate returns,
+	// whose Endpoints hold every operation.
+	IdentityEndpoints []EndpointInfo
+
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
 	HasPermissionEndpoints   bool
@@ -370,6 +377,31 @@ func (o *APIOutput) AddIndirectModules(modules []string) {
 // beside TypesModule: the declared dependencies' and IndirectModules, sorted.
 func (o *APIOutput) TypesModuleReplaces() []string {
 	return goutil.UniqueModules([]string{o.TypesModule}, o.ModuleDependencies, o.IndirectModules)
+}
+
+// RoutedEndpoints are the endpoints RegisterRoutes mounts and the identity
+// route table lists: Endpoints and IdentityEndpoints, in Generate's order
+// (by path, then method). Without IdentityEndpoints they are Endpoints.
+func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
+	if len(o.IdentityEndpoints) == 0 {
+		return o.Endpoints
+	}
+	routed := append(append([]EndpointInfo{}, o.Endpoints...), o.IdentityEndpoints...)
+	sort.SliceStable(routed, func(i, j int) bool {
+		if routed[i].Path != routed[j].Path {
+			return routed[i].Path < routed[j].Path
+		}
+		return routed[i].Method < routed[j].Method
+	})
+	return routed
+}
+
+// AuthWired reports whether the Go server's Config takes an auth
+// middleware, which every protected route runs: a public API's, or one
+// whose server authenticates with the identity runtime (Auth.Identity)
+// whether or not it is public. The database wiring stays public's alone.
+func (o *APIOutput) AuthWired() bool {
+	return o.IsPublic || o.Auth.Identity
 }
 
 // HasConstants reports whether constants.go is generated: public schemas
@@ -547,9 +579,11 @@ type Options struct {
 	// APIs.
 	UpstreamSchema string
 
-	// UpstreamIR is the loaded IR of the upstream schema, used to gate the
-	// auth store adapters on the tables it declares. Required when
-	// UpstreamSchema is set.
+	// UpstreamIR is the loaded IR of the upstream schema, which the auth
+	// provider analyzes: the user model it declares (D50) and any store of
+	// the provider's own. Required when UpstreamSchema is set. A non-public
+	// API sets it alone, to its authDb's, when that declares the user
+	// model.
 	UpstreamIR *ir.Schema
 
 	// ORMModule is the upstream ORM module path. Derived from
@@ -754,20 +788,12 @@ func (o *APIOutput) summarizeEndpoints() error {
 	o.HasServiceCallers, o.NeedsTypesImport = false, false
 	o.RequiredWebhookProviders, o.Namespaces = nil, nil
 	for _, endpoint := range o.Endpoints {
-		if endpoint.RequiresAuth {
-			o.HasAuth = true
-		}
-		if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
-			o.RoutesNeedTime = true
-		}
+		o.summarizeRoute(endpoint)
 		if endpoint.HasFileUpload {
 			o.HasFileUpload = true
 		}
 		if endpoint.Encrypted {
 			o.HasEncryptedEndpoints = true
-		}
-		if len(endpoint.RequiredPerms) > 0 {
-			o.HasPermissionEndpoints = true
 		}
 		if endpoint.Filterable {
 			if endpoint.Method != "GET" {
@@ -777,9 +803,6 @@ func (o *APIOutput) summarizeEndpoints() error {
 		}
 		if endpoint.WebhookHMACProvider != "" {
 			o.HasWebhookHMACEndpoints = true
-		}
-		if endpoint.ServiceCallers != nil {
-			o.HasServiceCallers = true
 		}
 		if endpoint.NeedsTypesImport {
 			o.NeedsTypesImport = true
@@ -810,6 +833,26 @@ func (o *APIOutput) summarizeEndpoints() error {
 	}
 	sort.Strings(o.Namespaces)
 	return nil
+}
+
+// summarizeRoute sets the flags the router reads of a route RegisterRoutes
+// mounts: whether it needs a caller or a permission, whether its
+// middlewares call time, and whether it has a service clause.
+// summarizeEndpoints calls it on every endpoint, and ImplementedOutput on
+// the identity runtime's too, since the router mounts them.
+func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
+	if endpoint.RequiresAuth {
+		o.HasAuth = true
+	}
+	if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
+		o.RoutesNeedTime = true
+	}
+	if len(endpoint.RequiredPerms) > 0 {
+		o.HasPermissionEndpoints = true
+	}
+	if endpoint.ServiceCallers != nil {
+		o.HasServiceCallers = true
+	}
 }
 
 // extractNamespace derives the kebab-case namespace from an operation set

@@ -1,0 +1,22 @@
+name: users-api
+kind: API
+types:
+  Greeting:
+    name: Greeting
+    role: APIView
+    fields:
+      - name: message
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: GreetingQueries
+    operations:
+      - name: greet
+        typeRef: { name: Greeting }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: greeting

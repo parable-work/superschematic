@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	api "example.com/acme/api/shop-orders"
@@ -36,6 +35,7 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 	if err != nil {
 		return nil, err
 	}
+	ctx = actingUser(ctx)
 	var placed *db.Order
 	err = o.DB.Transaction(ctx, func(tx orm.TxInterface) error {
 		order, err := tx.GetOrderRepository().CreateOne(ctx, &db.Order{
@@ -112,6 +112,7 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, l
 }
 
 func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
+	ctx = actingUser(ctx)
 	order, err := o.DB.GetOrderRepository().GetOne(ctx, id, nil)
 	if errors.Is(err, orm.ErrNotFound) {
 		return nil, api.NotFoundError("order", err)
@@ -191,6 +192,7 @@ func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID,
 	if err != nil {
 		return nil, err
 	}
+	ctx = actingUser(ctx)
 	review, err := r.DB.GetReviewRepository().CreateOne(ctx, &db.Review{
 		Product: db.Product{Id: &productID},
 		Author:  db.User{Id: &author},
@@ -233,14 +235,12 @@ func caller(ctx context.Context) (db.IdentityUUID, error) {
 }
 
 // actingUser tells the ORM who is making the request, so a soft delete
-// records deletedBy. The generated server authenticates the caller; the ORM
-// reads the user from its own context key.
-func actingUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		if id, err := scalars.ParseUUID(api.GetPrincipalID(ctx)); err == nil {
-			ctx = orm.WithUserID(ctx, id)
-		}
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+// records deletedBy. The generated server authenticates the caller and puts
+// their id on the context; the ORM reads the user from its own context key,
+// so each method that writes rows hands the caller over.
+func actingUser(ctx context.Context) context.Context {
+	if id, err := scalars.ParseUUID(api.GetPrincipalID(ctx)); err == nil {
+		return orm.WithUserID(ctx, id)
+	}
+	return ctx
 }

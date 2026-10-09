@@ -1,6 +1,8 @@
 // Calls shop-orders through the generated TypeScript SDK. go/clients_test.go
 // runs it against the Go server and compares what it prints with the other
-// languages' clients.
+// languages' clients. Its arguments are the server's base URL and the
+// shopper's bearer token, token-1 when absent, as the Rust server accepts
+// it; the Go server takes a session token its sign-in issued.
 import { ApiError, ShopOrdersSDK } from '@acme/shop-orders-sdk';
 import { parseIdentityNameStrict, parseIdentityUUIDStrict } from 'superscalar/scalars';
 
@@ -20,8 +22,9 @@ async function status(call: () => Promise<unknown>): Promise<number | string> {
 }
 
 const baseUrl = process.argv[2];
+const token = process.argv[3] ?? 'token-1';
 const anonymous = new ShopOrdersSDK({ baseUrl });
-const shopper = new ShopOrdersSDK({ baseUrl, auth: { token: 'token-1' } });
+const shopper = new ShopOrdersSDK({ baseUrl, auth: { token } });
 
 const reviews = await anonymous.productReviews.listReviews(product);
 console.log(`reviews: ${reviews.length}`);

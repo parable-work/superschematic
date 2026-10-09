@@ -10,8 +10,10 @@ import (
 	"fmt"
 	gohttp "net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	"go.uber.org/zap"
@@ -37,6 +39,17 @@ type Config struct {
 	// Optional: defaults to "http://localhost:8080" if empty.
 	OpenAPIBaseURL string
 
+	// Identity is the user model's runtime (D50): it authenticates the caller
+	// of every protected route and serves the user model's routes. Build it
+	// with NewIdentity, which gives it this API's route table.
+	Identity *identity.Service
+
+	// AuthMiddleware authenticates the caller of every protected route.
+	// Optional: nil runs Identity.Middleware. A middleware set here replaces
+	// it and authenticates the caller itself, usually by wrapping
+	// Identity.Middleware.
+	AuthMiddleware func(gohttp.Handler) gohttp.Handler
+
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
 }
@@ -46,6 +59,12 @@ type Config struct {
 func (c *Config) Validate() error {
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
+	}
+	if c.Identity == nil {
+		return fmt.Errorf("Config.Identity is required: the user model's runtime authenticates the callers of fixture-user-routes-api")
+	}
+	if err := checkIdentity(c.Identity); err != nil {
+		return err
 	}
 	if err := c.Implementations.ValidateImplementations(); err != nil {
 		return err
@@ -65,6 +84,7 @@ func (c *Config) Validate() error {
 //
 //	fixtureuserroutesapi.RegisterRoutes(r, fixtureuserroutesapi.Config{
 //		Logger: logger,
+//		Identity: identityService,
 //		Implementations: fixtureuserroutesapi.Implementations{
 //			Greeting: &myGreetingImpl{},
 //		},
@@ -85,6 +105,16 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 		openAPIBaseURL = defaultOpenAPIBaseURL
 	}
 
+	// The identity runtime authenticates the protected routes' callers
+	// unless the Config replaces its middleware.
+	if cfg.AuthMiddleware == nil {
+		cfg.AuthMiddleware = cfg.Identity.Middleware
+	}
+
+	// The credentialed CORS middleware runs first, so it answers the
+	// preflights of the identity config's trusted origins.
+	r.Use(cfg.Identity.CORS())
+
 	// Request completion log: one authoritative line per request with identity,
 	// outcome, and performance fields. Sets http.route span attribute and records
 	// OTel span error events for 5xx responses.
@@ -95,7 +125,11 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	// API routes
 	r.Route("/api", func(r chi.Router) {
 		runtimerouting.Register(r, publicAPIRoutes(cfg))
-		runtimerouting.Register(r, protectedAPIRoutes(cfg))
+		runtimerouting.RegisterGroup(
+			r,
+			protectedAPIRoutes(cfg),
+			cfg.AuthMiddleware,
+		)
 	})
 
 	return nil
@@ -111,11 +145,165 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 }
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
-	return []runtimerouting.Route{}
+	return []runtimerouting.Route{
+		// Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
+		{
+			Method:  "POST",
+			Path:    "/auth/login",
+			Handler: identityHandler(cfg.Identity, "login"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+			},
+		},
+		// Creates a user with the login, name and password given and signs them in, as login does.
+		{
+			Method:  "POST",
+			Path:    "/auth/register",
+			Handler: identityHandler(cfg.Identity, "register"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(5, time.Minute, LoggerFromContext),
+			},
+		},
+	}
 }
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		// Lists the roles and the permissions each grants.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/roles",
+			Handler: identityHandler(cfg.Identity, "listRoles"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.read"),
+			},
+		},
+		// Creates a role. The caller's own permissions must cover each permission it grants.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/roles",
+			Handler: identityHandler(cfg.Identity, "createRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Deletes a role and every grant of it. It answers true.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/admin/roles/{id}",
+			Handler: identityHandler(cfg.Identity, "deleteRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Renames a role or replaces its permissions. The caller's own permissions must cover each permission given.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/roles/{id}",
+			Handler: identityHandler(cfg.Identity, "updateRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Lists the users and the roles each holds.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/users",
+			Handler: identityHandler(cfg.Identity, "listUsers"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Creates a user with the login, name and password given.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users",
+			Handler: identityHandler(cfg.Identity, "createUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// One user and the roles they hold.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/users/{id}",
+			Handler: identityHandler(cfg.Identity, "getUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Disables a user, who can no longer sign in, and ends their sessions.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/disable",
+			Handler: identityHandler(cfg.Identity, "disableUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Enables a disabled user.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/enable",
+			Handler: identityHandler(cfg.Identity, "enableUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Sets a user's password and ends their sessions. It answers true.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/users/{id}/password",
+			Handler: identityHandler(cfg.Identity, "setUserPassword"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Revokes a role from a user.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/admin/users/{id}/roles/{roleId}",
+			Handler: identityHandler(cfg.Identity, "revokeRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Grants a user a role. The caller's own permissions must cover the role's.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/users/{id}/roles/{roleId}",
+			Handler: identityHandler(cfg.Identity, "grantRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.
+		{
+			Method:  "GET",
+			Path:    "/auth/capabilities",
+			Handler: identityHandler(cfg.Identity, "capabilities"),
+		},
+		// Ends the caller's session and clears the session cookie. It answers true.
+		{
+			Method:  "POST",
+			Path:    "/auth/logout",
+			Handler: identityHandler(cfg.Identity, "logout"),
+		},
+		// The caller's user, the roles they hold and the permissions those roles grant.
+		{
+			Method:  "GET",
+			Path:    "/auth/me",
+			Handler: identityHandler(cfg.Identity, "me"),
+		},
+		// Changes the caller's password, given their current one, and ends their other sessions. It answers true.
+		{
+			Method:  "POST",
+			Path:    "/auth/password",
+			Handler: identityHandler(cfg.Identity, "changePassword"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+			},
+		},
 		{
 			Method:  "GET",
 			Path:    "/greeting",

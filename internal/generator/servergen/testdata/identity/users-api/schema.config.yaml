@@ -1,0 +1,10 @@
+# A public API over users-db's user model: it serves the session routes,
+# and its own route needs a caller.
+name: users-api
+kind: API
+public: true
+authDb: users-db
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

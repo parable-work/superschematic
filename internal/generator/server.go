@@ -280,12 +280,19 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // goServerModules lists the modules a Go API server's build reads, each
 // with its directory: its own module, the types modules it reaches, the
 // ORM of its database, the SDK of each API it calls, and the runtime
-// modules. The API module and the packages its Deps imports are direct.
+// modules. The API module and the packages its Deps imports are direct,
+// and so are its database's Go types when it authenticates with the
+// identity runtime, whose store main.go builds from their descriptor.
 func (r run) goServerModules(o *apigen.APIOutput) []servergen.Module {
 	out, paths, n := r.Options.OutputRoot, r.Options.Paths, r.Options.Naming
 	modules := []servergen.Module{
 		{Path: o.ModulePath, Dir: APIDir(out, o.SchemaName), Direct: true},
 		{Path: o.TypesModule, Dir: TypesDir(out, LangGo, o.SchemaName)},
+	}
+	if o.Auth.Identity && o.Deps.Database != "" {
+		// main.go builds the identity store from the descriptor constant of
+		// the database's Go types (D50).
+		modules = append(modules, servergen.Module{Path: n.GoTypesModule(o.Deps.Database), Dir: TypesDir(out, LangGo, o.Deps.Database), Direct: true})
 	}
 	for _, m := range o.IndirectModules {
 		modules = append(modules, servergen.Module{Path: m, Dir: TypesDir(out, LangGo, path.Base(m))})

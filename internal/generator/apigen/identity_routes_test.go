@@ -15,8 +15,20 @@ import (
 )
 
 // userRoutesAPI is the API whose @userSessions and @userAdministration sets
-// the loader fills from fixture-user-model-db (D50).
-const userRoutesAPI = "fixture-user-routes-api"
+// the loader fills from userModelDB, its authDb (D50).
+const (
+	userRoutesAPI = "fixture-user-routes-api"
+	userModelDB   = "fixture-user-model-db"
+)
+
+func loadUserModelDB(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, userModelDB))
+	if err != nil {
+		t.Fatalf("load %s: %v", userModelDB, err)
+	}
+	return schema
+}
 
 func loadUserRoutesAPI(t *testing.T) *ir.Schema {
 	t.Helper()
@@ -27,6 +39,9 @@ func loadUserRoutesAPI(t *testing.T) *ir.Schema {
 	return schema
 }
 
+// generateUserRoutesAPI generates the API as the build does: not public,
+// with its authDb's IR, which declares the user model, so its server
+// authenticates with the identity runtime.
 func generateUserRoutesAPI(t *testing.T, schema *ir.Schema) *apigen.APIOutput {
 	t.Helper()
 	output, err := apigen.Generate(schema, apigen.Options{
@@ -34,6 +49,7 @@ func generateUserRoutesAPI(t *testing.T, schema *ir.Schema) *apigen.APIOutput {
 		SchemaName:  userRoutesAPI,
 		ModulePath:  "example.com/schemas/api/" + userRoutesAPI,
 		TypesModule: "example.com/schemas/types/go/" + userRoutesAPI,
+		UpstreamIR:  loadUserModelDB(t),
 		Clock:       goModuleClock,
 	})
 	if err != nil {
@@ -79,9 +95,11 @@ func TestUserRoutesAreEndpoints(t *testing.T) {
 }
 
 // TestImplementedOutputLeavesOutUserRoutes: the view the Go server is
-// written from has the project's endpoints alone, and the flags and
-// namespaces they give; the output the SDKs read is unchanged, and an
-// output without a user model operation is its own view.
+// written from implements the project's endpoints alone, with the
+// namespaces they give, and holds the user model's in IdentityEndpoints;
+// the flags the router reads count both, since it mounts both. The output
+// the SDKs read is unchanged, and an output without a user model operation
+// is its own view.
 func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	output := generateUserRoutesAPI(t, loadUserRoutesAPI(t))
 	view, err := apigen.ImplementedOutput(output)
@@ -91,8 +109,17 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if len(view.Endpoints) != 1 || view.Endpoints[0].Name != "greet" {
 		t.Fatalf("view endpoints = %+v", view.Endpoints)
 	}
-	if !slices.Equal(view.Namespaces, []string{"greeting"}) || view.RoutesNeedTime || view.HasPermissionEndpoints || !view.HasAuth {
+	if len(view.IdentityEndpoints) != 18 || len(view.RoutedEndpoints()) != 19 {
+		t.Fatalf("view: %d identity endpoints, %d routed", len(view.IdentityEndpoints), len(view.RoutedEndpoints()))
+	}
+	// The administration routes' permission check is the identity
+	// service's, so HasPermissionEndpoints, which gates the provider's
+	// routePermissions imports, leaves them out.
+	if !slices.Equal(view.Namespaces, []string{"greeting"}) || !view.RoutesNeedTime || view.HasPermissionEndpoints || !view.HasAuth {
 		t.Errorf("view: namespaces %v, RoutesNeedTime %v, HasPermissionEndpoints %v, HasAuth %v", view.Namespaces, view.RoutesNeedTime, view.HasPermissionEndpoints, view.HasAuth)
+	}
+	if !view.Auth.Identity || !view.AuthWired() || view.IsPublic {
+		t.Errorf("view: Auth %+v, AuthWired %v, IsPublic %v; want the identity wiring without public", view.Auth, view.AuthWired(), view.IsPublic)
 	}
 	if view.OpenAPISpecRaw != output.OpenAPISpecRaw || len(output.Endpoints) != 19 {
 		t.Error("the view changed the output, or its OpenAPI document")
@@ -100,6 +127,19 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	plain := generateServiceAuthFixtureAPI(t)
 	if same, err := apigen.ImplementedOutput(plain); err != nil || same != plain {
 		t.Errorf("ImplementedOutput(an API without the user model) = %p, %v; want the output itself", same, err)
+	}
+
+	// With the user model's routes alone, the router's flags still need
+	// the auth wiring: every route that needs a caller is the runtime's.
+	schema := loadUserRoutesAPI(t)
+	schema.OperationSets = slices.DeleteFunc(schema.OperationSets, func(set *ir.OperationSet) bool { return !set.IsIdentityRoutes() })
+	delete(schema.Types, "Greeting")
+	alone, err := apigen.ImplementedOutput(generateUserRoutesAPI(t, schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alone.Endpoints) != 0 || !alone.HasAuth || alone.HasPermissionEndpoints || !alone.RoutesNeedTime {
+		t.Errorf("the route sets alone: %d endpoints, HasAuth %v, HasPermissionEndpoints %v, RoutesNeedTime %v", len(alone.Endpoints), alone.HasAuth, alone.HasPermissionEndpoints, alone.RoutesNeedTime)
 	}
 }
 
@@ -174,9 +214,10 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 	}
 }
 
-// TestWriteAPIGoldenUserRoutes pins routes.go and interfaces.go of
-// fixture-user-routes-api: the project's interface and route alone, the
-// user model's being the identity runtime's. Regenerate with
+// TestWriteAPIGoldenUserRoutes pins routes.go, interfaces.go and identity.go
+// of fixture-user-routes-api: the project's interface and handler alone,
+// the user model's routes mounted on the identity runtime's handlers, and
+// the route table capabilities answers from. Regenerate with
 // go test ./internal/generator/apigen -run TestWriteAPIGoldenUserRoutes -update
 func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 	output := generateUserRoutesAPI(t, loadUserRoutesAPI(t))
@@ -184,16 +225,52 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 	if err := apigen.WriteAPI(output, outDir); err != nil {
 		t.Fatalf("apigen.WriteAPI: %v", err)
 	}
-	checkGoldenFiles(t, outDir, filepath.Join("testdata", "golden", userRoutesAPI), []string{"routes.go", "interfaces.go"})
-	for _, name := range []string{"routes.go", "interfaces.go"} {
+	checkGoldenFiles(t, outDir, filepath.Join("testdata", "golden", userRoutesAPI), []string{"routes.go", "interfaces.go", "identity.go"})
+	read := func(name string) string {
+		t.Helper()
 		src, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, absent := range []string{"Login", "ChangePassword", "AccountAdmin", "auth/login", "LoginInput"} {
-			if strings.Contains(string(src), absent) {
-				t.Errorf("%s mentions %s, which the identity runtime serves", name, absent)
-			}
+		return string(src)
+	}
+	routes, interfaces, identity := read("routes.go"), read("interfaces.go"), read("identity.go")
+	for _, absent := range []string{"Login", "ChangePassword", "AccountAdmin", "LoginInput"} {
+		if strings.Contains(interfaces, absent) {
+			t.Errorf("interfaces.go mentions %s, which the identity runtime serves", absent)
+		}
+	}
+	for _, absent := range []string{"createAccountLoginHandler", "Implementations.Account", "LoginInput"} {
+		if strings.Contains(routes, absent) {
+			t.Errorf("routes.go mentions %s, which the identity runtime serves", absent)
+		}
+	}
+	for _, want := range []string{
+		`Path:    "/auth/login",`,
+		`Handler: identityHandler(cfg.Identity, "login"),`,
+		`Handler: identityHandler(cfg.Identity, "grantRole"),`,
+		`cfg.Identity.RequirePermissions("identity.roles.write"),`,
+		`runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),`,
+		"Identity *identity.Service",
+		"cfg.AuthMiddleware = cfg.Identity.Middleware",
+		"r.Use(cfg.Identity.CORS())",
+		"cfg.AuthMiddleware,",
+	} {
+		if !strings.Contains(routes, want) {
+			t.Errorf("routes.go lacks %s", want)
+		}
+	}
+	for _, want := range []string{
+		`{OperationID: "AccountLoginHandler"},`,
+		`{OperationID: "AccountMeHandler", RequiresAuth: true},`,
+		`{OperationID: "AccountAdminGrantRoleHandler", RequiresAuth: true, Permissions: []string{"identity.roles.write"}},`,
+		`{OperationID: "GreetingGreetHandler", RequiresAuth: true},`,
+		`const IdentityPermissionPrefix = "identity"`,
+		"identity.WithRoutes(IdentityRoutes())",
+		"identity.WithPermissionPrefix(IdentityPermissionPrefix)",
+	} {
+		if !strings.Contains(identity, want) {
+			t.Errorf("identity.go lacks %s", want)
 		}
 	}
 }
@@ -207,7 +284,7 @@ func TestUserRoutesServerCompiles(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 	compile := func(t *testing.T, schema *ir.Schema) {
-		apiDir := writeGoAPIModule(t, schema, userRoutesAPI)
+		apiDir := writeGoAPIModuleOver(t, schema, userRoutesAPI, loadUserModelDB(t), nil)
 		if _, err := apigen.WriteImplementationScaffold(generateUserRoutesAPI(t, schema), filepath.Join(apiDir, "impl")); err != nil {
 			t.Fatal(err)
 		}

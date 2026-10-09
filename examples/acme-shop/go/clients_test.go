@@ -16,13 +16,14 @@ import (
 )
 
 // ordersClientGo makes the same calls as the TypeScript, Python and Rust
-// clients, through the generated Go SDK, and prints the same lines.
-func ordersClientGo(ctx context.Context, baseURL string) (string, error) {
+// clients, through the generated Go SDK, and prints the same lines. token
+// is the shopper's bearer token.
+func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) {
 	anonymous, err := sdk.New(sdk.SDKConfig{BaseURL: baseURL})
 	if err != nil {
 		return "", err
 	}
-	shopper, err := sdk.New(sdk.SDKConfig{BaseURL: baseURL, Auth: &sdk.AuthConfig{Token: "token-1"}})
+	shopper, err := sdk.New(sdk.SDKConfig{BaseURL: baseURL, Auth: &sdk.AuthConfig{Token: token}})
 	if err != nil {
 		return "", err
 	}
@@ -77,17 +78,20 @@ func status(err error) string {
 // Go or in Rust.
 const clientsSee = "reviews: 0\nwrite a review without a token: 401\norder a product that does not exist: 400\nget a missing order: 404\n"
 
-// Every generated SDK calls the same Go server and sees the same answers.
-// scripts/check.sh sets ACME_SHOP_CLIENTS=1 once it has built and linked the
-// TypeScript, Python and Rust clients; without it only the Go client runs.
+// Every generated SDK calls the same Go server and sees the same answers,
+// as a shopper signed in through shop-api's login. scripts/check.sh sets
+// ACME_SHOP_CLIENTS=1 once it has built and linked the TypeScript, Python
+// and Rust clients; without it only the Go client runs.
 func TestEverySDKCallsTheGoServer(t *testing.T) {
-	runClients(t, ordersServer(t, "orders").URL)
+	server, token := ordersServer(t, "orders")
+	runClients(t, server.URL, token)
 }
 
 // Every generated SDK calls shop-orders served by the generated Rust server
 // (rust-server/) and sees what it sees from the Go server. scripts/check.sh
 // builds the server and sets ACME_SHOP_RUST_SERVER to its binary, which
-// prints the URL it serves on.
+// prints the URL it serves on and authenticates the shopper by the token
+// token-1 (rust-server/src/lib.rs).
 func TestEverySDKCallsTheRustServer(t *testing.T) {
 	binary := os.Getenv("ACME_SHOP_RUST_SERVER")
 	if binary == "" {
@@ -110,15 +114,15 @@ func TestEverySDKCallsTheRustServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the Rust server printed no URL: %v", err)
 	}
-	runClients(t, strings.TrimSpace(baseURL))
+	runClients(t, strings.TrimSpace(baseURL), "token-1")
 }
 
-// runClients runs the Go client against baseURL, then, with
-// ACME_SHOP_CLIENTS=1, the TypeScript, Python and Rust clients, and checks
-// that each prints clientsSee.
-func runClients(t *testing.T, baseURL string) {
+// runClients runs the Go client against baseURL as the shopper whose
+// bearer token is token, then, with ACME_SHOP_CLIENTS=1, the TypeScript,
+// Python and Rust clients, and checks that each prints clientsSee.
+func runClients(t *testing.T, baseURL, token string) {
 	t.Helper()
-	got, err := ordersClientGo(context.Background(), baseURL)
+	got, err := ordersClientGo(context.Background(), baseURL, token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,9 +134,9 @@ func runClients(t *testing.T, baseURL string) {
 	}
 
 	clients := map[string][]string{
-		"typescript": {"bun", "run", "../typescript/orders-client.ts", baseURL},
-		"python":     {os.Getenv("ACME_SHOP_PYTHON"), "-B", "../python/orders_client.py", baseURL},
-		"rust":       {rustClient(), baseURL},
+		"typescript": {"bun", "run", "../typescript/orders-client.ts", baseURL, token},
+		"python":     {os.Getenv("ACME_SHOP_PYTHON"), "-B", "../python/orders_client.py", baseURL, token},
+		"rust":       {rustClient(), baseURL, token},
 	}
 	for language, argv := range clients {
 		t.Run(language, func(t *testing.T) {

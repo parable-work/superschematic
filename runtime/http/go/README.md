@@ -12,7 +12,7 @@ depends on a generated type.
 | `requestctx` | request-scoped values (request id, database handle) with typed accessors |
 | `middleware` | request logging, recovery, AES-GCM payload decryption and the `PayloadDecryptor` seam |
 | `routing` | route registration and handler adapter scaffolding |
-| `session` | the core auth provider's runtime: session store, middleware and permission checks |
+| `session` | the principal on the request context, `RequireAuth` and the permission checks every provider's routes run, and the store interfaces a provider of its own may build on; the core user model's sessions are `identity`'s |
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `identity` | the core user model's runtime (D50): the identity `Config`, argon2id passwords as PHC strings, session tokens, the session cookie, the credential a request carries (`ExtractCredential`), the cross-origin check and the credentialed `CORS` middleware, roles and capabilities, the `Store` with its `database/sql` `SQLStore` for Postgres and SQLite, the `Service` with every session and administration operation, its handlers and its `Middleware` |
 | `filterparse` | list-endpoint filter expression parsing |
@@ -68,6 +68,16 @@ cd runtime/http/go && go test ./identity -run TestWriteParityVectors -update
 store's tests run against `runtime/http/testdata/identity`, the
 `fixture-user-model-db` descriptor and DDL, on SQLite always and on the
 Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set.
+
+## Identity routes' answers
+
+`Service.Handler` answers every route as a generated server answers its
+operations: 200 with `{"data": ..., "meta": {"requestId": ...}}`, a list
+with the collection envelope, and a refusal with the problem `WriteError`
+writes. `logout`, `changePassword`, `setUserPassword` and `deleteRole`,
+which the contract types as the boolean `true`, answer
+`{"data": true, "meta": {...}}` with 200, never 204, so every SDK decodes
+them as it decodes any other operation's result.
 
 ## The identity runner
 

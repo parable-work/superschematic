@@ -57,6 +57,31 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequirePermissions is the permission check a generated server runs on a
+// user model route that needs permissions (an administration route), in
+// the route's place for one (after its rate and body limits and its
+// service step, before its timeout). It admits the caller when the
+// service's matcher gives their roles one of permissions, as the route's
+// handler and capabilities do, and answers a refusal with the problem the
+// routes' contract names (ir.IdentityOperationErrors): 401 unauthorized
+// without a usable session, 403 forbidden otherwise.
+func (s *Service) RequirePermissions(permissions ...string) func(http.Handler) http.Handler {
+	required := append([]string(nil), permissions...)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := s.principal(w, r)
+			if !ok {
+				return
+			}
+			if !s.matcher(p.Roles, required) {
+				WriteError(w, r, forbidden("Insufficient permissions", nil))
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+		})
+	}
+}
+
 // CORS is the credentialed CORS middleware for the config's trusted
 // origins (package function CORS).
 func (s *Service) CORS() func(http.Handler) http.Handler {
@@ -122,9 +147,9 @@ var Operations = []Operation{
 // route that needs a caller reads the principal Middleware put on the
 // request, or authenticates the request itself when there is none.
 // Success is the generated servers' envelope ({"data": ..., "meta":
-// {"requestId": ...}}) with 200, or 204 with no body for logout,
-// changePassword, setUserPassword and deleteRole; a refusal is the
-// problem WriteError writes.
+// {"requestId": ...}}) with 200; logout, changePassword, setUserPassword
+// and deleteRole, which the contract types as the boolean true, answer
+// {"data": true, ...}. A refusal is the problem WriteError writes.
 func (s *Service) Handler(op string) (http.Handler, bool) {
 	var h http.HandlerFunc
 	switch op {
@@ -141,7 +166,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 			if p.Transport == TransportCookie {
 				http.SetCookie(w, s.cfg.ClearCookie())
 			}
-			response.NoContent(w)
+			respond(w, r, true, nil)
 		})
 	case ir.IdentityOpMe:
 		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) { respond(w, r, s.Me(p), nil) })
@@ -151,7 +176,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) {
 			var in ChangePasswordInput
 			if decode(w, r, &in) {
-				noContent(w, r, s.ChangePassword(r.Context(), p, in))
+				respondTrue(w, r, s.ChangePassword(r.Context(), p, in))
 			}
 		})
 	case ir.IdentityOpCreateUser:
@@ -186,7 +211,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
 			var in SetPasswordInput
 			if decode(w, r, &in) {
-				noContent(w, r, s.SetUserPassword(r.Context(), p, id, in))
+				respondTrue(w, r, s.SetUserPassword(r.Context(), p, id, in))
 			}
 		})
 	case ir.IdentityOpListRoles:
@@ -212,7 +237,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		})
 	case ir.IdentityOpDeleteRole:
 		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
-			noContent(w, r, s.DeleteRole(r.Context(), p, id))
+			respondTrue(w, r, s.DeleteRole(r.Context(), p, id))
 		})
 	case ir.IdentityOpGrantRole, ir.IdentityOpRevokeRole:
 		change := s.GrantRole
@@ -386,10 +411,9 @@ func respondList(w http.ResponseWriter, r *http.Request, data any, err error) {
 	response.CollectionEnvelope(w, http.StatusOK, data, meta(r), nil)
 }
 
-func noContent(w http.ResponseWriter, r *http.Request, err error) {
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	response.NoContent(w)
+// respondTrue answers an operation the contract types as the boolean
+// true: {"data": true, ...} with 200, as every generated server answers
+// one, or the problem err is.
+func respondTrue(w http.ResponseWriter, r *http.Request, err error) {
+	respond(w, r, true, err)
 }

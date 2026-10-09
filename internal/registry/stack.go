@@ -97,6 +97,15 @@ type PlatformSpec struct {
 	// platform (`minInstances`, `tier`). Nil accepts no settings.
 	Settings json.RawMessage
 
+	// IdentityConfig is the identity config, a JSON object, that a server
+	// on this platform runs each API over the user model with (D50;
+	// ir.IdentityConfigField) unless its environment sets the field: the
+	// local platform's turns the session cookie's Secure attribute off,
+	// since it serves plain HTTP. Empty leaves the field unbound, and the
+	// server runs with the identity runtime's defaults. Only a server
+	// platform declares one.
+	IdentityConfig string
+
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
 	NameOf func(PlatformContext) any
@@ -458,7 +467,8 @@ var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeSc
 // name, an unknown kind, a server platform without languages or a database
 // platform without dialects (or either with the other's list), an unknown
 // or repeated language or dialect, a settings schema that does not compile,
-// and a missing NameOf, AddressOf or Lower.
+// an identity config that is not a server platform's JSON object, and a
+// missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -495,6 +505,15 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
+	}
+	if spec.IdentityConfig != "" {
+		var object map[string]any
+		if spec.Kind != ir.DeployableServer {
+			return fmt.Errorf("registry: database platform %q declares an identity config; only a server platform does", spec.Name)
+		}
+		if err := json.Unmarshal([]byte(spec.IdentityConfig), &object); err != nil || object == nil {
+			return fmt.Errorf("registry: platform %q IdentityConfig is not a JSON object: %v", spec.Name, err)
+		}
 	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")

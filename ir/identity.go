@@ -123,3 +123,18 @@ func (s *Schema) identityTable(is func(*TypeDef) bool) *TypeDef {
 	}
 	return nil
 }
+
+// IdentityConfigFieldSuffix is what the name of an API's identity config
+// field adds to the API's name in upper snake case.
+const IdentityConfigFieldSuffix = "_IDENTITY"
+
+// IdentityConfigField returns the name of the identity config field of the
+// API service named service, whose server authenticates with the identity
+// runtime: its name in upper snake case and IdentityConfigFieldSuffix
+// (`shop-api` is `SHOP_API_IDENTITY`), named as its callers field is
+// (CallersField). Its value is the identity runtime's config as JSON, the
+// Config the Go, TypeScript and Rust runtimes read alike; a server without
+// one runs with the runtime's defaults.
+func IdentityConfigField(service string) string {
+	return EnvName(service) + IdentityConfigFieldSuffix
+}

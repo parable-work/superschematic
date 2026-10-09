@@ -12,13 +12,13 @@ kind, decorators and auth provider.
 | Path | What it is |
 |---|---|
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
-| `schemas/services/shop-db` | DB: users, sessions, products, stock, orders and reviews |
-| `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs |
+| `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, stock, orders and reviews |
+| `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
 | `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server whose entrypoint the build writes; its `Dev` environment runs on the `local` target |
-| `go/` | the Go module: `auth.go`, the auth both APIs share, and the tests, which call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
-| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)` and `AuthMiddleware(deps)`, which the generated entrypoints call |
+| `go/` | the Go module and its tests, which sign in through `shop-api`'s login, call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
+| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call. No package authenticates a caller: both servers do it with the identity runtime |
 | `typescript/` | implements `shop-storefront` and tests it through the TypeScript SDK; a `shop-orders` client; type tests |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
@@ -60,8 +60,13 @@ instead; check the docs pages that quote a changed file. The `acme` job in
 candidate run on `main` twice a day and before every release, not on pull
 requests (D40).
 
-The Go tests serve each API in-process over the ORM's no-op database;
-only `TestStackDevRunsTheShop` needs Postgres, which `stack dev` runs in
-Docker, and it skips without Docker.
+The Go tests serve each API in-process over the ORM's no-op database,
+with the identity runtime over a store in memory (`go/users_test.go`), since
+`shop-db`'s search fields have no SQLite form; only
+`TestStackDevRunsTheShop` needs Postgres, which `stack dev` runs in Docker,
+and it skips without Docker. It creates a user with the identity runtime's
+store over Postgres and signs them in through `shop-api`'s login. The
+clients take the shopper's bearer token as their second argument: the Go
+server's comes from a sign-in, and the Rust server accepts `token-1`.
 `go/go.mod` and the `[paths]` table in `schemas/superschematic.toml` point
 at this checkout until the modules and packages are published.

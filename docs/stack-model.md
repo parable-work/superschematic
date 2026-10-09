@@ -168,7 +168,18 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
   name. It holds what the server's `ServiceAuthenticator` checks: the
   issuers it accepts, with their keys and audience, and the deployable
   each caller identity is, which the connectors of the http edges to the
-  API write together (section 9.2).
+  API write together (section 9.2);
+- an identity config field per served API whose server authenticates with
+  the identity runtime (D50: its `authDb` declares the user model),
+  `<API>_IDENTITY` (`SHOP_API_IDENTITY`), named as the callers field is.
+  It holds the identity runtime's config as one JSON string: the
+  session's lifetime, the cookie, the trusted origins and the password
+  hash's cost. The environment sets it with its `env` settings, a literal
+  or a parameter; without one the server's platform gives its identity
+  config (`PlatformSpec.IdentityConfig`), as the `local` platform's turns
+  the session cookie's `Secure` off over plain HTTP; without either it is
+  unbound, and the server runs with the runtime's defaults. Its binding
+  names the API in `identityOf`.
 
 An API's database field comes from its `authDb`, or its one DB-kind
 dependency, as its sql edge does (section 3.3).
@@ -609,6 +620,10 @@ registers a `PlatformSpec`:
   `TYPESCRIPT`, `RUST`), or `Dialects` for a database platform
   (`postgres`, `sqlite`), in order of preference;
 - `Settings`, the JSON Schema of its settings (`minInstances`, `tier`);
+- `IdentityConfig`, for a server platform, the identity config (a JSON
+  object) a server on it runs each API over the user model with unless its
+  environment sets the API's identity config field (section 3.4, D50); the
+  `local` platform's turns the session cookie's `Secure` off;
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
   (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
@@ -929,7 +944,8 @@ the core registers the local target); every other is an extension's.
   unknown deployable kind, a server platform without languages or a
   database platform without dialects (or either with the other's list), an
   unknown or repeated language or dialect, a settings schema that does not
-  compile, and a missing `NameOf`, `AddressOf` or `Lower`.
+  compile, an identity config that is not a server platform's JSON object,
+  and a missing `NameOf`, `AddressOf` or `Lower`.
 - `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
   an unknown edge kind, a missing platform or `Connect`, and a second
   connector for one edge kind between the same two platforms.
@@ -1329,7 +1345,19 @@ authenticator, a `serviceauth.Verifier` over the API's callers field
 (section 9.2), which `serviceAuthenticator` in `serviceauth.go`, beside
 `main.go`, builds with `stackconfig.LoadCallers`. The server refuses to
 start without the field, and where no other server calls the API it starts
-with no issuers and refuses every service credential. OpenTelemetry export
+with no issuers and refuses every service credential.
+
+An API whose server authenticates with the identity runtime (D50) takes
+the identity service in place of an auth middleware. The entrypoint builds
+one identity store per database such an API reads, over the database's
+pool (`database/sql` through `stdlib.OpenDBFromPool`, the Postgres
+dialect, the descriptor constant of the database's Go types), and each
+API's service with its generated `NewIdentity`, from the config
+`identityConfig` in `identity.go` reads from the API's identity config
+field: JSON, the runtime's defaults when unset, and a refused config stops
+the server. The implementation writes no auth middleware. A preflight
+goes to the router that registers the method it asks about, whose CORS
+middleware answers the trusted origins. OpenTelemetry export
 is not set up: the runtime records spans through the global tracer, and an
 exporter would add the OTLP client's dependencies to every server.
 

@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable } from "@superschematic/schema";
-import { AutoGenerate, Relation, key, unique } from "@superschematic/db";
+import { AutoGenerate, Relation, User as UserTrait, UserRole, key, unique } from "@superschematic/db";
 
 // Timestamps every table carries.
 export abstract class Auditable {
@@ -8,8 +8,12 @@ export abstract class Auditable {
   updatedAt: Nullable<Temporal.DateTime>;
 }
 
-// A person who can sign in to the shop.
-export abstract class User extends Auditable {
+// A person who can sign in to the shop, with their email and a password.
+// The User trait makes the table the core user model's (D50): the build
+// adds the Session and UserCredential tables beside it, and both APIs sign
+// users in and out with the identity runtime. The trait is imported as
+// UserTrait, since the table is named User too.
+export abstract class User extends Auditable implements UserTrait<{ login: "email"; name: "name" }> {
   @key
   id: AutoGenerate<Identity.UUID>;
 
@@ -19,18 +23,17 @@ export abstract class User extends Auditable {
   name: Identity.Name;
 }
 
-// A signed-in session. The session auth provider looks a bearer token up
-// by its jti.
-export abstract class Session extends Auditable {
+// A named set of permissions a user is granted: staff hold products, to
+// add products, and shoppers orders, to place them. Users hold roles
+// through the UserRoleGrant table the build adds.
+export abstract class Role extends Auditable implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;
 
   @unique
-  jti: Identity.UUID;
+  name: Identity.Slug;
 
-  user: Relation<User, { onDelete: "CASCADE" }>;
-
-  expiresAt: Temporal.DateTime;
+  permissions: string[];
 }
 
 // Something the shop sells.

@@ -149,8 +149,10 @@ func (r *resolver) bindConfig() {
 		}
 		callers := r.callersFields(d)
 		refused := r.checkCallersFields(d, callers, derived)
+		identity := r.identityFields(d)
+		r.checkIdentityFields(d, identity, callers, derived)
 		for _, key := range sortedKeys(d.settings.env) {
-			if _, ok := d.fields[key]; ok || refused[key] {
+			if _, ok := d.fields[key]; ok || refused[key] || identity[key] != "" {
 				continue
 			}
 			if e, ok := derived[key]; ok {
@@ -169,6 +171,7 @@ func (r *resolver) bindConfig() {
 			bindings = append(bindings, &ir.Binding{Field: e.res.Field, Source: ir.BindingDerived, Edge: e.res.ID})
 		}
 		bindings = append(bindings, r.callersBindings(d, callers)...)
+		bindings = append(bindings, r.identityBindings(d, identity)...)
 		slices.SortFunc(bindings, func(a, b *ir.Binding) int { return strings.Compare(a.Field, b.Field) })
 		d.res.Bindings = bindings
 	}
