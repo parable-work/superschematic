@@ -37,7 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
-| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, and the deploy's publish through a target's `Sites` seam | the gcp target's sites |
+| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -847,6 +847,7 @@ and the [generated CI](#generated-ci) signs in with.
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
+| site | a Cloud Storage bucket, `<project>-<site>`, readable by `allUsers`, and a backend bucket with Cloud CDN behind a load balancer of its own, whose URL map serves the files of the build the deploy switched to; with a domain at `https://<site>.<domain>`, without one over HTTP at the load balancer's address ([Static sites](/superschematic/guides/static-sites/#on-google-cloud)) |
 | secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server and job, and an environment variable that reads its latest version |
 | image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`), and a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits |
@@ -876,9 +877,9 @@ rules run over every gcp environment: `production-databases-highly-available`
 refuses a zonal instance when `production` is set, and
 `nothing-public-unless-exposed` refuses an internal server that takes
 outside traffic or turns its invoker check off, a load balancer for
-anything but an exposed server, a grant to `allUsers` or
-`allAuthenticatedUsers`, a job's included, and an instance open to
-`0.0.0.0/0`. Every
+anything but an exposed server or a site, a grant to `allUsers` or
+`allAuthenticatedUsers`, a job's included, but a site's bucket's, and an
+instance open to `0.0.0.0/0`. Every
 resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
 and resolution checks each node's properties against it.
 

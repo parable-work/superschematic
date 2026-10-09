@@ -77,8 +77,8 @@ type Export struct {
 
 // Exports returns the stack outputs the program Render writes for env,
 // sorted by key: every node's `id`, and every output env references in a
-// node's properties, a deployable's name or address, a binding's value or
-// a DNS record. An inherited node's outputs are read from the parent
+// node's properties, a deployable's name, address or public address (D55),
+// a binding's value or a DNS record. An inherited node's outputs are read from the parent
 // environment's stack and exported again, so a member's outputs cover its
 // whole graph.
 func Exports(env *ir.ResolvedEnvironment) ([]Export, error) {
@@ -198,7 +198,7 @@ func (p *program) collectExports() error {
 		}
 	}
 	for _, d := range p.env.Deployables {
-		if err := add("deployable "+d.Name, []any{d.ResourceName, d.Address}); err != nil {
+		if err := add("deployable "+d.Name, []any{d.ResourceName, d.Address, d.PublicAddress}); err != nil {
 			return err
 		}
 		for _, b := range d.Bindings {

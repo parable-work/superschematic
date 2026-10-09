@@ -245,8 +245,8 @@ func RunJob(ctx context.Context, o RunJobOptions) error {
 }
 
 // deployedRequest is the provisioner's request over the environment with
-// the images the manifest records pinned, so the program it renders is
-// the one the last deploy applied.
+// the images and the sites' files the manifest records pinned, so the
+// program it renders is the one the last deploy applied.
 func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionRequest, error) {
 	prev, err := readManifest(ctx, s.target.State, s.run)
 	if err != nil {
@@ -261,6 +261,15 @@ func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionReques
 			}
 		}
 		if env, err = PinImages(s.env, images); err != nil {
+			return registry.ProvisionRequest{}, err
+		}
+		sites := map[string]string{}
+		for site, digest := range prev.Sites {
+			if d := s.env.Deployable(site); d != nil && d.Kind == ir.DeployableSite {
+				sites[site] = digest
+			}
+		}
+		if env, err = PinSites(env, sites); err != nil {
 			return registry.ProvisionRequest{}, err
 		}
 	}

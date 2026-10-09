@@ -117,16 +117,17 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack
 	return resolved
 }
 
-// TestGolden resolves the shop stack on gcp in each environment and checks
-// the environment.json it writes, resource graph included, against the
-// golden file. Resolution validated every node against the pinned schema
-// of its type on the way.
+// TestGolden resolves the shop stack on gcp, with the site shop-web, which
+// calls shop-api (D55), in each environment and checks the
+// environment.json it writes, resource graph included, against the golden
+// file. Resolution validated every node against the pinned schema of its
+// type on the way.
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
-	s := shop()
+	s := stacktest.WithSite(shop())
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, stacktest.AcmeShop(), env.Name)
+			checkGolden(t, reg, s, stacktest.SiteShop(), env.Name)
 		})
 	}
 }

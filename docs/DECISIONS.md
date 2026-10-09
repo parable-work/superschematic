@@ -5076,3 +5076,32 @@ Status: built with the rest of D55's first half. The acme shop's
 `web/shop-web` calls shop-api with `fetch` through `loadApis()`.
 
 The rule is reversible until the first release.
+
+### D55, amended: on gcp a site's bucket is public, its fallback needs a backend service on its load balancer, and a site with no domain is served over HTTP
+
+D55 put a site on gcp in a bucket under a prefix per digest, behind a
+backend bucket with Cloud CDN and the HTTPS load balancer exposure builds,
+with the fallback on the URL map. Building it found three things the
+design did not say. A backend bucket reads only objects the public can
+read: Cloud CDN's own account reads a private bucket, but only to fill
+the cache for a signed request, and a browser's requests are not signed.
+A URL map's custom error response, which serves the fallback, does not
+work on a load balancer whose backends are all backend buckets, as
+Google's documentation of custom error responses says. And a certificate
+needs a host, which an environment with no domain does not give a site.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site's bucket grants `roles/storage.objectViewer` to `allUsers`, with uniform access and public access prevention inherited. `nothing-public-unless-exposed` allows it, since a site is always exposed. A project whose organization policy forbids public buckets cannot serve a site. | A private bucket read by Cloud CDN's service account, which serves only signed URLs or cookies. A backend service with an internet network endpoint group in front of `storage.googleapis.com`, whose requests the bucket would still see as anonymous. |
+| A site with a fallback gets an anchor: a backend service with no backends, to which the URL map sends one reserved path, `/__superschematic/none`, so the load balancer has a backend service besides its backend bucket and serves the fallback for a 404, with 200, from the build's prefix. | The bucket's `website.notFoundPage`, one object for the whole bucket, which the bucket node would have to change in the infrastructure step, before the files of the build it names are there, and which answers 404. Routing the paths with no file extension to `index.html`, which a URL map cannot match. |
+| With no domain, the site is served over HTTP on port 80 at its load balancer's address, `http://<address>`, which is its origin in each API's CORS field; the address applies in the infrastructure step, so it is there before the APIs that list it roll out. | No site without a domain. A self-signed certificate, which a browser refuses. |
+| Every file is served `Cache-Control: no-cache`, and the config `no-store`; the backend bucket's CDN takes the objects' headers (`USE_ORIGIN_HEADERS`). Cloud CDN keeps a file and checks with the bucket before it serves it again, so the switch to a new build shows at once whether its cache key holds the path before or after the URL map's rewrite, which Google's documentation does not say. | A long `max-age` for every file but the HTML, which serves a stale file whose name holds no hash of its content. Telling content-hashed files by their names, which a site's own build decides. |
+| The publisher writes a marker object under a build's prefix after its last file, and puts no file of a prefix that holds one. | Listing the prefix, which a partial upload also fills. |
+
+Status: built in `extensions/gcp` (`gcp.site`, `gcp.site-cloudrun`, the
+publisher, `deployer`'s Storage admin role). The gcp, Pulumi render and
+Cloudflare goldens hold the acme shop's site. None of it has run against
+Google Cloud, where the anchor and the rewrite of the root path are the
+first things to check.
+
+The rule is reversible until the first release.

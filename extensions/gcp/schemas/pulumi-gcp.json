@@ -25,6 +25,7 @@
     "gcp:cloudrunv2/service:Service",
     "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
     "gcp:cloudscheduler/job:Job",
+    "gcp:compute/backendBucket:BackendBucket",
     "gcp:compute/backendService:BackendService",
     "gcp:compute/globalAddress:GlobalAddress",
     "gcp:compute/globalForwardingRule:GlobalForwardingRule",
@@ -33,6 +34,7 @@
     "gcp:compute/router:Router",
     "gcp:compute/routerNat:RouterNat",
     "gcp:compute/subnetwork:Subnetwork",
+    "gcp:compute/targetHttpProxy:TargetHttpProxy",
     "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
     "gcp:compute/uRLMap:URLMap",
     "gcp:dns/recordSet:RecordSet",
@@ -47,6 +49,7 @@
     "gcp:sql/database:Database",
     "gcp:sql/databaseInstance:DatabaseInstance",
     "gcp:sql/user:User",
+    "gcp:storage/bucket:Bucket",
     "gcp:storage/bucketIAMMember:BucketIAMMember"
   ]
 }

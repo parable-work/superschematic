@@ -139,6 +139,16 @@ func TestDeployPublishesASite(t *testing.T) {
 	if calls := strings.Join(f.calls(from), "\n"); strings.Contains(calls, "upload") {
 		t.Errorf("the rollback uploaded files:\n%s", calls)
 	}
+
+	// Outputs renders the program the last deploy applied: the site
+	// serves the files the manifest records.
+	if _, err := stackdeploy.Outputs(context.Background(), f.options(t, env, nil)); err != nil {
+		t.Fatal(err)
+	}
+	site = f.ext.Provisioner.Rendered().Resources.Resource("shop-web.site")
+	if want := "/" + strings.TrimPrefix(digest, "sha256:") + "/"; site.Properties["prefix"] != want {
+		t.Errorf("outputs rendered the site serving %v, want %s", site.Properties["prefix"], want)
+	}
 }
 
 // TestASiteNeedsFiles: a deploy with no build refuses a site the manifest
