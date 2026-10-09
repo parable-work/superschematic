@@ -47,6 +47,7 @@ export type {
   LeaseDirectOn,
   LeaseTransition,
   LinkConfig,
+  LinkTarget,
   LinksConfig,
   NumberingConfig,
   NumberingScope,

@@ -63,9 +63,14 @@ transition to it from where it is, or whose guards veto the transition
 is left as it is, and so is an enters rule on the instance itself once
 the instance has moved on from the state. A target without Workflow, a
 state its Workflow lacks, a schema that does not link here through the
-link, and a revised link whose schema composes neither Revisions nor
-Branches are failures, which retry and then halt the subscription: the
-deployment's config is wrong, and only it can say what to do.
+link, a link of then, allTerminal, anyTerminal or a holds rule's rollup
+that holds a list of targets, and a revised link whose schema composes
+neither Revisions nor Branches are failures, which retry and then halt
+the subscription: the deployment's config is wrong, and only it can say
+what to do. parseConfig refuses such a list already where it can see
+it: the type's own Links, and a linked schema's live one when the schema
+is defined or published (D56). A revised rule hears a many-valued link
+as any other, through listLinked.
 
 Cycles and depth: enters rules on the instance itself chain, and
 parseConfig refuses their cycles. A holds rule hears only the rollup's
@@ -94,10 +99,10 @@ import { LINKS_TARGETS, WORKFLOW_STATUS, behaviorField, type InstanceFields } fr
 import { BehaviorError, BehaviorVetoError } from '../../errors.js';
 import type { EngineEvent, OperationChange } from '../../events/log.js';
 import { mergePatch } from '../../instances/patch.js';
-import { BehaviorConfigError, defineBehavior, type FrozenJSON, type ReactionContext } from '../behavior.js';
+import { BehaviorConfigError, defineBehavior, type ConfigTarget, type FrozenJSON, type ReactionContext } from '../behavior.js';
 import declaration from './declarations/Reactions.behavior.json' with { type: 'json' };
 import { reactionsGuidance } from './guidance/reactions.js';
-import { linkPin, type LinkPin } from './links.js';
+import { linkMany, linkPin, type LinkPin } from './links.js';
 import { movedOn, targetMove } from './revised.js';
 import { MAX_ROLLUP_READ } from './rollups.js';
 import { stateOutcome, type WorkflowOutcome, type WorkflowStates } from './workflow.js';
@@ -200,9 +205,14 @@ function movedLinks(event: EngineEvent): boolean {
   return links !== undefined && links !== null && Object.prototype.hasOwnProperty.call(links, 'targets');
 }
 
-// linkOf reads one link of an instance's Links targets field.
+// linkOf reads one link of an instance's Links targets field. A rule reads
+// the one target of a link, and a link that holds a list of them, which a
+// linked schema's new version may make it, is a failure.
 function linkOf(record: Logged, link: string): Target | undefined {
   const held = (behaviorField(record, 'Links', 'targets') as Record<string, { schema?: unknown; id?: unknown }> | undefined)?.[link];
+  if (Array.isArray(held)) {
+    throw new BehaviorError(NAME, `link ${link} holds a list of targets, and a rule reads the one instance a link points at`);
+  }
   return typeof held?.schema === 'string' && typeof held.id === 'string' ? { schema: held.schema, id: held.id } : undefined;
 }
 
@@ -525,6 +535,34 @@ function resolve(
   return { rollups, revised };
 }
 
+// checkOneTarget refuses a link a rule reads the one target of that holds
+// a list of them: then.link, and the link of an allTerminal, an
+// anyTerminal or a holds rule's rollup, the type's own or, when the schema
+// is defined or published, a linked schema's live one. A linked schema
+// with no live version is checked when the rule runs.
+function checkOneTarget(rules: readonly ReactionsRule[], rollups: Readonly<Record<string, ReactionsRollup>>, target: ConfigTarget): void {
+  const many = (schema: string, link: string): boolean => {
+    const config = schema === target.schema ? target.configs.Links : target.schemas?.get(schema)?.configs.Links;
+    return linkMany(own((config as { links?: RawLinks } | undefined)?.links, link));
+  };
+  const reads = 'and the rule reads the one instance it points at';
+  rules.forEach((rule, index) => {
+    const at = `rule ${index + 1}`;
+    if (rule.then.link !== undefined && many(target.schema, rule.then.link)) {
+      throw new BehaviorConfigError(`${at}: then.link ${rule.then.link} holds a list of targets, ${reads}`);
+    }
+    const heard = terminalOf(rule.when);
+    if (heard !== undefined && many(heard.terminal.schema, heard.terminal.link)) {
+      throw new BehaviorConfigError(`${at}: when.${heard.form} names link ${heard.terminal.link} of ${heard.terminal.schema}, which holds a list of targets, ${reads}`);
+    }
+    const holds = 'holds' in rule.when ? rule.when.holds : undefined;
+    const rollup = holds === undefined ? undefined : own(rollups, holds);
+    if (rollup !== undefined && many(rollup.schema, rollup.link)) {
+      throw new BehaviorConfigError(`${at}: when.holds names rollup ${holds}, whose link ${rollup.link} of ${rollup.schema} holds a list of targets, ${reads}`);
+    }
+  });
+}
+
 export const reactions = defineBehavior<ReactionsConfig>({
   declaration,
 
@@ -535,6 +573,7 @@ export const reactions = defineBehavior<ReactionsConfig>({
   parseConfig(json, target) {
     const raw = json as { rules: ReactionsRule[] };
     const resolved = resolve(raw.rules, target.behaviors, target.configs);
+    checkOneTarget(raw.rules, resolved.rollups, target);
     const workflow = target.configs.Workflow as Partial<RawWorkflow> | undefined;
     if (!Array.isArray(workflow?.states) || !Array.isArray(workflow.transitions)) {
       // Without Workflow, or with a Workflow config its own checks refuse,
@@ -642,6 +681,9 @@ export const reactions = defineBehavior<ReactionsConfig>({
         const spec = (context.schemas.config(schema, 'Links') as { links?: Record<string, { schema?: string }> } | undefined)?.links?.[link];
         if (spec?.schema !== context.schema) {
           throw new BehaviorError(NAME, `${form} names link ${link} of ${schema}, which has no such link to ${context.schema}`);
+        }
+        if (linkMany(spec)) {
+          throw new BehaviorError(NAME, `${form} names link ${link} of ${schema}, which holds a list of targets, and the rule reads the one instance it points at`);
         }
         if (form === 'anyTerminal') {
           for (const parent of anyTerminal(context, event, terminal)) {

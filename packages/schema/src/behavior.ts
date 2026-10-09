@@ -125,11 +125,31 @@ export interface LinksConfig {
   readonly links: Readonly<Record<string, LinkConfig>>;
 }
 
-/** One link of a Links config. */
-export interface LinkConfig {
+/**
+ * One link of a Links config. It holds one target, or with many a list of
+ * at most max, in the order they were linked.
+ */
+export type LinkConfig = LinkTarget &
+  (
+    | { readonly many?: false }
+    | {
+        /** The link holds a list of targets rather than one. */
+        readonly many: true;
+        /** The most targets it holds, from 1 to 100. */
+        readonly max: number;
+      }
+  );
+
+/** What a link points at and how it holds its target. */
+export interface LinkTarget {
   /** The schema of the instance the link points at. */
   readonly schema: string;
-  /** Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. */
+  /**
+   * Every create gives the link, which can then be moved to another target
+   * but not unlinked, and the delete of its target is refused. A
+   * many-valued link holds at least one target, and only the delete of its
+   * last is refused.
+   */
   readonly required?: boolean;
   /**
    * What the link records of the target, reporting the target's latest

@@ -682,7 +682,7 @@ export type ReviewDetail = {
   pullRequest: number;
 };
 
-/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, and it waits for its blockers. */
+/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, and it waits for its blockers. */
 export type TaskFields = {
   /** What the task does. */
   title: string;
@@ -715,12 +715,14 @@ export type TaskBehaviors = {
     readonly commentCount: number;
   };
   readonly Links: {
-    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none. */
+    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
     readonly targets: {
       /** The Task instance parent points at. */
       parent?: { id: string; schema: 'Task' };
       /** The Project instance project points at. */
       project: { id: string; schema: 'Project' };
+      /** The Task instances related points at, in the order they were linked. */
+      related?: Array<{ id: string; schema: 'Task' }>;
       /** The Spec instance spec points at. */
       spec?: {
         id: string;
@@ -769,7 +771,7 @@ export type TaskPatch = {
 export type TaskState = 'todo' | 'doing' | 'done' | 'failed';
 
 /** A link of a Task, by name. */
-export type TaskLinkName = 'parent' | 'project' | 'spec';
+export type TaskLinkName = 'parent' | 'project' | 'related' | 'spec';
 
 /** The parameters a Task's create gives its behaviors, by behavior name. */
 export type TaskCreateParams = {
@@ -794,6 +796,11 @@ export type TaskCreateParams = {
       /** The target's id. */
       id: string;
     };
+    /** The Task instances related points at, in order, each once. */
+    related?: Array<string | {
+      /** The target's id. */
+      id: string;
+    }>;
     /** The Spec instance spec points at: its id, or an object with its id and the revision to record. */
     spec?: string | {
       /** The target's id. */
@@ -860,7 +867,7 @@ export type TaskListCommentsResult = {
   next: string | null;
 };
 
-/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
 export type TaskLinkParams = {
   /** The target's id. */
   id: string;
@@ -883,8 +890,10 @@ export type TaskLinkResult = {
   schema: string;
 };
 
-/** The parameters of Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+/** The parameters of Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
 export type TaskUnlinkParams = {
+  /** The target to remove, which a many-valued link needs; for a link that holds one target, the one it must hold. */
+  id?: string;
   /** The link's name in the config. */
   name: TaskLinkName;
 };
@@ -1029,7 +1038,7 @@ export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Comments: never;
-  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
+  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Numbering: never;
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
@@ -1067,9 +1076,9 @@ export interface TaskClient {
   comment(id: string, params: TaskCommentParams, options?: TaskWriteOptions): Promise<TaskCommentResult>;
   /** Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
   listComments(id: string, params?: TaskListCommentsParams, options?: TaskWriteOptions): Promise<TaskListCommentsResult>;
-  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+  /** Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: TaskLinkParams, options?: TaskWriteOptions): Promise<TaskLinkResult>;
-  /** Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+  /** Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
   unlink(id: string, params: TaskUnlinkParams, options?: TaskWriteOptions): Promise<TaskUnlinkResult>;
   /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: TaskListLinkedParams, options?: CallOptions): Promise<TaskListLinkedResult>;

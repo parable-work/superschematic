@@ -865,7 +865,34 @@
                   "links": {
                     "additionalProperties": {
                       "additionalProperties": false,
+                      "else": {
+                        "not": {
+                          "required": [
+                            "max"
+                          ]
+                        }
+                      },
+                      "if": {
+                        "properties": {
+                          "many": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "many"
+                        ]
+                      },
                       "properties": {
+                        "many": {
+                          "description": "The link holds a list of targets, in the order they were linked, rather than one.",
+                          "type": "boolean"
+                        },
+                        "max": {
+                          "description": "For a many-valued link, the most targets it holds, from 1 to 100.",
+                          "maximum": 100,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
                         "pinned": {
                           "description": "What the link records of the target, reporting the target's latest beside it and whether the target has moved past it: true or revision, its revision, whose schema must compose Revisions; release, its release, whose schema must compose Branches; false or absent, nothing.",
                           "enum": [
@@ -876,7 +903,7 @@
                           ]
                         },
                         "required": {
-                          "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.",
+                          "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. A many-valued link holds at least one target, and only the delete of its last is refused.",
                           "type": "boolean"
                         },
                         "schema": {
@@ -888,6 +915,11 @@
                       "required": [
                         "schema"
                       ],
+                      "then": {
+                        "required": [
+                          "max"
+                        ]
+                      },
                       "type": "object"
                     },
                     "description": "The links an instance may hold, by name: camelCase, at most 64 characters.",

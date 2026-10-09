@@ -200,7 +200,7 @@ describe('the describe document', () => {
       [
         ['Constants', []],
         ['Variants', []],
-        ['Links', ['no_revision', 'no_release', 'required_link', 'required_target']],
+        ['Links', ['no_revision', 'no_release', 'required_link', 'required_target', 'too_many', 'not_linked']],
         ['test.Hold', ['stale', 'required', 'refused']],
       ]
     );

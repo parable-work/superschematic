@@ -18,9 +18,10 @@ positive integer, else the config's reserve, as Lease's maxHoldField
 falls back to maxHoldMs.
 
 Scopes. A meter may name a scope: a link of the type's Links config whose
-target encloses the instance, a pool its work draws on, say. The target's
-schema composes Budget with the same meter, which parseConfig checks when
-the schema is defined. Budget never writes another instance's rows (D16):
+target encloses the instance, a pool its work draws on, say. The link
+holds one target, not a list (D56), and the target's schema composes
+Budget with the same meter, which parseConfig checks when the schema is
+defined; a list a scope link holds all the same reads as no scope. Budget never writes another instance's rows (D16):
 the instance invokes an operation on its scope, reserveFor, settleFor or
 recordUsageFor, which applies the scope's own check, records what the
 scope holds for the instance, writes the scope's rows, appends the scope's
@@ -113,6 +114,7 @@ import {
   behaviorField,
   defineBehavior,
   fieldPath,
+  linkMany,
   type BehaviorScope,
   type ConfigTarget,
   type FrozenJSON,
@@ -414,10 +416,7 @@ function scopeOf(view: InstanceView<BudgetConfig>, meter: string): Target | unde
   if (link === undefined) {
     return undefined;
   }
-  const links = behaviorField(view.instances.get(view.schema, view.id, { fields: [LINKS_TARGETS] }), 'Links', 'targets') as
-    | Readonly<Record<string, Target>>
-    | undefined;
-  const target = own(links, link);
+  const target = own(linksIn(view.instances.get(view.schema, view.id, { fields: [LINKS_TARGETS] })), link);
   return target === undefined ? undefined : { schema: target.schema, id: target.id };
 }
 
@@ -442,9 +441,12 @@ function metersIn(record: InstanceRecord | undefined): Readonly<Record<string, M
   return behaviorField(record, NAME, 'meters') as Readonly<Record<string, MeterRecord>> | undefined;
 }
 
-// linksIn reads an instance's Links targets field, of what a read returns.
+// linksIn reads an instance's Links targets field, of what a read returns:
+// the links that hold one target. A list, which parseConfig refuses as a
+// scope, encloses nothing.
 function linksIn(record: InstanceRecord | undefined): Readonly<Record<string, Target>> | undefined {
-  return behaviorField(record, 'Links', 'targets') as Readonly<Record<string, Target>> | undefined;
+  const links = behaviorField(record, 'Links', 'targets') as Readonly<Record<string, Target | readonly Target[]>> | undefined;
+  return links === undefined ? undefined : (Object.fromEntries(Object.entries(links).filter(([, link]) => !Array.isArray(link))) as Readonly<Record<string, Target>>);
 }
 
 function reservedIn(record: InstanceRecord | undefined, meter: string): number {
@@ -792,6 +794,9 @@ function checkScope(target: ConfigTarget, meter: string, link: string): void {
       throw new BehaviorConfigError(`${at} is not a link of the type's Links config (its links: ${Object.keys(links).join(', ')})`);
     }
     return;
+  }
+  if (linkMany(spec)) {
+    throw new BehaviorConfigError(`${at} holds a list of targets, and a meter draws on one scope`);
   }
   if (target.schemas === undefined || typeof spec.schema !== 'string') {
     return;

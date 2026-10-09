@@ -210,7 +210,7 @@ export type JobBehaviors = {
     readonly stuck: boolean;
   };
   readonly Links: {
-    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none. */
+    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
     readonly targets?: {
       /** The batches instance batch points at. */
       batch?: { id: string; schema: 'batches' };
@@ -649,7 +649,7 @@ export type JobRecordAttemptResult = {
   total: number;
 };
 
-/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
 export type JobLinkParams = {
   /** The target's id. */
   id: string;
@@ -672,8 +672,10 @@ export type JobLinkResult = {
   schema: string;
 };
 
-/** The parameters of Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+/** The parameters of Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
 export type JobUnlinkParams = {
+  /** The target to remove, which a many-valued link needs; for a link that holds one target, the one it must hold. */
+  id?: string;
   /** The link's name in the config. */
   name: JobLinkName;
 };
@@ -946,7 +948,7 @@ export type JobVetoes = {
   Queue: 'not_claimable' | 'blocked' | 'stale_link' | 'claim_required';
   Budget: 'over_limit' | 'not_leased' | 'scope_moved' | 'scope_reserved' | 'below_committed' | 'exceeds_reservation' | 'not_configured';
   Retries: 'exhausted' | 'limits_fixed' | 'not_configured';
-  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
+  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Search: never;
@@ -1021,9 +1023,9 @@ export interface JobsClient {
   recordUsageFor(id: string, params: JobRecordUsageForParams, options?: JobWriteOptions): Promise<JobRecordUsageForResult>;
   /** Retries' recordAttempt: Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission. */
   recordAttempt(id: string, params?: JobRecordAttemptParams, options?: JobWriteOptions): Promise<JobRecordAttemptResult>;
-  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+  /** Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: JobLinkParams, options?: JobWriteOptions): Promise<JobLinkResult>;
-  /** Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+  /** Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
   unlink(id: string, params: JobUnlinkParams, options?: JobWriteOptions): Promise<JobUnlinkResult>;
   /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: JobListLinkedParams, options?: CallOptions): Promise<JobListLinkedResult>;

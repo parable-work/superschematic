@@ -1,6 +1,6 @@
 {
   "name": "Links",
-  "description": "Named, single-valued links from the instance to instances of the schemas its config names, set by link or given at create. A pinned link records the target's revision (its schema composes Revisions) or its release (its schema composes Branches), and reports the target's latest beside it and whether the target has moved past it. A required link is given at create, can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
+  "description": "Named links from the instance to instances of the schemas its config names, set by link or given at create: each holds one target, or with many a list of them. A pinned link records the target's revision (its schema composes Revisions) or its release (its schema composes Branches), and reports the target's latest beside it and whether the target has moved past it. A required link is given at create, can be moved to another target but not unlinked, and the delete of its target is refused; a required many-valued link keeps at least one target, and only its last target's delete is refused. A deleted target leaves every link that holds it.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -17,12 +17,20 @@
           "required": ["schema"],
           "properties": {
             "schema": { "description": "The schema of the instance the link points at.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
-            "required": { "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused.", "type": "boolean" },
+            "required": {
+              "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. A many-valued link holds at least one target, and only the delete of its last is refused.",
+              "type": "boolean"
+            },
             "pinned": {
               "description": "What the link records of the target, reporting the target's latest beside it and whether the target has moved past it: true or revision, its revision, whose schema must compose Revisions; release, its release, whose schema must compose Branches; false or absent, nothing.",
               "enum": [true, false, "revision", "release"]
-            }
-          }
+            },
+            "many": { "description": "The link holds a list of targets, in the order they were linked, rather than one.", "type": "boolean" },
+            "max": { "description": "For a many-valued link, the most targets it holds, from 1 to 100.", "type": "integer", "minimum": 1, "maximum": 100 }
+          },
+          "if": { "required": ["many"], "properties": { "many": { "const": true } } },
+          "then": { "required": ["max"] },
+          "else": { "not": { "required": ["max"] } }
         }
       }
     }
@@ -32,8 +40,8 @@
     "type": "object",
     "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]{0,63}$" },
     "additionalProperties": {
-      "description": "The target: its id, or an object with its id and, for a pinned link, the revision or the release to record.",
-      "type": ["string", "object"],
+      "description": "The target: its id, or an object with its id and, for a pinned link, the revision or the release to record; for a many-valued link, a list of them, each target once.",
+      "type": ["string", "object", "array"],
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
       "additionalProperties": false,
       "required": ["id"],
@@ -41,16 +49,32 @@
         "id": { "description": "The target's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
         "revision": { "description": "For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent.", "type": "integer", "minimum": 1 },
         "release": { "description": "For a link pinned to a release, the target's release to record, one it has had; its latest when absent.", "type": "integer", "minimum": 1 }
+      },
+      "maxItems": 100,
+      "items": {
+        "description": "One target: its id, or an object with its id and, for a pinned link, the revision or the release to record.",
+        "type": ["string", "object"],
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "description": "The target's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+          "revision": { "description": "For a link pinned to a revision, the target's revision to record, one it has had; its latest when absent.", "type": "integer", "minimum": 1 },
+          "release": { "description": "For a link pinned to a release, the target's release to record, one it has had; its latest when absent.", "type": "integer", "minimum": 1 }
+        }
       }
     }
   },
   "fields": [
-    { "name": "targets", "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none." }
+    {
+      "name": "targets",
+      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none."
+    }
   ],
   "operations": [
     {
       "name": "link",
-      "description": "Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given.",
+      "description": "Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -79,13 +103,18 @@
     },
     {
       "name": "unlink",
-      "description": "Clears an optional link. A required link cannot be unlinked, only moved.",
+      "description": "Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["name"],
         "properties": {
-          "name": { "description": "The link's name in the config.", "type": "string", "minLength": 1 }
+          "name": { "description": "The link's name in the config.", "type": "string", "minLength": 1 },
+          "id": {
+            "description": "The target to remove, which a many-valued link needs; for a link that holds one target, the one it must hold.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          }
         }
       },
       "resultSchema": {
@@ -147,7 +176,9 @@
   "vetoes": [
     { "code": "no_revision", "description": "A link pinned to a revision, by link or a create's links, to a target that has no revision to pin yet." },
     { "code": "no_release", "description": "A link pinned to a release, by link or a create's links, to a target that has not been released yet." },
-    { "code": "required_link", "description": "unlink of a required link, which link moves and nothing unlinks." },
-    { "code": "required_target", "description": "The delete of an instance a required link points at, whoever the caller." }
+    { "code": "required_link", "description": "unlink of a required link, which link moves and nothing unlinks, or of the last target of a required many-valued link." },
+    { "code": "required_target", "description": "The delete of an instance a required link points at, whoever the caller; for a many-valued link, of its last target." },
+    { "code": "too_many", "description": "link of a new target to a many-valued link that holds its max." },
+    { "code": "not_linked", "description": "unlink of a target the link does not hold." }
   ]
 }

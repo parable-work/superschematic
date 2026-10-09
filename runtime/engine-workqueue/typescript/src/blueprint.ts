@@ -57,7 +57,10 @@ release pins the definition's version graph and not the fields the map
 is in. copyLinks are links of both Links configs to one schema, copied
 with the revision or the release this instance's link records where the
 child's link pins the same: the ones the instance holds when it is
-stamped, which for inline steps are the ones its create gives.
+stamped, which for inline steps are the ones its create gives. Each of
+these links, parentLink, from and copyLinks, holds one target: one that
+holds a list (D56) is refused, and at a stamp this instance's list is
+read as no link.
 
 A child is routed by what the stamp set: the step it is, in keyField, and
 the fields it copied. Any writer of the child, the holder of its lease
@@ -91,6 +94,7 @@ import {
   LINKS_TARGETS,
   behaviorField,
   defineBehavior,
+  linkMany,
   linkPin,
   type ConfigSchema,
   type ConfigTarget,
@@ -356,6 +360,9 @@ function checkChild(config: BlueprintConfig, target: ConfigTarget, child: Config
   if (parent.schema !== target.schema) {
     throw new BehaviorConfigError(`${at}'s link ${config.parentLink} points at ${String(parent.schema)}, not ${target.schema}`);
   }
+  if (linkMany(parent)) {
+    throw new BehaviorConfigError(`${at}'s link ${config.parentLink} holds a list of targets, and a child links to its one parent through it`);
+  }
   // A parentLink pinned to a revision pins the parent's first revision,
   // which Revisions records in its afterChange of the create: before
   // Blueprint's, in list order. One pinned to a release would find none.
@@ -415,6 +422,9 @@ function checkChild(config: BlueprintConfig, target: ConfigTarget, child: Config
     if (copy.schema !== own?.schema) {
       throw new BehaviorConfigError(`copyLinks: ${at}'s link ${name} points at ${String(copy.schema)}, and this type's at ${String(own?.schema)}`);
     }
+    if (linkMany(copy)) {
+      throw new BehaviorConfigError(`copyLinks: ${at}'s link ${name} holds a list of targets, and a stamp copies one`);
+    }
   }
 }
 
@@ -452,10 +462,12 @@ function stamped(view: InstanceView<BlueprintConfig>): boolean {
   return at !== null && at !== undefined;
 }
 
-// linksOf reads this instance's Links targets field, as the caller.
+// linksOf reads this instance's Links targets field, as the caller: the
+// links that hold one target. A list, which parseConfig refuses for every
+// link Blueprint reads, is no link here.
 function linksOf(context: InstanceContext<BlueprintConfig>): Readonly<Record<string, LinkRecord>> {
   const links = behaviorField(context.instances.get(context.schema, context.id, { fields: [LINKS_TARGETS] }), 'Links', 'targets');
-  return (isObject(links) ? links : {}) as Readonly<Record<string, LinkRecord>>;
+  return Object.fromEntries(Object.entries(isObject(links) ? links : {}).filter(([, link]) => !Array.isArray(link))) as Readonly<Record<string, LinkRecord>>;
 }
 
 // revisionData reads one revision of an instance's own fields through
@@ -604,6 +616,9 @@ export const blueprint = defineBehavior<BlueprintConfig>({
             : `from: link ${raw.from.link} pins a release, not the revision of the fields its steps are read from`
         );
       }
+      if (linkMany(link)) {
+        throw new BehaviorConfigError(`from: link ${raw.from.link} holds a list of targets, and the steps are read from one`);
+      }
       if (target.schemas !== undefined) {
         checkSource(raw.from, String(link.schema), target.schemas.get(String(link.schema)));
       }
@@ -612,8 +627,12 @@ export const blueprint = defineBehavior<BlueprintConfig>({
       if (name === raw.parentLink) {
         throw new BehaviorConfigError(`copyLinks names ${name}, the link each child points at its parent through`);
       }
-      if (linkOf(target.configs.Links, name) === undefined) {
+      const copied = linkOf(target.configs.Links, name);
+      if (copied === undefined) {
         throw new BehaviorConfigError(`copyLinks: the type's Links has no link ${name}`);
+      }
+      if (linkMany(copied)) {
+        throw new BehaviorConfigError(`copyLinks: link ${name} holds a list of targets, and a stamp copies one`);
       }
     }
     let steps: BlueprintStep[] | undefined;

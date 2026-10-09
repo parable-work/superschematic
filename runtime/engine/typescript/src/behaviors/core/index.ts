@@ -48,7 +48,7 @@ export type { WorkflowConfig, WorkflowOutcome, WorkflowStates, WorkflowTransitio
 export type { CommentRecord } from './comments.js';
 export type { EvidenceRecord, ProposalRecord, ProposalState, RevisionRecord, RevisionsConfig } from './revisions.js';
 export type { BlockerRecord, DependenciesConfig, DependentRecord } from './dependencies.js';
-export { linkPin } from './links.js';
+export { linkMany, linkPin } from './links.js';
 export type { LinkPin, LinkRecord, LinkSpec, LinksConfig } from './links.js';
 export { linkedTo, movedOn, targetMove } from './revised.js';
 export type { TargetMove } from './revised.js';
