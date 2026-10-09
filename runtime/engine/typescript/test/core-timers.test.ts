@@ -19,6 +19,7 @@ import {
   SchemaDocumentError,
   behaviorField,
   defineBehavior,
+  type AccessPolicy,
   type Engine,
   type EngineEvent,
   type EngineOptions,
@@ -428,6 +429,23 @@ for (const driver of drivers) {
       forbidding.sweep(MINUTE);
       assert.deepEqual([forbidding.status('t1'), forbidding.deadlines('t1')?.respond.outcome], ['open', 'forbidden']);
       assert.deepEqual([forbidding.status('t2'), forbidding.events('t2').length], ['escalated', 2]);
+    });
+
+    test("a runner the policy refuses write on the schema fails the sweep, which its status shows, and fires nothing", () => {
+      // The runner may read the schema, which the sweep reads, and not write it.
+      const policy: AccessPolicy = ({ principal, action }) => !(principal.subject === runner.subject && action === 'write');
+      const { engine, create, deadlines, sweep } = opened(
+        { deadlines: { respond: { start: { enters: 'open' }, afterMs: HOUR, then: { transition: 'escalated' } } } },
+        [],
+        { policy }
+      );
+      create('t1');
+      const pass = sweep(HOUR);
+      assert.equal(pass.failed, 1);
+      const status = engine.runner.status().schedules.find((schedule) => schedule.behavior === 'Timers');
+      assert.equal(status?.state, 'retrying');
+      assert.match(String(status?.error), /forbidden|may not/);
+      assert.equal(deadlines('t1')?.respond.fired, false);
     });
 
     test('the sweep pages by due time past the deadlines whose fire is refused, so they hold none behind them back', () => {

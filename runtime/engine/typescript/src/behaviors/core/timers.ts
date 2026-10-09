@@ -54,9 +54,10 @@ The runner's schedule fire runs every sweepMs on each schema in each
 namespace: it reads the deadlines due and not fired, in order of due
 time, a keyset of due time, id and name past each page, through the
 partial index on them, at most MAX_SWEEP a run, and invokes fireTimer on
-each as the runner's principal. A veto or a forbidden the invoke meets, a
-Lease's guard say, leaves that deadline for the next run and the keyset
-moves past it. fireTimer fires one deadline that is due and has not
+each as the runner's principal. A veto the invoke meets, a Lease's guard
+say, leaves that deadline for the next run and the keyset moves past it;
+any other failure, a policy that refuses the runner write on the schema
+say, fails the run, which the runner retries and its status shows. fireTimer fires one deadline that is due and has not
 fired, and is unchanged() on any other, as Presence's miss is, so the
 sweep and a caller never fire one twice; one whose until holds when it
 comes due, after a publish changed until say, is cancelled instead. Any
@@ -731,7 +732,7 @@ export const timers = defineBehavior<TimersConfig>({
             try {
               context.instances.invoke(context.schema, String(row.id), 'fireTimer', { deadline: String(row.name) });
             } catch (error) {
-              if (!(error instanceof BehaviorVetoError) && !(error instanceof EngineError && error.code === 'forbidden')) {
+              if (!(error instanceof BehaviorVetoError)) {
                 throw error;
               }
             }
