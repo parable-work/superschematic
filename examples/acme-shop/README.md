@@ -43,8 +43,10 @@ run Dev shop-orders-ship-orders` runs the job once.
 ### The Topcoat app on SQLite
 
 The Topcoat app keeps the shop in memory unless `DATABASE_URL` names a
-SQLite file of `shop-db`'s tables, where its reviews and orders outlive
-the process. Build the Topcoat crate, plan `shop-db`'s SQLite database
+SQLite file of `shop-db`'s tables (a `sqlite:` URL, a `file:` URI or a
+path), where its reviews and orders outlive the process. A `DATABASE_URL`
+of another database, such as a Postgres one already in the shell, stops
+the app, and the error names its scheme alone. Build the Topcoat crate, plan `shop-db`'s SQLite database
 from an empty one, apply the plan with the migration runner, and start
 the app on the file, from this directory:
 

@@ -32,22 +32,40 @@ pub struct SqliteShop {
     conn: Mutex<Connection>,
 }
 
-/// Why `SqliteShop::open` refused a database: SQLite could not open or
-/// read it, or it holds none of shop-db's tables.
+/// Why `SqliteShop::open` refused a database URL: it names another kind of
+/// database, SQLite could not open or read it, or it holds none of
+/// shop-db's tables.
 #[derive(Debug)]
-pub struct OpenError {
-    database: String,
-    cause: Option<rusqlite::Error>,
+pub struct OpenError(Refusal);
+
+/// A refusal names a SQLite database by its URL, a path or a `file:` URI.
+/// It names another kind of database by its scheme alone: that URL may
+/// hold a server's password, so neither the message nor `Debug` shows it.
+#[derive(Debug)]
+enum Refusal {
+    NotSqlite {
+        scheme: String,
+    },
+    Unreadable {
+        database: String,
+        cause: rusqlite::Error,
+    },
+    NotMigrated {
+        database: String,
+    },
 }
 
 impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.cause {
-            Some(err) => write!(f, "open {}: {err}", self.database),
-            None => write!(
+        match &self.0 {
+            Refusal::NotSqlite { scheme } => write!(
                 f,
-                "{} holds no shop-db tables: apply shop-db's SQLite plan to it with superschematic-migrate",
-                self.database
+                "a {scheme}:// URL is not a SQLite database: give a sqlite: URL, a file: URI or a path"
+            ),
+            Refusal::Unreadable { database, cause } => write!(f, "open {database}: {cause}"),
+            Refusal::NotMigrated { database } => write!(
+                f,
+                "{database} holds no shop-db tables: apply shop-db's SQLite plan to it with superschematic-migrate"
             ),
         }
     }
@@ -55,7 +73,10 @@ impl fmt::Display for OpenError {
 
 impl std::error::Error for OpenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.cause.as_ref().map(|err| err as _)
+        match &self.0 {
+            Refusal::Unreadable { cause, .. } => Some(cause),
+            _ => None,
+        }
     }
 }
 
@@ -66,21 +87,30 @@ impl SqliteShop {
     /// Opens the database `url` names, as superschematic-migrate reads its
     /// `--database-url`: `sqlite:PATH` and `sqlite://PATH` are PATH, and so
     /// is a bare path; a `file:` URI opens as a URI. The file must exist and
-    /// hold shop-db's tables.
+    /// hold shop-db's tables. A URL with any other scheme, such as a
+    /// `postgres://` one, is refused, its scheme alone in the error.
     pub fn open(url: &str) -> Result<Self, OpenError> {
-        let refused = |cause| OpenError {
-            database: url.to_owned(),
-            cause,
+        let path = database_path(url).map_err(|scheme| {
+            OpenError(Refusal::NotSqlite {
+                scheme: scheme.to_owned(),
+            })
+        })?;
+        let unreadable = |cause| {
+            OpenError(Refusal::Unreadable {
+                database: url.to_owned(),
+                cause,
+            })
         };
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_URI
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let conn = Connection::open_with_flags(database_path(url), flags)
-            .map_err(|err| refused(Some(err)))?;
+        let conn = Connection::open_with_flags(path, flags).map_err(unreadable)?;
         match Self::with_connection(conn) {
             Ok(Some(shop)) => Ok(shop),
-            Ok(None) => Err(refused(None)),
-            Err(err) => Err(refused(Some(err))),
+            Ok(None) => Err(OpenError(Refusal::NotMigrated {
+                database: url.to_owned(),
+            })),
+            Err(err) => Err(unreadable(err)),
         }
     }
 
@@ -142,15 +172,35 @@ impl SqliteShop {
     }
 }
 
-/// The path, or `file:` URI, a database URL names.
-fn database_path(url: &str) -> &str {
-    match url.get(..7) {
-        Some(scheme) if scheme.eq_ignore_ascii_case("sqlite:") => {
-            let path = &url[7..];
-            path.strip_prefix("//").unwrap_or(path)
-        }
-        _ => url,
+/// The path, or `file:` URI, a database URL names, or else the scheme of
+/// a URL that names another kind of database (`postgres` of
+/// `postgres://...`). A string without a scheme is a path.
+fn database_path(url: &str) -> Result<&str, &str> {
+    let has_scheme = |scheme: &str| {
+        url.get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    };
+    if has_scheme("sqlite:") {
+        let path = &url["sqlite:".len()..];
+        return Ok(path.strip_prefix("//").unwrap_or(path));
     }
+    if has_scheme("file:") {
+        return Ok(url);
+    }
+    match url.split_once("://") {
+        Some((scheme, _)) if is_scheme(scheme) => Err(scheme),
+        _ => Ok(url),
+    }
+}
+
+/// Whether `name` is a URL scheme (RFC 3986): a letter, then letters,
+/// digits, `+`, `-` and `.`.
+fn is_scheme(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// A UUID as shop-db's SQLite tables hold it: hyphenated text.

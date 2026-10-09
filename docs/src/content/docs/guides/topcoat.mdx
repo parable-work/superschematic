@@ -202,7 +202,10 @@ The Rust server's `sqlite` feature adds `SqliteShop`, the shop's
 implementations over a file of `shop-db`'s tables, through rusqlite. The
 app turns it on. With `DATABASE_URL` set, the app opens that file, which
 must hold `shop-db`'s tables, and its reviews and orders outlive the
-process; without it, the shop is in memory:
+process; without it, the shop is in memory. `DATABASE_URL` is a `sqlite:`
+URL, a `file:` URI or a path. A URL of another database, such as a
+Postgres one already in the shell, stops the app with an error that names
+its scheme alone, since the URL may hold a password:
 
 <Snippet file="topcoat/src/main.rs" symbol="main" />
 
