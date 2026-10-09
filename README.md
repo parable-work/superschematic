@@ -258,7 +258,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Stacks and deploys](docs/src/content/docs/guides/stacks.mdx): declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
-- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches.
+- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches and StateRules.
 - [Work queues](docs/src/content/docs/guides/work-queues.mdx): claimable work with `@superschematic/engine-workqueue`: leases, claims, worker heartbeats, blueprints, budgets and retries.
 - [Pages with Topcoat](docs/src/content/docs/guides/topcoat.mdx): call a Rust API's operations in-process from a Topcoat app, with forms and records built from the schema.
 

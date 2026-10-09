@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches and StateRules behaviors.
 sidebar:
   order: 7
 ---
@@ -20,8 +20,8 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares eighteen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements eleven itself
+The core declares nineteen behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements twelve itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
@@ -39,6 +39,7 @@ schema that composes one until a deployment registers that package.
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
+| `StateRules` | own fields a Workflow state requires to enter it, and ones it freezes while an instance is in it | `Workflow` | [StateRules](#staterules) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -1004,6 +1005,82 @@ engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the re
   type composes both. Lease's guard then holds `Branches`' writes to the
   lease's holder, as it holds any writing operation
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## StateRules
+
+Fields that a state of the type's `Workflow` requires or freezes. An
+invoice is drafted with any fields, is sent only with a customer, an
+amount and its lines, which then stay as they are, and keeps every field
+once it is paid.
+
+| | |
+| --- | --- |
+| Config | `states`: by a state of the type's Workflow, `required`, the type's own top-level fields an instance must hold to enter the state and keeps while in it, and `frozen`, the ones that do not change while it is in it, a list or `"all"`; `permission`: what a caller needs to change a frozen field, optional |
+| Fields, operations | none |
+| Guard | a transition into a state without a field it requires is `vetoed` (409) with `details.code` `missing_fields`; while the instance is in a state, an update that clears a field the state requires is `required_fields`, and one that changes a frozen field `frozen_fields`. `details.details` names the `state` and the `fields` |
+| Validates | a create whose Workflow's initial state requires a field it does not give: `invalid_instance` (422), with the rule `required` at the field |
+
+```ts
+import { Generic } from "superscalar";
+import { Validate, behavior } from "@superschematic/schema";
+
+@behavior("Workflow", {
+  states: ["draft", "sent", "paid", "void"],
+  transitions: [
+    { from: "draft", to: "sent" },
+    { from: "sent", to: "draft" },
+    { from: "sent", to: "paid" },
+    { from: "draft", to: "void" },
+    { from: "sent", to: "void" },
+  ],
+  outcomes: { void: "neutral" },
+})
+@behavior("StateRules", {
+  states: {
+    sent: { required: ["customer", "amount", "lines"], frozen: ["customer", "amount", "lines"] },
+    paid: { frozen: "all" },
+    void: { frozen: "all" },
+  },
+  permission: "invoices.amend",
+})
+export abstract class Invoice {
+  title: Validate<string, { maxLength: 200 }>;
+  customer?: string;
+  amount?: Generic.Int64;
+  lines?: string[];
+  notes?: string;
+}
+```
+
+```ts
+engine.instances.create(me, 'invoices', { title: 'March', customer: 'Acme' }, { id: 'march' });
+engine.instances.invoke(me, 'invoices', 'march', 'transition', { to: 'sent' });
+// BehaviorVetoError (missing_fields): invoices march cannot move to sent
+// without amount and lines, which sent requires
+engine.instances.update(me, 'invoices', 'march', { amount: 1200, lines: ['Consulting'] });
+engine.instances.invoke(me, 'invoices', 'march', 'transition', { to: 'sent' });
+engine.instances.update(me, 'invoices', 'march', { amount: 1300 });
+// BehaviorVetoError (frozen_fields): invoices march is sent, which freezes amount
+```
+
+- **Held.** A field is held when it is neither absent nor null, so `""`,
+  `0` and `[]` are held.
+- **Every write.** The rules bind a caller's update and a behavior's
+  `update()` alike: a `Retries` result in a frozen field refuses the
+  attempt, and a `Revisions` approval of a patch to one is vetoed.
+  `propose` checks its patch without guards, so the proposal is accepted
+  and its approval refused.
+- **Every move.** A transition is held to what the state requires
+  whoever asks: a caller, a reaction, an expiring lease, another
+  behavior's call. An operation that updates the fields and moves the
+  status in one call is judged on the fields as its update left them.
+- **The permission.** A caller with `permission` may change a frozen
+  field. Nobody clears a field the state requires, and nobody moves the
+  instance into a state without what it requires.
+- **New versions.** Any config may change, and `StateRules` can be added
+  to and removed from a schema with instances. An instance that predates
+  a requirement keeps working: only clearing a required field it holds
+  is refused, until it next enters the state.
 
 ## Where to go next
 

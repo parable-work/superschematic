@@ -935,8 +935,10 @@ A success's result is kept. A failure's is kept only with `keepBest`:
 when its score beats the best kept score by at least `minDelta`, and no
 `neverRegress` predicate that held for the last kept attempt fails for it
 (a predicate the attempt does not report fails). A kept result is written
-to `resultField` through `update()`, with the checks of an update, so a
-result the live version refuses fails the attempt and records nothing.
+to `resultField` through `update()`, with the checks and guards of an
+update, so a result the live version refuses fails the attempt and
+records nothing, and so does one the engine's `StateRules` freezes in
+the instance's state (`frozen_fields`).
 
 ### Stuck failures
 

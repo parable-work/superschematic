@@ -11,7 +11,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -115,6 +115,14 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
 	}
+	// StateRules holds the own fields to the state of the type's Workflow:
+	// no field, no operation, and Workflow required, since its guard reads
+	// the status.
+	stateRules, _ := reg.Behavior("StateRules")
+	if stateRules.Package != EnginePackage || !stateRules.ConfigRequired() || !slices.Equal(stateRules.Requires, []string{"Workflow"}) || len(stateRules.Fields) != 0 ||
+		len(stateRules.Operations) != 0 || len(stateRules.PreconditionSchema) != 0 || len(stateRules.CreateParamsSchema) != 0 {
+		t.Errorf("StateRules = %+v, want the engine's, a config, Workflow required, and no field, operation or parameter", stateRules)
+	}
 	// Branches makes each instance a version graph's root: one field, the
 	// release pointer's version, no requirement, and sixteen operations, all
 	// of instance scope, of which the nine that write the graph write and
@@ -189,6 +197,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
 		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
 			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
+		{stateRules, []string{"missing_fields", "frozen_fields", "required_fields"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -349,6 +358,19 @@ func TestCoreBehaviors(t *testing.T) {
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 500}}`, "behavior Branches config: "},
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 60000, "abandonAfter": 0}}`, "behavior Branches config: "},
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "schemaEpoch": 1}`, "behavior Branches config: "},
+		{stateRules, `{"states": {"sent": {"required": ["customer", "amount"], "frozen": ["amount"]}, "paid": {"frozen": "all"}}, "permission": "invoices.amend"}`, ""},
+		{stateRules, `{"states": {"draft": {"required": ["title"]}}}`, ""},
+		{stateRules, ``, "behavior StateRules config: "},
+		{stateRules, `{"states": {}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"required": []}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"required": ["amount", "amount"]}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "some"}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": []}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"in review": {"frozen": "all"}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"optional": ["notes"]}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "all"}}, "permission": ""}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "all"}}, "roles": ["admin"]}`, "behavior StateRules config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},

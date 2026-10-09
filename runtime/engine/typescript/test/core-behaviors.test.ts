@@ -7,8 +7,9 @@
 // fixture-search-json, whose notes are searched,
 // fixture-reactions-json, whose projects start, finish and fail their
 // parent, fixture-variants-json, whose steps keep their kind and hold
-// a result of the kind's shape, and fixture-branches-json, whose recipes
-// are version graphs.
+// a result of the kind's shape, fixture-branches-json, whose recipes
+// are version graphs, and fixture-staterules-json, whose invoices need
+// and keep fields by their status.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -19,6 +20,7 @@ import {
   cleanup,
   documentsDocument,
   drivers,
+  invoicesDocument,
   notesDocument,
   openTestEngine,
   projectTreeDocument,
@@ -40,12 +42,13 @@ const notes = notesDocument();
 const writer: Principal = { subject: 'wes', permissions: [] };
 const reviewer: Principal = { subject: 'rae', permissions: ['documents.review'] };
 const publisher: Principal = { subject: 'pat', permissions: ['documents'] };
+const amender: Principal = { subject: 'amos', permissions: ['invoices.amend'] };
 
 for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -397,6 +400,26 @@ for (const driver of drivers) {
         engine.runner.status().schedules.filter((schedule) => schedule.behavior === 'Branches').map(({ state, everyMs }) => [state, everyMs]),
         [['active', 3600000]]
       );
+    });
+
+    test("it runs the invoices document: a sent invoice needs a customer, an amount and its lines, which then stay, and a paid one keeps every field", () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, invoicesDocument());
+      engine.schemas.publish(alice, 'invoices');
+      engine.instances.create(writer, 'invoices', { title: 'March', customer: 'Acme' }, { id: 'march' });
+      const missing = thrown(() => engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'sent' }));
+      assert.deepEqual([missing.code, missing.message], [
+        'vetoed',
+        'behavior StateRules vetoes transition of invoices march: invoices march cannot move to sent without amount and lines, which sent requires',
+      ]);
+      engine.instances.update(writer, 'invoices', 'march', { amount: 1200, lines: ['Consulting'] });
+      engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'sent' });
+      assert.match(thrown(() => engine.instances.update(writer, 'invoices', 'march', { amount: 1300 })).message, /which freezes amount/);
+      assert.equal(engine.instances.update(amender, 'invoices', 'march', { amount: 1300 }).data.amount, 1300);
+      engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'paid' });
+      assert.match(thrown(() => engine.instances.update(writer, 'invoices', 'march', { notes: 'Thanks' })).message, /is paid, which freezes notes/);
+      const read = engine.instances.get(alice, 'invoices', 'march');
+      assert.deepEqual([read?.data, read?.behaviors.Workflow?.status, read?.seq], [{ title: 'March', customer: 'Acme', amount: 1300, lines: ['Consulting'] }, 'paid', 5]);
     });
   });
 }

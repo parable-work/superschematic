@@ -242,3 +242,18 @@ export function recipesDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-branches-json/src/recipe.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * invoicesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-staterules-json): its Invoice type composes Workflow, from
+ * draft to sent, then paid or void, and StateRules, under which sent
+ * requires a customer, an amount and the lines and freezes them, and
+ * paid and void freeze every field, but for a caller with
+ * invoices.amend.
+ */
+export function invoicesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-staterules-json/src/invoice.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

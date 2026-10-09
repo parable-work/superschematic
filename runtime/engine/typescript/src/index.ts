@@ -238,6 +238,8 @@ export type {
   SearchHit,
   SearchVectors,
   SnippetPart,
+  StateRule,
+  StateRulesConfig,
   TargetMove,
   VariantsConfig,
   WorkflowConfig,

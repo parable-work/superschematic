@@ -45,6 +45,8 @@ export interface BehaviorConfigs {
   Variants: VariantsConfig;
   /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
   Branches: BranchesConfig;
+  /** Own fields each state of the type's Workflow requires to enter it, or freezes while the instance is in it; it requires Workflow. */
+  StateRules: StateRulesConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -329,6 +331,31 @@ export interface BranchesSweep {
   readonly pruneBatch?: number;
   /** Discards a draft with no write for this many milliseconds; none when absent. */
   readonly abandonAfter?: number;
+}
+
+/** StateRules' config. */
+export interface StateRulesConfig {
+  /** The rules, by a state of the type's Workflow. */
+  readonly states: Readonly<Record<string, StateRule>>;
+  /** The permission a caller needs to change a field a state freezes; nobody may when absent. What a state requires holds for every caller. */
+  readonly permission?: string;
+}
+
+/**
+ * One state's rules under StateRules. A field is held when it is neither
+ * absent nor null.
+ */
+export interface StateRule {
+  /**
+   * The type's own top-level fields, by JSON key, an instance must hold to
+   * enter the state, and keeps while it is in it: a transition into the
+   * state without one is refused, a create when the state is the
+   * Workflow's initial one, and an update that clears one while the
+   * instance is in the state.
+   */
+  readonly required?: readonly string[];
+  /** The type's own top-level fields, by JSON key, that do not change while the instance is in the state, or "all", every one of them. */
+  readonly frozen?: readonly string[] | "all";
 }
 
 /** Lease's config. */

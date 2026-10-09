@@ -23,8 +23,9 @@ and the core's behaviors: `Workflow`,
 reach other instances, `Search`, full-text search with vectors an outside
 embedder computes, and a search across a namespace's schemas,
 `Reactions`, which the runner runs, `Constants` and `Variants`, which
-judge the fields a write stores, and `Branches`, a version graph on each
-instance (D32). The plug-in interface has what D32 gives a behavior that
+judge the fields a write stores, `Branches`, a version graph on each
+instance (D32), and `StateRules`, the fields each Workflow state
+requires or freezes (D56). The plug-in interface has what D32 gives a behavior that
 keeps values of other types in its own tables: the schema's other types
 in `parseConfig`, `validate(type, value)` in its contexts, and schedules
 a schema turns off and whose runs write the behavior's own tables; a
@@ -1273,8 +1274,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
-`Rollups`, `Search`, `Reactions`, `Constants` and `Variants`, and the
-work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`,
+`Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches` and
+`StateRules`, and the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`,
 `Blueprint`, `Budget` and `Retries`), so its loader refuses any other.
 
 ### The implementation
@@ -2204,7 +2205,7 @@ tell a caller its read is stale.
 
 ### Core behaviors
 
-The core declares eleven behaviors the engine implements
+The core declares twelve behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -2281,6 +2282,19 @@ are other types of the document:
     "step": { "type": "Step", "order": "position", "units": { "timings": "keyed" } },
     "ingredient": { "type": "Ingredient", "parent": { "key": "stepKey", "of": "step" } },
     "cover": { "type": "Cover", "singleton": true } } } }
+```
+
+`StateRules` adds no field, operation or storage: its guard holds a
+transition and an update to the rules of the state the instance moves to
+or is in, and its `validate` a create to its initial state's ("StateRules").
+On a schema of invoices whose sent ones keep their customer and amount,
+and whose paid ones keep every field:
+
+```json
+{ "name": "StateRules", "config": { "states": {
+    "sent": { "required": ["customer", "amount"], "frozen": ["customer", "amount"] },
+    "paid": { "frozen": "all" } },
+  "permission": "invoices.amend" } }
 ```
 
 Where they number their records, they number from 1 per instance (a
@@ -3289,6 +3303,56 @@ times as UTC date-times; a tree is rows by kind.
   release through it, as it pins a revision through `Revisions`'
   `revision`, and `Queue`'s `excludeStale` hears it move.
 
+#### StateRules
+
+The own fields each state of the type's Workflow requires to enter it,
+and the ones it freezes while the instance is in it (D56).
+
+| | |
+| --- | --- |
+| Config | `states`: 1 or more, by a state of the type's Workflow, each `{ required?, frozen? }`, at least one: `required`, 1 to 64 of the type's own top-level fields, by JSON key, the instance must hold to enter the state and keeps while it is in it; `frozen`, 1 to 64 of them that do not change while it is in it, or `"all"`, every own field; `permission`: the permission a caller needs to change a frozen field, optional. Requires `Workflow` |
+| Fields, operations | none |
+| Guards | a Workflow `transition` into a state, whoever asks, while a field the state requires is not held: `vetoed` (`missing_fields`). An update, a caller's or an operation's `update()`, while the instance is in a state: one that clears a field the state requires and the instance held, `vetoed` (`required_fields`), whoever asks; one that changes a frozen field, `vetoed` (`frozen_fields`), unless the caller holds `permission`. Details `{ state, fields }` |
+| Validates | a create, when the Workflow's initial state requires a field it does not give: the rule `required` at the field (`invalid_instance`) |
+| Refusals at define | a state the type's Workflow lacks, a field that is not one of the type's own (`invalid_schema`); a behavior's field is not one |
+| `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
+
+A record's fields mean more as it moves on: an invoice is drafted with
+any amount, sent only with a customer and an amount that then stay, and
+paid with nothing left to change. A `validate` sees the fields and not
+the status, so each rule sits where it reads what it needs:
+
+- **Entering a state.** The guard reads the state a transition moves to
+  from its `to`, as `Dependencies`' gate does, and the fields from the
+  view, so a caller's transition, another behavior's `call()`, another
+  instance's invoke and the runner's moves are held alike, and an
+  operation that updates the fields and moves the status in one call is
+  judged on the fields its `update()` left.
+- **The initial state.** A create starts in the Workflow's initial state,
+  which `parseConfig` reads from the type's Workflow config, so
+  `validate` refuses a create that leaves out a field that state
+  requires, before anything is stored.
+- **In a state.** The update guard reads the instance's status through
+  `Workflow.status`, as the caller, only when a field a rule names
+  changes, and compares the fields before the update with the ones after.
+  Clearing a required field is checked first, since no permission lifts
+  it. A behavior's write is held as a caller's is: a `Retries` result in
+  a frozen field refuses its attempt.
+- **Held.** A field is held when it is neither absent nor null, as a
+  merge patch has it: `""`, `0` and `[]` are held. A value is compared
+  as JSON, so a change inside an object or a list is a change. The
+  fields a veto names are in the order the type lists them for `"all"`
+  and the config's otherwise.
+- **Instances from before.** An instance that predates a requirement
+  keeps working: the update guard refuses clearing only a required field
+  the instance held, so an update that leaves a missing field missing
+  passes, and the requirement binds when the instance next enters the
+  state.
+- **Revisions.** `propose` checks its patch with `validateUpdate()`,
+  which asks no guard, so a proposal that changes a frozen field is
+  accepted and its `approve` is vetoed (`frozen_fields`), whose
+  `update()` the guard asks. The guidance says so on `approve`.
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -3881,6 +3945,7 @@ in `@superschematic/engine-workqueue`):
 | `Constants` | the fields that keep their create's value, and the permission that changes them |
 | `Variants` | the type the field holds for each value |
 | `Branches` | the kinds and the primary line, the `release` field, and each operation's version-graph refusals |
+| `StateRules` | what each state requires and freezes, and the permission that changes a frozen field; `missing_fields` on `transition`, a create's required fields, `required_fields` and `frozen_fields` on `update` and on `Revisions`' `approve` |
 | `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
 | `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
 | `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |

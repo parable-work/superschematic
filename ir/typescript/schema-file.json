@@ -1589,6 +1589,81 @@
           "if": {
             "properties": {
               "name": {
+                "const": "StateRules"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "permission": {
+                    "description": "The permission a caller needs to change a field a state freezes; nobody may when absent. What a state requires holds for every caller.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "states": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "minProperties": 1,
+                      "properties": {
+                        "frozen": {
+                          "description": "The type's own top-level fields, by JSON key, that do not change while the instance is in the state, or all, every one of them.",
+                          "oneOf": [
+                            {
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "maxItems": 64,
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            {
+                              "const": "all"
+                            }
+                          ]
+                        },
+                        "required": {
+                          "description": "The type's own top-level fields, by JSON key, an instance must hold to enter the state, and keeps while it is in it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 64,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "The rules, by a state of the type's Workflow.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "states"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Variants"
               }
             }
@@ -1742,6 +1817,7 @@
             "Revisions",
             "Rollups",
             "Search",
+            "StateRules",
             "Variants",
             "Workflow"
           ],
