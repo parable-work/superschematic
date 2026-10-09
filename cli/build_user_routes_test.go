@@ -45,7 +45,8 @@ func TestBuildCommand_FillsTheUserRouteSets(t *testing.T) {
 // TestBuildCommand_WithDepsBuildsTheUserRoutes: build --with-deps reads the
 // API's authDb from the build's own schema cache and writes the server
 // without an implementation of the user model's operations, beside the
-// OpenAPI document that describes their routes.
+// OpenAPI document that describes their routes and the permission catalog
+// that lists the permissions they need.
 func TestBuildCommand_WithDepsBuildsTheUserRoutes(t *testing.T) {
 	servicesRoot := prepareTSServicesRoot(t, "fixture-user-model-db", "fixture-user-routes-api")
 	outDir := t.TempDir()
@@ -63,6 +64,10 @@ func TestBuildCommand_WithDepsBuildsTheUserRoutes(t *testing.T) {
 	openapi, err := os.ReadFile(filepath.Join(apiDir, "openapi.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(openapi), `"/api/auth/login"`)
+	catalog, err := os.ReadFile(filepath.Join(apiDir, "permissions.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(catalog), `"authDb": "fixture-user-model-db"`)
+	assert.Contains(t, string(catalog), `"name": "identity.users.write"`)
 	interfaces, err := os.ReadFile(filepath.Join(apiDir, "interfaces.go"))
 	require.NoError(t, err)
 	assert.Contains(t, string(interfaces), "Greet(ctx context.Context)")

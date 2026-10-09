@@ -17,6 +17,9 @@ var (
 	ErrRoleNameTaken = errors.New("identity: the role name is taken")
 	// ErrNoRoles: the schema has no UserRole table.
 	ErrNoRoles = errors.New("identity: the schema has no roles")
+	// ErrGrantExists: Bootstrap found a role grant, so someone holds a
+	// role already and the database is past its first administrator.
+	ErrGrantExists = errors.New("identity: a role grant exists")
 )
 
 // InvalidLoginError is a login the login scalar does not parse.
@@ -99,6 +102,14 @@ type NewUser struct {
 	At           time.Time
 }
 
+// NewBootstrap is the first administrator Bootstrap creates: a role with
+// its permissions, and a user with their credential who holds it.
+type NewBootstrap struct {
+	Role        string
+	Permissions []string
+	User        NewUser
+}
+
 // NewSession is a session the store creates.
 type NewSession struct {
 	UserID    string
@@ -111,7 +122,8 @@ type NewSession struct {
 // and the project's user and role tables. Mutations the user model ties
 // together run in one transaction: SetPassword with its revocations,
 // SetDisabled with the revocations of a disable, CreateUser with the
-// credential, and DeleteRole with the role's grants.
+// credential, DeleteRole with the role's grants, and Bootstrap's role, user
+// and grant.
 type Store interface {
 	// FindLogin finds the user whose login equals login once the login
 	// scalar parses it, with their password hash. A login the scalar
@@ -172,4 +184,13 @@ type Store interface {
 	// RevokeRole revokes the role from the user; one not held stays
 	// revoked. A user or role that does not exist is ErrNotFound.
 	RevokeRole(ctx context.Context, userID, roleID string) error
+
+	// Bootstrap creates a database's first administrator in one
+	// transaction: the role with its permissions, the user with their
+	// credential, and the grant of the one to the other. It writes nothing
+	// when any grant exists (ErrGrantExists), so it runs once per database,
+	// and refuses as CreateRole and CreateUser do (ErrRoleNameTaken,
+	// ErrLoginTaken, *InvalidLoginError, *InvalidNameError). The user it
+	// returns holds the role.
+	Bootstrap(ctx context.Context, b NewBootstrap) (Role, User, error)
 }

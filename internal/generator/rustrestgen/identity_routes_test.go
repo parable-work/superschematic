@@ -42,6 +42,9 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	if !strings.Contains(generated["openapi.json"], "/api/auth/login") {
 		t.Error("openapi.json does not describe the user model's routes")
 	}
+	if !strings.Contains(output.PermissionCatalogJSON, `"identity.roles.write"`) {
+		t.Error("the crate carries no permissions.json with the administration routes' permissions")
+	}
 
 	alone := generateRustAPI(t, userRoutesAPI, false, "", nil, routesOnly)
 	if len(alone.Endpoints) != 0 || len(alone.Namespaces) != 0 || alone.HasAuth {

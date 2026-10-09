@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -25,21 +26,22 @@ var templatesFS embed.FS
 // importable Go module:
 //
 //	{schema-name}/
-//	├── go.mod          # Module definition
-//	├── interfaces.go   # Implementation interfaces per namespace
-//	├── routes.go       # RegisterRoutes() with handler factories
-//	├── middleware.go   # Auth middleware + ORM store adapters (public only)
-//	├── openapi.go      # Embedded OpenAPI spec constant
-//	├── openapi.json    # Standalone spec for downstream tooling
-//	├── index.go        # Index page HTML
-//	├── rapidoc.go      # API docs page HTML
-//	├── errors.go       # Error shims over superschematic-http-runtime
-//	├── response.go     # Response shims over superschematic-http-runtime
-//	├── context.go      # Request context shims
-//	├── deps.go         # Deps and the implementation's Constructor
-//	├── config.go       # EnvConfig and its loader (settings or derived fields)
-//	├── constants.go    # SystemUserID (public schemas with a UUID scalar)
-//	└── fileupload.go   # Multipart upload helpers (only with file uploads)
+//	├── go.mod           # Module definition
+//	├── interfaces.go    # Implementation interfaces per namespace
+//	├── routes.go        # RegisterRoutes() with handler factories
+//	├── middleware.go    # Auth middleware + ORM store adapters (public only)
+//	├── openapi.go       # Embedded OpenAPI spec constant
+//	├── openapi.json     # Standalone spec for downstream tooling
+//	├── permissions.json # Permission catalog (only when an operation names a permission)
+//	├── index.go         # Index page HTML
+//	├── rapidoc.go       # API docs page HTML
+//	├── errors.go        # Error shims over superschematic-http-runtime
+//	├── response.go      # Response shims over superschematic-http-runtime
+//	├── context.go       # Request context shims
+//	├── deps.go          # Deps and the implementation's Constructor
+//	├── config.go        # EnvConfig and its loader (settings or derived fields)
+//	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
+//	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
 }
@@ -105,6 +107,11 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 	if output.OpenAPISpecRaw != "" {
 		if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(output.OpenAPISpecRaw), 0o644); err != nil {
 			return fmt.Errorf("failed to write openapi.json: %w", err)
+		}
+	}
+	if output.PermissionCatalogJSON != "" {
+		if err := os.WriteFile(filepath.Join(outputDir, permcatalog.FileName), []byte(output.PermissionCatalogJSON), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", permcatalog.FileName, err)
 		}
 	}
 

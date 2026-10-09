@@ -18,6 +18,7 @@ depends on a generated type.
 | `filterparse` | list-endpoint filter expression parsing |
 | `stackconfig` | the config fields an API's edges derive in a stack: a database connection and a service endpoint, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path, and a JSON-object scalar's value first checked on its own JSON by the check the route passes in (`CheckJSON`); and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
+| `cmd/superschematic-identity` | the identity runner, the binary that creates a database's first administrator (below) |
 
 The generated API package keeps `Config`, `Implementations`, the route table,
 per-endpoint decode and validate wiring, and anything that names a generated
@@ -67,3 +68,64 @@ cd runtime/http/go && go test ./identity -run TestWriteParityVectors -update
 store's tests run against `runtime/http/testdata/identity`, the
 `fixture-user-model-db` descriptor and DDL, on SQLite always and on the
 Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set.
+
+## The identity runner
+
+`superschematic-identity` writes a database's users through the
+`identity` package. Its `bootstrap` command creates a database's first
+administrator in one transaction (`Store.Bootstrap`): a role with each
+`--permission`, a user who signs in with `--login` and the password read
+from standard input, and the grant of the role to the user. It refuses
+when any role grant exists, so it runs once per database; the
+administration routes manage users and roles after it.
+`superschematic identity bootstrap` builds a DB service's identity
+descriptor and runs it. The runner holds the database drivers (pgx and
+the pure-Go `modernc.org/sqlite`), so none enters the compiler's module
+graph (D27), and a deploy job runs `superschematic-identity bootstrap`
+with the descriptor the build wrote and the password on standard input,
+without the compiler.
+
+```sh
+printf '%s\n' "$ADMIN_PASSWORD" | superschematic-identity bootstrap \
+  --descriptor dist/types/go/shop-db/identity/shop-db.json \
+  --database-url "$DATABASE_URL" --login admin@example.com --name "Shop Admin" \
+  --permission identity --permission orders
+superschematic-identity version
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--descriptor` | (required) | the identity descriptor the DB build writes, `identity/<schema>.json` in the Go types module |
+| `--login` | (required) | the administrator's login, a value of the `User` table's login scalar |
+| `--permission` | (required) | a permission the role carries; repeatable |
+| `--role` | `admin` | the role's name |
+| `--name` | the login | the administrator's display name, for a `User` trait that names a `name` field |
+| `--database-url` | `$DATABASE_URL` | a `postgres://` or `postgresql://` URL is Postgres; a `sqlite:` URL, a `file:` URI or a path is SQLite, which must exist |
+| `--dialect` | the URL's | `postgres` or `sqlite` |
+| `--config` | the runtime's cost | an identity config file; its `password.argon2` sets the hash's cost |
+
+The password is read from standard input, never from a flag or the
+environment: at a terminal it is asked for twice with the echo off,
+otherwise it is the first line. It must be an `Auth.Password`, 8 to 128
+characters. The runner prints the role and the user it created, with
+their ids, and never the password or its hash. It exits 0 when it created
+them, 1 when it refused or failed, and 2 for flags it cannot run with.
+
+Each release attaches the runner for linux and darwin on x64 and arm64,
+`superschematic-identity_<version>_<platform>.tar.gz`, with this file, the
+license and `BUILD_COMMIT`, as it attaches the migration runner
+(runtime/migrate/README.md says how to download and check one). The
+module keeps its `replace` lines, so `go install` cannot build it at a
+tag. Build it from a checkout instead, with the superscalar library on
+`CGO_LDFLAGS`, since the `identity` package reads scalars through
+superscalar's Go binding:
+
+```sh
+cd runtime/http/go
+CGO_LDFLAGS="$(../../../scripts/superscalar-dep.sh --print)" go build -trimpath -o superschematic-identity ./cmd/superschematic-identity
+```
+
+The compiler finds it as `$SUPERSCHEMATIC_IDENTITY`, else on `PATH`. Its
+tests run against SQLite always and against the Postgres
+`SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set, and sign
+the administrator in through the `identity` package's `Service`.

@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -231,6 +232,10 @@ type APIOutput struct {
 	// for every server: written to openapi.json, embedded in src/openapi.rs
 	// and served at GET /api/openapi.json.
 	OpenAPIJSON string
+	// PermissionCatalogJSON is the API's permissions.json as apigen builds
+	// it, written beside openapi.json; empty when no operation names a
+	// permission.
+	PermissionCatalogJSON string
 	// HasEnvConfig is true when the build writes src/config.rs, the env
 	// loader of the service's @envVars type; lib.rs then declares it.
 	HasEnvConfig bool
@@ -382,8 +387,9 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 			Naming:     opts.Naming,
 			Clock:      opts.Clock,
 		}),
-		Endpoints:   make([]EndpointInfo, 0, len(api.Endpoints)),
-		OpenAPIJSON: api.OpenAPISpecRaw,
+		Endpoints:             make([]EndpointInfo, 0, len(api.Endpoints)),
+		OpenAPIJSON:           api.OpenAPISpecRaw,
+		PermissionCatalogJSON: api.PermissionCatalogJSON,
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 
@@ -543,6 +549,11 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 	}
 	if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(document), 0o644); err != nil {
 		return fmt.Errorf("write openapi.json: %w", err)
+	}
+	if output.PermissionCatalogJSON != "" {
+		if err := os.WriteFile(filepath.Join(outputDir, permcatalog.FileName), []byte(output.PermissionCatalogJSON), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", permcatalog.FileName, err)
+		}
 	}
 
 	return nil

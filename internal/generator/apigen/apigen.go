@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -305,6 +306,10 @@ type APIOutput struct {
 	Timestamp      string
 	OpenAPISpec    string // backtick-escaped JSON for Go embedding
 	OpenAPISpecRaw string // raw JSON written to openapi.json
+	// PermissionCatalogJSON is permissions.json, written beside
+	// openapi.json: every permission the endpoints name (package
+	// permcatalog). It is empty when none names one, and no file is written.
+	PermissionCatalogJSON string
 
 	// Scalars carries JSON Schema metadata for tool-calling bindings.
 	Scalars map[string]ScalarJSONSchemaInfo
@@ -710,8 +715,33 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	output.OpenAPISpecRaw = rawSpec
 	output.OpenAPISpec = escapedSpec
 	output.Scalars = extractScalarJSONSchemaInfo(schema)
+	if output.PermissionCatalogJSON, err = permissionCatalog(output, schema); err != nil {
+		return nil, err
+	}
 
 	return output, nil
+}
+
+// permissionCatalog is the API's permissions.json, from every endpoint, the
+// user model's included, or "" when no endpoint names a permission.
+func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
+	operations := make([]permcatalog.Operation, len(output.Endpoints))
+	for i, endpoint := range output.Endpoints {
+		operations[i] = permcatalog.Operation{
+			ID:          endpoint.HandlerName,
+			Permissions: endpoint.RequiredPerms,
+			Identity:    endpoint.IdentityOperation != "",
+		}
+	}
+	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations)
+	if !ok {
+		return "", nil
+	}
+	data, err := catalog.JSON()
+	if err != nil {
+		return "", fmt.Errorf("apigen: %w", err)
+	}
+	return string(data), nil
 }
 
 // summarizeEndpoints sets what output holds about its endpoints as a

@@ -16,14 +16,20 @@ cli.New(cli.Config{}, ext...).Execute()
 set. Extensions that implement `cli.CommandProvider` add subcommands at
 `New`. Every command assembles its registry from the naming file it
 resolves, so the same command tree serves a core-only binary and one that
-carries extensions.
+carries extensions. A binary hands the error `Execute` returns to
+`cli.Exit`, which prints it and exits 1, or, for a program a command ran
+that already said why, such as `superschematic-identity`, exits with that
+program's status.
 
-The core has seven commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors` and the `stack` group, beside
-cobra's own `help` and `completion`. The installed `superschematic` links
+The core has eight commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors` and the `stack` and `identity`
+groups, beside cobra's own `help` and `completion`. The installed `superschematic` links
 the official extensions (the gcp target, the Cloudflare DNS platform and
 the Pulumi provisioner), which add none. The migration runner,
-`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)).
+`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
+and so is the identity runner, `superschematic-identity`
+([below](#the-identity-runner-superschematic-identity)): each holds the
+database drivers, which stay out of the compiler.
 
 ## `build <service-dir>`
 
@@ -660,6 +666,104 @@ resources by node ID and output name, leaving out secret ones.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--out` | stdout | write the outputs file to this path; put it beside the environment's `environment.json` for the bindings generator |
+
+## `identity bootstrap [<db-service-dir>]`
+
+Create a database's first administrator in one transaction: a role with
+the permissions `--permission` names, a user who signs in with `--login`
+and a password, and the grant of the role to the user. The database is
+one whose schema has the `User` and `UserRole` traits, the core user
+model. The command refuses when any role grant exists, so it runs once
+per database; the administrator then manages every other user and role
+through the `@userAdministration` routes. No one grants what they do not
+hold, so the role needs every permission the administrator hands out, the
+administration routes' own among them: `identity` covers
+`identity.users.read` and the other three, under the default
+[`identity_permission_prefix`](/superschematic/reference/naming/#identity_permission_prefix).
+
+The tables are those of the DB service at `<db-service-dir>`, which loads
+as `build` loads it; its identity descriptor is built in process, and a
+schema without a `UserRole` table is refused. `--descriptor` names the
+descriptor a build wrote instead, `identity/<schema>.json` in the
+service's Go types module, and takes no service directory.
+
+The compiler writes no database: the identity runner,
+`superschematic-identity`, does. The command runs the runner's
+`bootstrap` with the descriptor and every flag it was given but
+`--naming`, hands it its standard input, output and error, and exits with
+the runner's status, so the runner's refusals and its output are the
+command's. The runner is the binary `$SUPERSCHEMATIC_IDENTITY` names, else
+`superschematic-identity` on `PATH`; without either the command says how
+to install it.
+
+Before it runs the runner, the command reads the permission catalogs the
+build writes, `permissions.json` beside each API's `openapi.json`. When
+the default output root, `<schemas-root>/dist`, holds catalogs of APIs
+whose `authDb` is this service, a `--permission` that is none of their
+permissions and covers none draws a warning on stderr. It is granted all
+the same: an engine's schemas name permissions at run time.
+
+```
+superschematic identity bootstrap ./schemas/services/shop-db --login admin@example.com --permission identity --permission orders
+printf '%s\n' "$ADMIN_PASSWORD" | superschematic identity bootstrap ./schemas/services/shop-db --database-url "$SHOP_DB_URL" --login admin@example.com --name "Shop Admin" --role owner --permission identity
+superschematic identity bootstrap --descriptor ./schemas/dist/types/go/shop-db/identity/shop-db.json --database-url sqlite:./shop.db --login admin@example.com --permission identity
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--login` | (required) | the administrator's login |
+| `--permission` | (required) | a permission the role carries; repeatable |
+| `--role` | `admin` | the role's name |
+| `--name` | the login | the administrator's display name |
+| `--database-url` | `$DATABASE_URL` | the database URL |
+| `--dialect` | the URL's | `postgres` or `sqlite` |
+| `--config` | the runtime's cost | an identity config JSON file |
+| `--descriptor` | none | the identity descriptor file, in place of a service directory |
+| `--naming` | `<db-service-dir>/../../superschematic.toml` | naming config file; the command reads it and the runner does not |
+
+Each flag but `--descriptor` and `--naming` is the runner's, below.
+
+### The identity runner, `superschematic-identity`
+
+`superschematic-identity bootstrap --descriptor <file>` does the
+database write, through the HTTP runtime's identity package
+(`Store.Bootstrap`). A deploy job runs it with the descriptor the build
+wrote and the password on standard input, without the compiler. It
+installs as the migration runner does, from a release's
+`superschematic-identity_<version>_<platform>.tar.gz`, or built from a
+checkout ([runtime/http/go/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/http/go/README.md)).
+
+The database is `--database-url`, or `$DATABASE_URL`, read as
+`superschematic-migrate` reads it: a `postgres://` or `postgresql://` URL
+is Postgres, and a `sqlite:` URL, a `file:` URI or a path is SQLite.
+`--dialect` overrides the URL's. The database must hold the schema's
+tables, so migrate it first; a SQLite path that does not exist is refused.
+
+The password comes from standard input, never from a flag or the
+environment. At a terminal the runner asks for it twice with the
+terminal's echo off; otherwise it reads one line, so a secret store can
+pipe it in. It must be an `Auth.Password`, 8 to 128 characters. It is
+hashed with argon2id at the cost the identity config file `--config`
+sets under `password.argon2`, else at the runtime's default. The runner
+prints the role and the user it created, with their ids, and never the
+password or its hash. It exits 0 when it created them, 1 when it refused
+or failed, and 2 for flags it cannot run with.
+
+```
+printf '%s\n' "$ADMIN_PASSWORD" | superschematic-identity bootstrap --descriptor dist/types/go/shop-db/identity/shop-db.json --login admin@example.com --permission identity
+superschematic-identity version
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--descriptor` | (required) | the identity descriptor the DB build writes |
+| `--login` | (required) | the administrator's login, a value of the `User` table's login scalar, which normalizes it; a user with that login refuses the run |
+| `--permission` | (required) | a permission the role carries, dotted segments of letters, digits, `_` and `-`; repeatable, and a repeat is dropped |
+| `--role` | `admin` | the role's name; a role of that name that exists refuses the run |
+| `--name` | the login | the administrator's display name, for a `User` trait that names a `name` field |
+| `--database-url` | `$DATABASE_URL` | the database URL |
+| `--dialect` | the URL's | `postgres` or `sqlite` |
+| `--config` | the runtime's cost | an identity config JSON file; its `password.argon2` sets the hash's cost |
 
 ## Extension commands
 
