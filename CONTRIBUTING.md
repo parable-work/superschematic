@@ -70,7 +70,7 @@ By making a contribution to this project, I certify that:
 | Go            | 1.26.4  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
 | golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
-| Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
+| Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
 | Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |

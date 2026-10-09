@@ -6,8 +6,9 @@ import { argon2ParamsProblem, type Argon2Params } from './config.js';
 Passwords: argon2id written as PHC strings, so every runtime verifies every
 other's hashes (D50), and Auth.Password's rule, which the catalog scalar
 carries and superscalar's binding checks, so every server and SDK checks one
-rule. The hash is node:crypto's argon2, which Node.js 24 and Bun have; it
-runs off the main thread.
+rule. The hash is node:crypto's argon2, which Node.js 24.7 and Bun 1.4.2
+have (Bun 1.4.0's throws ERR_CRYPTO_ARGON2_NOT_SUPPORTED); it runs off the
+main thread.
 
 A PHC string is read only in the one form this module writes:
 
@@ -45,7 +46,7 @@ type Argon2 = (algorithm: 'argon2id', options: Argon2Options, callback: (error: 
 function argon2Of(): Argon2 {
   const argon2 = (nodeCrypto as unknown as { argon2?: Argon2 }).argon2;
   if (typeof argon2 !== 'function') {
-    throw new Error('identity: node:crypto has no argon2 here; the identity runtime needs Node.js 24.7 or later, or Bun');
+    throw new Error('identity: node:crypto has no argon2 here; the identity runtime needs Node.js 24.7 or later, or Bun 1.4.2 or later');
   }
   return argon2;
 }

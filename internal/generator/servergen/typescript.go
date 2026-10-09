@@ -36,7 +36,7 @@ import (
 
 // BunVersion is the oven/bun image a TypeScript server's Dockerfile runs it
 // on: tools.env's BUN_VERSION, the Bun the repository's checks run on.
-const BunVersion = "1.4.0"
+const BunVersion = "1.4.2"
 
 // The files of a TypeScript entrypoint package.
 const (
