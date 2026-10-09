@@ -77,10 +77,16 @@ func newRecordBuilder(schemas schemaSet) *recordBuilder {
 }
 
 // addResults adds a record per object type an operation of the service
-// returns, and per object type such a type nests.
+// returns, and per object type such a type nests. The user model's
+// operations (D50) add none: the identity runtime serves them, so they have
+// no in-process call or procedure that answers a record, and their results
+// carry what a page has no use for, such as login's session token.
 func (b *recordBuilder) addResults() error {
 	for _, set := range b.schemaSet[0].OperationSets {
 		for _, op := range set.Operations {
+			if op.IdentityOperation != "" {
+				continue
+			}
 			if b.objectType(op.TypeRef.Name) != nil {
 				if err := b.add(op.TypeRef.Name); err != nil {
 					return err
@@ -108,8 +114,10 @@ func (b *recordBuilder) add(name string) error {
 	rec := &record{Name: name + "Record", TypeName: name, Doc: firstLine(typeDef.Description)}
 	b.records[name] = rec
 	seen := map[string]string{}
+	// A @uiHidden or secret field is left out, since everything in a record
+	// reaches the browser.
 	for _, field := range typeDef.Fields {
-		if field.UIHidden {
+		if field.UIHidden || field.Secret {
 			continue
 		}
 		rustName := registry.RustIdentifier(field.Name, "value")

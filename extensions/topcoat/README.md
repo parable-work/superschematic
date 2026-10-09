@@ -149,10 +149,13 @@ can hold:
 | Optional | `Option` |
 | A union, or any JSON value | its JSON text |
 
-A field marked `@uiHidden` is left out, since everything in a record
-reaches the browser. A field whose name a record reserves (`clone`,
-`then`, ...) gets a trailing underscore. `From<types::X>` builds the
-record from the API's value.
+A field marked `@uiHidden` is left out, and so is a secret one
+(`Secret<T>`), since everything in a record reaches the browser. The user
+model's operations add no records: the identity runtime serves them, and
+they have guards but no in-process call, so login's session token never
+reaches a record. A field whose name a record reserves (`clone`, `then`,
+...) gets a trailing underscore. `From<types::X>` builds the record from
+the API's value.
 
 ## Forms
 

@@ -114,8 +114,9 @@ which a page hands the browser, here through a shard:
 <Snippet file="topcoat/src/lib.rs" symbol="review_card" />
 
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
-enums are strings, a map is its entries, and an `@uiHidden` field is left
-out, since a record reaches the browser.
+enums are strings, a map is its entries, and an `@uiHidden` or secret
+field is left out, since a record reaches the browser. The user model's
+routes have no records, since a page does not call them in-process.
 
 ## Procedures
 
