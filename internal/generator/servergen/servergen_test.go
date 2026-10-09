@@ -59,6 +59,11 @@ const (
 	// servers, whose Staging environment places shop-db on Cloud SQL.
 	cloudStack = "shop-cloud-stack"
 
+	// site is the fixture's site, which shop-stack deploys and which calls
+	// shop-orders: Storefront answers CORS for it on shop-orders' routes
+	// (D55). It is loaded, not built: its build writes no entrypoint.
+	site = "shop-web"
+
 	// goldenRoot holds the entrypoints as the output root lays them out,
 	// under server, and the scaffolds as the repository root does, under
 	// go.
@@ -95,7 +100,7 @@ func loadFixture(t *testing.T, root string) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(order), cloudStack) {
+	for _, name := range append(slices.Clone(order), cloudStack, site) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -174,7 +179,7 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
 		for _, server := range []string{"Storefront", "shop-api", expireOrders} {
-			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.BucketsFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.CORSFile, servergen.BucketsFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
 		}
@@ -755,6 +760,36 @@ func (s *started) send(t *testing.T, method, path, body string, status int, cont
 	}
 }
 
+// checkCORS sends method to path from origin, a preflight asking for ask
+// when method is OPTIONS, and checks the status, unless status is 0, and
+// the Access-Control-Allow-Origin the answer carries, or none when
+// allowed is empty (D55).
+func checkCORS(t *testing.T, base, method, path, origin, ask string, status int, allowed string) {
+	t.Helper()
+	req, err := http.NewRequest(method, base+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", origin)
+	if ask != "" {
+		req.Header.Set("Access-Control-Request-Method", ask)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if status != 0 && resp.StatusCode != status {
+		t.Errorf("%s %s from %s = %d, want %d", method, path, origin, resp.StatusCode, status)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != allowed {
+		t.Errorf("%s %s from %s allows origin %q, want %q", method, path, origin, got, allowed)
+	}
+	if allowed != "" && resp.Header.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Errorf("%s %s from %s does not allow credentials", method, path, origin)
+	}
+}
+
 // stop sends SIGTERM and checks the server drains and exits cleanly.
 func (s *started) stop(t *testing.T) {
 	t.Helper()
@@ -813,8 +848,17 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	// target's connector derives it, which the server reads at startup.
 	// Opening shop-media makes no request, so its emulator is nowhere too.
 	unreachable := "postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"
+	// The site shop-web calls shop-orders from its origin, which
+	// shop-orders' CORS field lists (D55).
+	const siteOrigin = "https://shop-web.acme.dev"
 	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
-	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
+	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
+	// A preflight to shop-orders from the site is answered; one from
+	// another origin is not, nor one to shop-reviews, which no site calls.
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/products/p-1/reviews", siteOrigin, http.MethodGet, 0, "")
+	checkCORS(t, storefront.base, http.MethodGet, "/api/orders/o-1", siteOrigin, "", http.StatusNotImplemented, siteOrigin)
 	storefront.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	storefront.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")

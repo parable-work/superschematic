@@ -216,6 +216,38 @@ resources:
       dependsOn:
         - ${shop-api-dns-authorization}
       version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-web-a:
+    name: dns.shop-web.a
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: shop-web.acme.dev.
+      project: acme-prod
+      rrdatas:
+        - ${shop-web-address.address}
+      ttl: 300
+      type: A
+    options:
+      dependsOn:
+        - ${shop-web-address}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-web-cname:
+    name: dns.shop-web.cname
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: _acme-challenge.shop-web.acme.dev.
+      project: acme-prod
+      rrdatas:
+        - ${shop-web-dns-authorization.dnsResourceRecords[0].data}
+      ttl: 300
+      type: CNAME
+    options:
+      dependsOn:
+        - ${shop-web-dns-authorization}
+      version: 9.37.1
   # phase infrastructure; owners Orders, shop-orders-ship-orders
   network:
     name: network
@@ -489,6 +521,8 @@ resources:
           - envs:
               - name: LOG_LEVEL
                 value: warn
+              - name: SHOP_API_CORS_ORIGINS
+                value: https://shop-web.acme.dev
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -860,6 +894,197 @@ resources:
       dependsOn:
         - ${shop-orders-ship-orders-account}
       version: 9.37.1
+  # phase infrastructure; owners shop-web
+  shop-web-address:
+    name: shop-web.address
+    type: gcp:compute/globalAddress:GlobalAddress
+    properties:
+      ipVersion: IPV4
+      name: shop-web-ip
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-web
+  shop-web-anchor:
+    name: shop-web.anchor
+    type: gcp:compute/backendService:BackendService
+    properties:
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-web-anchor
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-web
+  shop-web-backend:
+    name: shop-web.backend
+    type: gcp:compute/backendBucket:BackendBucket
+    properties:
+      bucketName: ${shop-web-bucket.name}
+      cdnPolicy:
+        cacheMode: USE_ORIGIN_HEADERS
+      enableCdn: true
+      name: shop-web-backend
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-web-bucket}
+      version: 9.37.1
+  # phase infrastructure; owners shop-web
+  shop-web-bucket:
+    name: shop-web.bucket
+    type: gcp:storage/bucket:Bucket
+    properties:
+      forceDestroy: true
+      location: US-EAST1
+      name: acme-prod-shop-web
+      project: acme-prod
+      publicAccessPrevention: inherited
+      uniformBucketLevelAccess: true
+      website:
+        mainPageSuffix: index.html
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-certificate:
+    name: shop-web.certificate
+    type: gcp:certificatemanager/certificate:Certificate
+    properties:
+      managed:
+        dnsAuthorizations:
+          - ${shop-web-dns-authorization.id}
+        domains:
+          - shop-web.acme.dev
+      name: shop-web-cert
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-web-dns-authorization}
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-certificate-map:
+    name: shop-web.certificate-map
+    type: gcp:certificatemanager/certificateMap:CertificateMap
+    properties:
+      name: shop-web-certs
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-certificate-map-entry:
+    name: shop-web.certificate-map-entry
+    type: gcp:certificatemanager/certificateMapEntry:CertificateMapEntry
+    properties:
+      certificates:
+        - ${shop-web-certificate.id}
+      hostname: shop-web.acme.dev
+      map: ${shop-web-certificate-map.name}
+      name: shop-web-certs-host
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-web-certificate}
+        - ${shop-web-certificate-map}
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-dns-authorization:
+    name: shop-web.dns-authorization
+    type: gcp:certificatemanager/dnsAuthorization:DnsAuthorization
+    properties:
+      domain: shop-web.acme.dev
+      name: shop-web-dns-auth
+      project: acme-prod
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-forwarding-rule:
+    name: shop-web.forwarding-rule
+    type: gcp:compute/globalForwardingRule:GlobalForwardingRule
+    properties:
+      ipAddress: ${shop-web-address.address}
+      ipProtocol: TCP
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-web-https
+      portRange: "443"
+      project: acme-prod
+      target: ${shop-web-https-proxy.id}
+    options:
+      dependsOn:
+        - ${shop-web-address}
+        - ${shop-web-https-proxy}
+      version: 9.37.1
+  # phase exposure; owners shop-web
+  shop-web-https-proxy:
+    name: shop-web.https-proxy
+    type: gcp:compute/targetHttpsProxy:TargetHttpsProxy
+    properties:
+      certificateMap: //certificatemanager.googleapis.com/${shop-web-certificate-map.id}
+      name: shop-web-https
+      project: acme-prod
+      urlMap: ${shop-web-url-map.id}
+    options:
+      dependsOn:
+        - ${shop-web-certificate-map}
+        - ${shop-web-certificate-map-entry}
+        - ${shop-web-url-map}
+      version: 9.37.1
+  # phase infrastructure; owners shop-web
+  shop-web-public-read:
+    name: shop-web.public-read
+    type: gcp:storage/bucketIAMMember:BucketIAMMember
+    properties:
+      bucket: ${shop-web-bucket.name}
+      member: allUsers
+      role: roles/storage.objectViewer
+    options:
+      dependsOn:
+        - ${shop-web-bucket}
+      version: 9.37.1
+  # phase rollout; owners shop-web
+  shop-web-url-map:
+    name: shop-web.url-map
+    type: gcp:compute/uRLMap:URLMap
+    properties:
+      defaultService: ${shop-web-backend.id}
+      hostRules:
+        - hosts:
+            - '*'
+          pathMatcher: files
+      name: shop-web-lb
+      pathMatchers:
+        - defaultCustomErrorResponsePolicy:
+            errorResponseRules:
+              - matchResponseCodes:
+                  - "404"
+                overrideResponseCode: 200
+                path: /{site-digest}/index.html
+            errorService: ${shop-web-backend.id}
+          defaultService: ${shop-web-backend.id}
+          name: files
+          routeRules:
+            - matchRules:
+                - fullPathMatch: /
+              priority: 1
+              routeAction:
+                urlRewrite:
+                  pathPrefixRewrite: /{site-digest}/index.html
+              service: ${shop-web-backend.id}
+            - matchRules:
+                - fullPathMatch: /__superschematic/none
+              priority: 2
+              service: ${shop-web-anchor.id}
+            - matchRules:
+                - prefixMatch: /
+              priority: 3
+              routeAction:
+                urlRewrite:
+                  pathPrefixRewrite: /{site-digest}/
+              service: ${shop-web-backend.id}
+      project: acme-prod
+    options:
+      dependsOn:
+        - ${shop-web-anchor}
+        - ${shop-web-backend}
+      version: 9.37.1
 outputs:
   Orders.account.email: ${Orders-account.email}
   Orders.account.id: ${Orders-account.id}
@@ -874,6 +1099,8 @@ outputs:
   Orders.trace-agent.id: ${Orders-trace-agent.id}
   dns.shop-api.a.id: ${dns-shop-api-a.id}
   dns.shop-api.cname.id: ${dns-shop-api-cname.id}
+  dns.shop-web.a.id: ${dns-shop-web-a.id}
+  dns.shop-web.cname.id: ${dns-shop-web-cname.id}
   network.id: ${network.id}
   network.name: ${network.name}
   network.nat.id: ${network-nat.id}
@@ -931,3 +1158,19 @@ outputs:
   shop-orders-ship-orders.schedule-invoker.id: ${shop-orders-ship-orders-schedule-invoker.id}
   shop-orders-ship-orders.schedule.id: ${shop-orders-ship-orders-schedule.id}
   shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}
+  shop-web.address.address: ${shop-web-address.address}
+  shop-web.address.id: ${shop-web-address.id}
+  shop-web.anchor.id: ${shop-web-anchor.id}
+  shop-web.backend.id: ${shop-web-backend.id}
+  shop-web.bucket.id: ${shop-web-bucket.id}
+  shop-web.bucket.name: ${shop-web-bucket.name}
+  shop-web.certificate-map-entry.id: ${shop-web-certificate-map-entry.id}
+  shop-web.certificate-map.id: ${shop-web-certificate-map.id}
+  shop-web.certificate-map.name: ${shop-web-certificate-map.name}
+  shop-web.certificate.id: ${shop-web-certificate.id}
+  shop-web.dns-authorization.dnsResourceRecords[0].data: ${shop-web-dns-authorization.dnsResourceRecords[0].data}
+  shop-web.dns-authorization.id: ${shop-web-dns-authorization.id}
+  shop-web.forwarding-rule.id: ${shop-web-forwarding-rule.id}
+  shop-web.https-proxy.id: ${shop-web-https-proxy.id}
+  shop-web.public-read.id: ${shop-web-public-read.id}
+  shop-web.url-map.id: ${shop-web-url-map.id}

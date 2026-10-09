@@ -56,6 +56,7 @@ func coreKinds() []KindSpec {
 			Pipeline: []string{"types", "envConfig"},
 		},
 		stackKind(),
+		siteKind(),
 		bucketKind(),
 	}
 }

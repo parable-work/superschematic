@@ -1,0 +1,9 @@
+# A TypeScript API over users-db's user model (D50, D51): it serves the
+# session routes, and its own route needs a caller.
+name: users-ts-api
+kind: API
+authDb: users-db
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

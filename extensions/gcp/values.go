@@ -34,6 +34,12 @@ const (
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
 	TypeBucket              = "gcp:storage/bucket:Bucket"
 
+	// The types of a site (D55): the bucket that holds its files
+	// (TypeBucket), the load balancer's backend for it, and the HTTP proxy
+	// of a site with no domain.
+	TypeBackendBucket = "gcp:compute/backendBucket:BackendBucket"
+	TypeHTTPProxy     = "gcp:compute/targetHttpProxy:TargetHttpProxy"
+
 	// The types of the bootstrap graph (BootstrapEnvironment). A bucket
 	// edge's grants (connectBucket) are of the last two too (D54).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
@@ -87,6 +93,14 @@ const cloudRunJobSettings = `{
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
+  "additionalProperties": false
+}`
+
+// siteSettings is the schema of a site's settings on the gcp site
+// platform (D55): it takes none.
+const siteSettings = `{
+  "type": "object",
+  "properties": {},
   "additionalProperties": false
 }`
 

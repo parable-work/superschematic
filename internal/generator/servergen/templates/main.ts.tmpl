@@ -18,10 +18,19 @@
 {{- range .APIs }}
 //   - {{ .Service }}: {{ .ImplPackage }}{{ if .ImplDir }}, at {{ .ImplDir }}{{ end }}
 {{- end }}
+{{- if .Identity }}
+//
+// An API whose authDb has a User table authenticates its end users with
+// the identity runtime over that database (D50), with the identity config
+// its identity config field holds.
+{{- end }}
 
 import { Hono } from 'hono';
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
+{{- if .Identity }}
+import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+{{- end }}
 {{- if .Databases }}
 import { connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
@@ -35,6 +44,11 @@ import * as {{ .Impl }} from '{{ .ImplPackage }}';
 {{- end }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
+{{- end }}
+{{- range .Databases }}
+{{- if .Store }}
+import { identityDescriptor as {{ .Descriptor }} } from '{{ .DescriptorModule }}';
+{{- end }}
 {{- end }}
 
 /** The port the server listens on when $PORT is unset. */
@@ -85,6 +99,10 @@ async function main(): Promise<void> {
 {{- if .Config }}
   const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.loadEnvConfig());
 {{- end }}
+{{- if .CORS }}
+  // The origins of the sites that call {{ .Service }}, which its CORS field lists (section 8.10).
+  const {{ .CORS }} = configure({{ tsQuote .Service }}, () => loadCors({{ tsQuote .CORSField }}));
+{{- end }}
 {{- end }}
 {{- if .Databases }}
 
@@ -99,6 +117,14 @@ async function main(): Promise<void> {
     { name: {{ tsQuote .Service }}, pool: {{ .Var }} },
 {{- end }}
   ];
+{{- range .Databases }}
+{{- if .Store }}
+
+  // The identity store of the user model in {{ .Service }} (D50), over the
+  // same pool, for every API that authenticates its users against it.
+  const {{ .Store }} = postgresIdentityStore({{ .Var }}, {{ .Descriptor }});
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .Clients }}
 
@@ -160,17 +186,47 @@ async function main(): Promise<void> {
 {{- if .Authenticate }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
 {{- end }}
+{{- if .Identity }}
+  // The identity runtime authenticates its callers and serves its user
+  // model's routes, with the config its identity config field holds.
+  const {{ .Identity }} = await construct({{ tsQuote .Service }}, 'identity', () =>
+    {{ .Module }}.identityService({ store: {{ .Database.Store }}, config: identityConfig({{ tsQuote .IdentityField }}) })
+  );
+{{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- end }}
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
+{{- if .AnyCORS }}
+
+  // A site's browser calls an API here from the site's origin: each API a
+  // site calls answers CORS for the origins its CORS field lists, and no
+  // other, the API a request is by the operations that take it.
+  const handle = corsHandler(
+    [
+{{- range .APIs }}
+{{- if .CORS }}
+      {
+        policy: { origins: {{ .CORS }}, methods: corsMethods(Object.values({{ .Module }}.operationSpecs)) },
+        match: matchOperations(Object.values({{ .Module }}.operationSpecs)),
+      },
+{{- end }}
+{{- end }}
+    ],
+    (request: Request, srv: BunServer) => app.fetch(request, srv)
+  );
+{{- end }}
 
   const bun = (globalThis as unknown as { Bun: BunRuntime }).Bun;
   let server: BunServer;
   try {
     // Hono hands Bun's server to the routes as their bindings, from which
     // the runtime reads the peer's address.
+{{- if .AnyCORS }}
+    server = bun.serve({ port, development: false, fetch: (request, srv) => handle(request, srv) });
+{{- else }}
     server = bun.serve({ port, development: false, fetch: (request, srv) => app.fetch(request, srv) });
+{{- end }}
   } catch (error) {
     throw new Error(`listen on :${port}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
@@ -219,6 +275,26 @@ function configure<T>(api: string, load: () => T): T {
     throw new Error(`configuration of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
+{{- if .Identity }}
+
+/**
+ * Reads the identity config of an API over the user model (D50) from the
+ * environment variable field, the API's identity config field: the JSON
+ * the identity runtimes read alike, which parseIdentityConfigJSON reads
+ * strictly. Unset or empty, it is the runtime's defaults. The platform sets
+ * the field (docs/stack-model.md, section 3.4): the local target turns the
+ * session cookie's Secure off, since it serves plain HTTP.
+ */
+function identityConfig(field: string): IdentityConfig | undefined {
+  const value = process.env[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    return parseIdentityConfigJSON(value);
+  } catch (error) {
+    throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+{{- end }}
 
 /** Builds what an API's implementation exports, naming the API when it fails. */
 async function construct<T>(api: string, what: string, build: () => T | Promise<T>): Promise<T> {

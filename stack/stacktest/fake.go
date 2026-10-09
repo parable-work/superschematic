@@ -50,6 +50,12 @@ const (
 	JobSQLConnector  = "fake.job-sql"
 	JobHTTPConnector = "fake.job-run"
 
+	// SitePlatform serves a site's files from storage under their digest,
+	// as gcp serves them from a bucket behind its load balancer, and
+	// SiteConnector connects a site to a server whose API it calls (D55).
+	SitePlatform  = "fake.site"
+	SiteConnector = "fake.site-run"
+
 	// BucketPlatform keeps a bucket, as gcp keeps one in Cloud Storage;
 	// BucketConnector and JobBucketConnector grant a server's or a job's
 	// account its objects (D54).
@@ -80,6 +86,7 @@ const (
 	TypeRecord   = "fake:dns/record:Record"
 	TypeJob      = "fake:run/job:Job"
 	TypeSchedule = "fake:scheduler/job:Job"
+	TypeSite     = "fake:storage/site:Site"
 	TypeBucket   = "fake:storage/bucket:Bucket"
 )
 
@@ -98,6 +105,7 @@ type Extension struct {
 	Builder     *FakeBuilder
 	CI          *FakeCI
 	Jobs        *FakeJobs
+	Sites       *FakeSites
 	Tools       []registry.CLITool
 	NoJobRunner bool
 }
@@ -131,10 +139,14 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Jobs == nil {
 		e.Jobs = &FakeJobs{}
 	}
+	if e.Sites == nil {
+		e.Sites = &FakeSites{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
 	e.Jobs.log = e.Provisioner
+	e.Sites.log = e.Provisioner
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
@@ -149,6 +161,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 			NameOf:    serverName,
 			AddressOf: func(ctx registry.PlatformContext) any {
 				return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "url"}
+			},
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				return publicAddress(ctx, ctx.Deployable.Name+".service")
 			},
 			Lower: lowerServer,
 		}
@@ -185,6 +200,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower:     lowerJob,
 		},
 		{
+			Name:      SitePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableSite,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				return publicAddress(ctx, ctx.Deployable.Name+".site")
+			},
+			Lower: lowerSite,
+		},
+		{
 			Name:      BucketPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableBucket,
@@ -205,6 +231,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: RunPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: JobPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: SitePlatform, To: RunPlatform, Connect: connectSite},
 		{Name: BucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: RunPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: JobBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
@@ -233,6 +260,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   RunPlatform,
 			ir.DeployableDatabase: SQLPlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableSite:     SitePlatform,
 			ir.DeployableBucket:   BucketPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
@@ -250,6 +278,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Builder:    e.Builder,
 		CI:         e.CI,
 		Jobs:       jobs,
+		Sites:      e.Sites,
 	})
 }
 
@@ -338,6 +367,11 @@ var resourceTypes = map[string]string{
 	    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
 	      "properties": {"name": {"type": "string"}, "value": {}, "secret": {"type": "string"}},
 	      "additionalProperties": false}}
+	  },
+	  "additionalProperties": false}`,
+	TypeSite: `{"type": "object", "required": ["name", "prefix", "public"],
+	  "properties": {
+	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"}
 	  },
 	  "additionalProperties": false}`,
 	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
@@ -496,6 +530,55 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 		}})
 	}
 	return out, nil
+}
+
+// publicAddress is where a browser reaches an exposed server or site: its
+// host under the environment's domain, or the url output of its node id
+// when the environment sets no domain (D55).
+func publicAddress(ctx registry.PlatformContext, id string) any {
+	if ctx.Environment.Domain == "" {
+		return ir.Output{Resource: id, Name: "url"}
+	}
+	return Join("https://", ctx.Deployable.ResourceName, ".", ctx.Environment.Domain)
+}
+
+// lowerSite lowers a site (D55) to its storage, public, serving its files
+// under the prefix of their digest, which the deploy pins, with the
+// single-page fallback, and under the environment's domain a route and a
+// CNAME record, as an exposed server's.
+func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Site == nil {
+		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
+	}
+	id := d.Name + ".site"
+	props := map[string]any{"name": d.ResourceName, "prefix": "/" + ir.SiteDigestToken + "/", "public": true}
+	if d.Site.Fallback != "" {
+		props["fallback"] = d.Site.Fallback
+	}
+	out := registry.Lowered{Resources: []*ir.Resource{{ID: id, Type: TypeSite, Properties: props}}}
+	if ctx.Environment.Domain != "" {
+		host := Join(d.ResourceName, ".", ctx.Environment.Domain)
+		out.Resources = append(out.Resources, &ir.Resource{
+			ID:         d.Name + ".route",
+			Type:       TypeRoute,
+			Properties: map[string]any{"host": host, "service": ir.Output{Resource: id, Name: "id"}},
+			Phase:      ir.PhaseExposure,
+		})
+		out.Records = append(out.Records, &ir.DNSRecord{
+			Name:  host,
+			Type:  "CNAME",
+			Value: ir.Output{Resource: d.Name + ".route", Name: "target"},
+		})
+	}
+	return out, nil
+}
+
+// connectSite derives the public address of the server whose API a site
+// calls (D55). The browser carries its end user's token, so the edge
+// grants nothing.
+func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 
 // lowerDatabase lowers a database to an instance and a database per

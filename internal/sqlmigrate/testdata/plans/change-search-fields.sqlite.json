@@ -1,0 +1,32 @@
+{
+  "dialect": "sqlite",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "22c651fa8a86372ede1d3c04e866967d123a9e0a8793584dd6b0b9f67c62999a",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" ADD COLUMN \"blurb\" TEXT"
+      ],
+      "subject": "table/product/column/blurb",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "regenerateColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" DROP COLUMN \"search_text\"",
+        "ALTER TABLE \"product\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"title\", '') || ' ' || COALESCE(\"blurb\", '')) VIRTUAL"
+      ],
+      "subject": "table/product/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "492049a86761d34df4b16862f119d7d61b0adfc008db7d157a32888769eb87a6",
+  "toModel": null,
+  "version": 1
+}

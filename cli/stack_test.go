@@ -55,7 +55,7 @@ func TestStackDevNeedsALocalEnvironment(t *testing.T) {
 			err := root.Execute()
 			require.Error(t, err, buf.String())
 			require.Contains(t, err.Error(), tc.want)
-			require.Contains(t, buf.String(), "Built 5 schema services for shop-stack")
+			require.Contains(t, buf.String(), "Built 6 schema services for shop-stack")
 		})
 	}
 }

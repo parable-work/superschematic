@@ -100,7 +100,7 @@ func TestScaffoldWritesEachMissingImplementation(t *testing.T) {
 func TestAStackScaffoldsTheImplementationsItServes(t *testing.T) {
 	repoRoot := t.TempDir()
 	servicesRoot := filepath.Join(repoRoot, "schemas", "services")
-	for _, fixture := range []string{"shop-db", "shop-media", "shop-api", "shop-orders", "shop-reviews", "shop-stack"} {
+	for _, fixture := range []string{"shop-db", "shop-media", "shop-api", "shop-orders", "shop-reviews", "shop-web", "shop-stack"} {
 		copyDir(t, filepath.Join("../internal/generator/servergen/testdata/services", fixture), filepath.Join(servicesRoot, fixture))
 	}
 	cacheRoot := t.TempDir()

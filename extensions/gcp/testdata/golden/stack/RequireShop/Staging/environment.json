@@ -148,6 +148,7 @@
           "name": "uri"
         }
       },
+      "publicAddress": "https://shop-api.staging.acme.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",

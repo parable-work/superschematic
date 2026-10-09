@@ -1,11 +1,12 @@
 // Package gcp is the gcp target of the stack model (docs/stack-model.md,
 // section 7): Cloud Run servers, Cloud Run jobs and their Cloud Scheduler
 // schedules, Cloud SQL Postgres databases, Cloud Storage buckets (D54),
-// Secret Manager secrets, a global
-// external Application Load Balancer for exposed servers, and Cloud DNS for
-// their records. It registers through the
-// public registry package alone, as any extension does (D10), in a Go
-// module of its own (D1), so the GCP vocabulary stays out of the core.
+// Secret Manager secrets, a global external Application Load Balancer for
+// exposed servers, static sites in Cloud Storage behind a load balancer
+// with Cloud CDN (D55), and Cloud DNS for their records. It registers
+// through the public registry package alone, as any extension does (D10),
+// in a Go module of its own (D1), so the GCP vocabulary stays out of the
+// core.
 //
 // Every platform, connector and DNS platform here is a pure function to
 // resource graph nodes typed by the Pulumi `gcp` provider, whose schemas
@@ -39,6 +40,10 @@ const (
 	CloudRunJob = "gcp.cloudrunjob"
 	CloudSQL    = "gcp.cloudsql"
 
+	// Site serves a static site's files from a Cloud Storage bucket,
+	// through a load balancer with Cloud CDN (D55).
+	Site = "gcp.site"
+
 	// Storage keeps a Bucket service's objects in a Cloud Storage bucket
 	// (D54).
 	Storage = "gcp.storage"
@@ -57,6 +62,10 @@ const (
 	JobSQLConnector  = "gcp.cloudrunjob-cloudsql"
 	JobHTTPConnector = "gcp.cloudrunjob-cloudrun"
 
+	// SiteConnector connects a site to a Cloud Run server it calls: the
+	// site's config holds the server's public address (D55).
+	SiteConnector = "gcp.site-cloudrun"
+
 	// BucketConnector and JobBucketConnector connect a Cloud Run server
 	// and a Cloud Run job to a bucket its API lists (D54).
 	BucketConnector    = "gcp.cloudrun-storage"
@@ -71,7 +80,7 @@ const (
 	PolicyHighAvailability = "production-databases-highly-available"
 
 	// PolicyNothingPublic refuses a resource that admits the public on
-	// behalf of anything but an exposed server.
+	// behalf of anything but an exposed server or a site.
 	PolicyNothingPublic = "nothing-public-unless-exposed"
 
 	// PolicyPrivateBuckets refuses a Bucket service's bucket that is not
@@ -118,8 +127,9 @@ func (Extension) Name() string { return Name }
 // platform, the pinned schema of every resource type they and bootstrap
 // emit, and the target's deploy seams: the state bucket, Secret Manager,
 // bootstrap, image builds with Cloud Build, the migration job, the
-// generated CI's sign-in through Workload Identity Federation, and a job's
-// run on demand as an execution of its Cloud Run job (D52).
+// generated CI's sign-in through Workload Identity Federation, a job's
+// run on demand as an execution of its Cloud Run job (D52), and a site's
+// files' upload to its bucket (D55).
 func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
@@ -130,7 +140,10 @@ func (e Extension) Register(r *registry.Registry) error {
 			Settings:  json.RawMessage(cloudRunSettings),
 			NameOf:    serviceName,
 			AddressOf: serviceAddress,
-			Lower:     lowerService,
+			// Where a browser reaches an exposed server: what a site's
+			// config holds for it (D55).
+			PublicAddressOf: servicePublicAddress,
+			Lower:           lowerService,
 		},
 		{
 			Name:      CloudRunJob,
@@ -153,6 +166,16 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerDatabase,
 		},
 		{
+			Name:            Site,
+			Extension:       Name,
+			Kind:            ir.DeployableSite,
+			Settings:        json.RawMessage(siteSettings),
+			NameOf:          serviceName,
+			AddressOf:       sitePublicAddress,
+			PublicAddressOf: sitePublicAddress,
+			Lower:           lowerSite,
+		},
+		{
 			Name:      Storage,
 			Extension: Name,
 			Kind:      ir.DeployableBucket,
@@ -171,6 +194,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunJob, To: CloudRun, Connect: connectHTTP},
+		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: Site, To: CloudRun, Connect: connectSite},
 		{Name: BucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRun, To: Storage, Connect: connectBucket},
 		{Name: JobBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunJob, To: Storage, Connect: connectBucket},
 	} {
@@ -194,6 +218,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   CloudRun,
 			ir.DeployableDatabase: CloudSQL,
 			ir.DeployableJob:      CloudRunJob,
+			ir.DeployableSite:     Site,
 			ir.DeployableBucket:   Storage,
 		},
 		Values:        json.RawMessage(targetValues),
@@ -212,6 +237,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Builder:    imageBuilder{ext: e},
 		CI:         ciIdentities{},
 		Jobs:       jobRunner{ext: e},
+		Sites:      sitePublisher{ext: e},
 	})
 }
 

@@ -68,17 +68,21 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, env string) *ir.
 	return resolved
 }
 
-// TestGolden resolves the shop stack in each environment, its records on
-// Cloudflare, and checks the environment.json it writes, resource graph
-// included, against the golden file. Resolution validated every record
-// against the pinned schema of its type on the way.
+// TestGolden resolves the shop stack with the site shop-web (D55) in each
+// environment, its records on Cloudflare, and checks the environment.json
+// it writes, resource graph included, against the golden file. Resolution
+// validated every record against the pinned schema of its type on the
+// way.
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
-	s := shop()
+	s := stacktest.WithSite(shop())
 	out := t.TempDir()
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			resolved := resolve(t, reg, s, env.Name)
+			resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.SiteShop(), Environment: env.Name})
+			if err != nil {
+				t.Fatal(err)
+			}
 			path, err := stack.Write(out, resolved)
 			if err != nil {
 				t.Fatal(err)
@@ -159,6 +163,33 @@ func TestRecords(t *testing.T) {
 		}
 		if !slices.Equal(rec.DependsOn, []string{"shop-api.route"}) {
 			t.Errorf("%s: dependsOn = %v", tc.env, rec.DependsOn)
+		}
+	}
+}
+
+// TestSiteRecord reads the record of the site shop-web (D55), which is
+// always exposed: its host under the domain, beside shop-api's, proxied in
+// Production as every record there is.
+func TestSiteRecord(t *testing.T) {
+	reg := assemble(t)
+	for _, tc := range []struct {
+		env     string
+		name    string
+		proxied bool
+	}{
+		{"Staging", `"shop-web.staging.acme.dev"`, false},
+		{"Production", `"shop-web.acme.dev"`, true},
+	} {
+		env, err := stack.Resolve(reg, stack.Input{Stack: stacktest.WithSite(shop()), Services: stacktest.SiteShop(), Environment: tc.env})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := env.Resources.Resource("dns.shop-web.cname")
+		if rec == nil || rec.Type != cloudflare.TypeRecord {
+			t.Fatalf("%s: shop-web's record = %+v", tc.env, rec)
+		}
+		if got := mustJSON(t, rec.Properties["name"]); got != tc.name || rec.Properties["proxied"] != tc.proxied {
+			t.Errorf("%s: shop-web's record is %s, proxied %v; want %s, %v", tc.env, got, rec.Properties["proxied"], tc.name, tc.proxied)
 		}
 	}
 }

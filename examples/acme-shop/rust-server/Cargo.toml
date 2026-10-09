@@ -7,13 +7,23 @@ publish = false
 # The generated server crate under ../schemas/dist-rust, which
 # scripts/check.sh builds with
 # `superschematic build --with-deps --api-language RUST --out schemas/dist-rust`,
-# and the runtime crate it is built on.
+# with its identity store over SQLite, and the runtime crate it is built on.
 [dependencies]
-acme-shop-orders-api = { path = "../schemas/dist-rust/api/shop-orders" }
+acme-shop-orders-api = { path = "../schemas/dist-rust/api/shop-orders", features = ["identity-sqlite"] }
 superschematic-http-runtime = { path = "../../../runtime/http/rust" }
 async-trait = "0.1"
 axum = "0.8"
+# The shop's users' SQLite database, the connection the identity store's
+# Rusqlite client binds: the version the runtime's identity-sqlite feature
+# links. The `sqlite` feature, which the Topcoat app turns on, keeps the
+# orders and reviews in a SQLite file over it too (src/sqlite.rs); the
+# server in src/main.rs keeps them in memory.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+serde_json = { version = "1", optional = true }
+
+[features]
+sqlite = ["dep:serde_json"]
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

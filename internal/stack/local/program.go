@@ -65,6 +65,10 @@ type Program struct {
 
 	// Jobs are the jobs, in deploy order: each after its callees (D52).
 	Jobs []*Job `json:"jobs,omitempty"`
+
+	// Sites are the sites, in deploy order: each after the servers it
+	// calls (D55).
+	Sites []*Site `json:"sites,omitempty"`
 }
 
 // Container is a Docker container node. Command, when set, replaces the
@@ -207,6 +211,7 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 	prog := &Program{Version: ProgramVersion, Stack: env.Stack, Environment: env.Environment}
 	servers := map[string]*Server{}
 	jobs := map[string]*Job{}
+	sites := map[string]*Site{}
 	containers := map[string]*Container{}
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -244,6 +249,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			var j *Job
 			if j, err = jobOf(res); err == nil {
 				jobs[j.ID] = j
+			}
+		case TypeSite:
+			var s *Site
+			if s, err = siteOf(res); err == nil {
+				sites[s.ID] = s
 			}
 		default:
 			err = fmt.Errorf("it has type %s, which is not the local provider's", res.Type)
@@ -300,7 +310,16 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 					j.Wave = step.Wave
 					prog.Jobs = append(prog.Jobs, j)
 				}
+				if s, ok := sites[id]; ok {
+					s.Wave = step.Wave
+					prog.Sites = append(prog.Sites, s)
+				}
 			}
+		}
+	}
+	for id := range sites {
+		if !slices.ContainsFunc(prog.Sites, func(s *Site) bool { return s.ID == id }) {
+			return nil, fmt.Errorf("local: site %s is in no rollout step", id)
 		}
 	}
 	for id := range servers {

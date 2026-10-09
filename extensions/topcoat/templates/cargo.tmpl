@@ -6,6 +6,13 @@ edition = "2024"
 rust-version = "1.99.0"
 description = "Topcoat pages, guards and records over the {{ .SchemaName }} API"
 license = "UNLICENSED"
+{{- if .Identity }}
+
+# The identity store's SQL client (D50), the API crate's features.
+[features]
+identity-postgres = ["{{ .APICrate }}/identity-postgres"]
+identity-sqlite = ["{{ .APICrate }}/identity-sqlite"]
+{{- end }}
 
 [dependencies]
 {{ .APICrate }} = { path = "{{ .APIDepPath }}" }
@@ -17,5 +24,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 {{- end }}
 {{- if or .Records .Forms }}
 serde_json = "1.0.149"
+{{- end }}
+{{- if .ControlledProcedures }}
+# The timeout of a procedure's route controls.
+tokio = { version = "1.52.2", features = ["time"] }
 {{- end }}
 topcoat = { version = "0.10", features = ["tower"] }

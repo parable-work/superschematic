@@ -91,6 +91,7 @@
       "exposed": true,
       "resourceName": "shop-api",
       "address": "http://127.0.0.1:21859",
+      "publicAddress": "http://127.0.0.1:21859",
       "bindings": [
         {
           "field": "LOG_LEVEL",

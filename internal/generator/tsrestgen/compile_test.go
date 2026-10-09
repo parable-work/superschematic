@@ -31,6 +31,12 @@ type generatedTree struct {
 	bun        string
 	apiDir     string
 	runtimeDir string
+	// root holds the tree; typesDirs maps each type package's name to its
+	// directory.
+	root      string
+	typesDirs map[string]string
+	// env is what runTest sets beside API_DIR, NAME=value.
+	env []string
 }
 
 func link(t *testing.T, target, name string) {
@@ -81,6 +87,9 @@ type apiFixture struct {
 	name   string
 	schema *ir.Schema
 	deps   map[string]*ir.Schema
+	// authDB is the authDb the schema's config names, loaded; nil for
+	// none. Its type package is generated too.
+	authDB *ir.Schema
 	// endpoints is apigen's extraction for the schema.
 	endpoints *apigen.APIOutput
 }
@@ -124,6 +133,9 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		typesCases = append(typesCases, typesCase{name: name, schema: fixture.deps[name]})
 		depPackages[name] = names.NpmTypesPackage(name)
 	}
+	if fixture.authDB != nil && fixture.deps[fixture.authDB.Name] == nil {
+		typesCases = append(typesCases, typesCase{name: fixture.authDB.Name, schema: fixture.authDB})
+	}
 	typesCases = append(typesCases, typesCase{name: fixture.name, schema: fixture.schema, deps: fixture.deps})
 
 	typesDirs := map[string]string{}
@@ -159,6 +171,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		SchemaName:   fixture.name,
 		Dependencies: fixture.deps,
 		Clock:        fixedClock,
+		AuthDB:       fixture.authDB,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -177,7 +190,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	for _, dep := range []string{"hono", "typescript", filepath.Join("@types", "node")} {
 		link(t, filepath.Join(runtimeDir, "node_modules", dep), filepath.Join(modules, dep))
 	}
-	return &generatedTree{bun: bunPath, apiDir: apiDir, runtimeDir: runtimeDir}
+	return &generatedTree{bun: bunPath, apiDir: apiDir, runtimeDir: runtimeDir, root: tempRoot, typesDirs: typesDirs}
 }
 
 // typeCheck runs tsc over the generated package.
@@ -210,13 +223,16 @@ func (tree *generatedTree) runTest(t *testing.T, name string) {
 	}
 	cmd := exec.Command(tree.bun, "test", testFile)
 	cmd.Dir = tree.apiDir
-	cmd.Env = append(os.Environ(), "API_DIR="+tree.apiDir)
+	cmd.Env = append(append(os.Environ(), "API_DIR="+tree.apiDir), tree.env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s failed: %v\n%s", name, err, out)
 	}
 	if !strings.Contains(string(out), " 0 fail") {
 		t.Fatalf("unexpected bun test summary for %s:\n%s", name, out)
+	}
+	if testing.Verbose() {
+		t.Logf("%s:\n%s", name, out)
 	}
 }
 

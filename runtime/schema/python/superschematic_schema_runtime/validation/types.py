@@ -79,14 +79,13 @@ class ScalarDef:
         """``"object"`` or ``"array"`` when the scalar's value is a JSON object or
         a JSON array, and ``""`` otherwise.
 
-        The json_schema type mapping declares the shape (Generic.StringMap and
-        Embedding.Vector in the core catalog). The catalog gives such a scalar
-        the String primitive, but every generated type holds the dict or the
-        list. A scalar that also declares a pattern or a length, which are rules
-        on a string, contradicts itself (Geo.Location's row has a "lat,lon"
-        pattern) and is not structured: it keeps the String primitive's checks
-        until its metadata agrees. Parse and validation key the rule off this,
-        not the scalar's name or primitive.
+        The json_schema type mapping declares the shape (Generic.StringMap,
+        Geo.Location and Embedding.Vector in the core catalog). The catalog
+        gives such a scalar the String primitive, but every generated type holds
+        the dict or the list. A scalar that also declares a pattern or a length,
+        which are rules on a string, contradicts itself and is not structured: it
+        keeps the String primitive's checks until its metadata agrees. Parse and
+        validation key the rule off this, not the scalar's name or primitive.
         """
         if self.pattern or self.min_length > 0 or self.max_length > 0:
             return ""

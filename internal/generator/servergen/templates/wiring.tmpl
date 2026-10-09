@@ -10,6 +10,10 @@ exactly as a server does.
 {{- if .Databases }}
 	"github.com/jackc/pgx/v5/pgxpool"
 {{- end }}
+{{- if anyIdentity .APIs }}
+	"github.com/jackc/pgx/v5/stdlib"
+	"{{ .Naming.HTTPRuntimeGoModule }}/identity"
+{{- end }}
 {{- if .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
@@ -23,6 +27,9 @@ exactly as a server does.
 {{- end }}
 {{- range .Databases }}
 	{{ .Package }} "{{ .Module }}"
+{{- if .Identity }}
+	{{ .Types }} "{{ .TypesModule }}"
+{{- end }}
 {{- end }}
 {{- range .Clients }}
 	{{ .Package }} "{{ .Module }}"
@@ -57,6 +64,16 @@ exactly as a server does.
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
+{{- if .Identity }}
+	// The identity store of the user model in {{ .Service }} (D50), over the
+	// same pool, for every API that authenticates its users against it.
+	{{ .Var }}SQL := stdlib.OpenDBFromPool({{ .Var }}Pool)
+	defer {{ .Var }}SQL.Close()
+	{{ .Var }}IdentityStore, err := identity.NewSQLStore({{ .Var }}SQL, identity.Postgres, []byte({{ .Types }}.IdentityDescriptor))
+	if err != nil {
+		return fmt.Errorf("identity store of {{ .Service }}: %w", err)
+	}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if .Clients }}

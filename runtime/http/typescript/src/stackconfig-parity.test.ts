@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { StackConfigError, loadBucket, loadCallers, loadDatabase, loadService, type StackEnv } from './index';
+import { StackConfigError, loadBucket, loadCallers, loadCors, loadDatabase, loadService, type StackEnv } from './index';
 
 /*
 The stackconfig parity vectors (D51, sections 3.4 and 8.6 of
@@ -16,7 +16,7 @@ const CORPUS = fileURLToPath(new URL('../../testdata/stackconfig_parity.json', i
 
 interface ParityVector {
   readonly name: string;
-  readonly reader: 'database' | 'service' | 'bucket' | 'callers';
+  readonly reader: 'database' | 'service' | 'bucket' | 'callers' | 'cors';
   readonly field: string;
   readonly value: unknown;
   readonly variables: Readonly<Record<string, string>>;
@@ -46,6 +46,8 @@ function read(vector: ParityVector, env: StackEnv): unknown {
       return loadBucket(vector.field, env);
     case 'callers':
       return loadCallers(vector.field, env);
+    case 'cors':
+      return { origins: loadCors(vector.field, env) };
   }
 }
 
@@ -53,7 +55,7 @@ describe('stackconfig parity vectors', () => {
   test('the corpus has vectors with distinct names, for each reader', () => {
     expect(corpus.vectors.length).toBeGreaterThan(0);
     expect(new Set(corpus.vectors.map(vector => vector.name)).size).toBe(corpus.vectors.length);
-    expect(new Set(corpus.vectors.map(vector => vector.reader))).toEqual(new Set(['database', 'service', 'bucket', 'callers']));
+    expect(new Set(corpus.vectors.map(vector => vector.reader))).toEqual(new Set(['database', 'service', 'bucket', 'callers', 'cors']));
   });
 
   for (const vector of corpus.vectors) {

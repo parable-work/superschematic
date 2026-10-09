@@ -46,6 +46,14 @@ const (
 	DatabasePlatform = "local.postgres"
 	JobPlatform      = "local.job"
 
+	// SitePlatform serves a site's built files and its config from a file
+	// server in the provisioner, on loopback (D55).
+	SitePlatform = "local.site"
+
+	// SiteConnector connects a site to a process whose API it calls: the
+	// process's loopback URL.
+	SiteConnector = "local.site-process"
+
 	// BucketPlatform keeps a bucket on the environment's storage emulator,
 	// fake-gcs-server, which speaks GCS's API (D54).
 	BucketPlatform = "local.gcs"
@@ -107,6 +115,11 @@ const (
 	// provisioner runs on its schedule while the environment runs (D52).
 	TypeJob = "local:process/job:Job"
 
+	// TypeSite is a site the provisioner builds once and serves from a
+	// file server of its own, with the site's config and its single-page
+	// fallback (D55).
+	TypeSite = "local:site/site:Site"
+
 	// TypeBucket is a bucket on the environment's storage emulator, which
 	// the provisioner creates through the emulator's JSON API (D54).
 	TypeBucket = "local:storage/bucket:Bucket"
@@ -134,9 +147,25 @@ func Register(r *registry.Registry) error {
 			Kind:      ir.DeployableServer,
 			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(serverSettings),
-			NameOf:    processName,
-			AddressOf: processAddress,
-			Lower:     lowerProcess,
+			// A process serves plain HTTP, where a browser drops a Secure
+			// cookie: the session cookie of an API over the user model
+			// (D50) is session, without Secure.
+			IdentityConfig: identityConfig,
+			NameOf:         processName,
+			AddressOf:      processAddress,
+			// A browser on this machine reaches an exposed server where
+			// another server does (D55).
+			PublicAddressOf: processAddress,
+			Lower:           lowerProcess,
+		},
+		{
+			Name:            SitePlatform,
+			Kind:            ir.DeployableSite,
+			Settings:        json.RawMessage(serverSettings),
+			NameOf:          processName,
+			AddressOf:       siteAddress,
+			PublicAddressOf: siteAddress,
+			Lower:           lowerSite,
 		},
 		{
 			Name:      JobPlatform,
@@ -171,6 +200,7 @@ func Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: SiteConnector, Edge: ir.EdgeSite, From: SitePlatform, To: ServerPlatform, Connect: connectSite},
 		{Name: BucketConnector, Edge: ir.EdgeBucket, From: ServerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: JobBucketConnector, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
@@ -191,6 +221,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableServer:   ServerPlatform,
 			ir.DeployableDatabase: DatabasePlatform,
 			ir.DeployableJob:      JobPlatform,
+			ir.DeployableSite:     SitePlatform,
 			ir.DeployableBucket:   BucketPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
@@ -217,6 +248,12 @@ const targetValues = `{
   },
   "additionalProperties": false
 }`
+
+// identityConfig is the identity config a process runs each API over the
+// user model with unless its environment sets the API's identity config
+// field: a session cookie without Secure, since the process serves plain
+// HTTP.
+const identityConfig = `{"cookie":{"secure":false}}`
 
 // serverSettings is the schema of a server's settings: the port it
 // listens on.
@@ -299,6 +336,30 @@ var resourceTypes = map[string]string{
 	      "properties": {"name": {"type": "string", "minLength": 1}, "value": {}, "secret": {"type": "string", "minLength": 1}},
 	      "additionalProperties": false
 	    }}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeSite: `{
+	  "type": "object",
+	  "required": ["name", "dir", "build", "output", "port", "config"],
+	  "properties": {
+	    "name": {"type": "string", "minLength": 1},
+	    "dir": {"type": "string", "minLength": 1},
+	    "build": {"type": "string", "minLength": 1},
+	    "output": {"type": "string", "minLength": 1},
+	    "fallback": {"type": "string", "minLength": 1},
+	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "config": {
+	      "type": "object",
+	      "required": ["apis"],
+	      "properties": {"apis": {"type": "object", "additionalProperties": {
+	        "type": "object",
+	        "required": ["url"],
+	        "properties": {"url": {"type": "string", "minLength": 1}},
+	        "additionalProperties": false
+	      }}},
+	      "additionalProperties": false
+	    }
 	  },
 	  "additionalProperties": false
 	}`,

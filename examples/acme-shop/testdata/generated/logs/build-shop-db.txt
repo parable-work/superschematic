@@ -1,4 +1,4 @@
-Loaded schema shop-db (kind DB): 9 types, 1 enums, 7 scalars, 0 operation sets
+Loaded schema shop-db (kind DB): 12 types, 1 enums, 8 scalars, 0 operation sets
   - sentinel up to date
   + sql written to .../schemas/dist/sql/shop-db
   + orm written to .../schemas/dist/orm/shop-db

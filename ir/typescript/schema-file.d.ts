@@ -11,7 +11,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'Stack' | (string & {});
+export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -334,6 +334,8 @@ export interface OperationSet {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface OperationSetFile {
@@ -346,6 +348,8 @@ export interface OperationSetFile {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface ProjectionCollapse {
@@ -490,7 +494,7 @@ export interface ServiceCallers {
 }
 
 export interface ServiceRef {
-  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'Stack';
+  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack';
   name: string;
 }
 
@@ -548,6 +552,8 @@ export interface TypeDef {
   stack?: StackDecl;
   strictJSON?: boolean;
   traitConfig?: TraitConfigSchema;
+  user?: UserTrait;
+  userRole?: UserRoleTrait;
   versionGraph?: VersionGraphConfig;
   versioned?: boolean;
   versionedConfig?: VersionedConfig;
@@ -590,6 +596,24 @@ export interface UnionFile {
   kind: 'Union';
   name: string;
   types: string[];
+}
+
+export interface UserAdministrationConfig {
+  path?: string;
+}
+
+export interface UserRoleTrait {
+}
+
+export interface UserSessionsConfig {
+  noLogin?: boolean;
+  path?: string;
+  register?: boolean;
+}
+
+export interface UserTrait {
+  login: string;
+  name?: string;
 }
 
 export interface VersionGraphConfig {

@@ -452,10 +452,11 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 		s.SetOutput(out)
 	}
 	req := registry.ProvisionRequest{
-		Environment: env,
-		Dir:         program,
-		OutputRoot:  p.outputRoot,
-		Backend:     local.StateBackend(stateDir),
+		Environment:    env,
+		Dir:            program,
+		OutputRoot:     p.outputRoot,
+		RepositoryRoot: filepath.Dir(p.schemasRoot),
+		Backend:        local.StateBackend(stateDir),
 	}
 	if err := prov.Render(env, program); err != nil {
 		return err
@@ -490,8 +491,8 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	return errors.Join(runErr, cleanup())
 }
 
-// printLocalSummary prints where each server and database of a running
-// local environment is reached, and when each job runs.
+// printLocalSummary prints where each server, site and database of a
+// running local environment is reached, and when each job runs.
 func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string) {
 	var lines []string
 	for _, d := range env.Deployables {
@@ -504,6 +505,10 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  job      %-24s on %s (%s)", d.Name, d.Job.Schedule, d.Job.TimeZone))
 		case d.Kind == ir.DeployableJob:
 			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
+		case d.Kind == ir.DeployableSite:
+			if address, ok := d.PublicAddress.(string); ok {
+				lines = append(lines, fmt.Sprintf("  site     %-24s %s", d.Name, address))
+			}
 		}
 	}
 	for _, res := range env.Resources.Resources {

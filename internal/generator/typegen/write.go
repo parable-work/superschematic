@@ -110,6 +110,31 @@ func keepsJSONNull(field FieldInfo) bool {
 		strings.HasPrefix(field.GoType, "*")
 }
 
+// JSONObjectFields returns the fields of t that hold JSON-object scalar
+// values (isJSONObjectField), in field order. UnmarshalJSON checks each
+// value's JSON with superscalar and notes a required struct value the JSON
+// left absent or null (decodeJSONObjects); Validate reports what it found.
+func (t TypeInfo) JSONObjectFields() []FieldInfo {
+	var fields []FieldInfo
+	for _, field := range t.Fields {
+		if isJSONObjectField(field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+// HasJSONObjectFields reports whether any type in types.go has a field
+// JSONObjectFields returns, so the file carries decodeJSONObjects.
+func (o *ModuleOutput) HasJSONObjectFields() bool {
+	for _, typeInfo := range o.Types {
+		if len(typeInfo.JSONObjectFields()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // HasKeptNullJSONFields reports whether any type in types.go has a field
 // KeptNullJSONFields returns, so the file carries nullJSONMembers.
 func (o *ModuleOutput) HasKeptNullJSONFields() bool {
@@ -133,7 +158,7 @@ func (o *ModuleOutput) HasListFields() bool {
 }
 
 // NeedsJSONValueMissing reports whether types.go's Validate checks a
-// required any-JSON field (requiredAnyJSONField) or JSON object field
+// required any-JSON field (requiredAnyJSONField) or JSON array field
 // (requiredStructuredJSONField), which call the jsonValueMissing helper.
 func (o *ModuleOutput) NeedsJSONValueMissing() bool {
 	for _, typeInfo := range o.Types {
@@ -192,8 +217,8 @@ func (o *ModuleOutput) filterImports(usedAliases map[string]bool) []ModuleImport
 }
 
 // WriteTypes writes all generated module files into outputDir: go.mod,
-// scalars.go, enums.go, types.go, unions.go, README.md. Files whose content
-// would be empty are removed when stale.
+// scalars.go, enums.go, types.go, unions.go, identity.go, README.md and the
+// descriptors. Files whose content would be empty are removed when stale.
 func WriteTypes(output *ModuleOutput, outputDir string) error {
 	return WriteTypesWithProfile(output, outputDir, nil, false)
 }
@@ -223,6 +248,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: len(output.Enums) > 0 || len(output.ImportedEnums) > 0, Template: "enums.tmpl", Filename: "enums.go"},
 		{Condition: len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "types.tmpl", Filename: "types.go"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.go"},
+		{Condition: output.Identity != nil, Template: "identity.tmpl", Filename: "identity.go"},
 	}
 
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
@@ -235,26 +261,33 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		return fmt.Errorf("failed to generate README.md: %w", err)
 	}
 
-	return writeVersionGraphDescriptors(output.VersionGraphs, filepath.Join(outputDir, "versiongraph"))
+	if err := writeDescriptors(output.VersionGraphs, filepath.Join(outputDir, "versiongraph")); err != nil {
+		return err
+	}
+	var identity []DescriptorFile
+	if output.Identity != nil {
+		identity = append(identity, *output.Identity)
+	}
+	return writeDescriptors(identity, filepath.Join(outputDir, "identity"))
 }
 
-// writeVersionGraphDescriptors writes each version graph's descriptor as
-// <dir>/<name>.json and removes the directory's other descriptors (each
-// *.json no graph of the schema writes), so a graph the schema dropped
-// leaves none behind. Any other file stays; the directory goes only when
-// nothing is left in it.
-func writeVersionGraphDescriptors(graphs []VersionGraphDescriptor, dir string) error {
+// writeDescriptors writes each descriptor as <dir>/<name>.json and removes
+// the directory's other descriptors (each *.json the schema no longer
+// writes), so a graph or a User table the schema dropped leaves none
+// behind. Any other file stays; the directory goes only when nothing is
+// left in it.
+func writeDescriptors(descriptors []DescriptorFile, dir string) error {
 	keep := map[string]bool{}
-	if len(graphs) > 0 {
+	if len(descriptors) > 0 {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("failed to create %s: %w", dir, err)
 		}
 	}
-	for _, graph := range graphs {
-		name := graph.FileName + ".json"
+	for _, descriptor := range descriptors {
+		name := descriptor.FileName + ".json"
 		keep[name] = true
-		if err := os.WriteFile(filepath.Join(dir, name), graph.JSON, 0o644); err != nil {
-			return fmt.Errorf("failed to write versiongraph/%s: %w", name, err)
+		if err := os.WriteFile(filepath.Join(dir, name), descriptor.JSON, 0o644); err != nil {
+			return fmt.Errorf("failed to write %s/%s: %w", filepath.Base(dir), name, err)
 		}
 	}
 	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
@@ -268,7 +301,7 @@ func writeVersionGraphDescriptors(graphs []VersionGraphDescriptor, dir string) e
 			}
 		}
 	}
-	if len(graphs) == 0 {
+	if len(descriptors) == 0 {
 		if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
 			if err := os.Remove(dir); err != nil {
 				return fmt.Errorf("failed to remove the empty %s: %w", dir, err)

@@ -1,3 +1,4 @@
+export { Account, AccountAdmin } from "./account.schema";
 export {
   CreateProductInput,
   ProductImageUpload,

@@ -290,8 +290,49 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 	if outputs, ok := obj["outputs"].(map[string]any); ok {
 		cfg.Outputs = outputs
 	}
+	if raw, set := obj["site"]; set {
+		site, serr := siteConfig(raw, at)
+		if serr != nil {
+			return nil, serr
+		}
+		cfg.Site = site
+	}
 
 	return schemaconfig.ValidateShapeWith(cfg, reg)
+}
+
+// siteConfig reads a Site config's `site` object: `build`, `output` and
+// `fallback`, each a string (D55).
+func siteConfig(raw any, at *astNode) (*ir.SiteConfig, *SchemaError) {
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil, errorAtNode(at, "defineConfig site must be an object of build, output and fallback")
+	}
+	site := &ir.SiteConfig{}
+	for _, key := range []string{"build", "output", "fallback"} {
+		value, set := obj[key]
+		if !set {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, errorAtNode(at, "defineConfig site.%s must be a string", key)
+		}
+		switch key {
+		case "build":
+			site.Build = text
+		case "output":
+			site.Output = text
+		case "fallback":
+			site.Fallback = text
+		}
+	}
+	for key := range obj {
+		if key != "build" && key != "output" && key != "fallback" {
+			return nil, errorAtNode(at, "defineConfig site has no key %s; it takes build, output and fallback", key)
+		}
+	}
+	return site, nil
 }
 
 // handleList reads a config key that holds a list of service handles.

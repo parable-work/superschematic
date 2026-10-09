@@ -427,7 +427,7 @@ func (r *resolver) collectMembers() {
 		}
 	}
 	for _, ref := range r.stack.Deploy {
-		if r.checkRef("deploy", ref, ir.SchemaKindAPI, ir.SchemaKindDB) {
+		if r.checkRef("deploy", ref, ir.SchemaKindAPI, ir.SchemaKindDB, ir.SchemaKindSite) {
 			add(ref.Name)
 		}
 	}
@@ -449,6 +449,15 @@ func (r *resolver) collectMembers() {
 	for len(queue) > 0 {
 		svc := r.services[queue[0]]
 		queue = queue[1:]
+		if svc.Kind == ir.SchemaKindSite {
+			// A site reaches the APIs it calls (D55).
+			for _, ref := range svc.Calls {
+				if r.checkRef(fmt.Sprintf("site %s calls", svc.Name), ref, ir.SchemaKindAPI) {
+					add(ref.Name)
+				}
+			}
+			continue
+		}
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
 		}
@@ -557,6 +566,9 @@ func (r *resolver) defaultDeployables() {
 			kind = ir.DeployableServer
 		case ir.SchemaKindDB:
 			kind = ir.DeployableDatabase
+		case ir.SchemaKindSite:
+			// Each Site service is a site of its own (D55).
+			kind = ir.DeployableSite
 		case ir.SchemaKindBucket:
 			kind = ir.DeployableBucket
 		default:
@@ -566,11 +578,20 @@ func (r *resolver) defaultDeployables() {
 			r.fail(CodeInvalidStack, "the default %s of %s would be named %s, like the declared deployable %s", kind, name, name, name)
 			continue
 		}
-		r.deployables[name] = &deployable{res: &ir.ResolvedDeployable{
+		res := &ir.ResolvedDeployable{
 			Name:     name,
 			Kind:     kind,
 			Services: []ir.ServiceRef{{Name: svc.Name, Kind: svc.Kind}},
-		}}
+		}
+		if kind == ir.DeployableSite {
+			if svc.Site == nil {
+				r.fail(CodeInvalidStack, "site %s: the stack's inputs say nothing of how it builds or where its code is", name)
+				continue
+			}
+			site := *svc.Site
+			res.Site = &site
+		}
+		r.deployables[name] = &deployable{res: res}
 		r.byService[name] = name
 	}
 	for _, name := range sortedKeys(r.members) {
@@ -641,7 +662,7 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 		}
 		return r.deployables[name], true
 	case ref.Service != nil:
-		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI, ir.SchemaKindDB, ir.SchemaKindBucket) {
+		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI, ir.SchemaKindDB, ir.SchemaKindSite, ir.SchemaKindBucket) {
 			return nil, false
 		}
 		name, ok := r.byService[ref.Service.Name]
@@ -845,6 +866,9 @@ func (r *resolver) place() {
 			r.placeServer(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
+		case ir.DeployableSite:
+			// A site serves the files its own build writes, in no
+			// language or dialect of the platform's (D55).
 		}
 		if len(d.settings.values) > 0 {
 			res.Settings = d.settings.values
@@ -923,29 +947,36 @@ func (r *resolver) placeDatabase(d *deployable) {
 	r.fail(CodeUnrealizable, "database %s hosts %s, and platform %s runs only %s", d.res.Name, strings.Join(hosted, ", "), d.platform.Name, strings.Join(d.platform.Dialects, ", "))
 }
 
-// expose marks the deployables reachable from outside the environment.
+// expose marks the deployables reachable from outside the environment:
+// the servers the stack exposes, and every site, which is always exposed,
+// whether the stack names it or not (D55).
 func (r *resolver) expose() {
 	for i, ref := range r.stack.Expose {
 		d, ok := r.resolveDeployableRef(fmt.Sprintf("expose[%d] (%s)", i, ref), ref)
 		if !ok {
 			continue
 		}
-		if d.res.Kind != ir.DeployableServer {
-			r.fail(CodeExposeNotServer, "stack %s exposes %s, a %s; only a server is exposed", r.stack.Name, d.res.Name, d.res.Kind)
+		if d.res.Kind != ir.DeployableServer && d.res.Kind != ir.DeployableSite {
+			r.fail(CodeExposeNotServer, "stack %s exposes %s, a %s; only a server or a site is exposed", r.stack.Name, d.res.Name, d.res.Kind)
 			continue
 		}
 		d.res.Exposed = true
+	}
+	for _, name := range sortedKeys(r.deployables) {
+		if d := r.deployables[name]; d.res.Kind == ir.DeployableSite {
+			d.res.Exposed = true
+		}
 	}
 }
 
 // resolveCalls gives each server the APIs it calls: the union of the
 // `calls` of the APIs it serves. A call to an API the same server serves
 // stays a call, to the server's own address. A job calls what its API
-// calls (D52).
+// calls (D52), and a site what its Site service calls (D55).
 func (r *resolver) resolveCalls() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RollsOut() {
 			continue
 		}
 		seen := map[string]bool{}
@@ -1002,7 +1033,7 @@ func (r *resolver) stackEnvironment() registry.StackEnvironment {
 }
 
 // nameDeployables asks each platform for its deployable's name and
-// address.
+// address, and for an exposed deployable's public address.
 func (r *resolver) nameDeployables() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -1014,6 +1045,15 @@ func (r *resolver) nameDeployables() {
 		where = fmt.Sprintf("platform %s addresses %s with", d.platform.Name, name)
 		d.res.Address = r.normalize(where, d.platform.AddressOf(ctx))
 		r.checkParameters(where, d.res.Address)
+		if !d.res.Exposed || d.platform.PublicAddressOf == nil {
+			continue
+		}
+		// Where a browser reaches an exposed deployable: what a site edge
+		// to a server derives, and a site's origin (D55).
+		ctx = registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
+		where = fmt.Sprintf("platform %s gives %s the public address", d.platform.Name, name)
+		d.res.PublicAddress = r.normalize(where, d.platform.PublicAddressOf(ctx))
+		r.checkParameters(where, d.res.PublicAddress)
 	}
 }
 
@@ -1100,9 +1140,14 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	}
 	c.ResourceName = deepCopy(d.ResourceName)
 	c.Address = deepCopy(d.Address)
+	c.PublicAddress = deepCopy(d.PublicAddress)
 	if d.Job != nil {
 		job := *d.Job
 		c.Job = &job
+	}
+	if d.Site != nil {
+		site := *d.Site
+		c.Site = &site
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))
