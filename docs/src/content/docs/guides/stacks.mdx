@@ -301,6 +301,7 @@ declare module "@superschematic/stack" {
         maxInstances?: number;
         concurrency?: number;
         cpu?: string;
+        cpuAlwaysAllocated?: boolean;
         memory?: string;
       };
       database: {
@@ -826,12 +827,19 @@ Settings and their defaults:
 | --- | --- | --- |
 | `gcp.cloudrun` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrun` | `minInstances`, `maxInstances`, `concurrency` | Cloud Run's |
+| `gcp.cloudrun` | `cpuAlwaysAllocated` | false: CPU only while an instance handles a request |
 | `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
 | `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
 | `gcp.cloudsql` | `deletionProtection` | on in production |
 | `gcp.cloudsql` | `diskSize` | Cloud SQL's |
+
+A server's CPU is allocated only while an instance handles a request, so
+Cloud Run bills its instances for the requests they handle. A server that
+works between requests, in goroutines of its own or on the warm instances
+`minInstances` keeps, sets `cpuAlwaysAllocated: true`, and Cloud Run
+bills each instance for its whole life and takes no `cpu` below 1.
 
 Backups are on, with point-in-time recovery in production. Two policy
 rules run over every gcp environment: `production-databases-highly-available`
