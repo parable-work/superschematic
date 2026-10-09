@@ -44,6 +44,12 @@ type crate struct {
 	Guards     []operation
 	Records    []record
 	Forms      []form
+	// FormStructs are the structs of the forms' input types and of the
+	// object types they nest.
+	FormStructs []*formStruct
+	// ArgForms are the forms over each operation's arguments other than
+	// its input (argforms.go).
+	ArgForms   []argForm
 	Procedures []procedure
 	// Views are each record's display components, and EnumLabels the
 	// label functions of the enums they show.
@@ -223,7 +229,14 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		}
 	}
 	if cfg.WritesForms() {
-		if out.Forms, err = formsOf(schemas, inProcess, c.Logf); err != nil {
+		if out.Forms, out.FormStructs, err = formsOf(schemas, inProcess, c.Logf); err != nil {
+			return nil, err
+		}
+		inputs := map[string]*formStruct{}
+		for _, f := range out.Forms {
+			inputs[f.TypeName] = f.Struct
+		}
+		if out.ArgForms, err = argFormsOf(schemas, inProcess, inputs, c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -255,17 +268,91 @@ func (c *crate) ProceduresTakeArgs() bool {
 	return false
 }
 
-// FormsUse reports whether a form writes a field with the helper put, so
-// forms.rs declares it.
-func (c *crate) FormsUse(put string) bool {
+// HasForms reports whether the crate has a form of either kind, an input
+// form or an argument form, so it writes forms.rs.
+func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+
+// FormsUse reports whether a form uses item, so forms.rs declares what it
+// needs: a kind of an input form's field ("value", "object", "objectRows",
+// "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
+// "yes_no", "date_time", "json_text"), "read" for any; "put", "list" and
+// "rows" for writing an input form; "first", "values", "postedText" and
+// "postedRows" for reading a post, and "maxRows" when a list's limit is
+// MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
+// argument forms; "noRows", "choosable"; and what a rendered control
+// needs ("checked", "localDateTime", "showsAll", "showsRow",
+// "showsRows").
+func (c *crate) FormsUse(item string) bool {
+	return c.formUses()[item]
+}
+
+// formUses is every item a form of the crate uses (FormsUse).
+func (c *crate) formUses() map[string]bool {
+	uses := map[string]bool{}
 	for _, f := range c.Forms {
-		for _, field := range f.Fields {
-			if field.Put == put {
-				return true
+		uses["choosable"] = uses["choosable"] || f.Choosable
+	}
+	for _, st := range c.FormStructs {
+		if st.Rows {
+			uses["rows"], uses["postedText"] = true, true
+		}
+		for _, f := range st.Fields {
+			shown := st.Shown && !f.Hidden
+			uses[f.Kind] = true
+			switch f.Kind {
+			case kindValue:
+				uses["put"], uses["postedText"] = true, true
+			case kindValueRows:
+				uses["list"], uses["postedRows"], uses["postedText"], uses["noRows"], uses["showsRow"] = true, true, true, true, uses["showsRow"] || shown
+			case kindObjectRows:
+				uses["list"], uses["postedRows"], uses["showsRows"] = true, true, uses["showsRows"] || shown
+				uses["noRows"] = uses["noRows"] || !f.Child.Rows
+			case kindGroup:
+				uses["list"], uses["values"] = true, true
+			}
+			if f.Kind == kindValue || f.Kind == kindValueRows {
+				uses["read"], uses[f.Read] = true, true
+			}
+			if (f.Kind == kindValueRows || f.Kind == kindObjectRows) && f.Limit() == "MAX_ROWS" {
+				uses["maxRows"] = true
+			}
+			if shown {
+				addRendered(uses, f)
 			}
 		}
 	}
-	return false
+	for _, f := range c.ArgForms {
+		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
+		uses["query"] = uses["query"] || f.IsGet()
+		uses["argsInput"] = uses["argsInput"] || f.Input != nil
+		for _, a := range f.Fields {
+			uses["read"], uses[a.Read] = true, true
+			if a.IsList() {
+				uses["values"], uses["argsList"] = true, true
+			} else {
+				uses["first"], uses["argsSingle"] = true, true
+			}
+			if a.Kind != kindPath {
+				addRendered(uses, a.formField)
+				if a.Kind == kindRepeated {
+					uses["showsAll"] = true
+				}
+			}
+		}
+	}
+	return uses
+}
+
+// addRendered adds what a rendered control of f needs.
+func addRendered(uses map[string]bool, f *formField) {
+	switch {
+	case f.Kind == kindGroup:
+		uses["checked"], uses["showsAll"] = true, true
+	case f.Control == "textarea":
+		uses["showsAll"] = true
+	case f.Control == "datetime-local":
+		uses["localDateTime"] = true
+	}
 }
 
 // ControlledProcedures are the procedures whose routes have a traffic
@@ -308,7 +395,7 @@ func (c *crate) write(dir string) error {
 			struct{ template, path string }{"wire.tmpl", filepath.Join("src", "wire.rs")},
 		)
 	}
-	if len(c.Forms) > 0 {
+	if c.HasForms() {
 		files = append(files, struct{ template, path string }{"forms.tmpl", filepath.Join("src", "forms.rs")})
 	}
 	if len(c.Procedures) > 0 {
@@ -318,15 +405,18 @@ func (c *crate) write(dir string) error {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
 	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
-		"rustString": rustString,
-		"join":       strings.Join,
-		"doc":        doc,
+		"rustString":   rustString,
+		"escapeBraces": escapeBraces,
+		"join":         strings.Join,
+		"doc":          doc,
+		"doc4":         doc4,
 	}).ParseFS(templates, "templates/*.tmpl")
 	if err != nil {
 		return err
 	}
-	// A crate written before with records or forms keeps no stale module.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs", "views.rs"} {
+	// A crate written before with records or forms keeps no stale module,
+	// arg_forms.rs among them, which argument forms were once written to.
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -384,6 +474,22 @@ func doc(text string) string {
 		line += " " + word
 	}
 	return strings.Join(append(lines, line), "\n")
+}
+
+// doc4 is doc for an item indented by four spaces: each line after the
+// first, which the template indents, starts with them, and every line
+// stays within 80 columns.
+func doc4(text string) string {
+	var lines []string
+	line := "///"
+	for _, word := range strings.Fields(text) {
+		if line != "///" && 4+len(line)+1+len(word) > 80 {
+			lines = append(lines, line)
+			line = "///"
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n    ")
 }
 
 // rustString renders a Rust string literal.

@@ -8,7 +8,8 @@
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
 //! `forms` reads and renders a form per input type a call in `operations`
-//! takes whose fields a form holds.
+//! takes, its controls named by their fields' paths, and per call with
+//! arguments a form submits, a GET's a filter read from the query.
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `views` renders each record as a description list and as a table.

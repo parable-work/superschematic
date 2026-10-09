@@ -1,0 +1,206 @@
+{{- /*
+The argument forms of forms.rs, which forms.tmpl renders after its input
+forms: one per call in `operations` with arguments a form submits.
+*/ -}}
+{{- define "argForms" }}
+{{- range .ArgForms }}
+{{- $form := . }}
+
+{{ doc (printf "The arguments of %s.%s, each as the browser sends it%s. %s" .Namespace .Operation (or (and .Input ", its input's fields beside them") "") (or (and .IsGet "A filter, sent by GET and read from the query.") "Sent by POST.")) }}
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct {{ .Name }} {
+{{- range .Fields }}
+    pub {{ .Name }}: {{ if .IsList }}Vec<String>{{ else }}Option<String>{{ end }},
+{{- end }}
+{{- with .Input }}
+    pub input: {{ .Struct.Name }},
+{{- end }}
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl {{ .Name }} {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = {{ rustString .Method }};
+
+    {{ doc4 (printf "A new form%s: each argument's declared default%s." (or (and .PathFields " of one resource, whose path arguments, which the form holds as hidden inputs, the page knows") "") (or (and .Input ", and the input's new form") "")) }}
+    pub fn new({{ range $i, $f := .PathFields }}{{ if $i }}, {{ end }}{{ $f.Name }}: impl ToString{{ end }}) -> Self {
+        Self {
+{{- range .Fields }}
+{{- if .IsPath }}
+            {{ .Name }}: Some({{ .Name }}.to_string()),
+{{- else }}
+            {{ .Name }}: {{ .NewValue }},
+{{- end }}
+{{- end }}
+{{- with .Input }}
+            input: {{ .Struct.Name }}::new(),
+{{- end }}
+            overflow: false,
+        }
+    }
+
+    {{ doc4 (printf "The form a browser sent, from its pairs: each argument's first value and a list's every value%s. `Form<%s>` decodes a %s this way." (or (and .Input ", and the input's fields by their names") "") .Name (or (and .IsGet "query") "post")) }}
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+{{- range .Fields }}
+{{- if .IsList }}
+            {{ .Name }}: posted.get({{ rustString .JSONName }}).values({{ .Split }}),
+{{- else }}
+            {{ .Name }}: posted.get({{ rustString .JSONName }}).first(),
+{{- end }}
+{{- end }}
+{{- with .Input }}
+            input: {{ .Struct.Name }}::from_post(&posted),
+{{- end }}
+            overflow: posted.overflow,
+        }
+    }
+{{- if .IsGet }}
+
+    /// The filter the current request's query holds, so a page's form shows
+    /// the filters in effect: what `Form<{{ .Name }}>` reads on GET.
+    pub fn from_query(cx: &Cx) -> topcoat::Result<Self> {
+        let query = uri(cx).query().unwrap_or_default();
+        Ok(Form::<Self>::from_bytes(query.as_bytes())?.0)
+    }
+{{- end }}
+
+    {{ doc4 (printf "The operation's arguments: each written as the JSON a request carries and decoded into its type%s, then checked as the router checks a request's (`Args::check`); else each control's errors, or the form's when the browser sent more than it reads. `check` refuses the first argument that breaks a rule." (or (and .Input (or (and .Input.Optional ", the input parsed by its form when one of its fields was sent") ", the input parsed by its form")) "")) }}
+    pub fn parse(&self) -> Result<crate::api::{{ .ArgsName }}, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+{{- range .Fields }}
+        let {{ .Local }} = {{ .ReadExpr }};
+{{- end }}
+{{- with .Input }}
+{{- if .Optional }}
+        // The input is optional: absent when none of its fields was sent.
+        let input = match self.input.is_sent().then(|| self.input.parse()).transpose() {
+{{- else }}
+        let input = match self.input.parse() {
+{{- end }}
+            Ok(input) => Some(input),
+            Err(refused) => {
+                errors.merge(refused);
+                None
+            }
+        };
+{{- end }}
+{{- range .Fields }}
+        let Some({{ .Local }}) = {{ .Local }} else {
+            return Err(errors);
+        };
+{{- end }}
+{{- if .Input }}
+        let Some(input) = input else {
+            return Err(errors);
+        };
+{{- end }}
+        let args = crate::api::{{ .ArgsName }} {
+{{- range .Fields }}
+            {{ .Name }}: {{ .Local }},
+{{- end }}
+{{- with .Input }}
+            input,
+{{- end }}
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::{{ .Call }}`). A refusal, the form's or the
+    /// operation's (`FormErrors::from_api`), is the form's errors, which a
+    /// page renders the form again with.
+    pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, FormErrors> {
+        let args = self.parse()?;
+        operations::{{ .Call }}(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+    }
+{{- if .Rows }}
+
+    /// Applies the row button that submitted the form to its input's rows
+    /// (`{{ .Input.Struct.Name }}::apply_action`): true when a row button
+    /// submitted it, and the page renders the form again without calling
+    /// the operation.
+    pub fn apply_action(&mut self) -> bool {
+        self.input.apply_action()
+    }
+{{- end }}
+
+    {{ doc4 (printf "Whether the component shows the errors at `path`: at an argument's control%s. A path argument's are the form's own." (or (and .Input " or the input's") "")) }}
+{{- if not .ShownArgs }}
+    fn shows({{ if not .Input }}_{{ end }}path: &[Segment]) -> bool {
+{{- with .Input }}
+        {{ .Struct.Name }}::shows(path)
+{{- else }}
+        false
+{{- end }}
+    }
+{{- else }}
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+{{- range .Fields }}
+{{- if not .IsPath }}
+{{- if or .IsList (eq .Control "textarea") }}
+                {{ rustString .JSONName }} => shows_all(rest),
+{{- else }}
+                {{ rustString .JSONName }} => rest.is_empty(),
+{{- end }}
+{{- end }}
+{{- end }}
+{{- with .Input }}
+                _ => {{ .Struct.Name }}::shows(path),
+{{- else }}
+                _ => false,
+{{- end }}
+            },
+            _ => false,
+        }
+    }
+{{- end }}
+}
+
+impl<'de> Deserialize<'de> for {{ .Name }} {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+{{ doc (printf "The controls of `%s`: each argument's, with its label, its value as sent, the attributes its rules give it and its errors, a path argument's a hidden input%s. `choices` turns a text or number control the app names into a select." .Name (or (and .Input "; then the input's fields") "")) }}
+#[component]
+pub async fn {{ .Component }}(
+    #[default] form: {{ .Name }},
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown({{ .Name }}::shows);
+{{- if not .Choosable }}
+    let _ = choices;
+{{- end }}
+{{- if not .UsesForm }}
+    let _ = form;
+{{- end }}
+    Ok(view! {
+{{- if .Rows }}
+        // The button Enter presses, ahead of every row button: it submits
+        // the form without an `_action`.
+        <button type="submit" class="ss-submit" hidden=(true)></button>
+{{- end }}
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+{{- if .Body }}
+{{ .Body }}
+{{- end }}
+    })
+}
+{{- end }}
+{{- end }}

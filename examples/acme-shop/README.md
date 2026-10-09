@@ -26,7 +26,7 @@ kind, decorators and auth provider.
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its orders and reviews in memory, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`), and renders reviews and orders with the crate's display components; a shopper signs in with their password, and one session cookie signs them in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`): a shopper signs in with their password, places, filters and cancels orders and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `schemas/dist/bun.lock` | the lockfile of `schemas/dist`'s Bun workspace, the one generated file committed, so the storefront's image and every install take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
@@ -45,6 +45,33 @@ migration runner,
 URL and port, and Ctrl-C stops it. While it runs, `superschematic stack
 run Dev shop-orders-ship-orders` runs the job once.
 
+### The Topcoat app
+
+Build the Topcoat crate, then start the app, from this directory. It
+keeps the shop and its users in memory:
+
+```sh
+superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
+cd topcoat && cargo run
+```
+
+It serves `http://127.0.0.1:3000`, each page linking to the others:
+
+- `/orders/new` places an order: a row per line, each line's product a
+  select of the app's catalog (its one product, an anvil), buttons that
+  add and remove lines without JavaScript, and the shipping address;
+- `/orders` lists the shopper's orders, filtered by status and a limit
+  through a GET form, with a link to each order's page;
+- `/orders/{id}` shows an order and, while it is placed, a form that
+  cancels it with a reason;
+- `/reviews` lists the anvil's reviews, with the form to write one.
+
+A refused form comes back with each message at its control. A page whose
+operation needs a signed-in shopper shows a Sign in button, which opens
+the sign-in page and then comes back to the page: sign in as
+grace@example.com, with the password in `topcoat/src/main.rs`. The JSON
+API at `/api` admits the same session.
+
 ### The Topcoat app on SQLite
 
 The Topcoat app keeps the shop and its users in memory unless
@@ -52,20 +79,18 @@ The Topcoat app keeps the shop and its users in memory unless
 a `file:` URI or a path), where its reviews, orders, users and sessions
 outlive the process. A `DATABASE_URL` of another database, such as a
 Postgres one already in the shell, stops the app, and the error names its
-scheme alone. Build the Topcoat crate, plan `shop-db`'s SQLite database
-from an empty one, apply the plan with the migration runner, and start
-the app on the file, from this directory:
+scheme alone. After building the Topcoat crate, plan `shop-db`'s SQLite
+database from an empty one, apply the plan with the migration runner, and
+start the app on the file, from this directory:
 
 ```sh
-superschematic-topcoat build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders
 superschematic migrate plan schemas/services/shop-db --dialect sqlite --out shop-db.sqlite.plan.json
 superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqlite:shop.db
 cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
 ```
 
-It serves `http://127.0.0.1:3000`: sign in at `/sign-in` as
-grace@example.com, with the password in `topcoat/src/main.rs`, then write
-a review at `/reviews`. The JSON API at `/api` admits the same session.
+The app adds the demo shopper and the catalog's product to the file,
+unless an earlier run added them, as a shop's own flows would.
 
 ## Check it
 

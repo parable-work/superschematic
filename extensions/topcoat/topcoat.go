@@ -8,10 +8,13 @@
 // as the router checks them, D43), save a webhook and one the service
 // mounts itself, offers a guard per operation, and mirrors each type such
 // a call returns as a Topcoat record, which a page can hand the browser. A
-// form per input type such a call takes whose fields a form holds parses
-// what the browser sends by the input type's rules (D14) and renders its
-// fields with the attributes those rules give them. A procedure per
-// operation lets browser code call it, its arguments and its result
+// form per input type such a call takes, nested objects and lists
+// included, parses what the browser sends by the input type's rules (D14)
+// and renders its fields at their paths with the attributes those rules
+// give them, a list's rows with buttons that add and remove them, and a
+// form per such call with arguments a form submits does the same by the
+// router's rules, a GET's a filter read from the query. A procedure
+// per operation lets browser code call it, its arguments and its result
 // records, its refusal a record the browser reads, under its route's
 // traffic controls. An operation whose route a browser's request cannot
 // meet, a webhook's or one only a service may call, has none. A detail and
@@ -108,7 +111,7 @@ var OutputSchema = json.RawMessage(`{
   "properties": {
     "enabled": {"type": "boolean"},
     "records": {"type": "boolean", "description": "Mirror each type an in-process call returns as a Topcoat record (default true)."},
-    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes whose fields a form holds (default true)."},
+    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes, and per in-process call with arguments a form submits (default true)."},
     "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."},
     "views": {"type": "boolean", "description": "Components that render each record as a description list and a table (default true; needs records)."}
   }
@@ -129,8 +132,8 @@ type Config struct {
 // types as records.
 func (c Config) WritesRecords() bool { return c.Records == nil || *c.Records }
 
-// WritesForms reports whether the crate has a form per input type a form
-// holds.
+// WritesForms reports whether the crate has a form per input type an
+// in-process call takes, and per call with arguments a form submits.
 func (c Config) WritesForms() bool { return c.Forms == nil || *c.Forms }
 
 // WritesProcedures reports whether the crate has a procedure per
