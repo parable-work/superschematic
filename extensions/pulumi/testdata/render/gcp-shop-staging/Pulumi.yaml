@@ -529,6 +529,8 @@ resources:
                 value: ${shop-db-instance.connectionName}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
                 value: shop-api@acme-staging.iam
+              - name: SHOP_MEDIA_BUCKET_NAME
+                value: ${shop-media-bucket.name}
               - name: STRIPE_KEY
                 valueSource:
                   secretKeyRef:
@@ -571,6 +573,32 @@ resources:
         - ${shop-api-account}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
+        - ${shop-media-bucket}
+      version: 9.37.1
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-sign-as-self:
+    name: shop-api.sign-as-self
+    type: gcp:serviceaccount/iAMMember:IAMMember
+    properties:
+      member: ${shop-api-account.member}
+      role: roles/iam.serviceAccountTokenCreator
+      serviceAccountId: ${shop-api-account.name}
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-storage-shop-media:
+    name: shop-api.storage.shop-media
+    type: gcp:storage/bucketIAMMember:BucketIAMMember
+    properties:
+      bucket: ${shop-media-bucket.name}
+      member: ${shop-api-account.member}
+      role: roles/storage.objectUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-media-bucket}
       version: 9.37.1
   # phase infrastructure; owners shop-api
   shop-api-trace-agent:
@@ -649,6 +677,26 @@ resources:
     options:
       dependsOn:
         - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners shop-media
+  shop-media-bucket:
+    name: shop-media.bucket
+    type: gcp:storage/bucket:Bucket
+    properties:
+      forceDestroy: false
+      lifecycleRules:
+        - action:
+            type: Delete
+          condition:
+            age: 30
+      location: US-EAST1
+      name: acme-staging-shop-shop-media
+      project: acme-staging
+      publicAccessPrevention: enforced
+      uniformBucketLevelAccess: true
+      versioning:
+        enabled: false
+    options:
       version: 9.37.1
   # phase infrastructure; owners shop-orders-ship-orders
   shop-orders-ship-orders-account:
@@ -1068,6 +1116,7 @@ outputs:
   shop-api.account.email: ${shop-api-account.email}
   shop-api.account.id: ${shop-api-account.id}
   shop-api.account.member: ${shop-api-account.member}
+  shop-api.account.name: ${shop-api-account.name}
   shop-api.address.address: ${shop-api-address.address}
   shop-api.address.id: ${shop-api-address.id}
   shop-api.backend.id: ${shop-api-backend.id}
@@ -1087,6 +1136,8 @@ outputs:
   shop-api.service.id: ${shop-api-service.id}
   shop-api.service.name: ${shop-api-service.name}
   shop-api.service.uri: ${shop-api-service.uri}
+  shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
+  shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
   shop-api.trace-agent.id: ${shop-api-trace-agent.id}
   shop-api.url-map.id: ${shop-api-url-map.id}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
@@ -1095,6 +1146,8 @@ outputs:
   shop-db.instance.id: ${shop-db-instance.id}
   shop-db.instance.name: ${shop-db-instance.name}
   shop-db.migrator.id: ${shop-db-migrator.id}
+  shop-media.bucket.id: ${shop-media-bucket.id}
+  shop-media.bucket.name: ${shop-media-bucket.name}
   shop-orders-ship-orders.account.email: ${shop-orders-ship-orders-account.email}
   shop-orders-ship-orders.account.id: ${shop-orders-ship-orders-account.id}
   shop-orders-ship-orders.account.member: ${shop-orders-ship-orders-account.member}

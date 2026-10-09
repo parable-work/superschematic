@@ -55,7 +55,7 @@ func TestCIIdentity(t *testing.T) {
 		{"Production", registry.CIPlanner, nil},
 		{"Production", registry.CIDeployer, nil},
 	} {
-		got := target.CI.Identity(resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), tc.env), tc.role)
+		got := target.CI.Identity(resolve(t, reg, s, stacktest.AcmeShop(), tc.env), tc.role)
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s as %s = %+v, want %+v", tc.env, tc.role, got, tc.want)
 		}
@@ -63,7 +63,7 @@ func TestCIIdentity(t *testing.T) {
 
 	// The pool, its provider and the accounts are the ones bootstrap
 	// creates.
-	boot, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging"), "acme/shop")
+	boot, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), "Staging"), "acme/shop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCIGolden(t *testing.T) {
 	}
 	var envs []registry.CIEnvironment
 	for _, env := range s.Environments {
-		envs = append(envs, reg.CIEnvironment(resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), env.Name)))
+		envs = append(envs, reg.CIEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), env.Name)))
 	}
 	files, err := renderer.Render(registry.CIRequest{
 		Stack: registry.CIStack{

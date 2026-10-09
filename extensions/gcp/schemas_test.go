@@ -110,7 +110,7 @@ func TestNoDeprecatedProperties(t *testing.T) {
 	reg := assemble(t)
 	var envs []*ir.ResolvedEnvironment
 	for _, name := range []string{"Staging", "Production", "Preview"} {
-		envs = append(envs, resolve(t, reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), name))
+		envs = append(envs, resolve(t, reg, shop(), stacktest.AcmeShop(), name))
 	}
 	checkNoDeprecated(t, "", envs)
 }

@@ -169,7 +169,7 @@ func (f *deployFixture) jobDocument(t *testing.T, args []string) (string, map[st
 func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	ctx := context.Background()
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -184,7 +184,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		"cloud build " + shopRepo + "orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
-		"render 45 nodes",
+		"render 48 nodes",
 		"apply infrastructure",
 		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
@@ -297,7 +297,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 func TestMigrationJobGrantsAndRecovers(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	ctx := context.Background()
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -423,7 +423,7 @@ func TestMigrationJobReportsTheRunnerError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 			f.ready(t)
-			env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+			env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 			ctx := context.Background()
 			o := stack.DeployOptions{
 				Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
@@ -466,7 +466,7 @@ func TestMigrationJobReportsTheRunnerError(t *testing.T) {
 func TestMigrationJobOfAMember(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Preview")
 	_, err := stack.Deploy(context.Background(), stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env, Parameters: map[string]string{"pr": "7"}}, Dir: t.TempDir()},
 		Images:  shopImages("acme-staging", 1),
@@ -500,7 +500,7 @@ func TestMigrationJobOfAMember(t *testing.T) {
 func TestMigrationJobNeedsARelease(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	_, err := stack.Deploy(context.Background(), stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
 		Images:  shopImages("acme-staging", 1),
@@ -526,7 +526,7 @@ func TestMigrationJobNeedsARelease(t *testing.T) {
 func TestBuilder(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
-	env := resolve(t, f.reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
 	src := shopSources(t)
 	o := stack.DeployOptions{
 		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},

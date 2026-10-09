@@ -61,6 +61,8 @@ func assemble(t *testing.T) *registry.Registry {
 // job ShipOrders (D52) runs hourly in New York's time in Staging, on its
 // decorator's schedule with two CPUs and 1 GiB in Production, and only on
 // demand in Preview, whose members run no schedule they do not turn on.
+// shop-api's bucket shop-media (D54) deletes objects after 30 days in
+// Staging and its Preview members, and keeps versions in Production.
 func shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "Shop",
@@ -81,6 +83,7 @@ func shop() *ir.Stack {
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "0 * * * *", TimeZone: "America/New_York"},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"deleteAfterDays": float64(30)}},
 				},
 			},
 			{
@@ -93,6 +96,7 @@ func shop() *ir.Stack {
 					{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Values: map[string]any{"memory": "1Gi"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
 					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2", "memory": "1Gi"}},
+					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"versioning": true}},
 				},
 			},
 			{
@@ -127,7 +131,7 @@ func TestGolden(t *testing.T) {
 	s := stacktest.WithSite(shop())
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, stacktest.WithoutBuckets(stacktest.SiteShop()), env.Name)
+			checkGolden(t, reg, s, stacktest.SiteShop(), env.Name)
 		})
 	}
 }
@@ -146,8 +150,8 @@ func TestServiceAuthGolden(t *testing.T) {
 		services []stack.Service
 		envs     []string
 	}{
-		{"RequireShop", stacktest.WithoutBuckets(stacktest.RequireServiceShop()), []string{"Staging", "Preview"}},
-		{"AllowShop", stacktest.WithoutBuckets(stacktest.AllowServiceShop()), []string{"Staging"}},
+		{"RequireShop", stacktest.RequireServiceShop(), []string{"Staging", "Preview"}},
+		{"AllowShop", stacktest.AllowServiceShop(), []string{"Staging"}},
 	} {
 		s := shop()
 		s.Name = tc.stack
@@ -210,7 +214,7 @@ func checkGolden(t *testing.T, reg *registry.Registry, s *ir.Stack, services []s
 // callers Orders and shop-orders' job, whose schedule comes with it, and
 // the load balancer and records last.
 func TestDeployOrder(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Staging")
 	var order []string
 	for _, step := range env.DeployOrder {
 		s := string(step.Step)
@@ -226,7 +230,8 @@ func TestDeployOrder(t *testing.T) {
 		"infrastructure (Orders.account, Orders.cloudsql-client.shop-db, Orders.cloudsql-login.shop-db, Orders.database-user.shop-db, " +
 			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
-			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.trace-agent, shop-db.database.shop-db, shop-db.instance, shop-db.migrator, " +
+			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sign-as-self, shop-api.storage.shop-media, shop-api.trace-agent, " +
+			"shop-db.database.shop-db, shop-db.instance, shop-db.migrator, shop-media.bucket, " +
 			"shop-orders-ship-orders.account, shop-orders-ship-orders.cloudsql-client.shop-db, shop-orders-ship-orders.cloudsql-login.shop-db, " +
 			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.trace-agent)",
 		"migrate expand (shop-db)",
@@ -247,7 +252,7 @@ func TestDeployOrder(t *testing.T) {
 // secret and the network from Staging, which no step of its deploy
 // applies.
 func TestPreviewInherits(t *testing.T) {
-	env := resolve(t, assemble(t), shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview")
+	env := resolve(t, assemble(t), shop(), stacktest.AcmeShop(), "Preview")
 	var inherited []string
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -290,7 +295,7 @@ func TestServiceCPU(t *testing.T) {
 		always = `{"limits":{"cpu":"1","memory":"512Mi"}}`
 	)
 
-	env := resolve(t, reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
 	wantJSON(t, "shop-api's resources", service(env, "shop-api"), idle)
 	wantJSON(t, "Orders' resources", service(env, "Orders"), idle)
 	task := node(t, env, stacktest.ShipOrdersJob+".job").Properties["template"].(map[string]any)["template"].(map[string]any)
@@ -302,7 +307,7 @@ func TestServiceCPU(t *testing.T) {
 		staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 			Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": keep},
 		})
-		env := resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+		env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
 		want := idle
 		if keep {
 			want = always
@@ -316,7 +321,7 @@ func TestServiceCPU(t *testing.T) {
 	staging.Settings = append(staging.Settings, &ir.DeployableSettings{
 		Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"cpuAlwaysAllocated": "yes"},
 	})
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Staging"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 	if err == nil || !strings.Contains(err.Error(), "cpuAlwaysAllocated") {
 		t.Errorf("cpuAlwaysAllocated \"yes\": err = %v, want a refusal naming cpuAlwaysAllocated", err)
 	}
@@ -329,13 +334,13 @@ func TestProjectNumber(t *testing.T) {
 	reg := assemble(t)
 	s := shop()
 	s.Environments[0].Values["projectNumber"] = "123456789012"
-	if got := resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Preview").Values["projectNumber"]; got != "123456789012" {
+	if got := resolve(t, reg, s, stacktest.AcmeShop(), "Preview").Values["projectNumber"]; got != "123456789012" {
 		t.Errorf("Preview's projectNumber = %v, want Staging's", got)
 	}
 	for _, bad := range []any{"acme-staging", "0123456789", "1234", float64(123456789012)} {
 		s := shop()
 		s.Environments[0].Values["projectNumber"] = bad
-		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Staging"})
+		_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
 		if err == nil || !strings.Contains(err.Error(), "projectNumber") {
 			t.Errorf("projectNumber %v: err = %v, want a refusal naming projectNumber", bad, err)
 		}

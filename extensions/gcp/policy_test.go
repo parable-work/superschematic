@@ -21,7 +21,7 @@ func TestPolicyHighAvailability(t *testing.T) {
 	s := shop()
 	prod := s.Environment("Production")
 	prod.Settings[0].Values["highAvailability"] = false
-	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Production"})
+	_, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"})
 	var errs *stack.Errors
 	if !errors.As(err, &errs) || len(errs.List) != 1 || errs.List[0].Code != stack.CodePolicy ||
 		!strings.Contains(err.Error(), gcp.PolicyHighAvailability) || !strings.Contains(err.Error(), "shop-db.instance") {
@@ -29,11 +29,11 @@ func TestPolicyHighAvailability(t *testing.T) {
 	}
 
 	delete(prod.Settings[0].Values, "highAvailability")
-	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.WithoutBuckets(stacktest.AcmeShop()), Environment: "Production"}); err == nil {
+	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Production"}); err == nil {
 		t.Error("a production database with the default settings passed; the default is not highly available")
 	}
 
-	env := resolve(t, reg, s, stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
 	settings := env.Resources.Resource("shop-db.instance").Properties["settings"].(map[string]any)
 	if settings["availabilityType"] != "ZONAL" {
 		t.Errorf("staging's instance is %v, want ZONAL", settings["availabilityType"])
@@ -65,7 +65,7 @@ func TestPolicyNothingPublic(t *testing.T) {
 	reg := assemble(t)
 	rule := policy(t, reg, gcp.PolicyNothingPublic)
 	resolved := func() *ir.ResolvedEnvironment {
-		return resolve(t, reg, shop(), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+		return resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
 	}
 	if findings := rule.Check(resolved()); len(findings) > 0 {
 		t.Fatalf("Staging as resolved has findings: %v", findings)

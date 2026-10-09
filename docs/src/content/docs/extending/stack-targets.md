@@ -123,7 +123,8 @@ runs no code and hosts no schema. Its `NameOf` names the bucket with its
 provider, and should give each member of a parameterized environment one
 of its own; its `AddressOf` is what its connectors derive the bucket's
 name from. A bucket takes settings, such as versioning, and no `env`.
-`stack/stacktest`'s `fake.storage` lowers one to a private bucket in the
+`extensions/gcp`'s `gcp.storage` lowers one to a private Cloud Storage
+bucket, `stack/stacktest`'s `fake.storage` to a private bucket in the
 environment's region; the core's `local.gcs` to a bucket on the
 environment's fake-gcs-server container.
 
