@@ -3,6 +3,14 @@ name = "{{ .CrateName }}"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.99.0"
+{{- if .Identity }}
+
+# The identity store's SQL client (D50): a service turns one on, or binds a
+# client of its own (`runtime::identity::Client`).
+[features]
+identity-postgres = ["{{ .RuntimeCrate }}/identity-postgres"]
+identity-sqlite = ["{{ .RuntimeCrate }}/identity-sqlite"]
+{{- end }}
 
 [dependencies]
 async-trait = "0.1.89"
@@ -13,8 +21,15 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 {{- if .HasEnvConfig }}
 dotenvy = "0.15"
 {{- end }}
-{{ .RuntimeCrate }} = { path = "{{ .RuntimeDepPath }}" }
+{{ .RuntimeCrate }} = { path = "{{ .RuntimeDepPath }}"{{ if .Identity }}, features = ["identity"]{{ end }} }
 {{ .TypesCrate }} = { path = "{{ .TypesDepPath }}" }
+{{- with .Identity }}
+{{- if .ScalarDepPath }}
+{{ .ScalarCrate }} = { path = "{{ .ScalarDepPath }}" }
+{{- else }}
+{{ .ScalarCrate }} = "0.1.0"
+{{- end }}
+{{- end }}
 {{- range .DependencyCrates }}
 {{ .Name }} = { path = "{{ .Path }}" }
 {{- end }}

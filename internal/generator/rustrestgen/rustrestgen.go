@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
@@ -75,6 +76,36 @@ type EndpointInfo struct {
 	// Manual marks an operation declared @manualRouteRegistration, which the
 	// service mounts itself.
 	Manual bool
+	// OperationID is the operation's OpenAPI operation id, apigen's
+	// HandlerName (GreetingGreetHandler): its key in what the user model's
+	// capabilities route answers (D50).
+	OperationID string
+	// IdentityOperation names the user model's operation (D50) the
+	// endpoint is, one of the ir.IdentityOp constants; empty for every
+	// other. The identity runtime serves it: build_router mounts the
+	// runtime's handler, and no namespace trait has a method for it.
+	IdentityOperation string
+}
+
+// IdentityConst is the identity runtime's constant naming the user model's
+// operation: OP_CHANGE_PASSWORD for changePassword.
+func (e EndpointInfo) IdentityConst() string {
+	return "OP_" + strings.ToUpper(rustutil.ToSnakeCase(e.IdentityOperation))
+}
+
+// IdentityControlCalls are ControlCalls without the route's permissions,
+// for a user model's route: the identity runtime's handler checks an
+// administration route's permission itself, under the service's
+// permission prefix, so the router asks only for a caller.
+func (e EndpointInfo) IdentityControlCalls(authenticator, serviceAuthenticator string) []string {
+	e.RequiredPerms = nil
+	return e.ControlCalls(authenticator, serviceAuthenticator)
+}
+
+// ServiceOnly reports whether only a service calls the route
+// (@requireService), so the user model's capabilities leaves it out.
+func (e EndpointInfo) ServiceOnly() bool {
+	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersRequire
 }
 
 // AllowsService reports whether the route is @allowService: a listed
@@ -213,15 +244,27 @@ type APIOutput struct {
 	// ManualEndpoints are the @manualRouteRegistration operations, which the
 	// service mounts itself.
 	ManualEndpoints []EndpointInfo
+	// IdentityEndpoints are the user model's operations (D50), which the
+	// identity runtime serves: build_router mounts the runtime's handler of
+	// each with its route's controls.
+	IdentityEndpoints []EndpointInfo
+	// Identity is the core user model's wiring (D50): set when the API's
+	// authDb has a User table and an operation, one of IdentityEndpoints
+	// included, needs a caller. Implementations.authenticator is then the
+	// identity runtime's IdentityAuthenticator, build_router serves the
+	// user model's routes and the trusted origins' CORS, and src/identity.rs
+	// holds the authDb's descriptor, the scalar catalog, the store and the
+	// service. Nil otherwise, and the crate is the one it was before.
+	Identity *IdentityInfo
 	// WebhookProviders are the @hmacVerified providers of every endpoint,
 	// manual ones included, sorted: Implementations.webhook_verifiers needs a
 	// verifier for each, as the Go server's WebhookVerifiers map does.
 	WebhookProviders []string
-	// HasAuth reports whether an endpoint, manual ones included, needs a
-	// caller: Implementations then has an authenticator.
+	// HasAuth reports whether an endpoint, manual ones and the user model's
+	// included, needs a caller: Implementations then has an authenticator.
 	HasAuth bool
-	// HasControls reports whether an endpoint, manual ones included, has
-	// RouteControls.
+	// HasControls reports whether an endpoint, manual ones and the user
+	// model's included, has RouteControls.
 	HasControls bool
 	// HasServiceCallers reports whether an endpoint, manual ones included,
 	// has a service clause: Implementations then has a
@@ -245,12 +288,35 @@ type APIOutput struct {
 	DependencyCrates []DependencyCrate
 }
 
-// AllEndpoints are the mounted and the manual operations, in the order
-// sortEndpoints gives them: the operations module declares each.
+// AllEndpoints are the mounted, the manual and the user model's operations,
+// in the order sortEndpoints gives them: the operations module declares
+// each.
 func (o *APIOutput) AllEndpoints() []EndpointInfo {
-	all := append(append([]EndpointInfo{}, o.Endpoints...), o.ManualEndpoints...)
+	all := append(append(append([]EndpointInfo{}, o.Endpoints...), o.ManualEndpoints...), o.IdentityEndpoints...)
 	sortEndpoints(all)
 	return all
+}
+
+// IdentityInfo is what src/identity.rs and the manifest need of the core
+// user model (D50).
+type IdentityInfo struct {
+	// AuthDB is the authDb's service name, whose User table holds the
+	// API's users.
+	AuthDB string
+	// Descriptor is the authDb's identity descriptor (identitydesc) as a
+	// Rust raw string literal, the IDENTITY_DESCRIPTOR constant.
+	Descriptor string
+	// PermissionPrefix is the naming key identity_permission_prefix, which
+	// the administration routes' permissions start with.
+	PermissionPrefix string
+	// ScalarCrate is the scalar crate's Cargo name and ScalarRegistry the
+	// Rust expression of its registry (Naming.ScalarRustRegistryExpr):
+	// the identity store parses logins, names and keys with it.
+	ScalarCrate    string
+	ScalarRegistry string
+	// ScalarDepPath is the scalar crate's directory relative to the
+	// crate's, set by SetReplacePaths; empty names the crate's version.
+	ScalarDepPath string
 }
 
 // Specs are the ParamSpec statics of every mounted operation's arguments.
@@ -319,6 +385,10 @@ type Options struct {
 	OutputDir    string
 	Naming       naming.Naming
 	Clock        codegen.Clock
+	// AuthDB is the loaded schema the API's authDb names; nil without one.
+	// When it has a User table, the crate authenticates with the identity
+	// runtime and serves the user model's routes (D50).
+	AuthDB *ir.Schema
 }
 
 // Generate produces Rust REST API metadata for a schema. Each mounted
@@ -362,6 +432,17 @@ type Options struct {
 // its handler takes the principal as an Option. A schema without a service
 // clause generates the crate it did before.
 //
+// An API whose authDb has a User table authenticates with the identity
+// runtime (D50) when an operation needs a caller. The authenticator field
+// of Implementations is then the runtime's IdentityAuthenticator, which a
+// service builds over the identity service src/identity.rs gives it, so a
+// crate without one does not compile (D29). build_router mounts the
+// runtime's handler of each of the user model's operations, behind the
+// request-id middleware and the route's controls, and wraps the router in
+// the trusted origins' CORS. The namespace traits have no method for those
+// operations, and the operations module declares each, so capabilities
+// answers for every route.
+//
 // The endpoints and the OpenAPI document come from api, the apigen output
 // generator.Run builds once for the Go and TypeScript servers and every
 // SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
@@ -388,12 +469,14 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 
 	// The user model's operations are the identity runtime's (D50): the
-	// Implementations traits and the router leave them out, and the
-	// runtime serves their routes.
-	var implemented []apigen.EndpointInfo
+	// Implementations traits leave them out, and the router mounts the
+	// runtime's handlers for them.
+	var implemented, identityOps []apigen.EndpointInfo
 	for _, endpoint := range api.Endpoints {
 		if endpoint.IdentityOperation == "" {
 			implemented = append(implemented, endpoint)
+		} else {
+			identityOps = append(identityOps, endpoint)
 		}
 	}
 	for _, endpoint := range implemented {
@@ -418,44 +501,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if endpoint.HasFileUpload && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step, declare it @manualRouteRegistration and add its route in the service, which reads the multipart body", endpoint.Namespace, endpoint.Name)
 		}
-		ns := endpoint.Namespace
-		if ns == "" {
-			ns = "root"
-		}
-
-		fnName := rustutil.ToSnakeCase(endpoint.ShortImplName)
-		if fnName == "" {
-			fnName = rustutil.ToSnakeCase(endpoint.Name)
-		}
-		if fnName == "" {
-			fnName = "call"
-		}
-
-		handlerName := rustutil.ToPascalCase(ns) + rustutil.ToPascalCase(fnName)
-		info := EndpointInfo{
-			Name:         endpoint.Name,
-			Namespace:    ns,
-			FunctionName: fnName,
-			HandlerName:  handlerName,
-			ArgsName:     handlerName + "Args",
-			// apigen {param} placeholders pass through: axum 0.8 uses
-			// {param} path captures natively (the 0.7-era :param panics).
-			Path:        endpoint.Path,
-			Method:      strings.ToLower(endpoint.Method),
-			Description: endpoint.Description,
-
-			WebhookProvider: endpoint.WebhookHMACProvider,
-
-			RequiresAuth:     endpoint.RequiresAuth,
-			RequiredPerms:    endpoint.RequiredPerms,
-			RequireOwnership: endpoint.RequireOwnership,
-			RateLimit:        positive(endpoint.RateLimit),
-			BodyLimit:        positive(endpoint.BodyLimit),
-			Timeout:          positive(endpoint.Timeout),
-			ServiceCallers:   endpoint.ServiceCallers,
-			ServiceStep:      output.HasServiceCallers,
-			Manual:           endpoint.ManualRouteRegistration,
-		}
+		info := endpointInfo(endpoint, output.HasServiceCallers)
 		if info.WebhookProvider != "" {
 			webhookProviders[info.WebhookProvider] = struct{}{}
 		}
@@ -470,8 +516,24 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if err := b.params(endpoint, &info); err != nil {
 			return nil, err
 		}
-		namespaceSet[ns] = struct{}{}
+		namespaceSet[info.Namespace] = struct{}{}
 		output.Endpoints = append(output.Endpoints, info)
+	}
+	// The runtime's handlers decode their own arguments, so a user model's
+	// operation has no Args struct.
+	for _, endpoint := range identityOps {
+		info := endpointInfo(endpoint, output.HasServiceCallers)
+		output.HasAuth = output.HasAuth || info.RequiresAuth
+		output.HasControls = output.HasControls || info.HasControls()
+		output.IdentityEndpoints = append(output.IdentityEndpoints, info)
+	}
+
+	var err error
+	if output.Identity, err = identityOf(opts, output.HasAuth); err != nil {
+		return nil, err
+	}
+	if len(output.IdentityEndpoints) > 0 && output.Identity == nil {
+		return nil, fmt.Errorf("rustrestgen: %s serves the user model's routes, which need its authDb's User table; no authDb with one was given", opts.SchemaName)
 	}
 
 	output.Namespaces = rustapigen.SortedNamespaces(namespaceSet)
@@ -481,10 +543,85 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	sort.Strings(output.WebhookProviders)
 	sortEndpoints(output.Endpoints)
 	sortEndpoints(output.ManualEndpoints)
+	sortEndpoints(output.IdentityEndpoints)
 	output.Patterns = b.patterns
 	output.DependencyCrates = b.dependencyCrates()
 
 	return output, nil
+}
+
+// endpointInfo is an endpoint's route as the crate names and guards it,
+// without its arguments (builder.params). serviceStep marks a crate whose
+// schema has a service clause anywhere.
+func endpointInfo(endpoint apigen.EndpointInfo, serviceStep bool) EndpointInfo {
+	ns := endpoint.Namespace
+	if ns == "" {
+		ns = "root"
+	}
+
+	fnName := rustutil.ToSnakeCase(endpoint.ShortImplName)
+	if fnName == "" {
+		fnName = rustutil.ToSnakeCase(endpoint.Name)
+	}
+	if fnName == "" {
+		fnName = "call"
+	}
+
+	handlerName := rustutil.ToPascalCase(ns) + rustutil.ToPascalCase(fnName)
+	return EndpointInfo{
+		Name:         endpoint.Name,
+		Namespace:    ns,
+		FunctionName: fnName,
+		HandlerName:  handlerName,
+		ArgsName:     handlerName + "Args",
+		// apigen {param} placeholders pass through: axum 0.8 uses
+		// {param} path captures natively (the 0.7-era :param panics).
+		Path:        endpoint.Path,
+		Method:      strings.ToLower(endpoint.Method),
+		Description: endpoint.Description,
+
+		WebhookProvider: endpoint.WebhookHMACProvider,
+
+		RequiresAuth:      endpoint.RequiresAuth,
+		RequiredPerms:     endpoint.RequiredPerms,
+		RequireOwnership:  endpoint.RequireOwnership,
+		RateLimit:         positive(endpoint.RateLimit),
+		BodyLimit:         positive(endpoint.BodyLimit),
+		Timeout:           positive(endpoint.Timeout),
+		ServiceCallers:    endpoint.ServiceCallers,
+		ServiceStep:       serviceStep,
+		Manual:            endpoint.ManualRouteRegistration,
+		OperationID:       endpoint.HandlerName,
+		IdentityOperation: endpoint.IdentityOperation,
+	}
+}
+
+// identityOf is the crate's user model wiring (D50): nil unless the authDb
+// has a User table and an operation needs a caller, since otherwise no
+// route reads a session.
+func identityOf(opts Options, hasAuth bool) (*IdentityInfo, error) {
+	if opts.AuthDB == nil || !hasAuth {
+		return nil, nil
+	}
+	descriptor, ok, err := identitydesc.Describe(opts.AuthDB)
+	if err != nil {
+		return nil, fmt.Errorf("rustrestgen: the identity descriptor of %s: %w", opts.AuthDB.Name, err)
+	}
+	if !ok {
+		return nil, nil
+	}
+	text, err := descriptor.JSON()
+	if err != nil {
+		return nil, fmt.Errorf("rustrestgen: the identity descriptor of %s: %w", opts.AuthDB.Name, err)
+	}
+	names := opts.Naming.OrDefault()
+	return &IdentityInfo{
+		AuthDB:           opts.AuthDB.Name,
+		Descriptor:       rustutil.RawString(strings.TrimSuffix(string(text), "\n")),
+		PermissionPrefix: names.IdentityPermissionPrefix,
+		ScalarCrate:      names.ScalarRustCrate,
+		ScalarRegistry:   names.ScalarRustRegistryExpr(),
+	}, nil
 }
 
 // positive is the value of a directive, or 0 without one or for a value
@@ -525,6 +662,18 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "router.tmpl", outputName: filepath.Join("src", "router.rs")},
 		{templateName: "openapi.tmpl", outputName: filepath.Join("src", "openapi.rs")},
 		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
+	}
+
+	// The user model's wiring (D50); a crate written before with it keeps
+	// no stale module.
+	identityPath := filepath.Join(outputDir, "src", "identity.rs")
+	if output.Identity != nil {
+		files = append(files, struct {
+			templateName string
+			outputName   string
+		}{templateName: "identity.tmpl", outputName: filepath.Join("src", "identity.rs")})
+	} else if err := os.Remove(identityPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", identityPath, err)
 	}
 
 	for _, file := range files {
@@ -656,7 +805,9 @@ func rustString(s string) string {
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.
 // Unlike the Go targets, the http-runtime path dependency is mandatory: there
 // is no published crate for Cargo to fall back on, so an unset [paths]
-// http_runtime_rust is an error rather than a no-op.
+// http_runtime_rust is an error rather than a no-op. The scalar crate a
+// crate with the user model reads (D50) follows [paths] scalar_rust, as the
+// types crate's does: unset, the manifest names its version.
 func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir string) error {
 	if paths.HTTPRuntimeRust == "" || outputDir == "" {
 		return fmt.Errorf("rustrestgen: [paths] http_runtime_rust and an output dir are required to locate the http-runtime crate")
@@ -666,5 +817,10 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 		return fmt.Errorf("http runtime crate path: %w", err)
 	}
 	output.RuntimeDepPath = rel
+	if output.Identity != nil {
+		if output.Identity.ScalarDepPath, err = naming.RelPath(outputDir, paths.ScalarRust); err != nil {
+			return fmt.Errorf("scalar crate path: %w", err)
+		}
+	}
 	return nil
 }

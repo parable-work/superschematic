@@ -892,6 +892,10 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	authDB, err := r.identityAuthDB(apiOutput)
+	if err != nil {
+		return nil, err
+	}
 	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
@@ -900,6 +904,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 		OutputDir:    APIDir(r.Options.OutputRoot, r.Config.Name),
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
+		AuthDB:       authDB,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
@@ -911,6 +916,39 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 		return nil, err
 	}
 	return output, nil
+}
+
+// identityAuthDB is the schema the API's authDb names, whose User table
+// the Rust server reads its users from (D50): nil without an authDb, and
+// nil when the build configures no dependency loader for an API that
+// serves none of the user model's routes, as before the model.
+func (r run) identityAuthDB(api *apigen.APIOutput) (*ir.Schema, error) {
+	name := r.Config.AuthDB
+	if name == "" {
+		return nil, nil
+	}
+	if r.Options.LoadDependency == nil && !servesIdentityRoutes(api) {
+		return nil, nil
+	}
+	schema, err := r.LoadDependency(name)
+	if err != nil {
+		return nil, fmt.Errorf("generator: load %s, the authDb of %s: %w", name, r.Config.Name, err)
+	}
+	return schema, nil
+}
+
+// servesIdentityRoutes reports whether api has one of the user model's
+// operations.
+func servesIdentityRoutes(api *apigen.APIOutput) bool {
+	if api == nil {
+		return false
+	}
+	for _, endpoint := range api.Endpoints {
+		if endpoint.IdentityOperation != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // generateRustAPI emits the Rust REST API server and route scaffolds. The

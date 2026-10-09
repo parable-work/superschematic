@@ -69,7 +69,7 @@ func generateRustAPI(t *testing.T, name string, public bool, upstream string, up
 	outDir := t.TempDir()
 	typesDir := filepath.Join(outDir, "types", "rust", name)
 
-	output, err := generateFrom(apiSchema, apiSource{public: public, upstream: upstream, upstreamIR: upstreamIR}, Options{
+	output, err := generateFrom(apiSchema, apiSource{public: public, upstream: upstream, upstreamIR: upstreamIR, authDB: authDBOf(t, apiSchema)}, Options{
 		SchemaName: name,
 		TypesCrate: "schemas-" + name + "-types",
 		TypesDir:   typesDir,
@@ -90,10 +90,12 @@ func generateRustAPI(t *testing.T, name string, public bool, upstream string, up
 func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]string {
 	t.Helper()
 
-	// Compute the Cargo.toml runtime path against a fixed fake output
-	// location so the golden stays machine-independent; SetReplacePaths only
-	// computes strings, so the directories need not exist.
-	if err := SetReplacePaths(output, naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust"}, "/repo/schemas/dist/api/"+name); err != nil {
+	// Compute the Cargo.toml runtime and scalar crate paths against a fixed
+	// fake output location so the golden stays machine-independent;
+	// SetReplacePaths only computes strings, so the directories need not
+	// exist.
+	paths := naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust", ScalarRust: "/repo/third_party/superscalar/crates/core"}
+	if err := SetReplacePaths(output, paths, "/repo/schemas/dist/api/"+name); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
 
@@ -110,6 +112,9 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 		filepath.Join("src", "openapi.rs"),
 		filepath.Join("src", "operations.rs"),
 		"openapi.json",
+	}
+	if output.Identity != nil {
+		files = append(files, filepath.Join("src", "identity.rs"))
 	}
 
 	generated := make(map[string]string, len(files))

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/identitydesc"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -19,5 +20,5 @@ func identityDescriptor(schema *ir.Schema) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return rawString(strings.TrimSuffix(string(text), "\n")), nil
+	return rustutil.RawString(strings.TrimSuffix(string(text), "\n")), nil
 }
