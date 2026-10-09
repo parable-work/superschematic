@@ -2,7 +2,7 @@
 The behaviors the core declares (internal/registry/behaviors in the
 repository, D16), which every engine registers when it opens: Workflow,
 Comments, Revisions, Dependencies, Links, Rollups, Search, Reactions,
-Constants, Variants, Branches and StateRules.
+Constants, Variants, Branches, StateRules and Approvals.
 Each implementation imports its declaration's copy from declarations/,
 which `superschematic behaviors --out` writes and CI checks, so the
 engine and the compiler read one declaration. They reach the engine only
@@ -10,6 +10,7 @@ through the plug-in interface an extension's behavior uses.
 */
 
 import type { AnyBehaviorImplementation } from '../behavior.js';
+import { approvals } from './approvals.js';
 import { branches } from './branches.js';
 import { comments } from './comments.js';
 import { constants } from './constants.js';
@@ -37,6 +38,7 @@ export const coreBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze
   variants,
   branches,
   stateRules,
+  approvals,
 ]);
 
 export { isTerminalState, stateOutcome } from './workflow.js';
@@ -58,3 +60,4 @@ export type { VariantsConfig } from './variants.js';
 export { ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROLE_COLUMNS, ROOT_NAMESPACE, uuidV5 } from './branches.js';
 export type { BranchCommit, BranchRef, BranchRelease, BranchesConfig, BranchesKind, BranchesSweep, BranchesUnit } from './branches.js';
 export type { StateRule, StateRulesConfig } from './staterules.js';
+export type { ApprovalsConfig, ApprovalsGate, SignOffRecord } from './approvals.js';

@@ -25,6 +25,7 @@ import {
   cleanup,
   documentsDocument,
   invoicesDocument,
+  expensesDocument,
   notesDocument,
   openTestEngine,
   projectsDocument,
@@ -224,7 +225,7 @@ describe('the core behaviors say what their config means', () => {
 
   test("every operation of the core's behaviors says when to use it or not, under the cli smoke's documents", () => {
     const engine = openTestEngine();
-    for (const document of [documentsDocument(), tasksDocument(), projectsDocument(), notesDocument(), stepsDocument(), recipesDocument(), invoicesDocument()]) {
+    for (const document of [documentsDocument(), tasksDocument(), projectsDocument(), notesDocument(), stepsDocument(), recipesDocument(), invoicesDocument(), expensesDocument()]) {
       publish(engine, document);
     }
     for (const summary of engine.schemas.list(alice)) {

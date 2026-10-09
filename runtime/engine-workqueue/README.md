@@ -271,7 +271,11 @@ An operation another behavior's reference hook invokes on a leased
 instance, as `Dependencies`' `removeBlocker` when a blocker is deleted or
 `Links`' `unlink` when a target is, runs as the principal of that change
 and is refused like any other, so that change is refused too; a
-deployment that wants it through lists it in `exempt`. Nothing changes
+deployment that wants it through lists it in `exempt`. Another
+principal's sign-off is refused the same way: on a type that also
+composes the engine's `Approvals`, `"Approvals.signOff"` and
+`"Approvals.withdrawSignOff"` in `exempt` let approvers sign the leased
+instance off. Nothing changes
 the field `maxHoldField` names while a lease is held, unless with
 `overridePermission`, so a holder cannot extend its own hold.
 

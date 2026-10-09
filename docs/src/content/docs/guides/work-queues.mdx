@@ -342,6 +342,12 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   recipe's lease edits, merges and releases its version graph while
   others only read it. The token fences those writes as it fences the
   rest.
+- **Beside `Approvals`.** A sign-off is a writing operation of another
+  principal than the holder, so the guard refuses
+  [`Approvals`](/superschematic/guides/engine-behaviors/#approvals)'
+  `signOff` and `withdrawSignOff` while a lease is active. List
+  `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` in `exempt` to
+  let approvers sign leased work off.
 - **Heartbeats fill the log.** Each one is an operation event. A
   dashboard that streams the event log passes `exclude=heartbeat` and
   keeps its place past them without receiving one.

@@ -76,6 +76,7 @@ var coreNarrowers = map[string]narrower{
 	"Links":        narrowLinks,
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
+	"Approvals":    narrowApprovals,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -556,6 +557,31 @@ func enumValues(enum *ir.EnumDef) []string {
 		}
 	}
 	return out
+}
+
+// Approvals: the gates field holds, by gated state, the subjects whose
+// sign-offs count, and no gate with none, so none is required; signOff and
+// withdrawSignOff name a gated state. listSignOffs takes any state, a gate
+// a later version removed included.
+func narrowApprovals(n *narrowing, config map[string]any, _ narrowTarget) error {
+	gates, _ := config["gates"].(map[string]any)
+	states := sortedKeys(gates)
+	properties := map[string]any{}
+	for _, state := range states {
+		properties[state] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"signedBy"},
+			"properties": map[string]any{"signedBy": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+		}
+	}
+	for _, op := range []string{"signOff", "withdrawSignOff"} {
+		if err := setOperationProperty(n.params, op, nil, "state", enumOf(states)); err != nil {
+			return err
+		}
+		if err := setOperationProperty(n.results, op, nil, "state", enumOf(states)); err != nil {
+			return err
+		}
+	}
+	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
 }
 
 // Assignment: the assignee's subject, absent when unassigned.

@@ -4,7 +4,7 @@
     {
       "kind": "General",
       "name": "Spec",
-      "description": "A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema.",
+      "description": "A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema, and it is final once a principal with specs.approve signs off.",
       "types": {
         "Spec": {
           "name": "Spec",
@@ -34,6 +34,17 @@
                 "schemas": [
                   "Task"
                 ]
+              }
+            },
+            {
+              "name": "Approvals",
+              "config": {
+                "gates": {
+                  "final": {
+                    "count": 1,
+                    "permission": "specs.approve"
+                  }
+                }
               }
             }
           ],
@@ -697,6 +708,33 @@
         }
       },
       "fields": {
+        "Approvals": {
+          "gates": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent.",
+              "properties": {
+                "final": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "signedBy": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "signedBy"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          }
+        },
         "Dependencies": {
           "blocked": {
             "schema": {

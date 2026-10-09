@@ -1,0 +1,39 @@
+{
+  "kind": "General",
+  "name": "expenses",
+  "description": "An expense claim an engine runs with the core's behaviors and no extension: it moves from draft to submitted, and on to approved, which waits for two sign-offs by principals with expenses.approve, the claimant's never among them, then to paid, which waits for one with expenses.pay. A change of the claim consumes the sign-offs it has, and entering approved or paid consumes that gate's.",
+  "types": {
+    "Expense": {
+      "name": "Expense",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["draft", "submitted", "approved", "paid", "rejected"],
+            "transitions": [
+              { "from": "draft", "to": "submitted" },
+              { "from": "submitted", "to": "draft" },
+              { "from": "submitted", "to": "approved" },
+              { "from": "submitted", "to": "rejected" },
+              { "from": "approved", "to": "paid" }
+            ]
+          }
+        },
+        {
+          "name": "Approvals",
+          "config": {
+            "gates": {
+              "approved": { "count": 2, "permission": "expenses.approve" },
+              "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] }
+            }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "amount", "typeRef": { "name": "number" }, "required": true, "validateMin": 0 }
+      ]
+    }
+  }
+}

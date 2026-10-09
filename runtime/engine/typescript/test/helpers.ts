@@ -257,3 +257,18 @@ export function invoicesDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-staterules-json/src/invoice.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * expensesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-approvals-json), a schema named expenses: its Expense type
+ * composes Workflow, from draft to submitted, approved and paid, or
+ * rejected, and Approvals, whose approved state waits for two sign-offs by
+ * principals with expenses.approve, never the claimant's, and whose paid
+ * state, from approved, for one with expenses.pay.
+ */
+export function expensesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-approvals-json/src/expense.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

@@ -9,7 +9,8 @@
 // parent, fixture-variants-json, whose steps keep their kind and hold
 // a result of the kind's shape, fixture-branches-json, whose recipes
 // are version graphs, and fixture-staterules-json, whose invoices need
-// and keep fields by their status.
+// and keep fields by their status, and fixture-approvals-json, whose expense claims
+// wait for sign-offs.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -21,6 +22,7 @@ import {
   documentsDocument,
   drivers,
   invoicesDocument,
+  expensesDocument,
   notesDocument,
   openTestEngine,
   projectTreeDocument,
@@ -48,7 +50,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -362,6 +364,55 @@ for (const driver of drivers) {
         kind: 'verify',
         result: { passed: false, checks: [{ name: 'eslint', ok: true }] },
       });
+    });
+
+    test("it runs the expenses document: a claim waits for two approvers' sign-offs, never its claimant's, then one to pay it, and a change of it signs again", () => {
+      const claimant: Principal = { subject: 'cleo', permissions: ['expenses.approve'] };
+      const approvers: Principal[] = [
+        { subject: 'ann', permissions: ['expenses.approve'] },
+        { subject: 'bob', permissions: ['expenses.approve'] },
+      ];
+      const payer: Principal = { subject: 'pia', permissions: ['expenses.pay'] };
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, expensesDocument());
+      engine.schemas.publish(alice, 'expenses');
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'expenses').map(({ name }) => name),
+        ['Workflow', 'Approvals']
+      );
+      const created = engine.instances.create(claimant, 'expenses', { title: 'Train to the offsite', amount: 120 }, { id: 'trip' });
+      assert.deepEqual(created.behaviors, { Workflow: { status: 'draft' }, Approvals: { gates: {} } });
+      const invoke = (who: Principal, operation: string, params: Record<string, unknown> = {}) => engine.instances.invoke(who, 'expenses', 'trip', operation, params);
+      invoke(claimant, 'transition', { to: 'submitted' });
+      assert.equal(thrown(() => invoke(claimant, 'signOff', { state: 'approved' })).code, 'vetoed');
+      for (const approver of approvers) {
+        invoke(approver, 'signOff', { state: 'approved' });
+      }
+      // The claim changes: the sign-offs it had no longer count.
+      engine.instances.update(claimant, 'expenses', 'trip', { amount: 140 });
+      assert.deepEqual(engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals, { gates: {} });
+      assert.equal(thrown(() => invoke(claimant, 'transition', { to: 'approved' })).code, 'vetoed');
+      for (const approver of approvers) {
+        invoke(approver, 'signOff', { state: 'approved' });
+      }
+      assert.deepEqual(invoke(claimant, 'transition', { to: 'approved' }), { from: 'submitted', to: 'approved' });
+      assert.equal(thrown(() => invoke(claimant, 'transition', { to: 'paid' })).code, 'vetoed');
+      invoke(payer, 'signOff', { state: 'paid' });
+      invoke(claimant, 'transition', { to: 'paid' });
+      const read = engine.instances.get(alice, 'expenses', 'trip');
+      assert.deepEqual(read?.behaviors.Workflow.status, 'paid');
+      assert.deepEqual(read?.behaviors.Approvals, { gates: {} });
+      const listed = engine.instances.invoke(alice, 'expenses', 'trip', 'listSignOffs') as { items: Array<{ subject: string; consumedAt?: number }> };
+      assert.deepEqual(
+        listed.items.map(({ subject, consumedAt }) => [subject, consumedAt !== undefined]),
+        [
+          ['ann', true],
+          ['bob', true],
+          ['ann', true],
+          ['bob', true],
+          ['pia', true],
+        ]
+      );
     });
 
     test('it runs the recipes document: a recipe is a graph root whose drafts merge into its primary line, and a tagged commit is released', () => {

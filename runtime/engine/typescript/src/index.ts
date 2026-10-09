@@ -201,6 +201,8 @@ export {
   uuidV5,
 } from './behaviors/core/index.js';
 export type {
+  ApprovalsConfig,
+  ApprovalsGate,
   BlockerRecord,
   BranchCommit,
   BranchRef,
@@ -237,6 +239,7 @@ export type {
   SearchConfig,
   SearchHit,
   SearchVectors,
+  SignOffRecord,
   SnippetPart,
   StateRule,
   StateRulesConfig,

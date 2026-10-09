@@ -25,7 +25,8 @@ embedder computes, and a search across a namespace's schemas,
 `Reactions`, which the runner runs, `Constants` and `Variants`, which
 judge the fields a write stores, `Branches`, a version graph on each
 instance (D32), and `StateRules`, the fields each Workflow state
-requires or freezes (D56). The plug-in interface has what D32 gives a behavior that
+requires or freezes (D56), and `Approvals`, sign-offs a move of the type's Workflow
+waits for (D56). The plug-in interface has what D32 gives a behavior that
 keeps values of other types in its own tables: the schema's other types
 in `parseConfig`, `validate(type, value)` in its contexts, and schedules
 a schema turns off and whose runs write the behavior's own tables; a
@@ -2205,7 +2206,7 @@ tell a caller its read is stale.
 
 ### Core behaviors
 
-The core declares twelve behaviors the engine implements
+The core declares thirteen behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -2295,6 +2296,16 @@ and whose paid ones keep every field:
     "sent": { "required": ["customer", "amount"], "frozen": ["customer", "amount"] },
     "paid": { "frozen": "all" } },
   "permission": "invoices.amend" } }
+```
+
+`Approvals` keeps sign-offs in a table of its own, and gates the type's
+Workflow on them as `Dependencies` and `Rollups` do, on an `expenses`
+schema whose claims two approvers sign off before they are approved:
+
+```json
+{ "name": "Approvals", "config": { "gates": {
+    "approved": { "count": 2, "permission": "expenses.approve" },
+    "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] } } } }
 ```
 
 Where they number their records, they number from 1 per instance (a
@@ -3353,6 +3364,48 @@ the status, so each rule sits where it reads what it needs:
   accepted and its `approve` is vetoed (`frozen_fields`), whose
   `update()` the guard asks. The guidance says so on `approve`.
 
+#### Approvals
+
+Sign-offs that gate states of the type's Workflow (D56): a transition
+into a gated state waits until `count` distinct principals holding the
+gate's permission have signed off.
+
+| | |
+| --- | --- |
+| Config | `gates` (at least one, by state of the type's Workflow): each `{ count, permission, from?, excludeCreator? }`, `count` 1 to 100, `from` the states a transition from is gated (every state when absent), `excludeCreator` whether the instance's creator is refused (`true` when absent); `resetOnChange`, whether a change of the own fields consumes every sign-off (`true` when absent); required. Requires `Workflow` |
+| Fields | `gates`: `{ <state>: { signedBy } }`, the subjects whose sign-offs count, in the order they signed; a gate with none is absent, and with none at all it is `{}`. No count: the config holds it, and a publish that changed it writes no event |
+| Operations | `signOff({ state, note? })` -> `{ state, subject, note?, at, signedBy, count }`, writes; `withdrawSignOff({ state })` -> the sign-off, `{ state, subject, note?, at }`, writes; `listSignOffs({ state?, limit?, cursor? })` -> a page of `{ state, subject, note?, at, consumedAt? }`, the consumed ones included, read-only |
+| Guards | a Workflow `transition` of the instance into a gated state, from a state its `from` allows, whoever asks, with fewer sign-offs than `count`: `vetoed` (`approvals_missing`), details `{ state, required, count }`, `required` the gate's count and `count` the sign-offs it has. A move Workflow refuses is left to Workflow's veto, whichever of the two the type lists first |
+| Refusals | `signOff` and `withdrawSignOff` of a state the config does not gate (`no_gate`); `signOff` without the gate's permission (`can`), `forbidden`, as `Revisions`' `approve` is; while the instance is in the state (`in_state`); by the instance's creator, the `created_by` of its row (`sql.instances()`), on a gate that excludes it (`creator_cannot_sign`); by a caller whose sign-off for the state counts already (`already_signed`); `withdrawSignOff` with no such sign-off (`not_signed`); all but `forbidden` `vetoed`. At define, a gated state or a `from` state the type's Workflow lacks, or a gate's own state in its `from` (`invalid_schema`) |
+| Storage | `signoffs`: a row per sign-off, unique among the ones that count per instance, state and subject, with the time it was consumed |
+| Events | `signOff`'s and `withdrawSignOff`'s events carry `gates`; so do the update or operation, and the transition, that consume sign-offs |
+| `configChange` | gates may be added, removed and changed: a removed gate's sign-offs are consumed (`afterConfigChange`), and a gate's new count or permission applies to the sign-offs already given. Added to a schema with instances, which start with none; not removed from one, since its sign-offs would stay behind |
+
+A sign-off counts until it is consumed, and `afterChange` consumes them
+from the instance as the change leaves it, in the change's transaction,
+never from which operation ran:
+
+- **A change of the own fields.** An update, or an operation that changes
+  them with `update()` (a `Revisions` approval, say), consumes every
+  gate's sign-offs, so what was signed is what moves. `resetOnChange:
+  false` keeps them; an operation that changes no own field, a comment or
+  a proposal, consumes none.
+- **Entering a gated state.** An instance in a gated state has that
+  gate's consumed, so a return to the state is signed again. It reads the
+  status, not the operation: a `Reactions` move on the runner, a `Lease`
+  expiry or a `Timers` fire moves the status inside an operation of its
+  own, and consumes them as a caller's transition does.
+
+A sign-off is one principal's, by its subject, so a principal counts once
+toward a gate whatever its permissions; `signOff` asks `can()` for the
+gate's permission at the time it signs. A withdrawal deletes its row, so
+`listSignOffs` shows what was given and consumed, and the log keeps every
+`signOff` and `withdrawSignOff`. Deleting the instance deletes its
+sign-offs. On a type that also composes `Lease`, `signOff` and
+`withdrawSignOff` are writing operations of another principal than the
+holder: `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` belong in
+Lease's `exempt` (`runtime/engine-workqueue/README.md`, "The guard").
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -3946,6 +3999,7 @@ in `@superschematic/engine-workqueue`):
 | `Variants` | the type the field holds for each value |
 | `Branches` | the kinds and the primary line, the `release` field, and each operation's version-graph refusals |
 | `StateRules` | what each state requires and freezes, and the permission that changes a frozen field; `missing_fields` on `transition`, a create's required fields, `required_fields` and `frozen_fields` on `update` and on `Revisions`' `approve` |
+| `Approvals` | each gate's count, permission and `from`, whether the creator may sign, and what consumes a sign-off; `approvals_missing` on `transition`, and that `update` consumes them |
 | `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
 | `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
 | `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |
