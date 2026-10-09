@@ -25,7 +25,8 @@ The descriptor is version 1.
     "table": "account",
     "columns": { "key": "id", "login": "email", "name": "display_name" },
     "keyScalar": "Identity.UUID",
-    "loginScalar": "Contact.Email"
+    "loginScalar": "Contact.Email",
+    "nameScalar": "Identity.Name"
   },
   "session": {
     "table": "session",
@@ -45,7 +46,8 @@ The descriptor is version 1.
   "role": {
     "type": "Role",
     "table": "role",
-    "columns": { "key": "id", "name": "name", "permissions": "permissions" }
+    "columns": { "key": "id", "name": "name", "permissions": "permissions" },
+    "keyScalar": "Identity.UUID"
   },
   "roleGrant": {
     "table": "user_role_grant",
@@ -64,12 +66,14 @@ The descriptor is version 1.
 | `user.columns.name` | The column a principal's display name comes from. It is the login column when the trait names no `name`. |
 | `user.keyScalar` | The key field's type as the schema names it: a scalar's canonical name, such as `Identity.UUID`, or a builtin type, such as `string`. A principal's id is a value of it. |
 | `user.loginScalar` | The login field's scalar, such as `Contact.Email` or `Identity.Slug`. |
+| `user.nameScalar` | The name field's type, a scalar's canonical name such as `Identity.Name` or a builtin type such as `string`; the login's when the name is the login. A store parses a display name it writes with it, when it is a scalar, so a name outside the column's bounds is refused before the write. |
 | `session.table` | The `Session` table the loader adds: one row per session. |
 | `session.columns` | `id`, the row's key. `user`, the session's user. `tokenHash`, unique: the lowercase hexadecimal SHA-256 of the session's token (`Crypto.SHA256`); the token itself is never stored. `createdAt` and `expiresAt`. `lastSeenAt`, nullable: when a request last used the session. `revokedAt`, null until logout or a revocation ends the session. |
 | `credential.table` | The `UserCredential` table the loader adds: a user's password, apart from the user row. |
 | `credential.columns` | `id`, the row's key. `user`, unique, so a user has at most one. `passwordHash`, the password's PHC string (`$argon2id$v=19$...`). `passwordChangedAt`. `disabledAt`, null unless the user is disabled. |
 | `role` | Absent when the schema has no `UserRole` table, and `roleGrant` with it. `type` and `table` name the type with the `UserRole` trait and its table. |
 | `role.columns` | `key`, the role table's key column. `name`, the role's unique name. `permissions`, a list of permission strings (`TEXT[]` in Postgres). |
+| `role.keyScalar` | The role table's key field's type, as `user.keyScalar` is the user table's. A role's id is a value of it. |
 | `roleGrant.table` | The `UserRoleGrant` table the loader adds beside a `UserRole` table: one row per role a user holds. |
 | `roleGrant.columns` | `id`, the row's key. `user`, the user. `role`, the role's key. `grantedAt`. The pair (`user`, `role`) is unique. |
 

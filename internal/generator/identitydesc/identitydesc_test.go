@@ -25,7 +25,8 @@ const withRoles = `{
       "name": "display_name"
     },
     "keyScalar": "Identity.UUID",
-    "loginScalar": "Contact.Email"
+    "loginScalar": "Contact.Email",
+    "nameScalar": "string"
   },
   "session": {
     "table": "session",
@@ -56,7 +57,8 @@ const withRoles = `{
       "key": "id",
       "name": "name",
       "permissions": "permissions"
-    }
+    },
+    "keyScalar": "Identity.UUID"
   },
   "roleGrant": {
     "table": "user_role_grant",

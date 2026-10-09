@@ -202,6 +202,15 @@ func TestStoreUsers(t *testing.T) {
 		if _, err := s.CreateUser(ctx, identity.NewUser{Login: "not an email", PasswordHash: "x", At: at(0)}); !errors.As(err, &invalid) {
 			t.Errorf("a login the scalar refuses: %v, want an InvalidLoginError", err)
 		}
+		// The fixture's display name is an Identity.Name, a VARCHAR(80): a
+		// longer one is refused by its scalar before any write.
+		var invalidName *identity.InvalidNameError
+		if _, err := s.CreateUser(ctx, identity.NewUser{Login: "dave@example.com", Name: strings.Repeat("d", 81), PasswordHash: "x", At: at(0)}); !errors.As(err, &invalidName) {
+			t.Errorf("a name the name scalar refuses: %v, want an InvalidNameError", err)
+		}
+		if _, err := s.FindLogin(ctx, "dave@example.com"); !errors.Is(err, identity.ErrNotFound) {
+			t.Errorf("a refused name left a user behind: %v", err)
+		}
 
 		rec, err := s.FindLogin(ctx, "ALICE@EXAMPLE.com")
 		if err != nil || rec.User.ID != alice.ID || rec.PasswordHash != "hash-of- Alice@Example.COM " {

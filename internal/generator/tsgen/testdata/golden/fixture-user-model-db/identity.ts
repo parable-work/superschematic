@@ -17,7 +17,8 @@ export const identityDescriptor = {
       "name": "display_name"
     },
     "keyScalar": "Identity.UUID",
-    "loginScalar": "Contact.Email"
+    "loginScalar": "Contact.Email",
+    "nameScalar": "Identity.Name"
   },
   "session": {
     "table": "session",
@@ -48,7 +49,8 @@ export const identityDescriptor = {
       "key": "id",
       "name": "name",
       "permissions": "permissions"
-    }
+    },
+    "keyScalar": "Identity.UUID"
   },
   "roleGrant": {
     "table": "user_role_grant",

@@ -307,10 +307,15 @@ func (s *Service) createUser(ctx context.Context, login, name, password string) 
 	}
 	user, err := s.store.CreateUser(ctx, NewUser{Login: login, Name: name, PasswordHash: hash, At: s.now()})
 	var invalidLogin *InvalidLoginError
+	var invalidName *InvalidNameError
 	switch {
 	case errors.As(err, &invalidLogin):
 		var f fieldErrors
 		f.add("login", "parse", invalidLogin.Err.Error())
+		return User{}, f.err()
+	case errors.As(err, &invalidName):
+		var f fieldErrors
+		f.add("name", "parse", invalidName.Err.Error())
 		return User{}, f.err()
 	case errors.Is(err, ErrLoginTaken):
 		return User{}, conflict("The login is taken")

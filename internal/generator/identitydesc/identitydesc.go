@@ -47,6 +47,11 @@ type User struct {
 	// the runtime parses a key and a login with.
 	KeyScalar   string `json:"keyScalar"`
 	LoginScalar string `json:"loginScalar"`
+	// NameScalar is the type of the name field ("Identity.Name", or a
+	// builtin such as "string"), which the runtime checks a display name
+	// with before it writes one. It is the login's when the name is the
+	// login.
+	NameScalar string `json:"nameScalar"`
 }
 
 // UserColumns are the user table's columns the runtime reads. Name is the
@@ -94,6 +99,9 @@ type Role struct {
 	Type    string      `json:"type"`
 	Table   string      `json:"table"`
 	Columns RoleColumns `json:"columns"`
+	// KeyScalar is the type of the role table's key field, which the
+	// runtime parses a role id with.
+	KeyScalar string `json:"keyScalar"`
 }
 
 // RoleColumns are the role table's columns the runtime reads and writes.
@@ -153,6 +161,7 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 	user := columnsOf(schema, userTable)
 	key := user.key()
 	login := user.field(userTable.User.Login)
+	name := user.field(userTable.User.NameField())
 	d := Descriptor{
 		Version: Version,
 		User: User{
@@ -161,14 +170,14 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 			Columns: UserColumns{
 				Key:   user.column(key),
 				Login: user.column(login),
-				Name:  user.column(user.field(userTable.User.NameField())),
+				Name:  user.column(name),
 			},
 		},
 	}
 	if user.err != nil {
 		return Descriptor{}, user.err
 	}
-	d.User.KeyScalar, d.User.LoginScalar = key.TypeRef.Name, login.TypeRef.Name
+	d.User.KeyScalar, d.User.LoginScalar, d.User.NameScalar = key.TypeRef.Name, login.TypeRef.Name, name.TypeRef.Name
 
 	sessionTable, err := added(schema, ir.IdentitySessionTable)
 	if err != nil {
@@ -214,11 +223,12 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 		return d, nil
 	}
 	role := columnsOf(schema, roleTable)
+	roleKey := role.key()
 	d.Role = &Role{
 		Type:  roleTable.Name,
 		Table: codegen.ToSnakeCase(roleTable.Name),
 		Columns: RoleColumns{
-			Key:         role.column(role.key()),
+			Key:         role.column(roleKey),
 			Name:        role.column(role.field(ir.IdentityRoleNameField)),
 			Permissions: role.column(role.field(ir.IdentityRolePermissionsField)),
 		},
@@ -226,6 +236,7 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 	if role.err != nil {
 		return Descriptor{}, role.err
 	}
+	d.Role.KeyScalar = roleKey.TypeRef.Name
 
 	grantTable, err := added(schema, ir.IdentityRoleGrantTable)
 	if err != nil {

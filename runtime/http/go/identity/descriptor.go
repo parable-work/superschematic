@@ -39,6 +39,7 @@ type DescriptorUser struct {
 	} `json:"columns"`
 	KeyScalar   string `json:"keyScalar"`
 	LoginScalar string `json:"loginScalar"`
+	NameScalar  string `json:"nameScalar"`
 }
 
 // DescriptorSession is the Session table the loader adds.
@@ -76,6 +77,7 @@ type DescriptorRole struct {
 		Name        string `json:"name"`
 		Permissions string `json:"permissions"`
 	} `json:"columns"`
+	KeyScalar string `json:"keyScalar"`
 }
 
 // DescriptorRoleGrant is the UserRoleGrant table the loader adds beside a
@@ -110,7 +112,7 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 	names := map[string]string{
 		"user.type": d.User.Type, "user.table": d.User.Table,
 		"user.columns.key": d.User.Columns.Key, "user.columns.login": d.User.Columns.Login, "user.columns.name": d.User.Columns.Name,
-		"user.keyScalar": d.User.KeyScalar, "user.loginScalar": d.User.LoginScalar,
+		"user.keyScalar": d.User.KeyScalar, "user.loginScalar": d.User.LoginScalar, "user.nameScalar": d.User.NameScalar,
 		"session.table": d.Session.Table, "session.columns.id": d.Session.Columns.ID, "session.columns.user": d.Session.Columns.User,
 		"session.columns.tokenHash": d.Session.Columns.TokenHash, "session.columns.createdAt": d.Session.Columns.CreatedAt,
 		"session.columns.expiresAt": d.Session.Columns.ExpiresAt, "session.columns.lastSeenAt": d.Session.Columns.LastSeenAt,
@@ -120,7 +122,7 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 		"credential.columns.passwordChangedAt": d.Credential.Columns.PasswordChangedAt, "credential.columns.disabledAt": d.Credential.Columns.DisabledAt,
 	}
 	if r := d.Role; r != nil {
-		names["role.type"], names["role.table"] = r.Type, r.Table
+		names["role.type"], names["role.table"], names["role.keyScalar"] = r.Type, r.Table, r.KeyScalar
 		names["role.columns.key"], names["role.columns.name"], names["role.columns.permissions"] = r.Columns.Key, r.Columns.Name, r.Columns.Permissions
 		g := d.RoleGrant
 		names["roleGrant.table"], names["roleGrant.columns.id"] = g.Table, g.Columns.ID

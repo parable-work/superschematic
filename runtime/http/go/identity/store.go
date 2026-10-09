@@ -31,6 +31,18 @@ func (e *InvalidLoginError) Error() string {
 
 func (e *InvalidLoginError) Unwrap() error { return e.Err }
 
+// InvalidNameError is a display name the name scalar does not parse.
+type InvalidNameError struct {
+	Scalar string
+	Err    error
+}
+
+func (e *InvalidNameError) Error() string {
+	return "identity: the name is not a " + e.Scalar + ": " + e.Err.Error()
+}
+
+func (e *InvalidNameError) Unwrap() error { return e.Err }
+
 // User is a user as the identity routes show one. Every id is in its key
 // scalar's wire form.
 type User struct {

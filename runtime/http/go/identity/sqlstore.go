@@ -57,7 +57,7 @@ type SQLStore struct {
 	desc    Descriptor
 
 	userKey, roleKey, sessionKey keyCodec
-	loginScalar                  string
+	loginScalar, nameScalar      string
 	nameIsLogin                  bool
 
 	t names
@@ -65,12 +65,6 @@ type SQLStore struct {
 
 // SQLStoreOption configures a SQLStore.
 type SQLStoreOption func(*SQLStore)
-
-// WithRoleKeyScalar names the role table's key scalar, which the
-// descriptor does not carry. The default is the user table's.
-func WithRoleKeyScalar(scalar string) SQLStoreOption {
-	return func(s *SQLStore) { s.roleKey = newKeyCodec(scalar) }
-}
 
 // names are the quoted table and column names the statements use.
 type names struct {
@@ -102,10 +96,13 @@ func NewSQLStore(db *sql.DB, dialect Dialect, descriptor []byte, opts ...SQLStor
 		dialect:     dialect,
 		desc:        d,
 		userKey:     newKeyCodec(d.User.KeyScalar),
-		roleKey:     newKeyCodec(d.User.KeyScalar),
 		sessionKey:  newKeyCodec(sessionKeyScalar),
 		loginScalar: d.User.LoginScalar,
+		nameScalar:  d.User.NameScalar,
 		nameIsLogin: d.User.Columns.Name == d.User.Columns.Login,
+	}
+	if d.Role != nil {
+		s.roleKey = newKeyCodec(d.Role.KeyScalar)
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -445,6 +442,12 @@ func (s *SQLStore) CreateUser(ctx context.Context, nu NewUser) (User, error) {
 	name := nu.Name
 	if name == "" || s.nameIsLogin {
 		name = login
+	} else if superscalar.KnownScalar(s.nameScalar) {
+		// The name column has its scalar's bounds; a name outside them is
+		// the caller's, not a failed write.
+		if name, err = superscalar.Parse(s.nameScalar, name); err != nil {
+			return User{}, &InvalidNameError{Scalar: s.nameScalar, Err: err}
+		}
 	}
 	t := s.t
 	columns, values, args := t.userLogin, "?", []any{login}
