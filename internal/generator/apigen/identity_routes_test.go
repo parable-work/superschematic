@@ -128,17 +128,47 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 	}
 
 	var spec struct {
-		Paths map[string]map[string]any `json:"paths"`
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Description string `json:"description"`
+			} `json:"responses"`
+		} `json:"paths"`
 	}
 	if err := json.Unmarshal(want, &spec); err != nil {
 		t.Fatal(err)
+	}
+	// Each user model route declares the errors the identity runtime
+	// answers it with; the project's route keeps the 400 and 500 alone.
+	statuses := func(path, method string) []string {
+		var out []string
+		for status := range spec.Paths[path][method].Responses {
+			out = append(out, status)
+		}
+		slices.Sort(out)
+		return out
+	}
+	for _, tc := range []struct {
+		path, method string
+		want         []string
+	}{
+		{"/api/auth/login", "post", []string{"200", "400", "401", "403", "500"}},
+		{"/api/auth/me", "get", []string{"200", "400", "401", "500"}},
+		{"/api/auth/admin/roles/{id}", "put", []string{"200", "400", "401", "403", "404", "409", "422", "500"}},
+		{"/api/greeting", "get", []string{"200", "400", "500"}},
+	} {
+		if got := statuses(tc.path, tc.method); !slices.Equal(got, tc.want) {
+			t.Errorf("%s %s responses = %v, want %v", tc.method, tc.path, got, tc.want)
+		}
+	}
+	if got := spec.Paths["/api/auth/login"]["post"].Responses["401"].Description; !strings.HasPrefix(got, ir.IdentityCodeInvalidCredentials+": ") {
+		t.Errorf("login's 401 = %q", got)
 	}
 	for path, method := range map[string]string{
 		"/api/auth/login": "post", "/api/auth/logout": "post", "/api/auth/me": "get", "/api/auth/capabilities": "get",
 		"/api/auth/password": "post", "/api/auth/register": "post", "/api/auth/admin/users/{id}/roles/{roleId}": "delete",
 		"/api/greeting": "get",
 	} {
-		if spec.Paths[path][method] == nil {
+		if _, ok := spec.Paths[path][method]; !ok {
 			t.Errorf("the OpenAPI document has no %s %s", method, path)
 		}
 	}
