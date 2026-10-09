@@ -273,9 +273,18 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
   checkbox is not checked, so it filters nothing; elsewhere an unchecked
   box is false.
 
+A page whose route holds a path argument fills it from the route before
+`submit`, rather than trusting the hidden input, which a reader can change.
+`submit` turns every refusal into the form's errors, a 401 or 403 too; a
+page that keeps the route's status calls `parse()` and the operation
+itself, as acme-shop's `/orders` does.
+
 ```rust
+path_param!(id: types::IdentityUUID, error = not_found);
+
 #[page(POST "/orders/{id}/cancel")]
 async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
+    let form = OrderCancelOrderArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
     let errors = match form.submit(cx).await {
         Ok(_) => return Err(see_other("/orders").into()),
         Err(errors) => errors,

@@ -5172,6 +5172,16 @@ control when it does not parse; and choices make the reason a select.
 `TestHowAFormHoldsAField`, `TestArgumentControls` and `TestControlNames`
 check the generator. acme-shop's crate gains `PlaceOrderInputForm` and
 argument forms for `cancelOrder`, `listOrders`, `listReviews` and
-`writeReview`; its app is unchanged, and its tests pass against it.
+`writeReview`. Its app places an order through the first at
+`/orders/new`, a row per line and each line's product a select of the
+app's catalog (`PlaceOrderLine`'s `@display` numbers the rows and labels
+the add button), filters `/orders` through the `listOrders` form, keeping
+the route's 401 and 403, and cancels an order from its page through the
+`cancelOrder` form, with the route's id in place of the hidden input's.
+Its tests drive each page through `Router::handle`, in memory and over
+SQLite: a row added without placing the order, a quantity refused at
+`lines[0].quantity`, a limit refused at `limit`, a reason past its 500
+characters refused at `reason`, and a second cancel's 409 as the form's
+message.
 
 The rule is reversible until the first release.

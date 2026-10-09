@@ -227,7 +227,10 @@ TypeScript frontend checks the argument with. It is presentation only,
 and adds no field, operation or storage. The core's generators leave it
 out; the Topcoat extension's display components read its `noun`,
 `plural`, `titleField` and `summaryFields`
-([Pages with Topcoat](/superschematic/guides/topcoat/#display-components)).
+([Pages with Topcoat](/superschematic/guides/topcoat/#display-components)),
+and its forms a row type's `noun` and `createLabel`, which number a list's
+rows and label its add button
+([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
 The engine's describe document carries it
 for the schema's instance type, with each field's title and icon
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).

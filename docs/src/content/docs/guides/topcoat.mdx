@@ -18,10 +18,13 @@ arguments, a filter for a GET, and a record per result type, with
 components that render each record, and it mounts the JSON API beside the
 pages.
 
-The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
+The acme shop's `topcoat/` app is a small shop over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
 serves, which keep the shop in memory or in a SQLite file, with the
-shop's users in SQLite.
+shop's users in SQLite. A shopper signs in with their password, writes a
+review at `/reviews`, places an order at `/orders/new`, filters their
+orders at `/orders` and cancels one from its page, `/orders/{id}`, each
+page's input taken through a form the crate builds.
 
 ## Build the crate
 
@@ -88,6 +91,13 @@ cover an operation's. A page and the JSON API therefore admit the same
 callers. The app names the crate, so the linker keeps it and `.discover()`
 finds its procedures.
 
+A page whose operation would refuse a caller who is not signed in shows a
+Sign in button. It opens the sign-in page with the page to come back to
+(`next`), which the sign-in form sends along, and a sign-in goes back
+there only when `next` is a path of the app, never another host's:
+
+<Snippet file="topcoat/src/lib.rs" symbol={['sign_in_button', 'is_local']} />
+
 ## Call an operation from a page
 
 `operations::<namespace>_<operation>(cx, args)` runs an operation as its
@@ -103,6 +113,10 @@ shows or hides what the operation does. Both apply the end-user rule
 only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
+The acme pages ask the guard whether to show the sign-in button above a
+form:
+
+<Snippet file="topcoat/src/lib.rs" symbol="needs_sign_in" />
 
 ## Forms
 
@@ -159,17 +173,23 @@ A list's rows are added and removed by submit buttons named `_action`:
 `remove:lines[1]` in each row while it holds more than its `listMin`. The
 form keeps the button pressed, and `apply_action()` applies it and says
 whether a row button submitted the form, in which case the page renders
-the form again without calling the operation:
+the form again, 200, without calling the operation. The acme app's
+`POST /orders/new` does that, then places the order and goes to its page,
+or renders the form again, 422, with each error at its control:
 
-```rust
-let mut form = form;
-if form.apply_action() {
-    return Ok(view! { <form method="post">place_order_input_fields(form: form)</form> });
-}
-```
+<Snippet file="topcoat/src/lib.rs" symbol="place_order" />
 
-The buttons skip the browser's checks (`formnovalidate`), so a row can be
+A page answers with one view, so the row action and a refusal set the
+status, and both render the same `place_order_page` component. The
+buttons skip the browser's checks (`formnovalidate`), so a row can be
 added before the others are valid, and Enter still submits the form.
+
+The row type's `@display` names the rows and the add button: each row is
+numbered by its `noun` ("Line 1"), else by the list's label, and the add
+button says its `createLabel` ("Add a line"), else "Add". A field's
+`@docs` title is its label, so the line's product reads "Product":
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="PlaceOrderLine" />
 
 ### An argument form
 
@@ -194,12 +214,33 @@ argument is labeled by its name in words, and its description is a hint
 under the label. A path argument is a hidden input: `new(id)` builds the
 form of one resource, such as the order a cancel button cancels.
 
+The acme order page renders `order_cancel_order_args_fields` under the
+order's detail while the order is placed. `POST /orders/{id}/cancel`
+takes the id from its route, not from the hidden input, which a reader
+can change, then submits the form. It goes back to the order's page
+(303), or renders the page again, 422, with the form as sent: an
+over-long reason's message at the reason, and the operation's 409, for an
+order no longer placed, as the form's own:
+
+<Snippet file="topcoat/src/lib.rs" symbol="cancel_order" />
+
+`path_param!(id: types::IdentityUUID, error = not_found)` declares the
+route's id, so a path that holds no id is a 404.
+
 A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
 reads it from the query with Topcoat's `Form<T>`, which reads the query on
 GET, or with `from_query(cx)`, so the controls show the filters in effect.
 A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
 a comma-separated value is split as the router splits it. A blank field is
 absent, and so is an optional flag whose checkbox is not checked.
+
+`submit` turns every refusal into the form's errors, a caller's 401 or
+403 included. The acme orders page keeps the route's status instead: it
+parses the filter and makes the call itself, so a caller the route
+refuses gets its status and the sign-in button, and a refused filter, a
+limit past 100, say, gets 422 and the message at its control:
+
+<Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
 
 ### Typed controls
 
@@ -226,12 +267,13 @@ An input type does not say which product a `productId` names. The page
 says, with `Choices`, which either kind of component takes and which
 turns the text or number fields it names into a `<select>`:
 `lines.productId` for every line's product, or `lines[0].productId` for
-one line's.
+one line's. The acme app's catalog, which also stocks the shop in memory
+and in SQLite, supplies each line's:
 
-```rust
-let choices = Choices::new().with("lines.productId", products.iter().map(|p| (p.id.clone(), p.name.clone())));
-view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
-```
+<Snippet file="topcoat/src/lib.rs" symbol="product_choices" />
+
+A choice's value is the id as the API sends it, its compact text, which
+is what a record holds and what the select sends back.
 
 ## Records
 
@@ -252,10 +294,12 @@ user model's routes have none, since a page does not call them in-process.
 `views` renders each record two ways: `<type>_detail(record)` as a
 description list, a label and a value per field, and `<type>_table(rows)`
 as a table with a row per record. The shard above renders a review with
-`review_view_detail`, and the orders page renders the shopper's orders
-with `order_view_table`:
+`review_view_detail`, an order's page renders the order with
+`order_view_detail`, and the orders page renders the shopper's orders
+with `order_view_table`. A table's cells are the records' values, with no
+links, so the page lists a link to each order's page after it:
 
-<Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
+<Snippet file="topcoat/src/lib.rs" symbol="order_list" />
 
 A field is labeled as its form field is: its `@docs` title, else its name
 in words. A value renders by its type:
@@ -336,7 +380,9 @@ implementations over a file of `shop-db`'s tables, through rusqlite, and
 With `DATABASE_URL` set, the app opens that file, which must hold
 `shop-db`'s tables, its identity tables among them, and its reviews,
 orders, users and sessions outlive the process; without it, the shop and
-its users are in memory. `DATABASE_URL` is a `sqlite:`
+its users are in memory. Either way the app stocks the shop from its
+catalog, since an order's lines are priced from it, in SQLite from the
+product's row. `DATABASE_URL` is a `sqlite:`
 URL, a `file:` URI or a path. A URL of another database, such as a
 Postgres one already in the shell, stops the app with an error that names
 its scheme alone, since the URL may hold a password:
@@ -370,9 +416,22 @@ JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
 
+The orders tests place an order through its form: a row button adds a
+line and renders the form again without placing the order, a quantity of
+0 comes back 422 with the message at `lines[0].quantity` and the form as
+sent, and a valid form goes to the new order's page. `/orders?statuses=cancelled`
+lists the cancelled orders alone, its box checked, and a limit of 500
+comes back 422 at the limit. On an order's page, a reason past 500
+characters is refused at the reason, the route's id is the order
+cancelled whatever the hidden input holds, and cancelling it again shows
+the operation's 409 as the form's message:
+
+<Snippet file="topcoat/tests/app.rs" symbol="an_order_is_cancelled_from_its_page" />
+
 Over SQLite, a test builds a file from `sqlite/create.sql`, or copies the
 one `scripts/check.sh` migrates with the runner, signs the shopper in,
-writes a review and places an order, then opens a new app on the same
-file, where the shopper's session still holds:
+writes a review, places an order through the JSON API and another through
+the form, cancels the second from its page, then opens a new app on the
+same file, where the shopper's session still holds:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_sqlite_shop_outlives_the_app" />
