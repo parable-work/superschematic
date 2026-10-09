@@ -100,7 +100,8 @@ left at 0.0.0 is a go.mod that `go build -mod=readonly` refuses to update.
 The `replace` lines stay in a release, and `go install <package>@vX.Y.Z`
 refuses a command whose module carries any, as cmd/superschematic does.
 runtime/migrate/go carries none, so superschematic-migrate installs that
-way. The installed binary is downloaded from the release or built from a
+way; runtime/http/go carries them, so superschematic-identity does not.
+The installed binary is downloaded from the release or built from a
 checkout.
 
 Pre-releases: SemVer `-alpha.N`, `-beta.N` and `-rc.N` map to PEP 440 `aN`,

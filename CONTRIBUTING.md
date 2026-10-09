@@ -265,8 +265,9 @@ the siblings from their tags; the `replace` lines next to them keep local
 builds on the checkout. A release keeps the `replace` lines, and `go
 install <package>@vX.Y.Z` refuses a module that has any, so the installed
 binary is not `go install`able: users download it from the release or run
-`make build` in a checkout. `superschematic-migrate`, whose module has
-none, installs that way.
+`make build` in a checkout. Nor is the identity runner,
+`superschematic-identity`, whose module `runtime/http/go` has them too.
+`superschematic-migrate`, whose module has none, installs that way.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
@@ -311,12 +312,15 @@ A release is three steps, each started by a person. For the first release,
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
    official extensions) for linux and darwin on x64 and arm64, each
    on a runner of that os/arch, linked against the superscalar archive built
-   from the pinned checkout. It cross-compiles the migration runner,
-   `superschematic-migrate`, for the same four on one runner, since it needs
-   no cgo, and stamps the version its `version` command prints with
-   `-X main.version`. It refuses a set not built from the tag's commit,
-   writes `SHA256SUMS` over both binaries' archives
-   (`superschematic_<version>_<platform>.tar.gz` and
+   from the pinned checkout, and the identity runner,
+   `superschematic-identity`, on the same runners, since it needs cgo too.
+   It cross-compiles the migration runner, `superschematic-migrate`, for the
+   same four on one runner, since it needs no cgo. Both runners' `version`
+   commands print the version the build stamps with `-X main.version`. It
+   refuses a set not built from the tag's commit, writes `SHA256SUMS` over
+   the three binaries' archives
+   (`superschematic_<version>_<platform>.tar.gz`,
+   `superschematic-identity_<version>_<platform>.tar.gz` and
    `superschematic-migrate_<version>_<platform>.tar.gz`), and packs the npm
    tarballs and the PyPI sdist and wheel. It creates the GitHub release with
    build provenance, an SBOM and notes generated from the pull requests
