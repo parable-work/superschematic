@@ -1,12 +1,15 @@
-# A TypeScript API with a database, a callee and a setting: it takes ts-db
-# from its one DB-kind dependency, calls ts-pricing, holds one setting in
-# its @envVars type and checks the end user on one operation.
+# A TypeScript API with a database, a callee, a bucket and a setting: it
+# takes ts-db from its one DB-kind dependency, calls ts-pricing, lists the
+# bucket ts-media (D54), holds one setting in its @envVars type and checks
+# the end user on one operation.
 name: ts-shop
 kind: API
 dependencies:
   - { name: ts-db, kind: DB }
 calls:
   - { name: ts-pricing, kind: API }
+buckets:
+  - { name: ts-media, kind: Bucket }
 outputs:
   types:
     typescript: { enabled: true }

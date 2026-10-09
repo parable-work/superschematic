@@ -37,6 +37,21 @@ func serviceAddress(ctx registry.PlatformContext) any {
 	return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "uri"}
 }
 
+// servicePublicAddress is where a browser reaches an exposed server
+// (D55): under a domain, `https://` and its host there, the only address
+// whose traffic its ingress takes (lowerService); without one, its run.app
+// URL. A server that is not exposed has none.
+func servicePublicAddress(ctx registry.PlatformContext) any {
+	d := ctx.Deployable
+	switch {
+	case !d.Exposed:
+		return nil
+	case ctx.Environment.Domain != "":
+		return join("https://", d.ResourceName, ".", ctx.Environment.Domain)
+	}
+	return serviceAddress(ctx)
+}
+
 // lowerService lowers a server to:
 //
 //   - what a server and a job share (lowerWorkload): a service account,

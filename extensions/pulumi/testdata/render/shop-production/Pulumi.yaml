@@ -144,6 +144,8 @@ resources:
           value: ${shop-db-instance.connectionName}
         - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
           value: ${shop-api-account.email}
+        - name: SHOP_MEDIA_BUCKET_NAME
+          value: ${shop-media-bucket.name}
         - name: STRIPE_KEY
           secret: ${secret-PaymentsSecrets-STRIPE_KEY.id}
       image: shop-api
@@ -157,6 +159,7 @@ resources:
         - ${shop-api-account}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
+        - ${shop-media-bucket}
   # phase infrastructure; owners sql:shop-api->shop-db
   shop-api-sql-shop-db:
     name: shop-api.sql.shop-db
@@ -169,6 +172,18 @@ resources:
       dependsOn:
         - ${shop-api-account}
         - ${shop-db-instance}
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-storage-shop-media:
+    name: shop-api.storage.shop-media
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${shop-api-account.email}
+      resource: ${shop-media-bucket.id}
+      role: storage.objectUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-media-bucket}
   # phase infrastructure; owners shop-db
   shop-db-database-shop-db:
     name: shop-db.database.shop-db
@@ -188,6 +203,15 @@ resources:
       highAvailability: true
       name: shop-db
       tier: large
+  # phase infrastructure; owners shop-media
+  shop-media-bucket:
+    name: shop-media.bucket
+    type: fake:storage/bucket:Bucket
+    properties:
+      location: us-east1
+      name: acme-prod-shop-stack-shop-media
+      public: false
+      versioning: true
   # phase infrastructure; owners shop-orders-fulfil-orders
   shop-orders-fulfil-orders-account:
     name: shop-orders-fulfil-orders.account
@@ -380,11 +404,14 @@ outputs:
   shop-api.service.id: ${shop-api-service.id}
   shop-api.service.url: ${shop-api-service.url}
   shop-api.sql.shop-db.id: ${shop-api-sql-shop-db.id}
+  shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
   shop-db.instance.connectionName: ${shop-db-instance.connectionName}
   shop-db.instance.id: ${shop-db-instance.id}
   shop-db.instance.name: ${shop-db-instance.name}
+  shop-media.bucket.id: ${shop-media-bucket.id}
+  shop-media.bucket.name: ${shop-media-bucket.name}
   shop-orders-fulfil-orders.account.email: ${shop-orders-fulfil-orders-account.email}
   shop-orders-fulfil-orders.account.id: ${shop-orders-fulfil-orders-account.id}
   shop-orders-fulfil-orders.invokes.shop-api.id: ${shop-orders-fulfil-orders-invokes-shop-api.id}

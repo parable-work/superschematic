@@ -190,7 +190,7 @@ func TestWorkerRefusals(t *testing.T) {
 		s, services := workerShop()
 		s.Expose = append(s.Expose, fulfil)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-fulfil-orders, a worker; only a server is exposed")
+		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-fulfil-orders, a worker; only a server or a site is exposed")
 	})
 	t.Run("a target with no worker platform", func(t *testing.T) {
 		s, services := workerShop()

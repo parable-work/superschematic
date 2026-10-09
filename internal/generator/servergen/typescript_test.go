@@ -41,6 +41,11 @@ const (
 	// servers, whose Staging environment places ts-db on Cloud SQL.
 	tsCloudStack = "ts-cloud-stack"
 
+	// tsSite is the fixture's site, which ts-stack deploys and which calls
+	// ts-shop: ts-shop's server answers CORS for it (D55). It is loaded,
+	// not built.
+	tsSite = "ts-web"
+
 	// tsGoldenRoot holds the TypeScript entrypoints as the output root
 	// lays them out.
 	tsGoldenRoot = "testdata/golden/typescript"
@@ -48,11 +53,12 @@ const (
 
 // tsOrder is the order a build-all builds the TypeScript fixture in,
 // tsCloudStack left out: ts-shop calls ts-pricing, so it builds after
-// ts-pricing's SDK.
-var tsOrder = []string{"ts-db", "ts-pricing", "ts-shop", "ts-stack"}
+// ts-pricing's SDK. ts-media, the bucket ts-shop lists, builds nothing
+// (D54).
+var tsOrder = []string{"ts-db", "ts-media", "ts-pricing", "ts-shop", "ts-stack"}
 
 // tsAPIs are the services of tsOrder the stacks serve.
-var tsAPIs = tsOrder[1 : len(tsOrder)-1]
+var tsAPIs = tsOrder[2 : len(tsOrder)-1]
 
 // loadTypeScriptFixture loads every TypeScript fixture service, as
 // loadFixture loads the Go one.
@@ -63,7 +69,7 @@ func loadTypeScriptFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(tsOrder), tsCloudStack) {
+	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsSite) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsServicesRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -294,6 +300,12 @@ export const create: Constructor = deps => ({
     async getCart({ id }, ctx) {
       if (id === 'slow') await new Promise(resolve => setTimeout(resolve, 1500));
       if (id === 'unpriced') throw notImplemented('carts.getCart for an unpriced cart');
+      if (id === 'media') {
+        // The bucket main.ts opened from TS_MEDIA_BUCKET signs a URL for
+        // its emulator's host, which the cart's region carries back.
+        const url = await deps.tsMedia.signedUrl('carts/' + id + '.png', { method: 'PUT', expiresInSeconds: 60, contentType: 'image/png' });
+        return { id, cents: 0, region: new URL(url).host };
+      }
       const quote = await deps.tsPricing.quotes.getQuote(id, { forward: ctx });
       return { id, cents: quote.cents, region: deps.config.STOREFRONT_REGION };
     },
@@ -466,10 +478,20 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	edge := variables(t, "TS_PRICING_SERVICE", ir.ServiceEndpoint{URL: pricing.base, Credential: &ir.ServiceCredential{
 		Source: ir.CredentialSignedToken, Audience: "ts-pricing", Issuer: "ts-shop", Key: private,
 	}})
-	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable}, edge...)...)
+	// ts-shop lists ts-media, on an emulator nothing answers: opening it
+	// and signing a URL make no request (D54).
+	edge = append(edge, variables(t, "TS_MEDIA_BUCKET", ir.BucketConnection{Name: "ts-media", Endpoint: "http://127.0.0.1:9"})...)
+	// The site ts-web calls ts-shop from its origin, which ts-shop's CORS
+	// field lists (D55).
+	const siteOrigin = "https://ts-web.acme.dev"
+	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable, "TS_SHOP_CORS_ORIGINS=" + siteOrigin}, edge...)...)
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, shop.base, http.MethodGet, "/api/carts/tea", siteOrigin, "", http.StatusOK, siteOrigin)
 	shop.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	shop.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["ts-db"]`)
 	shop.expect(t, http.MethodGet, "/api/carts/tea", http.StatusOK, `"cents":300`, `"region":"eu"`)
+	shop.expect(t, http.MethodGet, "/api/carts/media", http.StatusOK, `"region":"127.0.0.1:9"`)
 	// The implementation's problem is the router's, though the two import
 	// the runtime from packages with different peers.
 	shop.expect(t, http.MethodGet, "/api/carts/unpriced", http.StatusNotImplemented, "carts.getCart for an unpriced cart")

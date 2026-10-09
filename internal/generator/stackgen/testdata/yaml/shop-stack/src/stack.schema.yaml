@@ -11,6 +11,7 @@ types:
       deploy:
         - { name: shop-api, kind: API }
         - { name: shop-orders, kind: API }
+        - { name: shop-web, kind: Site }
       expose:
         - service: { name: shop-api, kind: API }
   Orders:
@@ -54,6 +55,8 @@ types:
           env: { FULFILLMENT_REGION: { value: us } }
         - of: { service: { name: shop-orders, kind: API }, job: ShipOrders }
           values: { cpu: "2" }
+        - of: { service: { name: shop-media, kind: Bucket } }
+          values: { versioning: true }
         - of: { service: { name: shop-orders, kind: API }, worker: FulfilOrders }
           instances: 3
           values: { memory: 1Gi }

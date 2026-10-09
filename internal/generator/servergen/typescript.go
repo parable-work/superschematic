@@ -28,11 +28,17 @@ import (
 // Go entrypoint's main does: it loads each API's config, opens one pg Pool
 // per database, builds one SDK client per API called, builds each API's
 // implementation from its Deps and mounts every API's router on one Hono
-// app beside /healthz and /readyz.
+// app beside /healthz and /readyz. An API whose authDb has a User table
+// authenticates with the identity runtime (D50), as on a Go server: main.ts
+// builds one identity store over the pool of that database, from the
+// descriptor its TypeScript types export, and the API's identity service
+// from its identity config field. A server whose APIs list a
+// bucket opens each on GCS through the HTTP runtime's ./gcs entry, and
+// depends on GCS's Node client (D54).
 
 // BunVersion is the oven/bun image a TypeScript server's Dockerfile runs it
 // on: tools.env's BUN_VERSION, the Bun the repository's checks run on.
-const BunVersion = "1.4.0"
+const BunVersion = "1.4.2"
 
 // The files of a TypeScript entrypoint package.
 const (
@@ -50,6 +56,14 @@ const (
 	pgVersion                = "8.23.0"
 	cloudSQLConnectorPackage = "@google-cloud/cloud-sql-connector"
 	cloudSQLConnectorVersion = "1.12.0"
+)
+
+// The GCS Node client the HTTP runtime's ./gcs entry imports, which only a
+// server whose APIs list a bucket depends on (D54): the release the
+// runtime is checked against.
+const (
+	storagePackage = "@google-cloud/storage"
+	storageNodeVer = "8.3.0"
 )
 
 // TypeScriptImplementation is where an API's TypeScript implementation
@@ -79,6 +93,10 @@ type TypeScriptAPIInput struct {
 
 	// Implementation is where its implementation lives.
 	Implementation TypeScriptImplementation
+
+	// CORS is true when a site of the stack calls the API: its server then
+	// answers CORS for the origins its CORS field lists (D55).
+	CORS bool
 }
 
 // TypeScriptInput is what a TypeScript server's entrypoint is planned
@@ -143,6 +161,10 @@ type TypeScriptServer struct {
 	Databases []*TypeScriptDatabase
 	Clients   []*TypeScriptClient
 
+	// Buckets are the buckets main.ts opens once, for every API that lists
+	// it. With one, the package depends on GCS's Node client (D54).
+	Buckets []*TypeScriptBucket
+
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. With one, the package depends on
 	// the Cloud SQL Node connector; with none main.ts refuses a Cloud SQL
@@ -181,27 +203,60 @@ type TypeScriptAPI struct {
 	// Config, Deps, Implementations and Authenticate are the variables of
 	// its config, its Deps, its implementations and its authenticator.
 	// Config is empty when the API has no EnvConfig, and Authenticate when
-	// no route needs an end user.
+	// no route needs an end user or the identity service establishes it.
 	Config          string
 	Deps            string
 	Implementations string
 	Authenticate    string
 
+	// Identity is the variable of its identity service when it
+	// authenticates with the identity runtime over the user model (D50),
+	// empty otherwise, and IdentityField the identity config field the
+	// service's config is read from (ir.IdentityConfigField).
+	Identity      string
+	IdentityField string
+
 	// Callers is its callers field, which serviceAuthenticator reads, when
 	// an operation has a service clause (D37).
 	Callers string
+
+	// CORS is the variable of the origins its CORS field lists, which
+	// loadCors reads, and CORSField that field, when a site of the stack
+	// calls it (D55); both empty otherwise.
+	CORS      string
+	CORSField string
 
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
 
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
+
+	// Buckets are Deps' buckets (D54).
+	Buckets []TypeScriptBucketUse
 }
 
 // TypeScriptCall is a client in an API's Deps.
 type TypeScriptCall struct {
 	Field  string
 	Client *TypeScriptClient
+}
+
+// TypeScriptBucketUse is a bucket in an API's Deps.
+type TypeScriptBucketUse struct {
+	Field  string
+	Bucket *TypeScriptBucket
+}
+
+// TypeScriptBucket is a bucket main.ts opens once, for every API that
+// lists it (D54).
+type TypeScriptBucket struct {
+	Service string
+	Var     string
+
+	// From is the expression that reads the bucket's connection from the
+	// first listing API's config.
+	From string
 }
 
 // TypeScriptDatabase is a database the server opens one pool to, for every
@@ -214,6 +269,16 @@ type TypeScriptDatabase struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+
+	// Store is the variable of the identity store over the pool when an
+	// API on the database authenticates with the identity runtime (D50),
+	// empty otherwise. Descriptor is the name main.ts imports the
+	// database's identity descriptor as, from DescriptorModule, an entry of
+	// its TypeScript types package, DescriptorPackage.
+	Store             string
+	Descriptor        string
+	DescriptorModule  string
+	DescriptorPackage string
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -271,7 +336,9 @@ var tsReserved = []string{
 	"connectPostgres", "ping", "Pool", "Database", "Service", "DEFAULT_PORT", "SHUTDOWN_TIMEOUT_MS",
 	"READINESS_TIMEOUT_MS", "BunServer", "BunRuntime", "Dependency", "logger", "exitCodes", "main",
 	"listenPort", "configure", "construct", "connect", "drain", "app", "draining", "dependencies", "bun",
-	"server", "stopping", "shutdown", "port", "process",
+	"server", "stopping", "shutdown", "port", "process", "openBucket",
+	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
+	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -306,6 +373,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	}
 	databases := map[string]*TypeScriptDatabase{}
 	clients := map[string]*TypeScriptClient{}
+	buckets := map[string]*TypeScriptBucket{}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := varStem(o.SchemaName)
@@ -333,8 +401,16 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasEnvConfig {
 			api.Config = taken.take(stem + "Config")
 		}
+		if a.CORS {
+			api.CORS = taken.take(stem + "Origins")
+			api.CORSField = ir.CORSField(o.SchemaName)
+		}
 		if o.ChecksEndUsers() {
 			api.Authenticate = taken.take(stem + "Authenticate")
+		}
+		if o.Identity != nil {
+			api.Identity = taken.take(stem + "Identity")
+			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
 		if o.HasServiceCallers && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
@@ -360,6 +436,19 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			}
 			api.Database = d
 		}
+		if o.Identity != nil {
+			d := api.Database
+			if d == nil || d.Service != o.Identity.AuthDB {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, and opens no pool on it to build its identity store over", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
+			}
+			if d.Store == "" {
+				stem := varStem(d.Service)
+				d.Store = taken.take(stem + "IdentityStore")
+				d.Descriptor = taken.take(stem + "IdentityDescriptor")
+				d.DescriptorModule = o.Identity.DescriptorModule
+				d.DescriptorPackage = n.NpmTypesPackage(d.Service)
+			}
+		}
 		for _, call := range o.Deps.Calls {
 			c := clients[call.Service]
 			if c == nil {
@@ -382,6 +471,23 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			}
 			api.Calls = append(api.Calls, TypeScriptCall{Field: call.Field, Client: c})
 		}
+		for _, b := range o.Deps.Buckets {
+			h := buckets[b.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, in.Server, o.SchemaName, b.Service)
+				}
+				h = &TypeScriptBucket{
+					Service: b.Service,
+					Var:     taken.take(varStem(b.Service) + "Bucket"),
+					From:    api.Config + "." + key,
+				}
+				buckets[b.Service] = h
+				s.Buckets = append(s.Buckets, h)
+			}
+			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
+		}
 		s.APIs = append(s.APIs, api)
 	}
 	slices.Sort(s.CloudSQL)
@@ -398,17 +504,32 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 }
 
 // RouterOptions are the members of the options main.ts builds the API's
-// router with: its authenticator, and the service authenticator over its
-// callers field.
+// router with: its authenticator or its identity service, and the service
+// authenticator over its callers field.
 func (a *TypeScriptAPI) RouterOptions() []string {
 	var out []string
 	if a.Authenticate != "" {
 		out = append(out, "authenticate: "+a.Authenticate)
 	}
+	if a.Identity != "" {
+		out = append(out, "identity: "+a.Identity)
+	}
 	if a.Callers != "" {
 		out = append(out, "authenticateService: serviceAuthenticator("+a.Config+"."+a.Callers+")")
 	}
 	return out
+}
+
+// Identity reports whether an API of the server authenticates with the
+// identity runtime, so main.ts imports its ./identity entry.
+func (s *TypeScriptServer) Identity() bool {
+	return slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.Identity != "" })
+}
+
+// AnyCORS reports whether a site of the stack calls an API the server
+// serves, which then answers CORS (D55).
+func (s *TypeScriptServer) AnyCORS() bool {
+	return slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.CORS != "" })
 }
 
 // RuntimeImports are the names main.ts imports from the HTTP runtime's
@@ -421,6 +542,9 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	if len(s.Clients) > 0 {
 		out = append(out, "serviceCredentialFor")
 	}
+	if s.AnyCORS() {
+		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")
+	}
 	if len(s.Databases) > 0 {
 		out = append(out, "type Database")
 	}
@@ -431,7 +555,8 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 }
 
 // planPackage plans package.json's dependencies: each served API package,
-// its implementation and each callee's SDK from the workspace; the HTTP
+// its implementation, each callee's SDK and the TypeScript types of each
+// database an identity store reads from the workspace; the HTTP
 // runtime, which the workspace's root overrides with a checkout or the
 // registry serves; and the third-party packages main.ts imports.
 func (s *TypeScriptServer) planPackage() {
@@ -446,6 +571,12 @@ func (s *TypeScriptServer) planPackage() {
 	for _, c := range s.Clients {
 		deps[c.Package] = "workspace:*"
 	}
+	for _, d := range s.Databases {
+		if d.Store != "" {
+			// main.ts imports the database's identity descriptor.
+			deps[d.DescriptorPackage] = "workspace:*"
+		}
+	}
 	dev := map[string]string{
 		"@types/node": tsrestgen.NodeTypesVersion,
 		"typescript":  tsrestgen.TypeScriptVersion,
@@ -456,6 +587,9 @@ func (s *TypeScriptServer) planPackage() {
 	}
 	if len(s.CloudSQL) > 0 {
 		deps[cloudSQLConnectorPackage] = cloudSQLConnectorVersion
+	}
+	if len(s.Buckets) > 0 {
+		deps[storagePackage] = storageNodeVer
 	}
 	sorted := func(m map[string]string) []NpmDependency {
 		out := make([]NpmDependency, 0, len(m))

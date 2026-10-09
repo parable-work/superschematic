@@ -269,10 +269,10 @@ func programDir(outputRoot, stackName, environment string) string {
 
 // stackDevFlags holds `stack dev`'s flag values.
 type stackDevFlags struct {
-	environment    string
-	out            string
-	namingPath     string
-	removeDatabase bool
+	environment string
+	out         string
+	namingPath  string
+	removeData  bool
 }
 
 func newStackDevCmd(a *app) *cobra.Command {
@@ -283,16 +283,19 @@ func newStackDevCmd(a *app) *cobra.Command {
 		Long: `Dev builds the stack service and every service it reaches, each with its
 dependencies, then runs the stack's environment on the local target
 (docs/stack-model.md, section 8.3): a Postgres container with a database per
-DB schema, each migrated to the schema's model with superschematic-migrate,
-and each server built from its entrypoint module at
+DB schema, each migrated to the schema's model with superschematic-migrate;
+a fake-gcs-server container with a bucket per Bucket service the stack
+reaches, when it reaches one (section 8.9); and each server built from its
+entrypoint module at
 <output-root>/server/<stack>/<server> and run as a process with its resolved
 config, callees first, each waited on until it answers /readyz. Each job is
 built from its entrypoint module the same way and runs on its schedule,
 never two runs of one job at once, until Ctrl-C; superschematic stack run
 runs one once, from another terminal. Every process's output is printed
 with its name in front. Dev stays in the foreground until Ctrl-C, then
-stops the servers and the container, which keeps its data for the next
-run.
+stops the servers and the containers, which keep their data for the next
+run: the databases, and the buckets' objects. --remove-data removes the
+containers and their data instead.
 
 The environment is --environment, or the stack's one environment on the local
 target. A secret a server reads comes from
@@ -306,7 +309,7 @@ service, else the one Stack service under ./schemas/services.
 
 Examples:
   superschematic stack dev ./schemas/services/shop-stack
-  superschematic stack dev --environment Dev --remove-database`,
+  superschematic stack dev --environment Dev --remove-data`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := ""
@@ -319,7 +322,11 @@ Examples:
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
-	cmd.Flags().BoolVar(&flags.removeDatabase, "remove-database", false, "on exit, remove the Postgres container and its data instead of stopping it")
+	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them")
+	// The flag's name before the storage emulator's container joined
+	// Postgres's (D54): it removes both.
+	cmd.Flags().BoolVar(&flags.removeData, "remove-database", false, "")
+	_ = cmd.Flags().MarkDeprecated("remove-database", "use --remove-data, which removes the storage emulator's data with the Postgres container's")
 	return cmd
 }
 
@@ -401,7 +408,7 @@ func (p *stackProject) writeModels(env *ir.ResolvedEnvironment, dir string) erro
 }
 
 // The local provisioner's optional methods stack dev uses: where it
-// writes, the wait on its servers, and the removal of the container.
+// writes, the wait on its servers, and the removal of the containers.
 type (
 	outputSetter interface{ SetOutput(io.Writer) }
 	waiter       interface {
@@ -445,10 +452,11 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 		s.SetOutput(out)
 	}
 	req := registry.ProvisionRequest{
-		Environment: env,
-		Dir:         program,
-		OutputRoot:  p.outputRoot,
-		Backend:     local.StateBackend(stateDir),
+		Environment:    env,
+		Dir:            program,
+		OutputRoot:     p.outputRoot,
+		RepositoryRoot: filepath.Dir(p.schemasRoot),
+		Backend:        local.StateBackend(stateDir),
 	}
 	if err := prov.Render(env, program); err != nil {
 		return err
@@ -461,7 +469,7 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	cleanup := func() error {
 		cctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
-		if pr, ok := prov.(purger); ok && flags.removeDatabase {
+		if pr, ok := prov.(purger); ok && flags.removeData {
 			return pr.Purge(cctx, req)
 		}
 		return prov.Destroy(cctx, req)
@@ -483,9 +491,9 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	return errors.Join(runErr, cleanup())
 }
 
-// printLocalSummary prints where each server and database of a running
-// local environment is reached, when each job runs, and what each worker
-// handles.
+// printLocalSummary prints where each server, site and database of a
+// running local environment is reached, when each job runs, and what each
+// worker handles.
 func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string) {
 	var lines []string
 	for _, d := range env.Deployables {
@@ -498,6 +506,10 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  job      %-24s on %s (%s)", d.Name, d.Job.Schedule, d.Job.TimeZone))
 		case d.Kind == ir.DeployableJob:
 			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
+		case d.Kind == ir.DeployableSite:
+			if address, ok := d.PublicAddress.(string); ok {
+				lines = append(lines, fmt.Sprintf("  site     %-24s %s", d.Name, address))
+			}
 		case d.Kind == ir.DeployableWorker && d.Worker != nil && d.Worker.Instances == 0:
 			lines = append(lines, fmt.Sprintf("  worker   %-24s off: queue %s waits", d.Name, d.Worker.Queue))
 		case d.Kind == ir.DeployableWorker && d.Worker != nil:
@@ -505,8 +517,11 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 		}
 	}
 	for _, res := range env.Resources.Resources {
-		if res.Type == local.TypeDatabase {
+		switch res.Type {
+		case local.TypeDatabase:
 			lines = append(lines, fmt.Sprintf("  database %-24s %v", res.Properties["service"], res.Properties["url"]))
+		case local.TypeBucket:
+			lines = append(lines, fmt.Sprintf("  bucket   %-24s %v/%v", res.Properties["service"], res.Properties["endpoint"], res.Properties["name"]))
 		}
 	}
 	sort.Strings(lines)

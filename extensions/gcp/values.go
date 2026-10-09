@@ -33,8 +33,16 @@ const (
 	TypeCertificateMap      = "gcp:certificatemanager/certificateMap:CertificateMap"
 	TypeCertificateMapEntry = "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry"
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
+	TypeBucket              = "gcp:storage/bucket:Bucket"
 
-	// The types of the bootstrap graph (BootstrapEnvironment).
+	// The types of a site (D55): the bucket that holds its files
+	// (TypeBucket), the load balancer's backend for it, and the HTTP proxy
+	// of a site with no domain.
+	TypeBackendBucket = "gcp:compute/backendBucket:BackendBucket"
+	TypeHTTPProxy     = "gcp:compute/targetHttpProxy:TargetHttpProxy"
+
+	// The types of the bootstrap graph (BootstrapEnvironment). A bucket
+	// edge's grants (connectBucket) are of the last two too (D54).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
 	TypeRepositoryIAMMember      = "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember"
 	TypeServiceAccountIAMMember  = "gcp:serviceaccount/iAMMember:IAMMember"
@@ -89,6 +97,14 @@ const cloudRunJobSettings = `{
   "additionalProperties": false
 }`
 
+// siteSettings is the schema of a site's settings on the gcp site
+// platform (D55): it takes none.
+const siteSettings = `{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}`
+
 // cloudRunWorkerSettings is the schema of a worker's settings on a Cloud
 // Run worker pool (D53): the resources of each instance's container. A
 // worker pool's CPU is always allocated, which Cloud Run gives as one CPU
@@ -113,6 +129,18 @@ const cloudSQLSettings = `{
     "version": {"enum": ["POSTGRES_15", "POSTGRES_16", "POSTGRES_17"]},
     "deletionProtection": {"type": "boolean"},
     "diskSize": {"type": "integer", "minimum": 10}
+  },
+  "additionalProperties": false
+}`
+
+// storageSettings is the schema of a bucket's settings on Cloud Storage
+// (D54): object versioning, off unless set, and the age in days at which
+// a lifecycle rule deletes an object.
+const storageSettings = `{
+  "type": "object",
+  "properties": {
+    "versioning": {"type": "boolean"},
+    "deleteAfterDays": {"type": "integer", "minimum": 1}
   },
   "additionalProperties": false
 }`

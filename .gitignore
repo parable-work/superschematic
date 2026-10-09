@@ -18,6 +18,9 @@ node_modules/
 dist/
 # examples/acme-shop's second output root, for shop-orders served in Rust.
 dist-rust/
+# The SQLite shop and its plan, which examples/acme-shop's README makes.
+examples/acme-shop/shop.db
+examples/acme-shop/shop-db.sqlite.plan.json
 .venv/
 __pycache__/
 .pytest_cache/

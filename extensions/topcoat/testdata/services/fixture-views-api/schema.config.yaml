@@ -1,0 +1,5 @@
+# The Topcoat extension's fixture for display components: a result type
+# with a field of every kind a component renders, and a @display.
+name: fixture-views-api
+kind: API
+outputs: {}

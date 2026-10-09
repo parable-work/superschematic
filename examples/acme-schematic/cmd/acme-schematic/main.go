@@ -7,9 +7,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/parable-work/superschematic/cli"
 
 	"example.com/acme/schematic/ext"
@@ -21,7 +18,6 @@ func main() {
 		Short: "Generate code from the acme schemas",
 	}, ext.Extension{})
 	if err := root.Execute(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		cli.Exit(err)
 	}
 }

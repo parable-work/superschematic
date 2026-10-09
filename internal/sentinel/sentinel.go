@@ -160,8 +160,9 @@ var identifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 // Content renders the sentinel file for a service. The SchemaKind enum in
 // the schema-config package is closed over the core kinds (DB, API,
-// General; the ir constants), so those render as the enum member, which
-// keeps committed sentinels byte-stable. Any other kind is an extension's
+// General and Bucket, D54; the ir constants), so those render as the enum
+// member, which keeps committed sentinels byte-stable. Any other kind is an
+// extension's
 // and has no member: it renders as a string literal, which the kind slot's
 // SchemaKindName type admits. Callers check the kind against their registry
 // first (EmitService does).
@@ -187,7 +188,11 @@ func HandleContent(name string, kind ir.SchemaKind, n naming.Naming, types Handl
 	imports := "service"
 	kindExpr := fmt.Sprintf("%q", string(kind))
 	switch kind {
-	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral:
+	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket:
+		imports = "service, SchemaKind"
+		kindExpr = "SchemaKind." + string(kind)
+	case ir.SchemaKindSite:
+		// A site is a core kind with an enum member (D55).
 		imports = "service, SchemaKind"
 		kindExpr = "SchemaKind." + string(kind)
 	}

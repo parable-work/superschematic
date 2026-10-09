@@ -54,7 +54,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
 		{name: "fixture-general", schema: generalSchema},
 	}
-	for _, name := range []string{"fixture-nested-arrays", "fixture-nested-arrays-db", "fixture-nested-arrays-api", "fixture-version-graph-db", "fixture-optimistic-db"} {
+	for _, name := range []string{"fixture-nested-arrays", "fixture-nested-arrays-db", "fixture-nested-arrays-api", "fixture-version-graph-db", "fixture-optimistic-db", "fixture-user-model-db"} {
 		schema, err := loader.LoadService(filepath.Join(fixturesDir, name))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)

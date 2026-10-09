@@ -15,11 +15,38 @@
           "kind": "API"
         }
       ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-api",
       "address": "http://127.0.0.1:22424",
+      "publicAddress": "http://127.0.0.1:22424",
       "bindings": [
+        {
+          "field": "SHOP_API_CORS",
+          "source": "derived",
+          "value": {
+            "origins": [
+              "http://127.0.0.1:22638"
+            ]
+          },
+          "corsOf": "shop-api",
+          "edges": [
+            "site:shop-web->shop-api"
+          ]
+        },
+        {
+          "field": "SHOP_API_IDENTITY",
+          "source": "literal",
+          "value": "{\"cookie\":{\"secure\":false}}",
+          "default": true,
+          "identityOf": "shop-api"
+        },
         {
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
@@ -27,6 +54,15 @@
             "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-api->shop-db"
+        },
+        {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "endpoint": "http://127.0.0.1:25259",
+            "name": "shop-media"
+          },
+          "edge": "bucket:shop-api->shop-media"
         }
       ]
     },
@@ -45,6 +81,19 @@
       "address": "127.0.0.1:32259"
     },
     {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "local.gcs",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "resourceName": "shop-media",
+      "address": "http://127.0.0.1:25259"
+    },
+    {
       "name": "shop-orders",
       "kind": "server",
       "platform": "local.process",
@@ -58,6 +107,7 @@
       "exposed": true,
       "resourceName": "shop-orders",
       "address": "http://127.0.0.1:21753",
+      "publicAddress": "http://127.0.0.1:21753",
       "bindings": [
         {
           "field": "SHOP_DB_DATABASE",
@@ -66,6 +116,13 @@
             "url": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders->shop-db"
+        },
+        {
+          "field": "SHOP_ORDERS_IDENTITY",
+          "source": "literal",
+          "value": "{\"cookie\":{\"secure\":false}}",
+          "default": true,
+          "identityOf": "shop-orders"
         }
       ]
     },
@@ -145,10 +202,72 @@
       "language": "TYPESCRIPT",
       "exposed": true,
       "resourceName": "shop-storefront",
-      "address": "http://127.0.0.1:22420"
+      "address": "http://127.0.0.1:22420",
+      "publicAddress": "http://127.0.0.1:22420"
+    },
+    {
+      "name": "shop-web",
+      "kind": "site",
+      "platform": "local.site",
+      "services": [
+        {
+          "name": "shop-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/shop-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html"
+      },
+      "exposed": true,
+      "resourceName": "shop-web",
+      "address": "http://127.0.0.1:22638",
+      "publicAddress": "http://127.0.0.1:22638",
+      "bindings": [
+        {
+          "field": "shop-api",
+          "source": "derived",
+          "value": {
+            "url": "http://127.0.0.1:22424"
+          },
+          "edge": "site:shop-web->shop-api"
+        }
+      ]
     }
   ],
   "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "local.process-gcs",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
+    {
+      "id": "site:shop-web->shop-api",
+      "kind": "site",
+      "from": "shop-web",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "local.site-process",
+      "field": "shop-api"
+    },
     {
       "id": "sql:shop-api->shop-db",
       "kind": "sql",
@@ -222,7 +341,19 @@
               "host": "127.0.0.1",
               "hostPort": 32259
             }
-          ]
+          ],
+          "readiness": {
+            "exec": [
+              "pg_isready",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              "5432",
+              "--username",
+              "postgres",
+              "--quiet"
+            ]
+          }
         },
         "phase": "infrastructure",
         "owners": [
@@ -235,8 +366,24 @@
         "properties": {
           "env": [
             {
+              "name": "SHOP_API_CORS_ORIGINS",
+              "value": "http://127.0.0.1:22638"
+            },
+            {
+              "name": "SHOP_API_IDENTITY",
+              "value": "{\"cookie\":{\"secure\":false}}"
+            },
+            {
               "name": "SHOP_DB_DATABASE_URL",
               "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
+              "value": "http://127.0.0.1:25259"
+            },
+            {
+              "name": "SHOP_MEDIA_BUCKET_NAME",
+              "value": "shop-media"
             }
           ],
           "language": "go",
@@ -270,6 +417,28 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "local:storage/bucket:Bucket",
+        "properties": {
+          "container": {
+            "$output": {
+              "resource": "storage.container",
+              "name": "name"
+            }
+          },
+          "endpoint": "http://127.0.0.1:25259",
+          "name": "shop-media",
+          "service": "shop-media"
+        },
+        "dependsOn": [
+          "storage.container"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
         ]
       },
       {
@@ -330,6 +499,10 @@
             {
               "name": "SHOP_DB_DATABASE_URL",
               "value": "postgres://postgres@127.0.0.1:32259/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_ORDERS_IDENTITY",
+              "value": "{\"cookie\":{\"secure\":false}}"
             }
           ],
           "language": "go",
@@ -357,6 +530,71 @@
         "owners": [
           "shop-storefront"
         ]
+      },
+      {
+        "id": "shop-web.site",
+        "type": "local:site/site:Site",
+        "properties": {
+          "build": "build",
+          "config": {
+            "apis": {
+              "shop-api": {
+                "url": "http://127.0.0.1:22424"
+              }
+            }
+          },
+          "dir": "web/shop-web",
+          "fallback": "index.html",
+          "name": "shop-web",
+          "output": "dist",
+          "port": 22638
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-web"
+        ]
+      },
+      {
+        "id": "storage.container",
+        "type": "local:docker/container:Container",
+        "properties": {
+          "args": [
+            "-scheme",
+            "http",
+            "-host",
+            "0.0.0.0",
+            "-port",
+            "4443",
+            "-backend",
+            "filesystem",
+            "-filesystem-root",
+            "/storage",
+            "-public-host",
+            "127.0.0.1:25259",
+            "-external-url",
+            "http://127.0.0.1:25259"
+          ],
+          "image": "fsouza/fake-gcs-server:1.56.1",
+          "labels": {
+            "superschematic.environment": "Dev",
+            "superschematic.stack": "shop-stack"
+          },
+          "name": "superschematic-shop-stack-dev-storage",
+          "ports": [
+            {
+              "containerPort": 4443,
+              "host": "127.0.0.1",
+              "hostPort": 25259
+            }
+          ],
+          "readiness": {
+            "http": "/storage/v1/b"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
+        ]
       }
     ]
   },
@@ -365,7 +603,9 @@
       "step": "infrastructure",
       "resources": [
         "postgres.container",
-        "shop-db.database.shop-db"
+        "shop-db.database.shop-db",
+        "shop-media.bucket",
+        "storage.container"
       ]
     },
     {
@@ -391,6 +631,16 @@
         "shop-orders-ship-orders.job",
         "shop-orders.process",
         "shop-storefront.process"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "shop-web"
+      ],
+      "resources": [
+        "shop-web.site"
       ]
     },
     {

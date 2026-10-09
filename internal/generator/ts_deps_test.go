@@ -201,9 +201,11 @@ export async function usesDeps(deps: Deps): Promise<string> {
   const where: string = 'url' in database ? database.url : database.cloudSql.instance;
   const issuers: number = config.DEPS_TS_SHOP_CALLERS.issuers.length;
   const pricing: string = config.DEPS_TS_PRICING_SERVICE.url;
+  const bucket: string = config.DEPS_MEDIA_BUCKET.name;
   const { rows } = await deps.db.query<{ one: number }>('SELECT 1 AS one');
   const quotes = deps.depsTsPricing.quotes;
-  deps.logger.child({ region }).info('used', { where, issuers, pricing, rows: rows.length, quotes: typeof quotes });
+  const upload: string = await deps.depsMedia.signedUrl('products/p-1.png', { method: 'PUT', expiresInSeconds: 900, contentType: 'image/png' });
+  deps.logger.child({ region }).info('used', { where, issuers, pricing, bucket, upload, rows: rows.length, quotes: typeof quotes });
   return region;
 }
 
@@ -227,10 +229,12 @@ test('the implementation builds from Deps and answers 501', async () => {
   expect(config.DEPS_DB_DATABASE).toEqual({ cloudSql: { instance: 'acme:us-central1:shop', database: 'deps_db', user: 'deps-ts-shop@acme.iam' } });
   expect(config.DEPS_TS_PRICING_SERVICE.credential?.source).toBe('google-id-token');
   expect(config.DEPS_TS_SHOP_CALLERS).toEqual({ issuers: [] });
+  expect(config.DEPS_MEDIA_BUCKET).toEqual({ name: 'acme-shop-deps-media' });
   const deps: Deps = {
     config,
     db: {} as Deps['db'],
     depsTsPricing: {} as Deps['depsTsPricing'],
+    depsMedia: {} as Deps['depsMedia'],
     logger: createLogger({ api: 'deps-ts-shop' }, { write: () => {} }),
   };
   const implementations = await create(deps);
@@ -247,7 +251,7 @@ test('the implementation builds from Deps and answers 501', async () => {
 });
 
 test('loadEnvConfig names every variable missing', () => {
-  expect(() => loadEnvConfig({})).toThrow(/DEPS_DB_DATABASE_URL[\s\S]*DEPS_TS_PRICING_SERVICE_URL[\s\S]*DEPS_TS_SHOP_CALLERS_ISSUERS/);
+  expect(() => loadEnvConfig({})).toThrow(/DEPS_DB_DATABASE_URL[\s\S]*DEPS_TS_PRICING_SERVICE_URL[\s\S]*DEPS_MEDIA_BUCKET_NAME[\s\S]*DEPS_TS_SHOP_CALLERS_ISSUERS/);
 });
 `
 
@@ -332,6 +336,7 @@ func TestTypeScriptDepsAndScaffoldCompile(t *testing.T) {
 			Source: ir.CredentialGoogleIDToken, Audience: "https://deps-ts-pricing.run.app",
 		}},
 		ir.CallersField("deps-ts-shop"): ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{}},
+		"DEPS_MEDIA_BUCKET":             ir.BucketConnection{Name: "acme-shop-deps-media"},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {

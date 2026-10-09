@@ -171,7 +171,7 @@ func TestTheTypeScriptStackIsStacktestsShop(t *testing.T) {
 	reg := assemble(t)
 	schema, _ := load(t, reg, filepath.Join(servicesRoot, "shop-stack"))
 	got := ir.StackOf(schema)
-	if want := stacktest.Shop(); !reflect.DeepEqual(got, want) {
+	if want := stacktest.WithSite(stacktest.Shop()); !reflect.DeepEqual(got, want) {
 		t.Errorf("StackOf =\n%s\nwant\n%s", dump(t, got), dump(t, want))
 	}
 }
@@ -214,7 +214,7 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 	reg := assemble(t)
 	c := registry.GenerateContext{Options: options(reg, t.TempDir()), Registry: reg}
 	c.LoadDependency = c.Options.LoadDependency
-	services, err := stackgen.Services(c, stacktest.Shop())
+	services, err := stackgen.Services(c, stacktest.WithSite(stacktest.Shop()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,14 +222,14 @@ func TestServiceReadsStacktestsFacts(t *testing.T) {
 	for _, svc := range services {
 		got[svc.Name] = svc
 	}
-	if len(got) != 3 {
-		t.Errorf("services = %v, want shop-api, shop-orders and shop-db", keys(got))
+	if len(got) != 5 {
+		t.Errorf("services = %v, want shop-api, shop-orders, shop-db, shop-web and shop-media", keys(got))
 	}
 	operations := map[string][]stack.Operation{
 		"shop-api":    {{Name: "ProductQueries.getProduct"}},
 		"shop-orders": {{Name: "OrderQueries.getOrder"}},
 	}
-	for _, want := range stacktest.AcmeShop() {
+	for _, want := range stacktest.SiteShop() {
 		svc, ok := got[want.Name]
 		if !ok {
 			continue
@@ -310,7 +310,7 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 			name: "values under a name that is not the target, which tsc refuses",
 			from: `fake: { project: "acme-staging", region: "us-east1" },`,
 			to:   `other: { project: "acme-staging", region: "us-east1" },`,
-			want: []string{"stack.schema.ts:18:3:", "'other' does not exist in type 'EnvironmentOptions<\"fake\""},
+			want: []string{"stack.schema.ts:19:3:", "'other' does not exist in type 'EnvironmentOptions<\"fake\""},
 		},
 		{
 			name: "values under a name that is not the target, which the loader refuses again",
@@ -323,7 +323,7 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 			name: "a literal for a secret, which tsc refuses",
 			from: `env: { LOG_LEVEL: "warn" }`,
 			to:   `env: { LOG_LEVEL: "warn", STRIPE_KEY: "sk_live" }`,
-			want: []string{"stack.schema.ts:37:63:", "Type 'string' is not assignable to type 'never'"},
+			want: []string{"stack.schema.ts:38:63:", "Type 'string' is not assignable to type 'never'"},
 		},
 		{
 			name: "settings of a class that is no deployable",
@@ -335,7 +335,7 @@ func TestTheLoaderRefusesABadStack(t *testing.T) {
 			name: "a job the API does not declare, which tsc refuses",
 			from: `job: "ShipOrders", schedule`,
 			to:   `job: "ShipOrder", schedule`,
-			want: []string{"stack.schema.ts:24:", "is not assignable to type 'never'"},
+			want: []string{"stack.schema.ts:25:", "is not assignable to type 'never'"},
 		},
 		{
 			name: "a schedule that is no five-field cron",
@@ -400,7 +400,9 @@ func TestAStacksReferencesAreTheServicesItNames(t *testing.T) {
 	want := []ir.ServiceRef{
 		{Name: "shop-api", Kind: ir.SchemaKindAPI},
 		{Name: "shop-db", Kind: ir.SchemaKindDB},
+		{Name: "shop-media", Kind: ir.SchemaKindBucket},
 		{Name: "shop-orders", Kind: ir.SchemaKindAPI},
+		{Name: "shop-web", Kind: ir.SchemaKindSite},
 	}
 	for _, dir := range []string{filepath.Join(servicesRoot, "shop-stack"), yamlStack} {
 		schema, cfg := load(t, reg, dir)

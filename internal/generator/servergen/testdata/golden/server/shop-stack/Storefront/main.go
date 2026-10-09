@@ -34,6 +34,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parable-work/superschematic/runtime/http/go/cors"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
@@ -111,13 +112,21 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("client of shop-api: %w", err)
 	}
 
+	// One handle per bucket, shared by every API that lists it (buckets.go).
+	defer closeBuckets()
+	shopMediaBucket, err := openBucket(ctx, "SHOP_MEDIA_BUCKET", shopOrdersConfig.ShopMediaBucket)
+	if err != nil {
+		return fmt.Errorf("bucket shop-media: %w", err)
+	}
+
 	// shop-orders: its implementation, built from its Deps, and its routes.
 	shopOrdersLogger := logger.With(zap.String("api", "shop-orders"))
 	shopOrdersDeps := shoporders.Deps{
-		Config:  *shopOrdersConfig,
-		DB:      shopDb,
-		ShopApi: shopApiClient,
-		Logger:  shopOrdersLogger,
+		Config:    *shopOrdersConfig,
+		DB:        shopDb,
+		ShopApi:   shopApiClient,
+		ShopMedia: shopMediaBucket,
+		Logger:    shopOrdersLogger,
 	}
 	shopOrdersImplementations, err := shopordersimpl.New(shopOrdersDeps)
 	if err != nil {
@@ -137,13 +146,18 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of shop-orders: %w", err)
 	}
+	shopOrdersCORS, err := corsPolicy("shop-orders")
+	if err != nil {
+		return fmt.Errorf("CORS of shop-orders: %w", err)
+	}
 
 	// shop-reviews: its implementation, built from its Deps, and its routes.
 	shopReviewsLogger := logger.With(zap.String("api", "shop-reviews"))
 	shopReviewsDeps := shopreviews.Deps{
-		Config: *shopReviewsConfig,
-		DB:     shopDb,
-		Logger: shopReviewsLogger,
+		Config:    *shopReviewsConfig,
+		DB:        shopDb,
+		ShopMedia: shopMediaBucket,
+		Logger:    shopReviewsLogger,
 	}
 	shopReviewsImplementations, err := shopreviewsimpl.New(shopReviewsDeps)
 	if err != nil {
@@ -169,6 +183,12 @@ func run(logger *zap.Logger) error {
 	// A client forwards the end user of the request a call is made for,
 	// whose token this keeps on the request's context (section 9.4).
 	handler = serviceauth.CaptureAuthorization(handler)
+	// A site's browser calls an API here from the site's origin: each API a
+	// site calls answers CORS for the origins its CORS field lists, and no
+	// other (section 8.10).
+	handler = cors.Handler(handler, []cors.API{
+		{Policy: shopOrdersCORS, Match: corsRoutes(shopOrdersRouter)},
+	})
 	return serve(ctx, stop, logger, &draining, handler)
 }
 

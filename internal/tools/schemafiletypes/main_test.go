@@ -32,6 +32,9 @@ var corpus = []string{
 	"internal/loader/tsreader/testdata/services/fixture-nested-arrays-db",
 	"internal/loader/tsreader/testdata/services/fixture-nested-arrays-api",
 	"internal/loader/tsreader/testdata/services/fixture-service-auth-api",
+	// The user model's route sets (D50), written as their keys over an
+	// empty operations list.
+	"internal/loader/tsreader/testdata/services/fixture-user-routes-api",
 	"internal/loader/tsreader/testdata/services/fixture-display",
 	"internal/loader/testdata/services/fixture-display-json",
 	"internal/loader/testdata/services/fixture-db-json",

@@ -322,7 +322,24 @@ func TestRefusals(t *testing.T) {
 	t.Run("a server on the Postgres port", func(t *testing.T) {
 		s := shop()
 		s.Environments[1].Settings[1].Values["port"] = float64(55432)
-		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and the Postgres container listen on one port, 55432")
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and container superschematic-shop-stack-pinned-postgres listen on one port, 55432")
+	})
+	t.Run("the storage emulator on the Postgres port", func(t *testing.T) {
+		s := shop()
+		s.Environments[1].Values["storagePort"] = float64(55432)
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "container superschematic-shop-stack-pinned-postgres and container superschematic-shop-stack-pinned-storage listen on one port, 55432")
+	})
+	t.Run("a bucket whose name GCS refuses", func(t *testing.T) {
+		services := stacktest.AcmeShop()
+		for i := range services {
+			switch services[i].Name {
+			case "shop-media":
+				services[i].Name = "m"
+			case "shop-api":
+				services[i].Buckets = []ir.ServiceRef{{Name: "m", Kind: ir.SchemaKindBucket}}
+			}
+		}
+		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
 	})
 	t.Run("a Rust server", func(t *testing.T) {
 		services := stacktest.AcmeShop()

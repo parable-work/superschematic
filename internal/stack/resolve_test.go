@@ -25,10 +25,12 @@ func assemble(t *testing.T, exts ...registry.Extension) *registry.Registry {
 }
 
 // shop returns the acceptance stack and services for an edit, without
-// shop-orders' job, which jobShop keeps (jobs_test.go), and without its
-// worker, which workerShop keeps (workers_test.go).
+// shop-orders' job, which jobShop keeps (jobs_test.go), without its
+// worker, which workerShop keeps (workers_test.go), and without shop-api's
+// bucket, which bucketShop keeps (buckets_test.go).
 func shop() (*ir.Stack, []stack.Service) {
-	return stacktest.WithoutWorkerSettings(stacktest.WithoutJobSettings(stacktest.Shop())), stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop()))
+	s := stacktest.WithoutBucketSettings(stacktest.WithoutWorkerSettings(stacktest.WithoutJobSettings(stacktest.Shop())))
+	return s, stacktest.WithoutBuckets(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop())))
 }
 
 // jobShop returns the acceptance stack and services with shop-orders' job,
@@ -424,7 +426,7 @@ func TestCheckExposeNotServer(t *testing.T) {
 	s, services := shop()
 	s.Expose = append(s.Expose, stacktest.Of(stacktest.ShopDB))
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server is exposed")
+	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server or a site is exposed")
 }
 
 func TestCheckPolicy(t *testing.T) {
@@ -1106,7 +1108,7 @@ func brokenStack() (*ir.Stack, []stack.Service) {
 			{Name: "Parent", Target: "broken"},
 			{Name: "Child", Extends: "Parent", Parameters: []string{"pr"}},
 		},
-	}, stacktest.AcmeShop()
+	}, stacktest.WithoutBuckets(stacktest.AcmeShop())
 }
 
 func TestGraphChecks(t *testing.T) {

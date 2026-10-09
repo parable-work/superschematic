@@ -1,0 +1,38 @@
+{
+  "token": "gcp:compute/targetHttpProxy:TargetHttpProxy",
+  "terraform": {
+    "type": "google_compute_target_http_proxy",
+    "renames": {
+      "deletionPolicy": "deletion_policy",
+      "httpKeepAliveTimeoutSec": "http_keep_alive_timeout_sec",
+      "proxyBind": "proxy_bind",
+      "urlMap": "url_map"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "httpKeepAliveTimeoutSec": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "proxyBind": {
+      "type": "boolean"
+    },
+    "urlMap": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "urlMap"
+  ]
+}

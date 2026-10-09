@@ -70,6 +70,11 @@ var corpus = []roundtripFixture{
 	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
 	// @optimistic tables and, in the graph above, @versioned({ exclude }).
 	{name: "fixture-optimistic-db", dir: tsFixtures + "/fixture-optimistic-db", native: FormatTS},
+	// The user model's traits (D50): every format writes User and
+	// UserRole, and the JSON-native schema's tables share the traits'
+	// names, so the TypeScript leg imports them under an alias.
+	{name: "fixture-users-db", dir: tsFixtures + "/fixture-users-db", native: FormatTS},
+	{name: "fixture-user-handles-json", dir: dataFixtures + "/fixture-user-handles-json", native: FormatJSON},
 	// Service clauses on operations and sets (D37), in the data forms.
 	{
 		name: "fixture-service-auth-api", dir: tsFixtures + "/fixture-service-auth-api", native: FormatTS,

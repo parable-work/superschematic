@@ -154,6 +154,14 @@ type TypeDef struct {
 	// Nil for every other type. See [GraphMemberConfig].
 	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
 
+	// User marks the DB table whose rows are the project's users, the core
+	// User trait (D50). Nil for every other type. See [UserTrait].
+	User *UserTrait `json:"user,omitempty" yaml:"user,omitempty"`
+
+	// UserRole marks the DB table whose rows are roles, the core UserRole
+	// trait (D50). Nil for every other type. See [UserRoleTrait].
+	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
+
 	// Origin names the declaration the loader expanded this type from:
 	// [OriginVersionGraph] for the graph tables a version graph adds.
 	// Empty for every authored type. The data forms have no key for it.
@@ -487,6 +495,12 @@ type FieldDef struct {
 	// user. It replaces the operation set's; nil means the operation takes
 	// the set's (see [EffectiveServiceCallers]).
 	ServiceCallers *ServiceCallers `json:"serviceCallers,omitempty" yaml:"serviceCallers,omitempty"`
+
+	// IdentityOperation names the user model's operation (D50) the loader
+	// expanded this operation from, one of the IdentityOp constants: a
+	// server routes it to its runtime's identity package. Empty for every
+	// authored operation. The data forms have no key for it.
+	IdentityOperation string `json:"identityOperation,omitempty" yaml:"identityOperation,omitempty" jsonschema:"-"`
 
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no

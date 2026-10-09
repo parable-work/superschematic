@@ -95,6 +95,11 @@ type ResolvedDeployable struct {
 	// API's.
 	Calls []ServiceRef `json:"calls,omitempty"`
 
+	// Buckets are the Bucket services a server reaches: the union of the
+	// `buckets` of the APIs it serves, sorted by name. A job's are its
+	// API's (D54).
+	Buckets []ServiceRef `json:"buckets,omitempty"`
+
 	// Language is a server's, a job's or a worker's language; Dialect is the SQL
 	// dialect a database runs, the first of its platform's dialects every
 	// hosted schema supports.
@@ -104,11 +109,16 @@ type ResolvedDeployable struct {
 	// Job is what a job runs and when; nil for every other kind.
 	Job *ResolvedJob `json:"job,omitempty"`
 
+	// Site is what a site builds and serves; nil for every other kind
+	// (D55).
+	Site *ResolvedSite `json:"site,omitempty"`
+
 	// Worker is what a worker handles and how many of it run; nil for
 	// every other kind (D53).
 	Worker *ResolvedWorker `json:"worker,omitempty"`
 
-	// Exposed is true for a server reachable from outside the environment.
+	// Exposed is true for a server reachable from outside the environment,
+	// and for every site.
 	Exposed bool `json:"exposed,omitempty"`
 
 	// Settings are the platform settings, the parent environment's merged
@@ -122,6 +132,13 @@ type ResolvedDeployable struct {
 	// Address is how an edge reaches the deployable, as its platform
 	// addresses it.
 	Address any `json:"address,omitempty"`
+
+	// PublicAddress is where a browser reaches an exposed deployable from
+	// outside the environment, as its platform's PublicAddressOf gives it:
+	// the base URL a site edge to a server derives, and a site's origin,
+	// which the CORS field of each API it calls lists (D55). Empty for a
+	// deployable that is not exposed, or whose platform gives none.
+	PublicAddress any `json:"publicAddress,omitempty"`
 
 	// Bindings bind every config field of a server or a job, sorted by
 	// field. An optional field with no value and no default has none.
@@ -193,6 +210,9 @@ func (d *ResolvedDeployable) UnmarshalJSON(data []byte) error {
 	if p.Address, err = DecodeValue(p.Address); err != nil {
 		return fmt.Errorf("deployable %s: address: %w", p.Name, err)
 	}
+	if p.PublicAddress, err = DecodeValue(p.PublicAddress); err != nil {
+		return fmt.Errorf("deployable %s: publicAddress: %w", p.Name, err)
+	}
 	*d = ResolvedDeployable(p)
 	return nil
 }
@@ -202,22 +222,25 @@ type Edge struct {
 	// ID is `<kind>:<from>-><service>`, unique in the environment.
 	ID string `json:"id"`
 
-	// Kind is sql or http.
+	// Kind is sql, http, site or bucket.
 	Kind EdgeKind `json:"kind"`
 
-	// From is the server or job with the need; To is the deployable that
-	// meets it.
+	// From is the server, job or site with the need; To is the deployable
+	// that meets it.
 	From string `json:"from"`
 	To   string `json:"to"`
 
-	// Service is the DB service the sql edge connects to, or the API
-	// service the http edge calls.
+	// Service is the DB service the sql edge connects to, the API service
+	// the http or site edge calls, or the Bucket service the bucket edge
+	// reaches.
 	Service ServiceRef `json:"service"`
 
 	// Connector is the registered connector that realizes the edge.
 	Connector string `json:"connector"`
 
 	// Field is the config field of From the edge's derived binding fills.
+	// A site edge's is the API service's name, the key of the API in the
+	// site's config (SiteConfigPath, D55).
 	Field string `json:"field"`
 }
 
@@ -274,10 +297,21 @@ type Binding struct {
 	// clause verifies its callers against (CallersField).
 	CallersOf string `json:"callersOf,omitempty"`
 
+	// CORSOf is the API service a CORS field belongs to: a derived
+	// binding, an ir.CORSPolicy, that lists the origins of the sites that
+	// call the API, which its server answers CORS for (CORSField, D55).
+	CORSOf string `json:"corsOf,omitempty"`
+
 	// Edges are the edges a callers field's value comes from: the http
 	// edges to CallersOf from other servers, sorted. None means no server
-	// calls the API, and the field's value has no issuers.
+	// calls the API, and the field's value has no issuers. A CORS field's
+	// are the site edges to CORSOf, sorted.
 	Edges []string `json:"edges,omitempty"`
+
+	// IdentityOf is the API service an identity config field belongs to
+	// (IdentityConfigField, D50): a literal, the environment's env setting
+	// or else the platform's identity config, or a parameter.
+	IdentityOf string `json:"identityOf,omitempty"`
 
 	// Parameter is a parameter binding's parameter.
 	Parameter string `json:"parameter,omitempty"`

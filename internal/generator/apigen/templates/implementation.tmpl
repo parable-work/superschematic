@@ -12,11 +12,13 @@
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs }}
 	"context"
+{{- end }}
 {{- if .HasEncryptedEndpoints }}
 	"errors"
 {{- end }}
-{{- if .IsPublic }}
+{{- if and .IsPublic (not .Auth.Identity) }}
 	"net/http"
 {{- end }}
 {{- if or .HasFilterableEndpoints .HasEncryptedEndpoints }}
@@ -97,7 +99,7 @@ func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypes
 }
 {{- end }}
 {{- end }}
-{{- if .IsPublic }}
+{{- if and .IsPublic (not .Auth.Identity) }}
 
 // AuthMiddleware authenticates the end user on the protected routes of
 // {{ .SchemaName }}. The server's entrypoint passes it to the generated

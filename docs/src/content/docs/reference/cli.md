@@ -16,15 +16,20 @@ cli.New(cli.Config{}, ext...).Execute()
 set. Extensions that implement `cli.CommandProvider` add subcommands at
 `New`. Every command assembles its registry from the naming file it
 resolves, so the same command tree serves a core-only binary and one that
-carries extensions.
+carries extensions. A binary hands the error `Execute` returns to
+`cli.Exit`, which prints it and exits 1, or, for a program a command ran
+that already said why, such as `superschematic-identity`, exits with that
+program's status.
 
-The core has eight commands: `build`, `build-all`, `migrate`,
+The core has nine commands: `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client` and the `stack`
-group, beside
-cobra's own `help` and `completion`. The installed `superschematic` links
-the official extensions (the gcp target, the Cloudflare DNS platform and
+and `identity` groups, beside cobra's own `help` and `completion`. The
+installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
 the Pulumi provisioner), which add none. The migration runner,
-`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)).
+`superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
+and so is the identity runner, `superschematic-identity`
+([below](#the-identity-runner-superschematic-identity)): each holds the
+database drivers, which stay out of the compiler.
 
 ## `build <service-dir>`
 
@@ -539,11 +544,19 @@ design is section 8.3 of
    it, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
    prints with its name in front. A job's run never stops the environment.
+7. Build each site once, `bun run <build>` in its package after the same
+   install, once the servers it calls are ready, and serve the directory
+   its build wrote from a file server on `http://127.0.0.1:<port>`, with
+   the site's config at `/__superschematic/config.json`, each API it calls
+   at its loopback URL, and its fallback for a path that names no file.
+   The summary prints each site's URL. A rebuilt site needs another `stack
+   dev`.
 
 Dev stays in the foreground until Ctrl-C or until a server or a worker
-exits, then stops the servers and the workers, callers first, and the
-container, which keeps its data for the next run. `--remove-database`
-removes the container and its data instead.
+exits, then stops the sites, the servers and the workers, callers first,
+and the containers, which keep their data for the next run: the
+databases, and the buckets' objects. `--remove-data` removes the
+containers and their data instead.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -559,25 +572,25 @@ Docker and Go.
 
 ```
 superschematic stack dev ./schemas/services/shop-stack
-superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-database
+superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-data
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-database` | false | on exit, remove the Postgres container and its data instead of stopping it |
+| `--remove-data` | false | on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
-A local environment sets the container's image and host port with its
-values, and a server's port with its settings; a port it leaves out comes
-from a hash of the stack, the environment and the server, so it stays the
-same from run to run:
+A local environment sets each container's image and host port with its
+values, Postgres's and the storage emulator's, and a server's port with
+its settings; a port it leaves out comes from a hash of the stack, the
+environment and the server, so it stays the same from run to run:
 
 ```ts
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432 },
+  local: { postgresImage: "postgres:16-alpine", postgresPort: 55432, storagePort: 54443 },
   settings: [{ of: ShopApi, port: 8080 }],
 })
 export abstract class Dev {}
@@ -698,8 +711,8 @@ superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
 of every resource, with each server's image pinned, and each database's
 migration plan from the schema the deploy manifest records. It also lists
-the secrets with no value, the servers and jobs with no image yet (which a
-deploy builds), the migration
+the secrets with no value, the servers and jobs with no image yet and the
+sites with no files yet (which a deploy builds), the migration
 phases a failed deploy left part-way, and the records to create by hand
 for a domain no DNS platform holds. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
@@ -707,6 +720,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--image` | the manifest's | a server's, job's or worker's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
+| `--site` | the manifest's | the files a site serves, `<site>=sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
@@ -721,23 +735,28 @@ nothing. A Go or TypeScript server, or a Go job, builds from the Dockerfile
 `<output-root>/server/<stack>/<deployable>/`, with the repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
 build runs on Cloud Build and pushes to the stack's Artifact Registry
-repository. It prints each image as a `stack deploy` flag:
+repository. Each site builds with its package's build script after a
+frozen install of the Bun workspace, and its files go up where the target
+serves sites from, under their digest, when they are new; they serve
+nothing until a deploy takes them. It prints each image and each site's
+files as a `stack deploy` flag:
 
 ```
 $ superschematic stack build Staging
 --image Orders=us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:...
 --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
+--site shop-web=sha256:...
 ```
 
 A build writes no deploy manifest.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--deployable` | every server, job and worker with a Dockerfile | build this server, job or worker only; repeatable |
-| `--server` | none | build this server only; repeatable. `--deployable` takes a job or a worker too |
-| `--force` | false | build a server, job or worker whose context did not change |
+| `--deployable` | every server, job and worker with a Dockerfile, and every site | build this server, job, worker or site only; repeatable |
+| `--server` | none | build this server only; repeatable. `--deployable` takes a job, a worker or a site too |
+| `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
-| `--format` | `text` | print `--image` flags (`text`) or the result as `json` |
+| `--format` | `text` | print `--image` and `--site` flags (`text`) or the result as `json` |
 
 ### `stack deploy <environment>`
 
@@ -747,8 +766,13 @@ Deploy the environment in deploy order: infrastructure, each database's
 server and job
 `--image` names none for whose build context changed since the image the
 manifest records, as `stack build` does; one with no Dockerfile keeps the
-manifest's image. The deploy manifest records each step, and the
-context each image it built came from. Every secret needs a value before
+manifest's image. It builds each site `--site` names no files for, and
+before the wave that rolls the site out it uploads the site's files under
+their digest when they are new and writes the site's config for the run,
+each API it calls with its public address; the wave's apply then serves
+them. The deploy manifest records each step, the
+context each image it built came from, and the digest of each site's
+files, which `--site` takes to serve them again: a rollback. Every secret needs a value before
 the first step after infrastructure; at a terminal the deploy asks for
 each one missing. On gcp each migration phase runs as an execution of the
 stack's Cloud Run job, `<stack>-migrate`, which also gives each server
@@ -770,7 +794,8 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--image` | a build, else the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable. One with none of them is refused |
-| `--no-build` | false | build no image: take each from `--image` or the manifest |
+| `--site` | a build, else the manifest's | the files a site serves, published by an earlier deploy or build, `<site>=sha256:<digest>`; repeatable. One with none of them is refused |
+| `--no-build` | false | build no image and no site: take each from `--image`, `--site` or the manifest |
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
@@ -802,6 +827,104 @@ resources by node ID and output name, leaving out secret ones.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--out` | stdout | write the outputs file to this path; put it beside the environment's `environment.json` for the bindings generator |
+
+## `identity bootstrap [<db-service-dir>]`
+
+Create a database's first administrator in one transaction: a role with
+the permissions `--permission` names, a user who signs in with `--login`
+and a password, and the grant of the role to the user. The database is
+one whose schema has the `User` and `UserRole` traits, the core user
+model. The command refuses when any role grant exists, so it runs once
+per database; the administrator then manages every other user and role
+through the `@userAdministration` routes. No one grants what they do not
+hold, so the role needs every permission the administrator hands out, the
+administration routes' own among them: `identity` covers
+`identity.users.read` and the other three, under the default
+[`identity_permission_prefix`](/superschematic/reference/naming/#identity_permission_prefix).
+
+The tables are those of the DB service at `<db-service-dir>`, which loads
+as `build` loads it; its identity descriptor is built in process, and a
+schema without a `UserRole` table is refused. `--descriptor` names the
+descriptor a build wrote instead, `identity/<schema>.json` in the
+service's Go types module, and takes no service directory.
+
+The compiler writes no database: the identity runner,
+`superschematic-identity`, does. The command runs the runner's
+`bootstrap` with the descriptor and every flag it was given but
+`--naming`, hands it its standard input, output and error, and exits with
+the runner's status, so the runner's refusals and its output are the
+command's. The runner is the binary `$SUPERSCHEMATIC_IDENTITY` names, else
+`superschematic-identity` on `PATH`; without either the command says how
+to install it.
+
+Before it runs the runner, the command reads the permission catalogs the
+build writes, `permissions.json` beside each API's `openapi.json`. When
+the default output root, `<schemas-root>/dist`, holds catalogs of APIs
+whose `authDb` is this service, a `--permission` that is none of their
+permissions and covers none draws a warning on stderr. It is granted all
+the same: an engine's schemas name permissions at run time.
+
+```
+superschematic identity bootstrap ./schemas/services/shop-db --login admin@example.com --permission identity --permission orders
+printf '%s\n' "$ADMIN_PASSWORD" | superschematic identity bootstrap ./schemas/services/shop-db --database-url "$SHOP_DB_URL" --login admin@example.com --name "Shop Admin" --role owner --permission identity
+superschematic identity bootstrap --descriptor ./schemas/dist/types/go/shop-db/identity/shop-db.json --database-url sqlite:./shop.db --login admin@example.com --permission identity
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--login` | (required) | the administrator's login |
+| `--permission` | (required) | a permission the role carries; repeatable |
+| `--role` | `admin` | the role's name |
+| `--name` | the login | the administrator's display name |
+| `--database-url` | `$DATABASE_URL` | the database URL |
+| `--dialect` | the URL's | `postgres` or `sqlite` |
+| `--config` | the runtime's cost | an identity config JSON file |
+| `--descriptor` | none | the identity descriptor file, in place of a service directory |
+| `--naming` | `<db-service-dir>/../../superschematic.toml` | naming config file; the command reads it and the runner does not |
+
+Each flag but `--descriptor` and `--naming` is the runner's, below.
+
+### The identity runner, `superschematic-identity`
+
+`superschematic-identity bootstrap --descriptor <file>` does the
+database write, through the HTTP runtime's identity package
+(`Store.Bootstrap`). A deploy job runs it with the descriptor the build
+wrote and the password on standard input, without the compiler. It
+installs as the migration runner does, from a release's
+`superschematic-identity_<version>_<platform>.tar.gz`, or built from a
+checkout ([runtime/http/go/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/http/go/README.md)).
+
+The database is `--database-url`, or `$DATABASE_URL`, read as
+`superschematic-migrate` reads it: a `postgres://` or `postgresql://` URL
+is Postgres, and a `sqlite:` URL, a `file:` URI or a path is SQLite.
+`--dialect` overrides the URL's. The database must hold the schema's
+tables, so migrate it first; a SQLite path that does not exist is refused.
+
+The password comes from standard input, never from a flag or the
+environment. At a terminal the runner asks for it twice with the
+terminal's echo off; otherwise it reads one line, so a secret store can
+pipe it in. It must be an `Auth.Password`, 8 to 128 characters. It is
+hashed with argon2id at the cost the identity config file `--config`
+sets under `password.argon2`, else at the runtime's default. The runner
+prints the role and the user it created, with their ids, and never the
+password or its hash. It exits 0 when it created them, 1 when it refused
+or failed, and 2 for flags it cannot run with.
+
+```
+printf '%s\n' "$ADMIN_PASSWORD" | superschematic-identity bootstrap --descriptor dist/types/go/shop-db/identity/shop-db.json --login admin@example.com --permission identity
+superschematic-identity version
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--descriptor` | (required) | the identity descriptor the DB build writes |
+| `--login` | (required) | the administrator's login, a value of the `User` table's login scalar, which normalizes it; a user with that login refuses the run |
+| `--permission` | (required) | a permission the role carries, dotted segments of letters, digits, `_` and `-`; repeatable, and a repeat is dropped |
+| `--role` | `admin` | the role's name; a role of that name that exists refuses the run |
+| `--name` | the login | the administrator's display name, for a `User` trait that names a `name` field |
+| `--database-url` | `$DATABASE_URL` | the database URL |
+| `--dialect` | the URL's | `postgres` or `sqlite` |
+| `--config` | the runtime's cost | an identity config JSON file; its `password.argon2` sets the hash's cost |
 
 ## Extension commands
 

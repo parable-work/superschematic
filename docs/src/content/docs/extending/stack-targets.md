@@ -117,6 +117,17 @@ account, secrets, config, Cloud SQL volume and egress, and for a schedule
 to a Cloud Scheduler job and the grant that lets the job's account run
 it.
 
+A bucket platform (`Kind: ir.DeployableBucket`) keeps a Bucket service's
+objects (D54). It declares no `Languages` and no `Dialects`: a bucket
+runs no code and hosts no schema. Its `NameOf` names the bucket with its
+provider, and should give each member of a parameterized environment one
+of its own; its `AddressOf` is what its connectors derive the bucket's
+name from. A bucket takes settings, such as versioning, and no `env`.
+`extensions/gcp`'s `gcp.storage` lowers one to a private Cloud Storage
+bucket, `stack/stacktest`'s `fake.storage` to a private bucket in the
+environment's region; the core's `local.gcs` to a bucket on the
+environment's fake-gcs-server container.
+
 A worker platform (`Kind: ir.DeployableWorker`) places an API's workers
 (D53). It declares `Languages` as a job platform does, and its
 `AddressOf` may return nil: nothing reaches a worker. Its `Lower` reads
@@ -149,28 +160,32 @@ at fault:
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `URL`, a connection string; or `CloudSQL`: `Instance`, `Database` and `User` |
 | http | `ir.ServiceEndpoint` | `URL`, the callee's base URL, and an optional `Credential`: its `Source` (`google-id-token`, `token-file` or `signed-token`), the members that source reads, and the `Headers` that carry it |
+| bucket | `ir.BucketConnection` | `Name`, the bucket's name with its provider, and an optional `Endpoint`, the base URL of an emulator that serves the provider's API in its place. No credential: the workload's own identity reaches the bucket, which the connector's grant allows |
 
 Each member may hold a reference. An http edge between two APIs one
 server serves runs from the server to itself, and its connector derives
 the server's own address. Return an error for an edge the platforms
 cannot serve, as the gcp sql connector does for a Rust server.
 
-A connector's `From` is a server, a job or a worker platform. A job or a
-worker takes its API's edges, so a target with a job or a worker platform
-registers a connector from it for each edge its server platform has; it
-may share the server connector's `Connect`, which sees the job or the
-worker as `From`, as gcp's do. For an http edge, the callee's issuer lists
-the job or the worker as a caller that serves its API.
+A connector's `From` is a server, a job or a worker platform, and its
+`To` a database platform for a sql edge, a server platform for an http
+edge and a bucket platform for a bucket edge. A job or a worker takes its
+API's edges, so a target with a job or a worker platform registers a
+connector from it for each edge its server platform has; it may share the
+server connector's `Connect`, which sees the job or the worker as `From`,
+as gcp's do. For an http edge, the callee's issuer lists the job or the
+worker as a caller that serves its API.
 
 ## A target
 
 A `TargetSpec` names a platform for each deployable kind (`server`,
-`database`, `job` and `worker`), the JSON Schema of an environment's
-values under the target's name, its default DNS platform, its provisioner,
-the schema of every resource type its platforms, connectors and default
-DNS platform emit, and its policy rules. A kind it names no platform for
-is refused in its environments, so a stack whose APIs declare jobs or
-workers resolves on it only with each placed on another target's platform.
+`database`, `job`, `worker` and `bucket`), the JSON Schema of an
+environment's values under the target's name, its default DNS platform,
+its provisioner, the schema of every resource type its platforms,
+connectors and default DNS platform emit, and its policy rules. A kind it
+names no platform for is refused in its environments, so a stack whose
+APIs declare jobs or workers resolves on it only with each placed on
+another target's platform.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:

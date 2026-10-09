@@ -47,8 +47,13 @@ type Service struct {
 	Dependencies []ir.ServiceRef
 
 	// Calls are the handles in an API service's `calls`: the APIs its
-	// server's code calls.
+	// server's code calls. A Site service's are the APIs its code calls
+	// from the browser (D55).
 	Calls []ir.ServiceRef
+
+	// Buckets are the handles in an API service's `buckets`: the Bucket
+	// services its server's and jobs' code use (D54).
+	Buckets []ir.ServiceRef
 
 	// Language is an API service's `outputs.api.language`
 	// (registry.APILanguageGo, ...). Empty means Go.
@@ -61,6 +66,12 @@ type Service struct {
 	// Config is the service's `@envVars` type, or nil when it has none.
 	Config *Config
 
+	// Identity reports that an API service's server authenticates with the
+	// identity runtime (D50): its authDb, or a public API's one DB-kind
+	// dependency, declares the user model. Each server that serves it
+	// binds its identity config field (ir.IdentityConfigField).
+	Identity bool
+
 	// Operations are an API service's operations, each with what admits a
 	// caller to it (docs/stack-model.md, section 9.3): every calls edge to
 	// the API must reach one its caller may invoke. OperationsOf reads them
@@ -70,6 +81,11 @@ type Service struct {
 	// Jobs are an API service's jobs, its `@job` classes (D52), as
 	// ir.Schema.Jobs holds them. Each is a deployable of the stack.
 	Jobs []ir.Job
+
+	// Site is a Site service's build and where its code is, with every
+	// default filled in (D55); nil for every other kind. Its Calls are the
+	// APIs its code calls from the browser.
+	Site *ir.ResolvedSite
 
 	// Workers are an API service's workers, its `@worker` classes (D53), as
 	// ir.Schema.Workers holds them. Each is a deployable of the stack.

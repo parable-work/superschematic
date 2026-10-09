@@ -33,3 +33,4 @@ export type {
   VersionGraphOptions,
 } from "./decorators";
 export type { AutoGenerate, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
+export type { User, UserConfig, UserRole } from "./user";

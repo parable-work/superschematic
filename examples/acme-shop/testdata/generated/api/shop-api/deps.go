@@ -8,6 +8,7 @@ package shopapi
 
 import (
 	orm "example.com/acme/orm/shop-db"
+	"github.com/parable-work/superschematic/runtime/http/go/bucket"
 	"go.uber.org/zap"
 )
 
@@ -22,6 +23,11 @@ type Deps struct {
 
 	// DB is the ORM of shop-db, the API's database.
 	DB orm.DatabaseInterface
+
+	// ShopMedia is shop-media, a bucket the API lists: private object
+	// storage it puts, gets, deletes and lists objects in, and signs URLs
+	// for (D54).
+	ShopMedia bucket.Bucket
 
 	// Logger is the API's logger.
 	Logger *zap.Logger

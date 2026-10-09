@@ -15,6 +15,7 @@ module example.com/schemas/server/shop-stack/shop-orders-expire-orders
 go 1.26.4
 
 require (
+	cloud.google.com/go/storage v1.69.0
 	example.com/schemas/api/shop-orders v0.0.0-00010101000000-000000000000
 	example.com/schemas/implementation/shop-orders v0.0.0-00010101000000-000000000000
 	example.com/schemas/orm/shop-db v0.0.0-00010101000000-000000000000
@@ -22,6 +23,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.28.0
+	google.golang.org/api v0.288.0
 )
 
 require (

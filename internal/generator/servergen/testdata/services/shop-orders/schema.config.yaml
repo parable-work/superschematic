@@ -1,5 +1,6 @@
 # Served with shop-reviews by the declared server Storefront. Its edges are
-# shop-db, its authDb, and shop-api, which it calls.
+# shop-db, its authDb, shop-api, which it calls, and shop-media, the bucket
+# it lists with shop-reviews (D54).
 name: shop-orders
 kind: API
 authDb: shop-db
@@ -7,6 +8,8 @@ dependencies:
   - { name: shop-db, kind: DB }
 calls:
   - { name: shop-api, kind: API }
+buckets:
+  - { name: shop-media, kind: Bucket }
 outputs:
   types:
     go: { enabled: true }

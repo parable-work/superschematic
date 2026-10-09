@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "api": "fixture-user-routes-api",
+  "authDb": "fixture-user-model-db",
+  "permissions": [
+    {
+      "name": "identity.roles.read",
+      "identity": true,
+      "operations": [
+        "AccountAdminListRolesHandler"
+      ]
+    },
+    {
+      "name": "identity.roles.write",
+      "identity": true,
+      "operations": [
+        "AccountAdminCreateRoleHandler",
+        "AccountAdminDeleteRoleHandler",
+        "AccountAdminGrantRoleHandler",
+        "AccountAdminRevokeRoleHandler",
+        "AccountAdminUpdateRoleHandler"
+      ]
+    },
+    {
+      "name": "identity.users.read",
+      "identity": true,
+      "operations": [
+        "AccountAdminGetUserHandler",
+        "AccountAdminListUsersHandler"
+      ]
+    },
+    {
+      "name": "identity.users.write",
+      "identity": true,
+      "operations": [
+        "AccountAdminCreateUserHandler",
+        "AccountAdminDisableUserHandler",
+        "AccountAdminEnableUserHandler",
+        "AccountAdminSetUserPasswordHandler"
+      ]
+    }
+  ]
+}

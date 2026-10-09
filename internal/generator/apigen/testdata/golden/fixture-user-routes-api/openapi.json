@@ -1,0 +1,2267 @@
+{
+  "components": {
+    "schemas": {
+      "Capabilities": {
+        "description": "What the caller may call.",
+        "properties": {
+          "operations": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Whether each operation's route admits the caller, keyed by its OpenAPI operation id.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "type": "object"
+      },
+      "ChangePasswordInput": {
+        "description": "What changePassword takes: the caller's current password and the new one.",
+        "properties": {
+          "current": {
+            "description": "The caller's current password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "password": {
+            "description": "The new password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "password"
+        ],
+        "type": "object"
+      },
+      "CreateUserInput": {
+        "description": "What createUser takes: the new user's login, name and password.",
+        "properties": {
+          "login": {
+            "description": "The user's login, as their User row holds it.",
+            "format": "email",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The user's display name; the login when absent.",
+            "maxLength": 80,
+            "minLength": 2,
+            "nullable": true,
+            "type": "string"
+          },
+          "password": {
+            "description": "The new user's password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "password"
+        ],
+        "type": "object"
+      },
+      "CurrentUser": {
+        "description": "The caller: their user, the roles they hold and the permissions those roles grant.",
+        "properties": {
+          "permissions": {
+            "description": "The permissions the roles grant, each once.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "description": "The roles the user holds.",
+            "items": {
+              "$ref": "#/components/schemas/RoleRef"
+            },
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/SessionUser"
+          }
+        },
+        "required": [
+          "user",
+          "roles",
+          "permissions"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Greeting": {
+        "description": "A greeting for the signed-in user.",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "IdentityRole": {
+        "description": "A role and the permissions it grants.",
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "description": "The permissions the role grants.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "permissions"
+        ],
+        "type": "object"
+      },
+      "IdentityUser": {
+        "description": "A user as the administration routes show it.",
+        "properties": {
+          "disabled": {
+            "description": "Whether the user is disabled, and so cannot sign in.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "login": {
+            "description": "The user's login, as their User row holds it.",
+            "format": "email",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The user's display name.",
+            "maxLength": 80,
+            "minLength": 2,
+            "type": "string"
+          },
+          "roles": {
+            "description": "The roles the user holds.",
+            "items": {
+              "$ref": "#/components/schemas/RoleRef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "login",
+          "name",
+          "disabled",
+          "roles"
+        ],
+        "type": "object"
+      },
+      "LoginInput": {
+        "description": "What login takes: the user's login and password, and how the session travels.",
+        "properties": {
+          "login": {
+            "description": "The user's login, as their User row holds it.",
+            "format": "email",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "type": "string"
+          },
+          "password": {
+            "description": "The user's password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "session": {
+            "description": "How the session travels; bearer when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionTransport"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "login",
+          "password"
+        ],
+        "type": "object"
+      },
+      "LoginResult": {
+        "description": "A session login or register started.",
+        "properties": {
+          "expiresAt": {
+            "description": "When the session ends.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "token": {
+            "description": "The session's bearer token; absent for a cookie session.",
+            "nullable": true,
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/SessionUser",
+            "description": "The signed-in user."
+          }
+        },
+        "required": [
+          "user",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "RegisterInput": {
+        "description": "What register takes: the new user's login, name and password, and how the session travels.",
+        "properties": {
+          "login": {
+            "description": "The user's login, as their User row holds it.",
+            "format": "email",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The user's display name; the login when absent.",
+            "maxLength": 80,
+            "minLength": 2,
+            "nullable": true,
+            "type": "string"
+          },
+          "password": {
+            "description": "The new user's password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "session": {
+            "description": "How the session travels; bearer when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionTransport"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "login",
+          "password"
+        ],
+        "type": "object"
+      },
+      "ResponseLinks": {
+        "properties": {
+          "first": {
+            "nullable": true,
+            "type": "string"
+          },
+          "last": {
+            "nullable": true,
+            "type": "string"
+          },
+          "next": {
+            "nullable": true,
+            "type": "string"
+          },
+          "prev": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          },
+          "totalCount": {
+            "description": "Total count of items for paginated responses",
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "RoleInput": {
+        "description": "What createRole and updateRole take: the role's name and the permissions it grants.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "description": "The permissions the role grants.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "permissions"
+        ],
+        "type": "object"
+      },
+      "RoleRef": {
+        "description": "A role a user holds.",
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "SessionTransport": {
+        "description": "How a session travels: bearer answers its token for the Authorization header; cookie sets the session cookie and answers no token.",
+        "enum": [
+          "bearer",
+          "cookie"
+        ],
+        "type": "string"
+      },
+      "SessionUser": {
+        "description": "A signed-in user: their key, login and display name.",
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "login": {
+            "description": "The user's login, as their User row holds it.",
+            "format": "email",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The user's display name.",
+            "maxLength": 80,
+            "minLength": 2,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "login",
+          "name"
+        ],
+        "type": "object"
+      },
+      "SetPasswordInput": {
+        "description": "What setUserPassword takes: the user's new password.",
+        "properties": {
+          "password": {
+            "description": "The new password.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-user-routes-api schema",
+    "title": "Fixture-User-Routes-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/auth/admin/roles": {
+      "get": {
+        "description": "Lists the roles and the permissions each grants.",
+        "operationId": "AccountAdminListRolesHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/IdentityRole"
+                      },
+                      "type": "array"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "listRoles",
+        "tags": [
+          "account-admin"
+        ]
+      },
+      "post": {
+        "description": "Creates a role. The caller's own permissions must cover each permission it grants.",
+        "operationId": "AccountAdminCreateRoleHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityRole"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission, or grants a permission they do not hold; details.permissions lists those. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "conflict: The role name is taken."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_permission: A permission is not dotted segments of letters, digits, _ and -; details.permissions lists them."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "createRole",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/roles/{id}": {
+      "delete": {
+        "description": "Deletes a role and every grant of it. It answers true.",
+        "operationId": "AccountAdminDeleteRoleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No role has the id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "deleteRole",
+        "tags": [
+          "account-admin"
+        ]
+      },
+      "put": {
+        "description": "Renames a role or replaces its permissions. The caller's own permissions must cover each permission given.",
+        "operationId": "AccountAdminUpdateRoleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityRole"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission, or grants a permission they do not hold; details.permissions lists those. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No role has the id."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "conflict: The role name is taken."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_permission: A permission is not dotted segments of letters, digits, _ and -; details.permissions lists them."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "updateRole",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users": {
+      "get": {
+        "description": "Lists the users and the roles each holds.",
+        "operationId": "AccountAdminListUsersHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/IdentityUser"
+                      },
+                      "type": "array"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "listUsers",
+        "tags": [
+          "account-admin"
+        ]
+      },
+      "post": {
+        "description": "Creates a user with the login, name and password given.",
+        "operationId": "AccountAdminCreateUserHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "conflict: The login is taken."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "createUser",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}": {
+      "get": {
+        "description": "One user and the roles they hold.",
+        "operationId": "AccountAdminGetUserHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "getUser",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}/disable": {
+      "post": {
+        "description": "Disables a user, who can no longer sign in, and ends their sessions.",
+        "operationId": "AccountAdminDisableUserHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "disableUser",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}/enable": {
+      "post": {
+        "description": "Enables a disabled user.",
+        "operationId": "AccountAdminEnableUserHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "enableUser",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}/password": {
+      "put": {
+        "description": "Sets a user's password and ends their sessions. It answers true.",
+        "operationId": "AccountAdminSetUserPasswordHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "setUserPassword",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}/roles/{roleId}": {
+      "delete": {
+        "description": "Revokes a role from a user.",
+        "operationId": "AccountAdminRevokeRoleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "roleId parameter",
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id, or no role the roleId."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "revokeRole",
+        "tags": [
+          "account-admin"
+        ]
+      },
+      "put": {
+        "description": "Grants a user a role. The caller's own permissions must cover the role's.",
+        "operationId": "AccountAdminGrantRoleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "roleId parameter",
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission, or grants a permission they do not hold; details.permissions lists those. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id, or no role the roleId."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "grantRole",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/capabilities": {
+      "get": {
+        "description": "For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.",
+        "operationId": "AccountCapabilitiesHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Capabilities"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "capabilities",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "description": "Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.",
+        "operationId": "AccountLoginHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LoginResult"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_credentials: The login or the password does not verify, or the user is disabled."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cross_origin: The cross-origin check refused a cookie session's login."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "login",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Ends the caller's session and clears the session cookie. It answers true.",
+        "operationId": "AccountLogoutHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cross_origin: The cross-origin check refused a cookie request."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "logout",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "description": "The caller's user, the roles they hold and the permissions those roles grant.",
+        "operationId": "AccountMeHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CurrentUser"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "me",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/auth/password": {
+      "post": {
+        "description": "Changes the caller's password, given their current one, and ends their other sessions. It answers true.",
+        "operationId": "AccountChangePasswordHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session. invalid_credentials: The current password does not verify."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cross_origin: The cross-origin check refused a cookie request."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "changePassword",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "description": "Creates a user with the login, name and password given and signs them in, as login does.",
+        "operationId": "AccountRegisterHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LoginResult"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cross_origin: The cross-origin check refused a cookie session's login."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "conflict: The login is taken."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "register",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/greeting": {
+      "get": {
+        "operationId": "GreetingGreetHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Greeting"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "greet",
+        "tags": [
+          "greeting"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

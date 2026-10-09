@@ -185,7 +185,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-fulfil-orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
-		"render 53 nodes",
+		"render 56 nodes",
 		"apply infrastructure",
 		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
