@@ -186,6 +186,20 @@ func (h *harness) expect(r reply, status int, code string) {
 	}
 }
 
+// expectTrue fails unless r is the answer of an operation the contract
+// types as true: 200 with {"data": true, "meta": {"requestId": ...}}, as
+// every generated server answers one, never a 204 an SDK cannot decode.
+func (h *harness) expectTrue(r reply) {
+	h.t.Helper()
+	h.expect(r, 200, "")
+	if r.body["data"] != true {
+		h.t.Fatalf("got %v, want the envelope of true", r.body)
+	}
+	if _, ok := r.body["meta"].(map[string]any); !ok {
+		h.t.Fatalf("got %v, want the envelope's meta", r.body)
+	}
+}
+
 // login signs in with the bearer transport and returns the token.
 func (h *harness) login(login, password string) string {
 	h.t.Helper()
@@ -314,7 +328,7 @@ func TestLoginCookie(t *testing.T) {
 		h.expect(h.do("GET", "/auth/me", nil, with(cookieHeader(token), []string{"Sec-Fetch-Site", "cross-site"})...), 200, "")
 
 		out := h.do("POST", "/auth/logout", nil, with(cookieHeader(token), []string{"Sec-Fetch-Site", "same-origin"})...)
-		h.expect(out, 204, "")
+		h.expectTrue(out)
 		if len(out.cookies) != 1 || out.cookies[0].Name != identity.HostCookieName || out.cookies[0].MaxAge != -1 || out.cookies[0].Value != "" {
 			t.Errorf("logout's cookies = %v, want the clear", out.cookies)
 		}
@@ -406,7 +420,7 @@ func TestSessionEnds(t *testing.T) {
 		h.expect(me(idleToken), 401, identity.CodeUnauthorized)
 
 		revoked := h.login("member@example.com", userPassword)
-		h.expect(h.do("POST", "/auth/logout", nil, bearer(revoked)...), 204, "")
+		h.expectTrue(h.do("POST", "/auth/logout", nil, bearer(revoked)...))
 		h.expect(me(revoked), 401, identity.CodeUnauthorized)
 		h.expect(h.do("POST", "/auth/logout", nil, bearer(revoked)...), 401, identity.CodeUnauthorized)
 
@@ -433,7 +447,7 @@ func TestChangePassword(t *testing.T) {
 		h.expect(h.do("POST", "/auth/password", map[string]any{"current": "not my password", "password": newPassword}, bearer(mine)...), 401, identity.CodeInvalidCredentials)
 		h.expect(h.do("POST", "/auth/password", map[string]any{"current": userPassword, "password": "short"}, bearer(mine)...), 400, "bad_request")
 		h.expect(h.do("POST", "/auth/password", map[string]any{"current": userPassword, "password": newPassword}), 401, identity.CodeUnauthorized)
-		h.expect(h.do("POST", "/auth/password", map[string]any{"current": userPassword, "password": newPassword}, bearer(mine)...), 204, "")
+		h.expectTrue(h.do("POST", "/auth/password", map[string]any{"current": userPassword, "password": newPassword}, bearer(mine)...))
 
 		h.expect(h.do("GET", "/auth/me", nil, bearer(mine)...), 200, "")
 		h.expect(h.do("GET", "/auth/me", nil, bearer(other)...), 401, identity.CodeUnauthorized)
@@ -546,12 +560,12 @@ func TestAdministration(t *testing.T) {
 		if updated.data()["name"] != "order reader" {
 			t.Errorf("updateRole = %v", updated.data())
 		}
-		h.expect(h.do("DELETE", "/auth/admin/roles/"+readerID, nil, clerk...), 204, "")
+		h.expectTrue(h.do("DELETE", "/auth/admin/roles/"+readerID, nil, clerk...))
 		h.expect(h.do("DELETE", "/auth/admin/roles/"+readerID, nil, clerk...), 404, identity.CodeNotFound)
 		h.expect(h.do("GET", "/auth/admin/roles", nil, member...), 403, identity.CodeForbidden)
 
 		// Setting a user's password revokes their sessions.
-		h.expect(h.do("PUT", "/auth/admin/users/"+h.memberID+"/password", map[string]any{"password": "reset password"}, admin...), 204, "")
+		h.expectTrue(h.do("PUT", "/auth/admin/users/"+h.memberID+"/password", map[string]any{"password": "reset password"}, admin...))
 		h.expect(h.do("GET", "/auth/me", nil, member...), 401, identity.CodeUnauthorized)
 		h.login("member@example.com", "reset password")
 		h.expect(h.do("PUT", "/auth/admin/users/"+h.memberID+"/password", map[string]any{"password": "short"}, admin...), 400, "bad_request")

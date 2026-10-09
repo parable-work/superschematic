@@ -67,3 +67,13 @@ cd runtime/http/go && go test ./identity -run TestWriteParityVectors -update
 store's tests run against `runtime/http/testdata/identity`, the
 `fixture-user-model-db` descriptor and DDL, on SQLite always and on the
 Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is set.
+
+## Identity routes' answers
+
+`Service.Handler` answers every route as a generated server answers its
+operations: 200 with `{"data": ..., "meta": {"requestId": ...}}`, a list
+with the collection envelope, and a refusal with the problem `WriteError`
+writes. `logout`, `changePassword`, `setUserPassword` and `deleteRole`,
+which the contract types as the boolean `true`, answer
+`{"data": true, "meta": {...}}` with 200, never 204, so every SDK decodes
+them as it decodes any other operation's result.

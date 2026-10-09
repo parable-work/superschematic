@@ -121,9 +121,9 @@ var Operations = []Operation{
 // route that needs a caller reads the principal Middleware put on the
 // request, or authenticates the request itself when there is none.
 // Success is the generated servers' envelope ({"data": ..., "meta":
-// {"requestId": ...}}) with 200, or 204 with no body for logout,
-// changePassword, setUserPassword and deleteRole; a refusal is the
-// problem WriteError writes.
+// {"requestId": ...}}) with 200; logout, changePassword, setUserPassword
+// and deleteRole, which the contract types as the boolean true, answer
+// {"data": true, ...}. A refusal is the problem WriteError writes.
 func (s *Service) Handler(op string) (http.Handler, bool) {
 	var h http.HandlerFunc
 	switch op {
@@ -140,7 +140,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 			if p.Transport == TransportCookie {
 				http.SetCookie(w, s.cfg.ClearCookie())
 			}
-			response.NoContent(w)
+			respond(w, r, true, nil)
 		})
 	case ir.IdentityOpMe:
 		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) { respond(w, r, s.Me(p), nil) })
@@ -150,7 +150,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) {
 			var in ChangePasswordInput
 			if decode(w, r, &in) {
-				noContent(w, r, s.ChangePassword(r.Context(), p, in))
+				respondTrue(w, r, s.ChangePassword(r.Context(), p, in))
 			}
 		})
 	case ir.IdentityOpCreateUser:
@@ -185,7 +185,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
 			var in SetPasswordInput
 			if decode(w, r, &in) {
-				noContent(w, r, s.SetUserPassword(r.Context(), p, id, in))
+				respondTrue(w, r, s.SetUserPassword(r.Context(), p, id, in))
 			}
 		})
 	case ir.IdentityOpListRoles:
@@ -211,7 +211,7 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		})
 	case ir.IdentityOpDeleteRole:
 		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
-			noContent(w, r, s.DeleteRole(r.Context(), p, id))
+			respondTrue(w, r, s.DeleteRole(r.Context(), p, id))
 		})
 	case ir.IdentityOpGrantRole, ir.IdentityOpRevokeRole:
 		change := s.GrantRole
@@ -381,10 +381,9 @@ func respondList(w http.ResponseWriter, r *http.Request, data any, err error) {
 	response.CollectionEnvelope(w, http.StatusOK, data, meta(r), nil)
 }
 
-func noContent(w http.ResponseWriter, r *http.Request, err error) {
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	response.NoContent(w)
+// respondTrue answers an operation the contract types as the boolean
+// true: {"data": true, ...} with 200, as every generated server answers
+// one, or the problem err is.
+func respondTrue(w http.ResponseWriter, r *http.Request, err error) {
+	respond(w, r, true, err)
 }
