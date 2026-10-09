@@ -1,8 +1,9 @@
 // Package gcp is the gcp target of the stack model (docs/stack-model.md,
 // section 7): Cloud Run servers, Cloud Run jobs and their Cloud Scheduler
 // schedules, Cloud SQL Postgres databases, Secret Manager secrets, a global
-// external Application Load Balancer for exposed servers, and Cloud DNS for
-// their records. It registers through the
+// external Application Load Balancer for exposed servers, static sites in
+// Cloud Storage behind a load balancer with Cloud CDN (D55), and Cloud DNS
+// for their records. It registers through the
 // public registry package alone, as any extension does (D10), in a Go
 // module of its own (D1), so the GCP vocabulary stays out of the core.
 //
@@ -38,6 +39,10 @@ const (
 	CloudRunJob = "gcp.cloudrunjob"
 	CloudSQL    = "gcp.cloudsql"
 
+	// Site serves a static site's files from a Cloud Storage bucket,
+	// through a load balancer with Cloud CDN (D55).
+	Site = "gcp.site"
+
 	// CloudDNS writes an environment's records into a Cloud DNS managed
 	// zone. It is the target's default DNS platform.
 	CloudDNS = "gcp.clouddns"
@@ -52,6 +57,10 @@ const (
 	JobSQLConnector  = "gcp.cloudrunjob-cloudsql"
 	JobHTTPConnector = "gcp.cloudrunjob-cloudrun"
 
+	// SiteConnector connects a site to a Cloud Run server it calls: the
+	// site's config holds the server's public address (D55).
+	SiteConnector = "gcp.site-cloudrun"
+
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
 	Provisioner = "pulumi"
@@ -61,7 +70,7 @@ const (
 	PolicyHighAvailability = "production-databases-highly-available"
 
 	// PolicyNothingPublic refuses a resource that admits the public on
-	// behalf of anything but an exposed server.
+	// behalf of anything but an exposed server or a site.
 	PolicyNothingPublic = "nothing-public-unless-exposed"
 )
 
@@ -103,8 +112,9 @@ func (Extension) Name() string { return Name }
 // platform, the pinned schema of every resource type they and bootstrap
 // emit, and the target's deploy seams: the state bucket, Secret Manager,
 // bootstrap, image builds with Cloud Build, the migration job, the
-// generated CI's sign-in through Workload Identity Federation, and a job's
-// run on demand as an execution of its Cloud Run job (D52).
+// generated CI's sign-in through Workload Identity Federation, a job's
+// run on demand as an execution of its Cloud Run job (D52), and a site's
+// files' upload to its bucket (D55).
 func (e Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		{
@@ -115,7 +125,10 @@ func (e Extension) Register(r *registry.Registry) error {
 			Settings:  json.RawMessage(cloudRunSettings),
 			NameOf:    serviceName,
 			AddressOf: serviceAddress,
-			Lower:     lowerService,
+			// Where a browser reaches an exposed server: what a site's
+			// config holds for it (D55).
+			PublicAddressOf: servicePublicAddress,
+			Lower:           lowerService,
 		},
 		{
 			Name:      CloudRunJob,
@@ -137,6 +150,16 @@ func (e Extension) Register(r *registry.Registry) error {
 			AddressOf: instanceAddress,
 			Lower:     lowerDatabase,
 		},
+		{
+			Name:            Site,
+			Extension:       Name,
+			Kind:            ir.DeployableSite,
+			Settings:        json.RawMessage(siteSettings),
+			NameOf:          serviceName,
+			AddressOf:       sitePublicAddress,
+			PublicAddressOf: sitePublicAddress,
+			Lower:           lowerSite,
+		},
 	} {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
@@ -147,6 +170,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
 		{Name: JobHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunJob, To: CloudRun, Connect: connectHTTP},
+		{Name: SiteConnector, Extension: Name, Edge: ir.EdgeSite, From: Site, To: CloudRun, Connect: connectSite},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -168,6 +192,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableServer:   CloudRun,
 			ir.DeployableDatabase: CloudSQL,
 			ir.DeployableJob:      CloudRunJob,
+			ir.DeployableSite:     Site,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,
@@ -184,6 +209,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Builder:    imageBuilder{ext: e},
 		CI:         ciIdentities{},
 		Jobs:       jobRunner{ext: e},
+		Sites:      sitePublisher{ext: e},
 	})
 }
 

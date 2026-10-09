@@ -461,6 +461,27 @@
         ]
       },
       {
+        "id": "deployer.role.storage-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/storage.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "deployer.state",
         "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
         "properties": {
@@ -841,6 +862,7 @@
         "deployer.role.run-admin",
         "deployer.role.secretmanager-admin",
         "deployer.role.serviceusage-serviceUsageConsumer",
+        "deployer.role.storage-admin",
         "deployer.state",
         "deployer.state-key",
         "github",

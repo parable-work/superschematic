@@ -687,8 +687,9 @@ registers a `PlatformSpec`:
   target's is the loopback URL, as its address is. On gcp it is
   `https://<host>`, the server's host under the environment's domain, or
   its `run.app` URL without a domain, where its ingress lets a browser
-  reach it. The generic connector, which joins deployables on two
-  targets, will read it too;
+  reach it; a site's is `https://<site>.<domain>`, or without a domain
+  `http://` and its load balancer's address. The generic connector, which
+  joins deployables on two targets, will read it too;
 - `Lower`, a pure function from the environment and the resolved
   deployable, bindings included, to the deployable's resources and, for an
   exposed server, the DNS records it needs (section 6.9).
@@ -1204,13 +1205,14 @@ change reads as a diff.
 ## 7. The gcp target
 
 `extensions/gcp` builds this section: the target, its Cloud Run, Cloud
-Run job and Cloud SQL platforms, their connectors, the Cloud DNS
+Run job, Cloud SQL and site platforms, their connectors, the Cloud DNS
 platform, the policy rules, the pinned provider schemas (section 6.4), at
 pulumi-gcp 9.37.1, bootstrap with the target's Secret Manager store and
 state bucket (section 7.3), image builds on Cloud Build, the migration
-job (section 8.4, D46), and a job's run on demand (section 8.7, D52). Its
-golden environments resolve the acme-shop stack of section 4.1,
-shop-orders' job included, in a staging, a production and a parameterized
+job (section 8.4, D46), a job's run on demand (section 8.7, D52), and a
+site's publish to its bucket (section 8.10, D55). Its golden environments
+resolve the acme-shop stack of section 4.1, shop-orders' job and the site
+shop-web included, in a staging, a production and a parameterized
 preview environment.
 
 ### 7.1 What the engineer enters
@@ -1244,7 +1246,9 @@ Bootstrap reads the GitHub repository from the git remote.
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server or job | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
-| exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic |
+| exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
+| site | a Cloud Storage bucket per site, `<project>-<site>`, in the environment's region, with uniform access and readable by `allUsers`, which a backend bucket needs; a backend bucket over it with Cloud CDN, which keeps each object as its `Cache-Control` says; and a global external Application Load Balancer whose URL map, in the site's rollout step, rewrites every path to the prefix of the files it serves and `/` to their `index.html`, and serves the fallback with 200 for a 404 (section 8.10). With a domain, a certificate for `<site>.<domain>` as an exposed server has, and `https://<site>.<domain>` is the site's origin; without one, HTTP on port 80 at the load balancer's address, which is the origin, since a certificate needs a host |
+| site edge | the server's public address in the site's config, and the site's origin in the server's CORS field (section 3.4). No grant: the server is exposed, with its invoker check off |
 | secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's or job's account, and an environment variable that references its latest version |
 | image | a server's or a job's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits |
@@ -1256,10 +1260,12 @@ accepts, so no caller waits on a load balancer the exposure step applies
 last. A call to an API the same server serves stays on loopback, with no
 grant and no credential.
 
-Each exposed server gets a load balancer of its own. A platform lowers one
-deployable, so it cannot write the host rules of a load balancer the
-environment's exposed servers would share; sharing one waits for a
-lowering that sees the whole environment.
+Each exposed server gets a load balancer of its own, and so does each
+site. A platform lowers one deployable, so it cannot write the host rules
+of a load balancer the environment's exposed servers would share; sharing
+one waits for a lowering that sees the whole environment. A member of a
+parameterized environment gets its own site bucket and load balancer, as
+it gets its own exposed servers.
 
 A schedule runs as its job's own account, which may run that job and no
 other. An account per stack, with a grant on each job, could run every job
@@ -1318,7 +1324,9 @@ again: each step creates what is missing and leaves the rest.
      applies a job's schedule with Cloud Scheduler's admin role, the role
      that creates, updates and deletes scheduler jobs, and runs a job's
      executions for `stack run` with the Cloud Run admin role it applies
-     the job with (D52);
+     the job with (D52). It creates a site's bucket and its grant to
+     `allUsers`, and publishes the site's files, with Storage's admin role
+     (D55);
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1414,11 +1422,13 @@ amended).
 - `production-databases-highly-available`: in an environment whose values
   set `production`, every Cloud SQL instance it creates is regional.
 - `nothing-public-unless-exposed`: nothing admits the public on behalf of
-  anything but an exposed server. It refuses an internal server's service
-  that takes outside traffic or turns its invoker check off, a load
-  balancer's address or forwarding rule, a grant to `allUsers` or
-  `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`. A
-  job is never exposed, so a grant that lets anyone run it is refused too.
+  anything but an exposed server or a site. It refuses an internal
+  server's service that takes outside traffic or turns its invoker check
+  off, a load balancer's address or forwarding rule, a grant to `allUsers`
+  or `allAuthenticatedUsers`, and an instance that authorizes `0.0.0.0/0`.
+  A job is never exposed, so a grant that lets anyone run it is refused
+  too. A site is always exposed, so its load balancer and its bucket's
+  grant to `allUsers` pass.
 
 ## 8. Generated build and runtime
 
@@ -2285,11 +2295,29 @@ config may leave `outputs` out.
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
   fallback, and prints its URL in the summary (section 8.3).
-- **gcp.** The output goes to a bucket under a prefix per content digest.
-  A backend bucket with Cloud CDN serves it behind the HTTPS load balancer
-  that exposure builds, with the fallback on the URL map. A deploy writes
-  the new prefix and then points the URL map at it, so the switch is
-  atomic and the manifest can roll it back. A site is always exposed.
+- **gcp.** The site platform, `gcp.site`, gives each site a bucket of its
+  own, `<project>-<site>`, and the publisher puts each build's files in it
+  under the hex of their digest, `<hex>/index.html`, with a marker object
+  after the last, so a prefix with the marker holds every file and is not
+  put again; the config goes under the same prefix,
+  `<hex>/__superschematic/config.json`. A backend bucket with Cloud CDN
+  serves the bucket behind the load balancer that exposure builds (section
+  7.2). The URL map rewrites `/` to `/<hex>/index.html` and every other
+  path to `/<hex>/` and the path, `pathPrefixRewrite` with
+  `ir.SiteDigestToken` until the deploy pins it, and applies in the site's
+  rollout step: the deploy uploads, then the apply points the URL map at
+  the new prefix, so the switch is one change, and a deploy given an
+  earlier digest points back. A site with a fallback serves it for a 404,
+  with 200, through the URL map's `defaultCustomErrorResponsePolicy`;
+  since a load balancer with backend buckets alone serves no custom error
+  response, the URL map sends one reserved path,
+  `/__superschematic/none`, to a backend service with no backends. Files
+  are served `no-cache`, so the CDN asks the bucket whether a file
+  changed before it serves it, and the config `no-store`. The bucket is
+  readable by `allUsers`: a backend bucket reads only public objects for a
+  browser's unsigned requests, so a project whose organization policy
+  forbids public buckets cannot serve a site. With no domain, the site is
+  served over HTTP at its load balancer's address (D55, amended).
 
 
 ## 9. End-user auth and service auth
@@ -3368,10 +3396,13 @@ model, or retired, when it lands.
    the generic connector (section 6.2) so compute can mix. Built so far:
    - TypeScript servers on Bun (section 8.6, D51);
    - jobs and scheduled jobs, on the local target and on gcp as Cloud
-     Run jobs with Cloud Scheduler (section 8.7, D52).
+     Run jobs with Cloud Scheduler (section 8.7, D52);
+   - static sites, on the local target and on gcp from a bucket behind a
+     load balancer with Cloud CDN, never run against Google Cloud
+     (section 8.10, D55).
    
-   Not yet: buckets, queues with their workers, static sites and a
-   second target.
+   Not yet: buckets, queues with their workers, a site's SDK clients in
+   the browser, and a second target.
 
 ## 15. Open questions
 

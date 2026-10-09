@@ -27,7 +27,8 @@ and D55 in `docs/DECISIONS.md` records the decisions.
 | the `Site` kind, its config and its sentinel; the typed browser config and the scaffold | a site's typed SDK clients in the browser, which wait on superscalar's browser build |
 | the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
 | `stack dev`: each site built once and served with its config and its fallback | rebuilding a site while `stack dev` runs |
-| the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | the gcp target's sites |
+| the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
+| the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback | a run against Google Cloud; longer caching for files whose names hold their content's hash |
 
 ## Declare a site
 
@@ -160,5 +161,31 @@ superschematic stack build Staging
 superschematic stack deploy Staging --site shop-web=sha256:...
 ```
 
-The gcp target, which serves a site from Cloud Storage behind its load
-balancer, is the next piece of D55.
+### On Google Cloud
+
+The gcp target serves each site from a Cloud Storage bucket of its own,
+`<project>-<site>` (`acme-staging-shop-web`), through a global external
+Application Load Balancer with Cloud CDN. A deploy puts the files of a new
+build in the bucket under the hex of their digest, writes the site's
+config beside them, and then switches the load balancer's URL map to that
+prefix in the site's rollout step, so the site moves to the new build in
+one change; `--site` with an earlier digest moves it back.
+
+| Environment | The site's address |
+| --- | --- |
+| with a `domain` | `https://<site>.<domain>` (`https://shop-web.staging.acme.dev`), with a Google-managed certificate and the records the environment's DNS platform writes, as an exposed server has |
+| without one | `http://<address>`, the load balancer's address, over HTTP: a certificate needs a host. `stack outputs` holds the address as the `address` of `<site>.address` |
+
+A site with a `fallback` serves it, with 200, for a path that names no
+file. Every file is served `no-cache`, so Cloud CDN checks with the
+bucket before it serves a file again and a deploy shows at once, and the
+config `no-store`.
+
+The bucket is readable by `allUsers`, since the load balancer reads only
+public objects for a browser's request; `nothing-public-unless-exposed`
+allows that for a site, which is always exposed. A project whose
+organization policy forbids public buckets cannot serve a site.
+`stack bootstrap` gives the `deployer` account Storage's admin role,
+which creates the bucket and publishes its files. The bucket comes with
+the first deploy's infrastructure step, so run `stack deploy` once before
+`stack build` uploads a site's files.

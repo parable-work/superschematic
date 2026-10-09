@@ -33,6 +33,13 @@ const (
 	TypeCertificateMapEntry = "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry"
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
 
+	// The types of a site (D55): the bucket that holds its files, the
+	// load balancer's backend for it, and the HTTP proxy of a site with
+	// no domain.
+	TypeBucket        = "gcp:storage/bucket:Bucket"
+	TypeBackendBucket = "gcp:compute/backendBucket:BackendBucket"
+	TypeHTTPProxy     = "gcp:compute/targetHttpProxy:TargetHttpProxy"
+
 	// The types of the bootstrap graph (BootstrapEnvironment).
 	TypeRepository               = "gcp:artifactregistry/repository:Repository"
 	TypeRepositoryIAMMember      = "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember"
@@ -85,6 +92,14 @@ const cloudRunJobSettings = `{
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
     "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
   },
+  "additionalProperties": false
+}`
+
+// siteSettings is the schema of a site's settings on the gcp site
+// platform (D55): it takes none.
+const siteSettings = `{
+  "type": "object",
+  "properties": {},
   "additionalProperties": false
 }`
 
