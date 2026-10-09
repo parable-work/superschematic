@@ -41,10 +41,15 @@ const viewsService = "fixture-views-api"
 // serviceDir is a fixture's directory: the extension's own, or the
 // loader's.
 func serviceDir(name string) string {
-	if name == formsService || name == controlsService || name == viewsService {
-		return filepath.Join("testdata", "services", name)
+	if own := filepath.Join("testdata", "services", name); isDir(own) {
+		return own
 	}
 	return filepath.Join(fixtures, name)
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // rustOutputs are a fixture's outputs with the server in Rust and the
@@ -204,11 +209,12 @@ func skipped(result *registry.Result, reason string) bool {
 // fixture-forms-api, whose input types make forms, fixture-controls-api,
 // whose routes have a webhook's signature check, service clauses and
 // traffic controls, fixture-views-api, whose result's fields are of every
-// kind a display component renders, and fixture-user-routes-api, whose
-// users are the core user model's (D50), with testdata/golden/<service>;
-// -update rewrites them.
+// kind a display component renders, fixture-user-routes-api, whose users
+// are the core user model's (D50), and fixture-args-api, whose arguments
+// make argument forms, with testdata/golden/<service>; -update rewrites
+// them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -504,8 +510,8 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	if strings.Contains(records, "ReceiptRecord") {
 		t.Error("records.rs mirrors the webhook's result, which no page receives")
 	}
-	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, controlsService), "src", "forms.rs")); !os.IsNotExist(err) {
-		t.Errorf("forms.rs written for the webhook's input, which no page submits: %v", err)
+	if strings.Contains(read("forms.rs"), "PaymentEventForm") {
+		t.Error("forms.rs has a form for the webhook's input, which no page submits")
 	}
 	if strings.Contains(views, "pub async fn receipt_") {
 		t.Error("views.rs renders the webhook's result, which has no record")

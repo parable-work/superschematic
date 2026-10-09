@@ -13,6 +13,10 @@
 //! `forms` reads and renders a form per input type a call in `operations`
 //! takes, its controls named by their fields' paths.
 {{- end }}
+{{- if .ArgForms }}
+//! `arg_forms` reads and renders a form per call in `operations` whose
+//! arguments, beside its input, a form holds; a GET's is a filter.
+{{- end }}
 {{- if .Procedures }}
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
@@ -28,7 +32,10 @@
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
-{{ if .Forms -}}
+{{ if .ArgForms -}}
+pub mod arg_forms;
+{{ end -}}
+{{ if .HasForms -}}
 pub mod forms;
 {{ end -}}
 pub mod operations;

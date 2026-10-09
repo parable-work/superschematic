@@ -5151,4 +5151,45 @@ winning. Its unit tests decode rows by index and read date-times as UTC.
 `TestControlNames` check the generator. acme-shop's `PlaceOrderInput` now
 has `PlaceOrderInputForm`; its app is unchanged.
 
+### D44, amended: an operation's arguments get a form, and a GET's query a filter form
+
+D44's forms covered an operation's input type alone. An operation whose
+arguments are scalars, in its path, its query or its body, had none, so a
+page that cancels an order by its id and a reason, or lists orders by a
+set of statuses and a limit, wrote its fields, their rules and their
+parsing by hand. The router already decodes and checks each argument
+(`ParamSpec`), and `Args::check` runs those rules in-process (D43), but
+only in the API crate: its specs are private to its router.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An operation with an in-process call and an argument beside its input gets `arg_forms::<Ns><Op>ArgsForm`, named after its `Args` struct. It holds each argument as the browser sends it, an `Option<String>`, and a list's every value, a `Vec<String>`, so a refused form renders again as sent. `outputs.topcoat.forms` turns argument forms off with input forms; `FormErrors` stays in `forms`, which the crate writes when it has either kind. | A switch of their own, `argForms`, where one switch already says whether the crate renders forms; a form only for operations without an input |
+| `parse()` writes each argument as the JSON a request carries, as a procedure's `to_args` does (a number parsed, a checkbox true when sent, a blank field absent, a declared default read when blank), decodes it into the `Args` struct, then runs `Args::check`. A value that does not decode, or that `check` refuses, is that argument's error; `check` stops at the first argument it refuses. `submit(cx)` parses the form and makes the in-process call. | Restating each `ParamSpec`'s rules in the form, which would drift from the router's; making the router's specs public, a change to every Rust server for one extension |
+| The component renders each argument with the control and attributes an input form's field of its type gets (`schemaSet.control`, called, not copied): a select for an enum, number with `min`, `max` and `step`, text with lengths and a pattern a browser reads as the server does, a checkbox for a boolean. A list of an enum is a group of checkboxes; any other list an input per value sent and one more. A label is the argument's name in words, since the IR's arguments have no title, and its description a hint (`aria-describedby`). A path argument is a hidden input a page fills through `new(<path arguments>)`. A map, a list of lists, an object, a list of booleans, a union or any JSON value leaves the operation without a form, with the build log's reason. | A multiple select for a list of an enum, which hides its choices; refusing every list but an enum's |
+| An operation with an input embeds the input's form as `input`: one struct, one `parse()` and one component cover the arguments and the input's fields, posted in one `<form>`. The arguments' keys go to the argument form, the rest to the input form through Topcoat's own `Form<T>`. An operation whose input has no form gets no argument form, nor does one where an argument shares an input field's name. | An argument form beside the input's that the page composes, which needs two extractions of one body that Topcoat does not offer; copying the input's fields into the argument form |
+| A GET operation's form is a filter: `METHOD` is `"get"`, and it deserializes from Topcoat's `Form<T>`, which reads the query on GET, or from `from_query(cx)`. Its `Deserialize` reads the pairs a browser sends: a list's values are repeated keys (`statuses=placed&statuses=shipped`), which a derived `Deserialize` refuses as a duplicate field, a query list's comma-separated values are split as the router splits them, and a single argument takes the first value sent, as the router does. An optional boolean in a filter is absent when its checkbox is not checked; elsewhere an unchecked box is false, as in an input form. | Pairs (`Form<Vec<(String, String)>>`) in each page; serde_urlencoded's struct decoding, which holds no list; a component that renders the `<form>` element and its button, whose words are the app's |
+| `FormErrors::from_api` places a refused parameter's error, which the router's 400 names in `details.parameter`, on that argument's control, as procedures' `ProblemRecord::from` places it at the parameter. A component shows a message no control it renders shows, a hidden path argument's, an input's `@uiHidden` field's, a parameter an input form does not hold, with the form's own, named by its field (`FormErrors::unclaimed`). | The detail alone as the form's message, which an argument form could not place at its control; dropping a field's error the form does not render |
+
+Status: built. The goldens cover a sixth fixture, the extension's own
+`fixture-args-api`: a filter of a list of enums, a list of strings, a
+limit, an integer page and a flag in the query; a cancel by a path UUID,
+an enum and an optional reason with `maxLength` and a description in the
+body; an order fetched by its id alone; a review written by a path id and
+an input; and a tag map, which leaves its operation without a form.
+`TestWhatHasNoArgumentForm` reads its crate and build log, and
+`TestArgumentControls` each control and reason. Its cargo test drives a
+Topcoat app through `Router::handle`: the cancel form renders its id
+hidden, its select required and its reason's `maxlength` and hint; a
+valid post calls the operation with the arguments sent, a blank reason
+absent; an over-long reason re-renders with 422 and the router's message
+at its control, a forged id with the form's message naming it, and the
+operation's refusal as the form's; the GET filter reads repeated statuses,
+a comma-separated tag list, a limit, a page and a flag from the query and
+renders them checked and filled, an unchecked flag and a blank limit
+absent, and a limit out of range or a page that is not a whole number at
+its control; and the review form, its input embedded, parses both, a
+value with `&` and `%` intact, and shows the input's error at its field.
+The other fixtures' crates gain the forms their operations' arguments
+give, and their apps still pass clippy with warnings denied.
+
 The rule is reversible until the first release.

@@ -11,9 +11,11 @@
 // form per input type such a call takes, nested objects and lists
 // included, parses what the browser sends by the input type's rules (D14)
 // and renders its fields at their paths with the attributes those rules
-// give them, a list's rows with buttons that add and remove them. A
-// procedure per operation lets browser code call it, its arguments and its
-// result records, its refusal a record the browser reads, under its route's
+// give them, a list's rows with buttons that add and remove them, and a
+// form per such call whose other arguments a form holds does the same by
+// the router's rules, a GET's a filter read from the query. A procedure
+// per operation lets browser code call it, its arguments and its result
+// records, its refusal a record the browser reads, under its route's
 // traffic controls. An operation whose route a browser's request cannot
 // meet, a webhook's or one only a service may call, has none. A detail and
 // a table component per record render it as HTML, labeled by the schema's
@@ -109,7 +111,7 @@ var OutputSchema = json.RawMessage(`{
   "properties": {
     "enabled": {"type": "boolean"},
     "records": {"type": "boolean", "description": "Mirror each type an in-process call returns as a Topcoat record (default true)."},
-    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes (default true)."},
+    "forms": {"type": "boolean", "description": "A form per input type an in-process call takes, and per in-process call whose other arguments a form holds (default true)."},
     "procedures": {"type": "boolean", "description": "A procedure per operation the browser calls, its arguments and result records (default true; needs records)."},
     "views": {"type": "boolean", "description": "Components that render each record as a description list and a table (default true; needs records)."}
   }
@@ -131,7 +133,7 @@ type Config struct {
 func (c Config) WritesRecords() bool { return c.Records == nil || *c.Records }
 
 // WritesForms reports whether the crate has a form per input type a form
-// holds.
+// holds, and per call whose other arguments a form holds.
 func (c Config) WritesForms() bool { return c.Forms == nil || *c.Forms }
 
 // WritesProcedures reports whether the crate has a procedure per

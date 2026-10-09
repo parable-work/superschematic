@@ -24,6 +24,10 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 - reads and renders a form per input type an operation a page calls takes,
   nested objects and lists included, by the input type's rules
   ([Forms](#forms)).
+- reads and renders a form per operation a page calls whose other
+  arguments a form holds, path, query and body, by the router's rules; a
+  GET's is a filter read from the query
+  ([Argument forms](#argument-forms)).
 - lets browser code call each operation through a Topcoat procedure, its
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
@@ -72,8 +76,9 @@ outputs: {
 }
 ```
 
-Records, forms, procedures and views are on by default. `forms: false`,
-`procedures: false` and `views: false` each leave out their module;
+Records, forms, procedures and views are on by default. `forms: false`
+leaves out both kinds of form; `procedures: false` and `views: false` each
+leave out their module;
 `records: false` leaves out the records, and with them the procedures and
 the views, which are built on records.
 
@@ -314,6 +319,86 @@ why. A form submits through the operation's in-process call, so the
 input of an operation without one, a webhook's or one the service mounts
 itself, gets none either ([what has no procedure](#what-has-no-procedure)).
 `forms: false` in `outputs.topcoat` leaves out the module.
+
+## Argument forms
+
+An operation with an in-process call and an argument beside its input
+(a path, query or body argument) gets a form in `arg_forms`, named after
+its `Args` struct:
+
+- **`<Ns><Op>ArgsForm`** holds each argument as the browser sends it, an
+  `Option<String>`, a list's every value a `Vec<String>`, so a refused
+  form renders again as it was sent. It deserializes from Topcoat's
+  `Form<T>`, for a post's body or a GET's query: a list's values are
+  repeated keys (`statuses=placed&statuses=shipped`), which a derived
+  `Deserialize` refuses, and a query list's comma-separated values are
+  split as the router splits them. A single argument takes the first
+  value sent, a blank one none. `from_pairs` builds it from pairs.
+- **`new(<path arguments>)`** builds the form of one resource: each path
+  argument is a hidden input the page fills, with the order's id, say.
+- **`parse()`** writes each argument as the JSON a request carries (a
+  number parsed, a checkbox true when sent), decodes it into the `Args`
+  struct and checks it with `Args::check`, the router's own rules
+  ([D43](../../docs/DECISIONS.md)). A blank optional argument is absent,
+  and one with a declared default reads the default. A value that does
+  not decode, or that `check` refuses, is the argument's error in
+  `FormErrors`; `check` refuses the first argument that breaks a rule.
+- **`submit(cx)`** parses the form and calls the operation in-process
+  (`operations::<ns>_<op>`), its refusal the form's errors through
+  `FormErrors::from_api`.
+- **`<ns>_<op>_args_fields(form, errors)`** renders each argument with the
+  control an input form's field of its type gets, the attributes its
+  rules give it, its label (its name in words; the IR's arguments have no
+  title) and its description as a hint, `aria-describedby` it. A list of
+  an enum is a group of checkboxes; any other list an input per value
+  sent and one more. A path argument is a hidden input, whose error is
+  shown with the form's own.
+
+An operation with an input embeds the input's form as `input`: one
+struct, one `parse` and one component cover the arguments and the
+input's fields, which the page posts in one `<form>`. The input's fields
+keep their names, so an argument that shares one gets no form, nor does an
+operation whose input has none.
+
+A GET operation's form is a filter: `METHOD` is `"get"`, and the page
+reads it from the query with `Form<T>` (or `from_query(cx)`), so its
+controls show the filters in effect. An optional boolean in a filter is
+absent when its checkbox is not checked, so it filters nothing; elsewhere
+an unchecked box is false, as in an input form.
+
+```rust
+#[page(POST "/orders/cancel")]
+async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
+    let errors = match form.submit(cx).await {
+        Ok(_) => return Err(see_other("/orders").into()),
+        Err(errors) => errors,
+    };
+    Ok(view! {
+        (StatusCode::UNPROCESSABLE_ENTITY)
+        <form method="post">order_cancel_order_args_fields(form: form, errors: errors)</form>
+    })
+}
+
+#[page("/orders")]
+async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
+    let (orders, errors) = match filter.submit(cx).await {
+        Ok(orders) => (orders, FormErrors::default()),
+        Err(errors) => (Vec::new(), errors),
+    };
+    let rows: Vec<OrderViewRecord> = orders.iter().map(OrderViewRecord::from).collect();
+    Ok(view! {
+        <form method=(OrderListOrdersArgsForm::METHOD)>
+            order_list_orders_args_fields(form: filter, errors: errors)
+            <button type="submit">"Filter"</button>
+        </form>
+        order_view_table(rows: rows)
+    })
+}
+```
+
+An argument that is a map, a list of lists, an object, a list of
+booleans, a union or any JSON value leaves its operation without a form,
+and the build log says why.
 
 ## Procedures
 

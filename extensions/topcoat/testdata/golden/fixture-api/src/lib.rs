@@ -9,6 +9,8 @@
 //! webhook's, has none.
 //! `forms` reads and renders a form per input type a call in `operations`
 //! takes, its controls named by their fields' paths.
+//! `arg_forms` reads and renders a form per call in `operations` whose
+//! arguments, beside its input, a form holds; a GET's is a filter.
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `fixture_api` puts each route's traffic controls in front of its
@@ -18,6 +20,7 @@
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod arg_forms;
 pub mod forms;
 pub mod operations;
 pub mod procedures;

@@ -13,9 +13,10 @@ Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
 rules. For the operations a page can call, the crate also has a form per
-input type, nested objects and lists included, and a record per result
-type, with components that render each record, and it mounts the JSON API
-beside the pages.
+input type, nested objects and lists included, and per operation's other
+arguments, a filter for a GET, and a record per result type, with
+components that render each record, and it mounts the JSON API beside the
+pages.
 
 The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
@@ -52,8 +53,8 @@ says why in the build log, so the same config also builds the Go server.
 The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
 
 The crate's forms, records, procedures and display components, below,
-are on by default. In `outputs.topcoat`, `forms: false` leaves out the
-forms, `procedures: false` the procedures, `views: false` the display
+are on by default. In `outputs.topcoat`, `forms: false` leaves out both
+kinds of form, `procedures: false` the procedures, `views: false` the display
 components, and `records: false` the records with the procedures and the
 display components, which are built on records.
 
@@ -178,6 +179,41 @@ a `<select>`: `lines.productId` for every line's product, or
 let choices = Choices::new().with("lines.productId", products.iter().map(|p| (p.id.clone(), p.name.clone())));
 view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
 ```
+
+## Argument and filter forms
+
+An operation's other arguments, in its path, its query or its body, get a
+form too, in `arg_forms`, named after the operation's `Args` struct:
+`<Namespace><Operation>ArgsForm`. It holds each argument as the browser
+sends it, and a list's every value. `parse()` writes each as the JSON a
+request carries, decodes it into the `Args` struct and checks it with the
+router's own rules (`Args::check`), so a value the JSON API would refuse
+with 400 is that field's error. `submit(cx)` parses the form and makes the
+in-process call, and a refusal of either is the form's `FormErrors`, which
+the page renders the form again with, as it does an input form.
+
+`<namespace>_<operation>_args_fields(form, errors)` renders each argument
+with the control an input form gives a field of its type and the
+attributes its rules give it: a `<select>` for an enum, a group of
+checkboxes for a list of an enum, `min` and `max` on a number, `maxlength`
+on a string. An argument is labeled by its name in words, and its
+description, when it has one, is a hint under the label. A path argument
+is a hidden input: `new(id)` builds the form of one resource, such as the
+order a cancel button cancels. When the operation also takes an input, the
+argument form embeds the input's form, so one `<form>`, one `parse()` and
+one component cover both.
+
+A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
+reads it from the query with Topcoat's `Form<T>`, which reads the query on
+GET, or with `from_query(cx)`, so the controls show the filters in effect.
+A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
+a comma-separated value is split as the router splits it. A blank field is
+absent, and so is an optional flag whose checkbox is not checked.
+
+`FormErrors::from_api` places a refused parameter's error, which the
+router's 400 names in its details, on that argument's control. A message
+no rendered control shows, such as a hidden path argument's, is shown with
+the form's own messages, named by its field.
 
 ## Records
 

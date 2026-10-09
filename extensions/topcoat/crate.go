@@ -47,7 +47,10 @@ type crate struct {
 	// FormStructs are the structs of the forms' input types and of the
 	// object types they nest.
 	FormStructs []*formStruct
-	Procedures  []procedure
+	// ArgForms are the forms over each operation's arguments other than
+	// its input (argforms.go).
+	ArgForms   []argForm
+	Procedures []procedure
 	// Views are each record's display components, and EnumLabels the
 	// label functions of the enums they show.
 	Views      []view
@@ -229,6 +232,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		if out.Forms, out.FormStructs, err = formsOf(schemas, inProcess, c.Logf); err != nil {
 			return nil, err
 		}
+		if out.ArgForms, err = argFormsOf(schemas, inProcess, out.Forms, c.Logf); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -353,8 +359,11 @@ func (c *crate) write(dir string) error {
 			struct{ template, path string }{"wire.tmpl", filepath.Join("src", "wire.rs")},
 		)
 	}
-	if len(c.Forms) > 0 {
+	if c.HasForms() {
 		files = append(files, struct{ template, path string }{"forms.tmpl", filepath.Join("src", "forms.rs")})
+	}
+	if len(c.ArgForms) > 0 {
+		files = append(files, struct{ template, path string }{"arg_forms.tmpl", filepath.Join("src", "arg_forms.rs")})
 	}
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
@@ -372,7 +381,7 @@ func (c *crate) write(dir string) error {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "procedures.rs", "views.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

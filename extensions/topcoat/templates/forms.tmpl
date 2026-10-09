@@ -14,7 +14,10 @@
 //! their indexes, and its errors are keyed by the same names, so each
 //! message renders at its control. A list's rows are added and removed by
 //! submit buttons named `_action` (`add:rooms`, `remove:rooms[1]`), which
-//! `apply_action` applies without JavaScript.
+//! `apply_action` applies without JavaScript. `FormErrors` is an argument
+//! form's errors too (`arg_forms`).
+
+#![allow(unused_imports)]
 
 use std::collections::BTreeMap;
 
@@ -81,18 +84,59 @@ impl FormErrors {
     }
 
     /// The errors of an operation's refusal: its field errors (its `errors`
-    /// member, nested for a nested object's fields) when it has them, else
-    /// its detail, so a form shows what the operation refused as it shows
-    /// what `parse` refused.
+    /// member, nested for a nested object's fields, and a refused
+    /// parameter's, which the router's 400 names in its `details`) when it
+    /// has them, else its detail, so a form shows what the operation refused
+    /// as it shows what `parse` refused.
     pub fn from_api(err: &ApiError) -> Self {
         let mut errors = Self::default();
         if let Some(fields) = err.errors.as_deref() {
             errors.read("", fields);
         }
+        if let Some(details) = err.details.as_deref() {
+            errors.read_parameter(details);
+        }
         if errors.is_empty() {
             errors.form.push(err.message.clone());
         }
         errors
+    }
+
+    /// The messages no rendered control shows: the form's own, then each
+    /// field's whose name is not among `rendered` (an `@uiHidden` field's,
+    /// a path argument's, a parameter the form does not hold), named by the
+    /// field.
+    pub fn unclaimed(&self, rendered: &[&str]) -> Vec<String> {
+        let mut messages = self.form.clone();
+        for (field, field_messages) in &self.fields {
+            if !rendered.contains(&field.as_str()) {
+                messages.extend(field_messages.iter().map(|message| format!("{field}: {message}")));
+            }
+        }
+        messages
+    }
+
+    /// Reads a refused parameter's errors from the router's 400 details
+    /// (`{parameter, path?, reason, errors?}`), at the parameter: each
+    /// broken rule's message, else the reason.
+    fn read_parameter(&mut self, details: &Value) {
+        let Some(parameter) = details.get("parameter").and_then(Value::as_str) else {
+            return;
+        };
+        let messages: Vec<&str> = details["errors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|error| error.get("message").and_then(Value::as_str))
+            .collect();
+        if messages.is_empty()
+            && let Some(reason) = details.get("reason").and_then(Value::as_str)
+        {
+            self.add(parameter, reason);
+        }
+        for message in messages {
+            self.add(parameter, message);
+        }
     }
 
     /// Reads field errors keyed by path, nested for a nested object's
@@ -114,6 +158,8 @@ impl FormErrors {
         }
     }
 
+{{- if .Forms }}
+
     /// The form's own messages, and those of a place the component shows
     /// no control for (an `@uiHidden` field, a key the input does not
     /// declare), each after its name.
@@ -126,6 +172,7 @@ impl FormErrors {
         }
         out
     }
+{{- end }}
 }
 
 /// Where `name` is under `field`: `vip` of `labels.vip`, `[1]` of
@@ -223,6 +270,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
     out
 }
 {{- end }}
+{{- if .Forms }}
 
 /// A step of a control's name: a field's key, or a row's index.
 #[derive(Debug, Clone, PartialEq)]
@@ -321,6 +369,7 @@ impl Posted {
     }
 {{- end }}
 }
+{{- end }}
 {{- if .FormsUse "read" }}
 
 /// What one control sent, read as the input's JSON: nothing, a value, or

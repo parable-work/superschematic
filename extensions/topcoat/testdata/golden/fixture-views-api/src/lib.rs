@@ -7,6 +7,8 @@
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
+//! `arg_forms` reads and renders a form per call in `operations` whose
+//! arguments, beside its input, a form holds; a GET's is a filter.
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `views` renders each record as a description list and as a table.
@@ -14,6 +16,8 @@
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod arg_forms;
+pub mod forms;
 pub mod operations;
 pub mod procedures;
 pub mod records;

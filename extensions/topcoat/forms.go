@@ -26,6 +26,8 @@ type form struct {
 	Visible bool
 	// Body is the component's view, the fields rendered at their names.
 	Body string
+	// Struct is the input type's struct.
+	Struct *formStruct
 }
 
 // formStruct is the struct of one object type's fields as a form holds
@@ -159,6 +161,7 @@ func formsOf(schemas schemaSet, inProcess []declared, log func(format string, ar
 			TypeName:  typeDef.Name,
 			Component: registry.RustIdentifier(typeDef.Name, "input") + "_fields",
 			Parse:     "types::validators::" + parse,
+			Struct:    st,
 		})
 	}
 	structs := b.sorted()

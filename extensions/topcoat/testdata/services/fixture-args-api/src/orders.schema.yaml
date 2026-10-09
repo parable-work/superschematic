@@ -1,0 +1,161 @@
+# Orders and reviews, through argument forms: a list of orders filtered by
+# a list of statuses, a list of tags, a limit, a page and a flag in the
+# query; an order cancelled by its id in the path and an optional reason in
+# the body; a review written by its product's id in the path and an input;
+# and an order tagged by a map, which a form does not hold.
+name: fixture-args-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Ordering.Rank:
+    name: Ordering.Rank
+    languagePrimitive: number
+enums:
+  # Where an order is.
+  OrderStatus:
+    name: OrderStatus
+    values:
+      - name: Placed
+        serializedAs: placed
+      - name: OnHold
+        serializedAs: on_hold
+      - name: Shipped
+        serializedAs: shipped
+      - name: Cancelled
+        serializedAs: cancelled
+  # Why an order is cancelled.
+  CancelCode:
+    name: CancelCode
+    values:
+      - name: ChangedMind
+        serializedAs: changed_mind
+      - name: TooSlow
+        serializedAs: too_slow
+types:
+  OrderView:
+    name: OrderView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: status
+        typeRef: { name: OrderStatus }
+        required: true
+      - name: note
+        typeRef: { name: string }
+  ReviewView:
+    name: ReviewView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: rating
+        typeRef: { name: number }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+  WriteReviewInput:
+    name: WriteReviewInput
+    role: APIInput
+    fields:
+      - name: rating
+        typeRef: { name: number }
+        required: true
+        validateMin: 1
+        validateMax: 5
+      - name: title
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 1
+        validateMaxLength: 120
+operationSets:
+  - name: OrderQueries
+    operations:
+      # The orders that match every filter.
+      - name: listOrders
+        typeRef: { name: OrderView, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: orders
+        arguments:
+          - name: statuses
+            typeRef: { name: OrderStatus, isArray: true }
+            isQuery: true
+          - name: tags
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateMaxLength: 20
+          - name: limit
+            typeRef: { name: number }
+            isQuery: true
+            validateMin: 1
+            validateMax: 100
+          - name: page
+            typeRef: { name: Ordering.Rank }
+            isQuery: true
+            validateMin: 1
+          - name: archived
+            typeRef: { name: boolean }
+            isQuery: true
+      # One order.
+      - name: getOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: "orders/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+  - name: OrderMutations
+    operations:
+      # Cancels an order, recording why.
+      - name: cancelOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/cancel"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: code
+            typeRef: { name: CancelCode }
+            required: true
+          - name: reason
+            description: Why the order is cancelled, as the shopper wrote it.
+            typeRef: { name: string }
+            validateMaxLength: 500
+      # Tags an order; a form holds no map.
+      - name: tagOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: labels
+            typeRef: { name: string, isMap: true }
+            required: true
+  - name: ProductReviews
+    operations:
+      # Writes a review of a product.
+      - name: writeReview
+        typeRef: { name: ReviewView }
+        required: true
+        httpMethod: POST
+        restPath: "products/{productId}/reviews"
+        arguments:
+          - name: productId
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: WriteReviewInput }
+            required: true
