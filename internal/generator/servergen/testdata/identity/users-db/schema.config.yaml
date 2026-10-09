@@ -1,0 +1,8 @@
+# The database of the identity fixture: its User table and UserRole table
+# are the user model's (D50), and the loader adds Session, UserCredential
+# and UserRoleGrant beside them.
+name: users-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
