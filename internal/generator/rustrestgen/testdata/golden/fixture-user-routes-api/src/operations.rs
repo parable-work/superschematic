@@ -7,6 +7,240 @@
 
 use superschematic_http_runtime::OperationInfo;
 
+/// account.capabilities (`GET /api/auth/capabilities`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_CAPABILITIES: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "capabilities",
+    method: "GET",
+    path: "/api/auth/capabilities",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account.login (`POST /api/auth/login`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_LOGIN: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "login",
+    method: "POST",
+    path: "/api/auth/login",
+    requires_auth: false,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account.logout (`POST /api/auth/logout`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_LOGOUT: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "logout",
+    method: "POST",
+    path: "/api/auth/logout",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account.me (`GET /api/auth/me`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ME: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "me",
+    method: "GET",
+    path: "/api/auth/me",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account.changePassword (`POST /api/auth/password`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_CHANGE_PASSWORD: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "changePassword",
+    method: "POST",
+    path: "/api/auth/password",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account.register (`POST /api/auth/register`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_REGISTER: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "register",
+    method: "POST",
+    path: "/api/auth/register",
+    requires_auth: false,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.listRoles (`GET /api/auth/admin/roles`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_LIST_ROLES: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "listRoles",
+    method: "GET",
+    path: "/api/auth/admin/roles",
+    requires_auth: true,
+    permissions: &["identity.roles.read"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.createRole (`POST /api/auth/admin/roles`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_CREATE_ROLE: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "createRole",
+    method: "POST",
+    path: "/api/auth/admin/roles",
+    requires_auth: true,
+    permissions: &["identity.roles.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.deleteRole (`DELETE /api/auth/admin/roles/{id}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_DELETE_ROLE: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "deleteRole",
+    method: "DELETE",
+    path: "/api/auth/admin/roles/{id}",
+    requires_auth: true,
+    permissions: &["identity.roles.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.updateRole (`PUT /api/auth/admin/roles/{id}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_UPDATE_ROLE: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "updateRole",
+    method: "PUT",
+    path: "/api/auth/admin/roles/{id}",
+    requires_auth: true,
+    permissions: &["identity.roles.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.listUsers (`GET /api/auth/admin/users`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_LIST_USERS: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "listUsers",
+    method: "GET",
+    path: "/api/auth/admin/users",
+    requires_auth: true,
+    permissions: &["identity.users.read"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.createUser (`POST /api/auth/admin/users`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_CREATE_USER: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "createUser",
+    method: "POST",
+    path: "/api/auth/admin/users",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.getUser (`GET /api/auth/admin/users/{id}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_GET_USER: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "getUser",
+    method: "GET",
+    path: "/api/auth/admin/users/{id}",
+    requires_auth: true,
+    permissions: &["identity.users.read"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.disableUser (`POST /api/auth/admin/users/{id}/disable`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_DISABLE_USER: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "disableUser",
+    method: "POST",
+    path: "/api/auth/admin/users/{id}/disable",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.enableUser (`POST /api/auth/admin/users/{id}/enable`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_ENABLE_USER: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "enableUser",
+    method: "POST",
+    path: "/api/auth/admin/users/{id}/enable",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.setUserPassword (`PUT /api/auth/admin/users/{id}/password`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_SET_USER_PASSWORD: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "setUserPassword",
+    method: "PUT",
+    path: "/api/auth/admin/users/{id}/password",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.revokeRole (`DELETE /api/auth/admin/users/{id}/roles/{roleId}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_REVOKE_ROLE: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "revokeRole",
+    method: "DELETE",
+    path: "/api/auth/admin/users/{id}/roles/{roleId}",
+    requires_auth: true,
+    permissions: &["identity.roles.write"],
+    require_ownership: false,
+    manual: false,
+};
+
+/// account-admin.grantRole (`PUT /api/auth/admin/users/{id}/roles/{roleId}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_GRANT_ROLE: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "grantRole",
+    method: "PUT",
+    path: "/api/auth/admin/users/{id}/roles/{roleId}",
+    requires_auth: true,
+    permissions: &["identity.roles.write"],
+    require_ownership: false,
+    manual: false,
+};
+
 /// greeting.greet (`GET /api/greeting`).
 pub const GREETING_GREET: OperationInfo = OperationInfo {
     namespace: "greeting",
@@ -19,7 +253,25 @@ pub const GREETING_GREET: OperationInfo = OperationInfo {
     manual: false,
 };
 
-/// Every operation, mounted and manual.
+/// Every operation, mounted and manual, the user model's among them.
 pub const ALL: &[OperationInfo] = &[
+    ACCOUNT_CAPABILITIES,
+    ACCOUNT_LOGIN,
+    ACCOUNT_LOGOUT,
+    ACCOUNT_ME,
+    ACCOUNT_CHANGE_PASSWORD,
+    ACCOUNT_REGISTER,
+    ACCOUNT_ADMIN_LIST_ROLES,
+    ACCOUNT_ADMIN_CREATE_ROLE,
+    ACCOUNT_ADMIN_DELETE_ROLE,
+    ACCOUNT_ADMIN_UPDATE_ROLE,
+    ACCOUNT_ADMIN_LIST_USERS,
+    ACCOUNT_ADMIN_CREATE_USER,
+    ACCOUNT_ADMIN_GET_USER,
+    ACCOUNT_ADMIN_DISABLE_USER,
+    ACCOUNT_ADMIN_ENABLE_USER,
+    ACCOUNT_ADMIN_SET_USER_PASSWORD,
+    ACCOUNT_ADMIN_REVOKE_ROLE,
+    ACCOUNT_ADMIN_GRANT_ROLE,
     GREETING_GREET,
 ];

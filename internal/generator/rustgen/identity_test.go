@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc/identitytest"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -127,7 +128,7 @@ func TestIdentityDescriptorCompiles(t *testing.T) {
 	}
 	check := `use ` + strings.ReplaceAll(output.CrateName, "-", "_") + `::IDENTITY_DESCRIPTOR;
 
-const EXPECTED: &str = ` + rawString(identityDocument(t, schema)) + `;
+const EXPECTED: &str = ` + rustutil.RawString(identityDocument(t, schema)) + `;
 
 #[test]
 fn identity_descriptor_is_the_document() {

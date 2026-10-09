@@ -7,6 +7,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -86,7 +87,7 @@ func versionGraphs(schema *ir.Schema, types []TypeInfo) ([]VersionGraphInfo, err
 			Name:          g.Name,
 			FileName:      g.FileName,
 			ConstPrefix:   strings.ToUpper(g.FileName),
-			Descriptor:    rawString(strings.TrimSuffix(string(descriptor), "\n")),
+			Descriptor:    rustutil.RawString(strings.TrimSuffix(string(descriptor), "\n")),
 			SchemaEpoch:   g.Root.VersionGraph.SchemaEpoch,
 			SnapshotEvery: g.Root.VersionGraph.SnapshotInterval(),
 			KindEnum:      g.Name + "EntityKind",
@@ -177,16 +178,6 @@ func isAuditField(name string) bool {
 		return true
 	}
 	return false
-}
-
-// rawString writes s as a Rust raw string literal with enough #s that no
-// "#... sequence in s ends it.
-func rawString(s string) string {
-	hashes := "#"
-	for strings.Contains(s, `"`+hashes) {
-		hashes += "#"
-	}
-	return "r" + hashes + `"` + s + `"` + hashes
 }
 
 // SetVersionGraphPath computes the Cargo.toml path entry for the version

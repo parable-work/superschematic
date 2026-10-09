@@ -96,10 +96,12 @@ type (
 
 	// RustAPI is the Rust REST API crate the api generator writes for a
 	// service whose API language is Rust (D39): its crate names, and each
-	// operation, mounted (Endpoints) or manual (ManualEndpoints), as a
-	// RustEndpoint with its Args struct, its arguments (RustParam), its
-	// input (RustInput), its result type and its auth rules. RustAPIOf
-	// returns it.
+	// operation, mounted (Endpoints), manual (ManualEndpoints) or the user
+	// model's, which the identity runtime serves (IdentityEndpoints, D50),
+	// as a RustEndpoint with its Args struct, its arguments (RustParam),
+	// its input (RustInput), its result type and its auth rules. Identity
+	// is set when the crate authenticates with the identity runtime.
+	// RustAPIOf returns it.
 	RustAPI      = rustrestgen.APIOutput
 	RustEndpoint = rustrestgen.EndpointInfo
 	RustParam    = rustrestgen.ParamInfo

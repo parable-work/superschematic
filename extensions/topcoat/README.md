@@ -106,6 +106,32 @@ caller's permissions cover an operation's, so pages and the JSON API agree.
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
 
+## Users and sessions
+
+When the API's users are the core user model's (D50), its
+`Implementations.authenticator` is the identity runtime's, and the crate
+also offers `IdentityPageAuthenticator`, beside a `PageAuthenticator` of
+the app's own. It reads a page's caller from the session the request
+carries, the session cookie or a bearer token, as the JSON API reads it,
+so a user who signs in through the mounted `/api/auth/login` is signed in
+on every page:
+
+```rust
+let pages = IdentityPageAuthenticator::of(&implementations);
+Router::builder()
+    .discover()
+    .fixture_user_routes_api(implementations, pages)
+    .build()
+```
+
+A cookie on a request other than `GET`, `HEAD` or `OPTIONS` passes the
+identity config's cross-origin check, as on the JSON API, and a refused
+cookie is cleared on the page's response. Topcoat's own origin policy
+runs first, for pages and the mounted API alike, so an origin the identity
+config trusts must also be one the app's `OriginPolicy` trusts. The
+crate's `identity-postgres` and `identity-sqlite` features turn on the API
+crate's.
+
 ## Records
 
 A record holds the type's JSON as the API sends it, in the types a record

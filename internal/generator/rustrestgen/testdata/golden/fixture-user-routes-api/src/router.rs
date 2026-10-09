@@ -3,6 +3,7 @@
 
 use crate::interfaces::*;
 use crate::types;
+use axum::routing::MethodRouter;
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -20,6 +21,8 @@ use superschematic_http_runtime::{
 };
 use superschematic_http_runtime::Principal;
 use superschematic_http_runtime::RouteControls;
+use superschematic_http_runtime::Authenticator;
+use superschematic_http_runtime::identity;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,6 +37,13 @@ pub struct RouterState {
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
+///
+/// The caller is the user whose session the request carries, as
+/// `implementations.authenticator` reads it (D50), and the router answers
+/// the CORS of the identity config's trusted origins. The user model's
+/// routes are the identity runtime's handlers, behind their routes' rate
+/// limits and that caller; an administration route's handler checks its
+/// permission itself.
 pub fn build_router(implementations: Implementations) -> Router {
     build_router_with(implementations, RouterOptions::default())
 }
@@ -44,16 +54,106 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `options.openapi_base_url` as the generated Go server states its
 /// `Config`'s.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+    let identity_service = Arc::clone(implementations.authenticator.service());
+    let authenticator: Arc<dyn Authenticator> = implementations.authenticator.clone();
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::new()
-        .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .authorize(Arc::clone(&authenticator), &[])
         .apply(get(handle_greeting_greet));
     router = router.route("/api/greeting", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_CAPABILITIES));
+    router = router.route("/api/auth/capabilities", route);
+    let route = RouteControls::new()
+        .rate_limit(10)
+        .apply(identity_handler(&identity_service, identity::OP_LOGIN));
+    router = router.route("/api/auth/login", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_LOGOUT));
+    router = router.route("/api/auth/logout", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_ME));
+    router = router.route("/api/auth/me", route);
+    let route = RouteControls::new()
+        .rate_limit(10)
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_CHANGE_PASSWORD));
+    router = router.route("/api/auth/password", route);
+    let route = RouteControls::new()
+        .rate_limit(5)
+        .apply(identity_handler(&identity_service, identity::OP_REGISTER));
+    router = router.route("/api/auth/register", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_LIST_ROLES));
+    router = router.route("/api/auth/admin/roles", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_CREATE_ROLE));
+    router = router.route("/api/auth/admin/roles", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_DELETE_ROLE));
+    router = router.route("/api/auth/admin/roles/{id}", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_UPDATE_ROLE));
+    router = router.route("/api/auth/admin/roles/{id}", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_LIST_USERS));
+    router = router.route("/api/auth/admin/users", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_CREATE_USER));
+    router = router.route("/api/auth/admin/users", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_GET_USER));
+    router = router.route("/api/auth/admin/users/{id}", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_DISABLE_USER));
+    router = router.route("/api/auth/admin/users/{id}/disable", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_ENABLE_USER));
+    router = router.route("/api/auth/admin/users/{id}/enable", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_SET_USER_PASSWORD));
+    router = router.route("/api/auth/admin/users/{id}/password", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_REVOKE_ROLE));
+    router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_GRANT_ROLE));
+    router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
     router
         .with_state(state)
         .layer(axum::middleware::from_fn(request_ids))
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, "fixture-user-routes-api", &options))
+        .layer(identity_service.cors())
+}
+
+/// The identity runtime's handler of the user model's operation `op`
+/// (D50). It reads the caller the route's authenticator established, or
+/// authenticates the request itself on a route that needs none.
+///
+/// # Panics
+///
+/// When the runtime has no operation `op`: a crate generated for a newer
+/// runtime than the one it is built with.
+fn identity_handler(service: &Arc<identity::Service>, op: &str) -> MethodRouter<Arc<RouterState>> {
+    service
+        .handler(op)
+        .unwrap_or_else(|| panic!("the identity runtime has no operation {op}"))
 }
 
 fn method_from_str(method: &str) -> Method {

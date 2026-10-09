@@ -480,6 +480,52 @@ let router = build_router(Implementations {
 An operation added to the schema later is a method the scaffold's impl
 lacks; the compiler names it, and you add it with its file.
 
+### Users and sessions
+
+When the API's `authDb` has a `User` table, the core user model (D50),
+and an operation needs a caller, the crate authenticates with the identity
+runtime, the `identity` feature of `superschematic-http-runtime`.
+`Implementations.authenticator` is then an `Arc<IdentityAuthenticator>`
+rather than any `Authenticator`, so a service that leaves it out, or
+passes another, does not compile. A caller is the user whose session the
+request carries, as a bearer token or the session cookie, with the
+permissions of their roles. `build_router` mounts the runtime's handler of
+each `@userSessions` and `@userAdministration` route, behind its rate
+limit and its caller, and answers the CORS of the identity config's
+`trustedOrigins`. The implementation has no method for those routes.
+
+The crate's `identity` module holds the authDb's descriptor and builds
+the store and the service over it:
+
+```rust
+use schemas_catalog_api::runtime::identity::{Config, IdentityAuthenticator, TokioPostgres};
+use schemas_catalog_api::{build_router, identity, Implementations};
+
+let store = identity::store(TokioPostgres::new(client))?;
+let service = Arc::new(identity::service(Arc::new(store), Config::parse(&config_json)?)?);
+let router = build_router(Implementations {
+    product: Arc::new(Products::new(pool)),
+    authenticator: Arc::new(IdentityAuthenticator::new(service)),
+});
+```
+
+The store's SQL client is the service's choice, through the crate's
+features: `identity-postgres` adds `TokioPostgres`, `identity-sqlite`
+adds `Rusqlite`, and with neither the service binds a `Client` of its
+own.
+
+```toml
+schemas-catalog-api = { path = "schemas/dist/api/catalog", features = ["identity-postgres"] }
+```
+
+`identity::service` hands `capabilities` the route table of every
+operation (`identity::routes`, keyed by OpenAPI operation id) and the
+administration routes' permission prefix; set a clock or another
+permission rule with `with_clock` or `with_permits` before you share it.
+A password hash runs on tokio's blocking pool, so serve the router on a
+tokio runtime. The generated Rust SDK signs in with a bearer session:
+`login` answers the token, which `set_token` sends on every later call.
+
 ### Calling an operation in-process
 
 A Rust caller in the same process, such as a server-rendered page or a job,

@@ -4,7 +4,7 @@
 
 use crate::types;
 use async_trait::async_trait;
-use superschematic_http_runtime::{ApiError, Authenticator, RequestContext};
+use superschematic_http_runtime::{ApiError, IdentityAuthenticator, RequestContext};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,8 +16,11 @@ pub trait GreetingImplementation: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct Implementations {
     pub greeting: Arc<dyn GreetingImplementation>,
-    /// Establishes the caller of each route that needs one (@auth,
-    /// @requirePermission, @requireOwnership, an Authenticated set), and
-    /// decides whether its permissions satisfy a @requirePermission list.
-    pub authenticator: Arc<dyn Authenticator>,
+    /// The identity runtime's authenticator (D50): the caller of each route
+    /// that needs one (@auth, @requirePermission, @requireOwnership, an
+    /// Authenticated set) is the user whose session the request carries,
+    /// holding their roles' permissions. Build it over the API's identity
+    /// service (`identity::service`), whose session and administration
+    /// routes `build_router` mounts.
+    pub authenticator: Arc<IdentityAuthenticator>,
 }
