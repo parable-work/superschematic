@@ -27,8 +27,16 @@ export interface Principal {
   readonly claims?: Readonly<Record<string, unknown>>;
 }
 
-/** Establishes the caller for a request that requires one; null when there is none. */
-export type Authenticator = (ctx: RequestContext) => Promise<Principal | null>;
+/**
+ * Establishes the caller for a request that requires one; null when there is
+ * none. One that sets `readsAuthorization` reads the Authorization header
+ * itself and answers a malformed one with its own problem, so the Hono
+ * adapter leaves the header to it: it does not run hono/bearer-auth, which
+ * answers 400 to a malformed Bearer header, nor set ctx.bearerToken.
+ */
+export type Authenticator = ((ctx: RequestContext) => Promise<Principal | null>) & {
+  readonly readsAuthorization?: boolean;
+};
 
 /** Reports whether `held` satisfies `required`; an empty `required` must be satisfied. */
 export type PermissionMatcher = (held: readonly string[], required: readonly string[]) => boolean;
