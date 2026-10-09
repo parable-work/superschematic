@@ -125,6 +125,11 @@ func parsePHC(phc string) (phcHash, error) {
 	if p.Iterations < 1 || p.Parallelism < 1 || p.Parallelism > 255 || p.MemoryKiB < 8*p.Parallelism || p.MemoryKiB > maxArgon2MemoryKiB {
 		return phcHash{}, ErrMalformedHash
 	}
+	// The decoder skips CR and LF even in strict mode, so a salt or hash
+	// with a line break would read; the PHC format has none.
+	if !isBase64Text(fields[4]) || !isBase64Text(fields[5]) {
+		return phcHash{}, ErrMalformedHash
+	}
 	salt, err := base64.RawStdEncoding.Strict().DecodeString(fields[4])
 	if err != nil || len(salt) < 8 {
 		return phcHash{}, ErrMalformedHash
@@ -134,6 +139,18 @@ func parsePHC(phc string) (phcHash, error) {
 		return phcHash{}, ErrMalformedHash
 	}
 	return phcHash{params: p, salt: salt, key: key}, nil
+}
+
+// isBase64Text reports whether s holds only standard base64's alphabet,
+// without padding.
+func isBase64Text(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '+' || c == '/') {
+			return false
+		}
+	}
+	return true
 }
 
 // isDecimal reports whether s is a decimal integer without a sign or a

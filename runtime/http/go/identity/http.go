@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -343,10 +344,14 @@ func pathParam(w http.ResponseWriter, r *http.Request, name string) (string, boo
 	return value, true
 }
 
-// decode reads a JSON body into v, refusing unknown members, a second
-// value and a body over maxBodyBytes with 400 bad_request.
+// decode reads a JSON body into v, refusing unknown members (a member
+// named in another case among them), a second value and a body over
+// maxBodyBytes with 400 bad_request.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err == nil {
+		err = checkMemberNames(body, reflect.TypeOf(v))
+	}
 	if err == nil {
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()

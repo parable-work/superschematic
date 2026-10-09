@@ -276,11 +276,12 @@ func TestLoginBearer(t *testing.T) {
 			}
 		}
 		for name, body := range map[string]any{
-			"a short password":      map[string]any{"login": "admin@example.com", "password": "short"},
-			"no login":              map[string]any{"password": adminPassword},
-			"an unknown session":    map[string]any{"login": "admin@example.com", "password": adminPassword, "session": "jwt"},
-			"an unknown member":     map[string]any{"login": "admin@example.com", "password": adminPassword, "remember": true},
-			"a body that is a list": []any{},
+			"a short password":         map[string]any{"login": "admin@example.com", "password": "short"},
+			"no login":                 map[string]any{"password": adminPassword},
+			"an unknown session":       map[string]any{"login": "admin@example.com", "password": adminPassword, "session": "jwt"},
+			"an unknown member":        map[string]any{"login": "admin@example.com", "password": adminPassword, "remember": true},
+			"a member in another case": map[string]any{"LOGIN": "admin@example.com", "password": adminPassword},
+			"a body that is a list":    []any{},
 		} {
 			r := h.do("POST", "/auth/login", body)
 			if r.status != 400 || r.code() != "bad_request" {

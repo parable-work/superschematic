@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -98,6 +99,9 @@ type DescriptorRoleGrant struct {
 // no quoting can carry.
 func ParseDescriptor(data []byte) (Descriptor, error) {
 	var d Descriptor
+	if err := checkMemberNames(data, reflect.TypeOf(d)); err != nil {
+		return Descriptor{}, fmt.Errorf("identity: descriptor: %w", err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&d); err != nil {

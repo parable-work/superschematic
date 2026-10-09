@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -90,6 +91,9 @@ type Argon2Config struct {
 // its defaults filled in.
 func ParseConfig(data []byte) (Config, error) {
 	var cfg Config
+	if err := checkMemberNames(data, reflect.TypeOf(cfg)); err != nil {
+		return Config{}, fmt.Errorf("identity: config: %w", err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
