@@ -773,8 +773,9 @@ jobs:
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
       # tests run with and without them. The http runtime's run again with
-      # its optional http-client feature, and with its identity features,
-      # whose store and route tests run on SQLite here.
+      # its optional http-client feature, with its identity features, whose
+      # store and route tests run on SQLite here, and with a stack server's
+      # postgres feature (D57), whose tests need a database and skip here.
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -788,6 +789,9 @@ jobs:
           cargo clippy --all-targets --features identity -- -D warnings
           cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings
           cargo test --features identity-postgres,identity-sqlite
+          cargo clippy --all-targets --features postgres -- -D warnings
+          cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings
+          cargo test --features postgres,identity-postgres,identity-sqlite
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust

@@ -182,9 +182,11 @@ python:
 # runtime's run again with arbitrary_precision too, which superscalar's
 # default lossless-json feature turns on: an error map and a number check
 # must not depend on either. The http runtime's run again with its optional
-# http-client feature, and with its identity features, whose store and route
+# http-client feature, with its identity features, whose store and route
 # tests run on SQLite (and on the Postgres
-# SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set).
+# SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set), and with
+# a stack server's postgres feature (D57), whose tests run on the Postgres
+# SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -192,7 +194,10 @@ rust:
 		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client \
 		&& cargo clippy --all-targets --features identity -- -D warnings \
 		&& cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings \
-		&& cargo test --features identity-postgres,identity-sqlite
+		&& cargo test --features identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features postgres -- -D warnings \
+		&& cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings \
+		&& cargo test --features postgres,identity-postgres,identity-sqlite
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
