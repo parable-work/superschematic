@@ -1,9 +1,11 @@
 # Projects, as pages: listed by status, read, started from an input,
 # edited with a patch whose tags and milestones are rows, deleted, and
-# archived with a reason; a project's tasks, listed, read and added under
-# it; members, which only a member reader lists; and the signed-in viewer,
-# one object on a path with no parameter, which is no resource. Reading a
-# project needs projects.read and changing one projects.write.
+# archived with a reason, each owned by a member the app's choices name; a
+# project's tasks, listed, read and added under it; the tasks a label
+# marks, listed under a label that has no pages; members, which only a
+# member reader lists; and the signed-in viewer, one object on a path with
+# no parameter, which is no resource. Reading a project needs
+# projects.read and changing one projects.write.
 name: fixture-pages-api
 kind: API
 scalars:
@@ -33,12 +35,17 @@ types:
       plural: Projects
       titleField: name
       createLabel: Start a project
-      summaryFields: [name, status, budget]
+      summaryFields: [name, ownerId, status, budget]
     fields:
       - name: id
         typeRef: { name: Identity.UUID }
         required: true
       - name: name
+        typeRef: { name: string }
+        required: true
+      # Who owns the project, a member's id, which the app's choices name.
+      - name: ownerId
+        title: Owner
         typeRef: { name: string }
         required: true
       - name: status
@@ -92,6 +99,10 @@ types:
         required: true
         validateMinLength: 2
         validateMaxLength: 80
+      - name: ownerId
+        title: Owner
+        typeRef: { name: string }
+        required: true
       - name: status
         typeRef: { name: ProjectStatus }
         required: true
@@ -114,6 +125,10 @@ types:
         required: true
         validateMinLength: 2
         validateMaxLength: 80
+      - name: ownerId
+        title: Owner
+        typeRef: { name: string }
+        required: true
       - name: status
         typeRef: { name: ProjectStatus }
         required: true
@@ -288,6 +303,17 @@ operationSets:
             required: true
           - name: id
             typeRef: { name: Identity.UUID }
+            required: true
+      # The tasks a label marks, under a label nothing lists or reads.
+      - name: listLabelledTasks
+        typeRef: { name: Task, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "labels/{label}/tasks"
+        permissions: [projects.read]
+        arguments:
+          - name: label
+            typeRef: { name: string }
             required: true
   - name: TaskMutations
     operations:

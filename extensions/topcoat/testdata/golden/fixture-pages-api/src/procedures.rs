@@ -303,6 +303,37 @@ pub async fn call_project_archive_project(cx: &Cx, args: ProjectArchiveProjectAr
     Ok(ProjectRecord::from_wire(&json))
 }
 
+/// The arguments of task.listLabelledTasks, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskListLabelledTasksArgsRecord {
+    pub label: String,
+}
+
+impl TaskListLabelledTasksArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::TaskListLabelledTasksArgs, ProblemRecord> {
+        Ok(crate::api::TaskListLabelledTasksArgs {
+            label: decode("label", wire::put_string(&self.label))?,
+        })
+    }
+}
+
+/// task.listLabelledTasks, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/task/list-labelled-tasks")]
+pub async fn task_list_labelled_tasks(cx: &Cx, args: TaskListLabelledTasksArgsRecord) -> topcoat::Result<Result<Vec<TaskRecord>, ProblemRecord>> {
+    Ok(call_task_list_labelled_tasks(cx, args).await)
+}
+
+/// The body of the task_list_labelled_tasks procedure.
+pub async fn call_task_list_labelled_tasks(cx: &Cx, args: TaskListLabelledTasksArgsRecord) -> Result<Vec<TaskRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::task_list_labelled_tasks(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, TaskRecord::from_wire))
+}
+
 /// The arguments of task.listTasks, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

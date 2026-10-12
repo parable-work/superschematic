@@ -26,12 +26,15 @@ func pagesOutputs() map[string]any {
 // TestPagesServeATopcoatApp builds fixture-pages-api's crates with the
 // pages on and runs cargo clippy, then cargo test, with pagesAppTest: an
 // app discovers the pages; the index and the nav list what the caller may
-// list; a list filters, links its rows to their items and offers its new
-// page to a writer; an item's page shows its detail, its edit and delete
-// links, its action's form and its tasks' section; the new, edit, delete
-// and action pages post, redirect (303) and refuse with 422 at the
-// control, the edit form filled from the item and a conflict (409) the
-// form's message; a nested resource's pages live under its parent's item;
+// list, and the trail names an item by its title; a list filters, links
+// its rows to their items, names their owners by the app's choices and
+// offers its new page to a writer; an item's page shows its detail, its
+// edit and delete links, its action's form and its tasks' section; the
+// new, edit, delete and action pages post, redirect (303) and refuse with
+// the Refusal's status, 422 at the control, the new page's owner a select
+// of the choices, the edit form filled from the item and a conflict (409)
+// the form's message; a nested resource's pages live under its parent's
+// item, and one under a collection without pages has no place in the nav;
 // and a refused caller keeps the route's status: 401 with a sign-in link
 // that comes back, 403 and 404, a route's value that does not decode 404.
 func TestPagesServeATopcoatApp(t *testing.T) {
@@ -217,9 +220,10 @@ use schemas_fixture_pages_api_topcoat::api::runtime::{ApiError, Authenticator, P
 use schemas_fixture_pages_api_topcoat::api::{
     types, Implementations, MemberImplementation, ProjectArchiveProjectArgs, ProjectCreateProjectArgs,
     ProjectDeleteProjectArgs, ProjectGetProjectArgs, ProjectImplementation, ProjectListProjectsArgs,
-    ProjectUpdateProjectArgs, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation, TaskListTasksArgs,
+    ProjectUpdateProjectArgs, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation, TaskListLabelledTasksArgs, TaskListTasksArgs,
     ViewerImplementation,
 };
+use schemas_fixture_pages_api_topcoat::choices::Choices;
 use schemas_fixture_pages_api_topcoat::pages::Settings;
 use schemas_fixture_pages_api_topcoat::{PageAuthenticator, RouterBuilderFixturePagesApiExt};
 use topcoat::context::Cx;
@@ -256,6 +260,7 @@ impl Store {
                 types::Project {
                     id: uuid(APOLLO),
                     name: "Apollo".to_owned(),
+                    owner_id: "ada".to_owned(),
                     status: types::ProjectStatus::Active,
                     budget: 1200.5,
                     description: Some("To the moon".to_owned()),
@@ -267,6 +272,7 @@ impl Store {
                 types::Project {
                     id: uuid(GEMINI),
                     name: "Gemini".to_owned(),
+                    owner_id: "grace".to_owned(),
                     status: types::ProjectStatus::Planned,
                     budget: 300.0,
                     description: None,
@@ -312,6 +318,7 @@ impl ProjectImplementation for Shop {
         let project = types::Project {
             id: self.0.new_id(),
             name: args.input.name,
+            owner_id: args.input.owner_id,
             status: args.input.status,
             budget: args.input.budget,
             description: args.input.description,
@@ -328,6 +335,7 @@ impl ProjectImplementation for Shop {
         let project = projects.iter_mut().find(|project| project.id == args.id).ok_or_else(|| ApiError::not_found("No such project"))?;
         let notify = if args.input.notify_owner == Some(true) { "notified" } else { "quiet" };
         project.name = args.input.name;
+        project.owner_id = args.input.owner_id;
         project.status = args.input.status;
         project.budget = args.input.budget;
         project.description = Some(format!("{} ({notify})", args.input.description.unwrap_or_default()));
@@ -369,6 +377,10 @@ impl TaskImplementation for Shop {
             .find(|(project, task)| *project == args.project_id && task.id == args.id)
             .map(|(_, task)| task.clone())
             .ok_or_else(|| ApiError::not_found("No such task"))
+    }
+    async fn list_labelled_tasks(&self, _ctx: RequestContext, args: TaskListLabelledTasksArgs) -> Result<Vec<types::Task>, ApiError> {
+        let tasks = self.0.tasks.lock().unwrap();
+        Ok(tasks.iter().filter(|(_, task)| task.title.to_lowercase().contains(&args.label)).map(|(_, task)| task.clone()).collect())
     }
     async fn add_task(&self, _ctx: RequestContext, args: TaskAddTaskArgs) -> Result<types::Task, ApiError> {
         self.0.project(&args.project_id)?;
@@ -435,9 +447,14 @@ fn implementations(store: &Arc<Store>) -> Implementations {
 fn app(store: &Arc<Store>) -> Router {
     Router::builder()
         .discover()
-        .app_context(Settings::new().title("Projects console").sign_in("/sign-in"))
+        .app_context(Settings::new().title("Projects console").sign_in("/sign-in").choices(owners()))
         .fixture_pages_api(implementations(store), Callers)
         .build()
+}
+
+// The members who may own a project, as the app names them.
+fn owners() -> Choices {
+    Choices::new().with("ownerId", [("ada", "Ada Lovelace"), ("grace", "Grace Hopper")])
 }
 
 // The same app without settings: a refusal has no sign-in link.
@@ -512,6 +529,7 @@ async fn a_list_filters_links_its_rows_and_offers_a_new_page_to_a_writer() {
     assert!(list.html.contains(&format!(r#"<th scope="row" data-field="name"><a href="/console/projects/{apollo}">Apollo</a></th>"#)), "{}", list.html);
     assert!(list.html.contains(&format!(r#"<a href="/console/projects/{gemini}">Gemini</a>"#)), "{}", list.html);
     assert!(!list.html.contains("Start a project"), "a reader may not create: {}", list.html);
+    assert!(list.html.contains(r#"<td data-field="ownerId">Ada Lovelace</td>"#), "{}", list.html);
     assert!(list.html.contains(r#"<form method="get" class="ss-filter">"#), "{}", list.html);
     assert!(list.html.contains(r#"<li><a href="/console">Projects console</a></li><li><span aria-current="page">Projects</span></li>"#), "{}", list.html);
 
@@ -548,7 +566,10 @@ async fn an_item_page_shows_its_detail_its_links_its_actions_and_its_sections() 
         format!(r#"<section class="ss-section" data-resource="tasks"><h2><a href="/console/projects/{APOLLO}/tasks">Tasks</a></h2>"#),
         format!(r#"<a class="ss-new" href="/console/projects/{APOLLO}/tasks/new">New task</a>"#),
         format!(r#"<a href="/console/projects/{APOLLO}/tasks/{}">Build the rocket</a>"#, wire(ROCKET)),
-        format!(r#"<li><a href="/console/projects">Projects</a></li><li><span aria-current="page">Project {APOLLO}</span></li>"#),
+        // The trail names the item by its title.
+        r#"<li><a href="/console/projects">Projects</a></li><li><span aria-current="page">Apollo</span></li>"#.to_owned(),
+        // The app's choices name the owner.
+        r#"<div data-field="ownerId"><dt>Owner</dt><dd>Ada Lovelace</dd></div>"#.to_owned(),
     ] {
         assert!(item.html.contains(&want), "the item's page lacks {want}: {}", item.html);
     }
@@ -570,29 +591,30 @@ async fn a_new_page_posts_redirects_and_refuses_with_422() {
     assert_eq!(new.status, StatusCode::OK, "{}", new.html);
     assert!(new.html.contains("<h1>Start a project</h1>"), "{}", new.html);
     assert!(new.html.contains(r#"name="name" type="text" required="" minlength="2""#), "{}", new.html);
+    assert!(new.html.contains(r#"<select id="project-input-owner-id" name="ownerId" required=""><option value="" selected=""></option><option value="ada">Ada Lovelace</option><option value="grace">Grace Hopper</option></select>"#), "{}", new.html);
     assert!(new.html.contains(r#"<li><a href="/console/projects">Projects</a></li><li><span aria-current="page">Start a project</span></li>"#), "{}", new.html);
 
-    let added = post(&app, "/console/projects/new", "writer", "name=Mercury&status=planned&budget=10&_action=add:tags").await;
+    let added = post(&app, "/console/projects/new", "writer", "name=Mercury&ownerId=ada&status=planned&budget=10&_action=add:tags").await;
     assert_eq!(added.status, StatusCode::OK, "{}", added.html);
     assert!(added.html.contains(r#"name="tags[0]""#), "{}", added.html);
     assert_eq!(store.projects.lock().unwrap().len(), 2, "a row button created a project");
 
-    let short = post(&app, "/console/projects/new", "writer", "name=A&status=planned&budget=10").await;
+    let short = post(&app, "/console/projects/new", "writer", "name=A&ownerId=ada&status=planned&budget=10").await;
     assert_eq!(short.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", short.html);
     assert!(short.html.contains(r#"value="A""#), "{}", short.html);
     assert!(short.html.contains(r#"<p class="field-error">"#), "{}", short.html);
 
-    let created = post(&app, "/console/projects/new", "writer", "name=Mercury&status=planned&budget=10&description=First").await;
+    let created = post(&app, "/console/projects/new", "writer", "name=Mercury&ownerId=grace&status=planned&budget=10&description=First").await;
     assert_eq!(created.status, StatusCode::SEE_OTHER, "{}", created.html);
     let location = created.location.unwrap();
     let id = location.strip_prefix("/console/projects/").unwrap_or_default();
     assert!(!id.is_empty() && !id.contains('/'), "{location}");
     let shown = get(&app, &location, "writer").await;
-    assert!(shown.html.contains("<h1>Mercury</h1>"), "{}", shown.html);
+    assert!(shown.html.contains("<h1>Mercury</h1>") && shown.html.contains("<dd>Grace Hopper</dd>"), "{}", shown.html);
 
     let refused = get(&app, "/console/projects/new", "reader").await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.html);
-    let refused = post(&app, "/console/projects/new", "reader", "name=Venus&status=planned&budget=10").await;
+    let refused = post(&app, "/console/projects/new", "reader", "name=Venus&ownerId=ada&status=planned&budget=10").await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.html);
     assert_eq!(store.projects.lock().unwrap().len(), 3);
 }
@@ -607,6 +629,7 @@ async fn an_edit_page_is_filled_from_the_item_and_posts_redirects() {
         "<h1>Edit the project</h1>",
         r#"value="Apollo""#,
         r#"<option value="active" selected="">Active</option>"#,
+        r#"<option value="ada" selected="">Ada Lovelace</option>"#,
         r#"value="1200.5""#,
         // The description, up to 500 characters, is long text.
         "name=\"description\" rows=\"6\" maxlength=\"500\">\nTo the moon</textarea>",
@@ -630,14 +653,14 @@ async fn an_edit_page_is_filled_from_the_item_and_posts_redirects() {
         &app,
         &format!("/console/projects/{APOLLO}/edit"),
         "writer",
-        &format!("id={APOLLO}&name=Apollo+X&status=active&budget=1&tags[0]=moon&_action=add:tags"),
+        &format!("id={APOLLO}&name=Apollo+X&ownerId=ada&status=active&budget=1&tags[0]=moon&_action=add:tags"),
     )
     .await;
     assert_eq!(added.status, StatusCode::OK, "{}", added.html);
     assert!(added.html.contains(r#"name="tags[1]""#) && added.html.contains(r#"value="Apollo X""#), "{}", added.html);
     assert_eq!(store.project(&uuid(APOLLO)).unwrap().name, "Apollo");
 
-    let refused = post(&app, &format!("/console/projects/{APOLLO}/edit"), "writer", &format!("id={APOLLO}&name=Apollo&status=active&budget=-1")).await;
+    let refused = post(&app, &format!("/console/projects/{APOLLO}/edit"), "writer", &format!("id={APOLLO}&name=Apollo&ownerId=ada&status=active&budget=-1")).await;
     assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.html);
     assert!(refused.html.contains(r#"value="-1""#), "{}", refused.html);
 
@@ -646,13 +669,14 @@ async fn an_edit_page_is_filled_from_the_item_and_posts_redirects() {
         &app,
         &format!("/console/projects/{APOLLO}/edit"),
         "writer",
-        &format!("id={GEMINI}&name=Apollo+II&status=done&budget=1300&description=Again&notifyOwner=on&tags[0]=sun&milestones[0].title=Return"),
+        &format!("id={GEMINI}&name=Apollo+II&ownerId=grace&status=done&budget=1300&description=Again&notifyOwner=on&tags[0]=sun&milestones[0].title=Return"),
     )
     .await;
     assert_eq!(saved.status, StatusCode::SEE_OTHER, "{}", saved.html);
     assert_eq!(saved.location.as_deref(), Some(format!("/console/projects/{APOLLO}").as_str()));
     let project = store.project(&uuid(APOLLO)).unwrap();
     assert_eq!(project.name, "Apollo II");
+    assert_eq!(project.owner_id, "grace");
     assert_eq!(project.description.as_deref(), Some("Again (notified)"));
     assert_eq!(project.tags, Some(vec!["sun".to_owned()]));
     assert_eq!(project.milestones, Some(vec![types::Milestone { title: "Return".to_owned(), due_on: None }]));
@@ -727,7 +751,7 @@ async fn a_nested_resource_has_pages_under_its_parents_item() {
     assert!(tasks.html.contains("<h1>Tasks</h1>"), "{}", tasks.html);
     assert!(tasks.html.contains(&format!(r#"<a href="/console/projects/{APOLLO}/tasks/{}">Build the rocket</a>"#, wire(ROCKET))), "{}", tasks.html);
     assert!(tasks.html.contains(&format!(
-        r#"<li><a href="/console/projects">Projects</a></li><li><a href="/console/projects/{APOLLO}">Project {APOLLO}</a></li><li><span aria-current="page">Tasks</span></li>"#
+        r#"<li><a href="/console/projects">Projects</a></li><li><a href="/console/projects/{APOLLO}">Apollo</a></li><li><span aria-current="page">Tasks</span></li>"#
     )), "{}", tasks.html);
 
     let new = get(&app, &format!("/console/projects/{APOLLO}/tasks/new"), "writer").await;
@@ -750,6 +774,16 @@ async fn a_nested_resource_has_pages_under_its_parents_item() {
 
     let missing = get(&app, &format!("/console/projects/{NOWHERE}/tasks"), "writer").await;
     assert_eq!(missing.status, StatusCode::NOT_FOUND, "{}", missing.html);
+
+    // A list under a label, which nothing lists or reads: its page lives
+    // under the label's path, its rows unlinked, as no detail reads them,
+    // and neither the nav nor the index links it, since it needs a label.
+    let labelled = get(&app, "/console/labels/rocket/tasks", "reader").await;
+    assert_eq!(labelled.status, StatusCode::OK, "{}", labelled.html);
+    assert!(labelled.html.contains(r#"<th scope="row" data-field="title">Build the rocket</th>"#), "{}", labelled.html);
+    assert!(labelled.html.contains(r#"<li><span>Labels</span></li><li><span>Label rocket</span></li><li><span aria-current="page">Tasks</span></li>"#), "{}", labelled.html);
+    let index = get(&app, "/console", "reader").await;
+    assert!(!index.html.contains("/console/labels"), "{}", index.html);
 }
 
 #[tokio::test]
@@ -763,10 +797,12 @@ async fn a_refused_caller_keeps_the_routes_status() {
 
     let item = get(&app, &format!("/console/projects/{APOLLO}"), "").await;
     assert_eq!(item.status, StatusCode::UNAUTHORIZED, "{}", item.html);
+    // A caller who may not read the item sees it by its noun and id.
+    assert!(item.html.contains(&format!(r#"<span aria-current="page">Project {APOLLO}</span>"#)), "{}", item.html);
 
     // A refused post signs in to come back to its page: the new page, or
     // the item's for an action, which has none of its own.
-    let created = post(&app, "/console/projects/new", "", "name=Venus&status=planned&budget=10").await;
+    let created = post(&app, "/console/projects/new", "", "name=Venus&ownerId=ada&status=planned&budget=10").await;
     assert_eq!(created.status, StatusCode::UNAUTHORIZED, "{}", created.html);
     assert!(created.html.contains(r#"href="/sign-in?next=%2Fconsole%2Fprojects%2Fnew""#), "{}", created.html);
     let archived = post(&app, &format!("/console/projects/{APOLLO}/archive"), "", "reason=Landed").await;

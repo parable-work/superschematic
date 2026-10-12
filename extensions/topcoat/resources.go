@@ -131,14 +131,6 @@ type resourceNode struct {
 // show: a list or a detail.
 func (n *resourceNode) isResource() bool { return n.list != nil || n.detail != nil }
 
-// depth is how many items the collection is under.
-func (n *resourceNode) depth() int {
-	if n.parent == nil {
-		return 0
-	}
-	return n.parent.depth() + 1
-}
-
 // chain is the collection's ancestors and itself, outermost first.
 func (n *resourceNode) chain() []*resourceNode {
 	if n.parent == nil {

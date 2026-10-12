@@ -306,6 +306,10 @@ pub async fn project_detail(record: ProjectRecord, #[default] choices: Choices) 
                     <dt>"Name"</dt>
                     <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
+                <div data-field="ownerId">
+                    <dt>"Owner"</dt>
+                    <dd>(text_of(&choices, "ownerId", &record.owner_id))</dd>
+                </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
                     <dd><data value=(&record.status)>(project_status_label(&record.status))</data></dd>
@@ -381,6 +385,7 @@ pub async fn project_table(
             <thead>
                 <tr>
                     <th scope="col" data-field="name">"Name"</th>
+                    <th scope="col" data-field="ownerId">"Owner"</th>
                     <th scope="col" data-field="status">"Status"</th>
                     <th scope="col" data-field="budget">"Budget"</th>
                 </tr>
@@ -396,6 +401,7 @@ pub async fn project_table(
                                 (text_of(&choices, "name", &row.name))
                             }
                         </th>
+                        <td data-field="ownerId">(text_of(&choices, "ownerId", &row.owner_id))</td>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
                         <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
                     </tr>
@@ -415,6 +421,10 @@ pub async fn project_input_detail(record: ProjectInputRecord, #[default] choices
                 <div data-field="name">
                     <dt>"Name"</dt>
                     <dd>(text_of(&choices, "name", &record.name))</dd>
+                </div>
+                <div data-field="ownerId">
+                    <dt>"Owner"</dt>
+                    <dd>(text_of(&choices, "ownerId", &record.owner_id))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -468,6 +478,7 @@ pub async fn project_input_table(
             <thead>
                 <tr>
                     <th scope="col" data-field="name">"Name"</th>
+                    <th scope="col" data-field="ownerId">"Owner"</th>
                     <th scope="col" data-field="status">"Status"</th>
                     <th scope="col" data-field="budget">"Budget"</th>
                     <th scope="col" data-field="description">"Description"</th>
@@ -485,6 +496,7 @@ pub async fn project_input_table(
                                 (text_of(&choices, "name", &row.name))
                             }
                         </td>
+                        <td data-field="ownerId">(text_of(&choices, "ownerId", &row.owner_id))</td>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
                         <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
                         <td data-field="description">
@@ -522,6 +534,10 @@ pub async fn project_patch_detail(record: ProjectPatchRecord, #[default] choices
                 <div data-field="name">
                     <dt>"Name"</dt>
                     <dd>(text_of(&choices, "name", &record.name))</dd>
+                </div>
+                <div data-field="ownerId">
+                    <dt>"Owner"</dt>
+                    <dd>(text_of(&choices, "ownerId", &record.owner_id))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -602,6 +618,7 @@ pub async fn project_patch_table(
             <thead>
                 <tr>
                     <th scope="col" data-field="name">"Name"</th>
+                    <th scope="col" data-field="ownerId">"Owner"</th>
                     <th scope="col" data-field="status">"Status"</th>
                     <th scope="col" data-field="budget">"Budget"</th>
                     <th scope="col" data-field="description">"Description"</th>
@@ -622,6 +639,7 @@ pub async fn project_patch_table(
                                 (text_of(&choices, "name", &row.name))
                             }
                         </td>
+                        <td data-field="ownerId">(text_of(&choices, "ownerId", &row.owner_id))</td>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
                         <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
                         <td data-field="description">

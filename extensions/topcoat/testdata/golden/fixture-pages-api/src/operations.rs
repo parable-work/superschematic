@@ -103,6 +103,18 @@ pub async fn project_archive_project(cx: &Cx, args: crate::api::ProjectArchivePr
         .await
 }
 
+/// task.listLabelledTasks (`GET /api/labels/{label}/tasks`): The tasks a label marks, under a label nothing lists or reads.
+pub async fn task_list_labelled_tasks(cx: &Cx, args: crate::api::TaskListLabelledTasksArgs) -> Result<Vec<types::Task>, ApiError> {
+    let caller = can_task_list_labelled_tasks(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .task
+        .list_labelled_tasks(operations::TASK_LIST_LABELLED_TASKS.context(caller), args)
+        .await
+}
+
 /// task.listTasks (`GET /api/projects/{projectId}/tasks`): A project's tasks.
 pub async fn task_list_tasks(cx: &Cx, args: crate::api::TaskListTasksArgs) -> Result<Vec<types::Task>, ApiError> {
     let caller = can_task_list_tasks(cx).await?;
@@ -190,6 +202,12 @@ pub async fn can_project_update_project(cx: &Cx) -> Result<Option<Principal>, Ap
 /// without one of projects.write. The caller, for the implementation.
 pub async fn can_project_archive_project(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::PROJECT_ARCHIVE_PROJECT).await
+}
+
+/// Admits the caller of task.listLabelledTasks as its route does: 401 without one, 403
+/// without one of projects.read. The caller, for the implementation.
+pub async fn can_task_list_labelled_tasks(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::TASK_LIST_LABELLED_TASKS).await
 }
 
 /// Admits the caller of task.listTasks as its route does: 401 without one, 403

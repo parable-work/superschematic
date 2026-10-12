@@ -136,6 +136,7 @@ impl From<types::MilestoneInput> for MilestoneInputRecord {
 pub struct ProjectRecord {
     pub id: String,
     pub name: String,
+    pub owner_id: String,
     pub status: String,
     pub budget: f64,
     pub description: Option<String>,
@@ -151,6 +152,7 @@ impl ProjectRecord {
         Self {
             id: wire::string(&json["id"]),
             name: wire::string(&json["name"]),
+            owner_id: wire::string(&json["ownerId"]),
             status: wire::string(&json["status"]),
             budget: wire::number(&json["budget"]),
             description: wire::optional(&json["description"], wire::string),
@@ -166,6 +168,7 @@ impl ProjectRecord {
         let mut json = serde_json::Map::new();
         json.insert("id".to_owned(), wire::put_string(&self.id));
         json.insert("name".to_owned(), wire::put_string(&self.name));
+        json.insert("ownerId".to_owned(), wire::put_string(&self.owner_id));
         json.insert("status".to_owned(), wire::put_string(&self.status));
         json.insert("budget".to_owned(), wire::put_number(&self.budget));
         if let Some(value) = &self.description {
@@ -202,6 +205,7 @@ impl From<types::Project> for ProjectRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectInputRecord {
     pub name: String,
+    pub owner_id: String,
     pub status: String,
     pub budget: f64,
     pub description: Option<String>,
@@ -213,6 +217,7 @@ impl ProjectInputRecord {
     pub fn from_wire(json: &serde_json::Value) -> Self {
         Self {
             name: wire::string(&json["name"]),
+            owner_id: wire::string(&json["ownerId"]),
             status: wire::string(&json["status"]),
             budget: wire::number(&json["budget"]),
             description: wire::optional(&json["description"], wire::string),
@@ -224,6 +229,7 @@ impl ProjectInputRecord {
     pub fn to_wire(&self) -> serde_json::Value {
         let mut json = serde_json::Map::new();
         json.insert("name".to_owned(), wire::put_string(&self.name));
+        json.insert("ownerId".to_owned(), wire::put_string(&self.owner_id));
         json.insert("status".to_owned(), wire::put_string(&self.status));
         json.insert("budget".to_owned(), wire::put_number(&self.budget));
         if let Some(value) = &self.description {
@@ -253,6 +259,7 @@ impl From<types::ProjectInput> for ProjectInputRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectPatchRecord {
     pub name: String,
+    pub owner_id: String,
     pub status: String,
     pub budget: f64,
     pub description: Option<String>,
@@ -267,6 +274,7 @@ impl ProjectPatchRecord {
     pub fn from_wire(json: &serde_json::Value) -> Self {
         Self {
             name: wire::string(&json["name"]),
+            owner_id: wire::string(&json["ownerId"]),
             status: wire::string(&json["status"]),
             budget: wire::number(&json["budget"]),
             description: wire::optional(&json["description"], wire::string),
@@ -281,6 +289,7 @@ impl ProjectPatchRecord {
     pub fn to_wire(&self) -> serde_json::Value {
         let mut json = serde_json::Map::new();
         json.insert("name".to_owned(), wire::put_string(&self.name));
+        json.insert("ownerId".to_owned(), wire::put_string(&self.owner_id));
         json.insert("status".to_owned(), wire::put_string(&self.status));
         json.insert("budget".to_owned(), wire::put_number(&self.budget));
         if let Some(value) = &self.description {

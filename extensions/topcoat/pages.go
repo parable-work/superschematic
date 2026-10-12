@@ -139,16 +139,21 @@ type pageResource struct {
 	RowTable  string
 	LinkExpr  string
 	// DetailRecord and DetailView render an item; HeadingExpr is its
-	// heading, from `record`.
+	// heading, from `record`, and TitleExpr its title for the trail, an
+	// Option<String> from `item`, the detail's result, empty when its type
+	// declares no title.
 	DetailRecord string
 	DetailView   string
 	HeadingExpr  string
+	TitleExpr    string
+	// Key names the collection in the trail's tree: projects/{}/tasks.
+	Key string
 	// HrefBody is the body of <ident>_href, the collection's path.
 	HrefBody string
-	// CreatedLines turn `created`, a new item, into the page it goes to;
-	// BackExpr is the page a deleted item goes back to.
-	CreatedLines string
-	BackExpr     string
+	// BackExpr is the page a deleted item goes back to, and ItemExpr an
+	// item's own page, each a String from the route's values.
+	BackExpr string
+	ItemExpr string
 }
 
 // NeedsHref reports whether pages.rs writes <ident>_href.
@@ -185,11 +190,15 @@ type pageOp struct {
 	// RouteFields are its path arguments: each a form's field when it has
 	// an argument form, else an Args struct's.
 	RouteFields []routeField
-	// Call and Submit report whether pages.rs writes call_<op>, which a
-	// list or a detail calls with the route's values, and submit_<op>,
-	// which posts a form.
-	Call   bool
-	Submit bool
+	// Call reports whether pages.rs writes call_<op>, which a list or a
+	// detail calls with the route's values; Memoized whether it keeps its
+	// result for the request (a detail's, which the trail reads too).
+	Call     bool
+	Memoized bool
+	// DoneBinding and DoneLines are what a post's page does with the
+	// operation's result: the redirect (303) that ends it.
+	DoneBinding string
+	DoneLines   string
 	// Verb, Label and Field are an action's word, button text and the
 	// item component's prop of its form; PrefillFn fills an edit form.
 	Verb      string
@@ -337,8 +346,10 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		logf("  - topcoat: no pages: no operation a page calls describes a resource\n")
 		return nil, nil
 	}
+	// The nav and the index link the lists no item holds: a list under an
+	// item, even of a collection without pages, needs the item's id.
 	for _, r := range m.Resources {
-		if r.Parent == nil && r.List != nil {
+		if len(r.ColParams) == 0 && r.List != nil {
 			m.Top = append(m.Top, r)
 		}
 	}
@@ -545,12 +556,33 @@ func (b *pageBuilder) fill(r *pageResource) error {
 					text = "record." + title.Name + ".as_deref().unwrap_or_default()"
 				}
 				r.HeadingExpr = "title_or(" + text + ", " + rustString(r.Noun) + ")"
-				b.m.use("titleOr")
+				b.m.use("titleOr", "itemTitle")
+				r.TitleExpr = rec.Name + "::from(item)." + title.Name
+				if !title.Optional {
+					r.TitleExpr = "Some(" + r.TitleExpr + ")"
+				}
 			}
 		}
 	}
-	if r.Create != nil {
-		r.CreatedLines = b.createdLines(r)
+	if r.Detail != nil {
+		r.ItemExpr = r.Ident + "_item_href(" + pass(r.ItemParams, "&") + ").unwrap_or_else(|| PREFIX.to_owned())"
+	}
+	r.Key = r.node.key
+	redirect := func(to string) string { return "return Err(see_other(" + to + ").into());" }
+	if o := r.Create; o != nil {
+		o.DoneBinding, o.DoneLines = "_", redirect(r.BackExpr)
+		if lines := b.createdLines(r); lines != "" {
+			o.DoneBinding, o.DoneLines = "created", lines
+		}
+	}
+	if o := r.Update; o != nil {
+		o.DoneBinding, o.DoneLines = "_", redirect(r.ItemExpr)
+	}
+	if o := r.Delete; o != nil {
+		o.DoneBinding, o.DoneLines = "_", redirect(r.BackExpr)
+	}
+	for _, o := range r.Actions {
+		o.DoneBinding, o.DoneLines = "_", redirect("item")
 	}
 	return nil
 }
@@ -567,14 +599,14 @@ func (b *pageBuilder) linkExpr(r *pageResource, rec record) string {
 		args := append(prefixed(r.ColParams, "&"), id)
 		return r.Ident + "_item_href(" + strings.Join(args, ", ") + ")"
 	}
-	switch {
-	case field.Type == "String":
+	switch field.Type {
+	case "String":
 		return href("&row."+field.Name) + ".unwrap_or_default()"
-	case field.Type == "i64":
+	case "i64":
 		return href("&row."+field.Name+".to_string()") + ".unwrap_or_default()"
-	case field.Type == "Option<String>":
+	case "Option<String>":
 		return "row." + field.Name + ".as_deref().map_or_else(String::new, |id| " + href("id") + ".unwrap_or_default())"
-	case field.Type == "Option<i64>":
+	case "Option<i64>":
 		return "row." + field.Name + ".map_or_else(String::new, |id| " + href("&id.to_string()") + ".unwrap_or_default())"
 	}
 	return ""
@@ -611,7 +643,7 @@ func (b *pageBuilder) createdLines(r *pageResource) string {
 				b.m.importName("records", rec.Name)
 				args := append(prefixed(r.ColParams, "&"), id)
 				return "let created = " + rec.Name + "::from(created);\n" +
-					"            return Err(see_other(" + r.Ident + "_item_href(" + strings.Join(args, ", ") + ").unwrap_or_else(|| " + r.BackExpr + ")).into());"
+					"return Err(see_other(" + r.Ident + "_item_href(" + strings.Join(args, ", ") + ").unwrap_or_else(|| " + r.BackExpr + ")).into());"
 			}
 		}
 	}
@@ -678,25 +710,20 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 	}
 	switch c.kind {
 	case pageList:
-		o.Submit = o.ArgForm != nil
 		o.Call = r.Parent != nil && r.Parent.node.detail != nil || o.ArgForm == nil
 	case pageDetail:
-		o.Call = true
+		o.Call, o.Memoized = true, true
 	case pageAction:
-		o.Submit = true
 		o.Label = humanize(e.Name)
 		if c.d.op.Docs != nil && c.d.op.Docs.Title != "" {
 			o.Label = c.d.op.Docs.Title
 		}
 	case pageUpdate:
-		o.Submit = true
 		input := o.ArgForm.Input
 		if input == nil {
 			return nil, fmt.Errorf("topcoat: pages: %s.%s updates without an input form", e.Namespace, e.Name)
 		}
 		o.PrefillFn = b.prefill(input.Struct, r.node.detail.d.op.TypeRef.Name)
-	default:
-		o.Submit = true
 	}
 	if o.FormName() != "" {
 		b.m.importName("forms", o.FormComponent())
@@ -737,11 +764,13 @@ func (b *pageBuilder) prefill(st *formStruct, typeName string) string {
 			if b.valueKind(in.TypeRef) != b.valueKind(out.TypeRef) {
 				continue
 			}
+			// A long text's control is "longtext", held as text; a JSON
+			// textarea's holds the value's JSON text.
 			read := "held"
-			switch {
-			case f.Control == "checkbox":
+			switch f.Control {
+			case "checkbox":
 				read = "held_checked"
-			case f.Control == "textarea":
+			case "textarea":
 				read = "held_json"
 			}
 			b.m.use(read)
@@ -838,8 +867,14 @@ func (b *pageBuilder) tree(nodes []*resourceNode, level int) string {
 				actions = append(actions, "("+rustString(action.Verb)+", "+rustString(action.Label)+")")
 			}
 		}
+		lines = append(lines, pad+"Node {")
+		// An item's title is read only where a type declares one.
+		if b.m.uses["itemTitle"] {
+			lines = append(lines,
+				pad+"    key: "+rustString(node.key)+",",
+				pad+fmt.Sprintf("    titled: %t,", r != nil && r.TitleExpr != ""))
+		}
 		lines = append(lines,
-			pad+"Node {",
 			pad+"    words: &["+strings.Join(words, ", ")+"],",
 			pad+"    plural: "+rustString(plural)+",",
 			pad+"    noun: "+rustString(noun)+",",
@@ -870,21 +905,19 @@ func (b *pageBuilder) pageOf(node *resourceNode) *pageResource {
 // finish records what pages.rs uses from the helpers each page needs.
 func (b *pageBuilder) finish() {
 	m := b.m
+	m.importName("forms", "Refusal")
 	for _, o := range m.Ops {
-		if o.Submit {
-			m.use("outcome", "form")
-			m.importName("forms", "FormErrors")
-			if o.ArgForm != nil && len(o.RouteFields) > 0 {
-				m.use("routeRefused", "noSuchPage")
-			}
+		if !o.Call {
+			continue
 		}
-		if o.Call {
-			switch {
-			case o.ArgForm != nil:
-				m.use("formRefusal")
-			case len(o.RouteFields) > 0:
-				m.use("routeValue", "routeRefusal", "noSuchPage", "value")
-			}
+		if o.Memoized {
+			m.use("memoize")
+		}
+		switch {
+		case o.ArgForm != nil:
+			m.use("pageRefusal")
+		case len(o.RouteFields) > 0:
+			m.use("routeValue", "pageRefusal", "value")
 		}
 	}
 	for _, r := range m.Resources {
@@ -892,13 +925,73 @@ func (b *pageBuilder) finish() {
 			m.use("seg")
 		}
 		if r.List != nil && r.List.ArgForm != nil {
-			m.importName("forms", "FormErrors")
+			m.use("form", "alone", "pageRefusal")
 		}
-		if r.Create != nil || r.Update != nil || r.Delete != nil || len(r.Actions) > 0 {
-			m.use("seeOther")
-			m.importName("forms", "FormErrors")
+		posts := append([]*pageOp{r.Create, r.Update, r.Delete}, r.Actions...)
+		for _, o := range posts {
+			if o == nil {
+				continue
+			}
+			m.use("seeOther", "form", "alone", "pageRefusal", "formErrors")
+			if o.Rows() {
+				m.use("rowsAgain")
+			}
 		}
 	}
+	if m.uses["pageRefusal"] || m.uses["formErrors"] {
+		m.importName("forms", "FormErrors")
+	}
+}
+
+// SentLines are the Rust of a post's page from its form, `form`, to
+// `sent`, the refusal it renders: the route's values set on the form over
+// its hidden inputs, a row button applied, then the form submitted (an
+// argument form's `submit`) or parsed and its operation called (an input
+// form, with `Refusal::from` and `Refusal::from_api`). The operation's
+// result ends the page with DoneLines.
+func (o *pageOp) SentLines() string {
+	var lines []string
+	switch {
+	case o.ArgForm != nil && len(o.RouteFields) > 0:
+		mut := ""
+		if o.Rows() {
+			mut = "mut "
+		}
+		lines = append(lines, "// The route's values, never the hidden inputs, which a reader can change.", "let "+mut+"form = "+o.ArgForm.Name+" {")
+		for _, field := range o.RouteFields {
+			lines = append(lines, "    "+field.Field+": Some("+field.Param+".clone()),")
+		}
+		lines = append(lines, "    ..form", "};")
+	case o.Rows():
+		lines = append(lines, "let mut form = form;")
+	}
+	done := strings.Split(o.DoneLines, "\n")
+	var send []string
+	if o.ArgForm != nil {
+		send = append(send, "match form.submit(cx).await {", "    Ok("+o.DoneBinding+") => {")
+		send = append(send, indentEach(8, done)...)
+		send = append(send, "    }", "    Err(refusal) => refusal,", "}")
+	} else {
+		input := "input"
+		if o.InputOptional {
+			input = "input: Some(input)"
+		}
+		send = append(send, "match form.parse() {",
+			"    Ok(input) => match operations::"+o.Snake+"(cx, crate::api::"+o.ArgsName+" { "+input+" }).await {",
+			"        Ok("+o.DoneBinding+") => {")
+		send = append(send, indentEach(12, done)...)
+		send = append(send, "        }", "        Err(err) => Refusal::from_api(&err),", "    },", "    Err(errors) => Refusal::from(errors),", "}")
+	}
+	if o.Rows() {
+		lines = append(lines, "let sent = if form.apply_action() {", "    rows_again()", "} else {")
+		lines = append(lines, indentEach(4, send)...)
+		lines = append(lines, "};")
+	} else {
+		send[0] = "let sent = " + send[0]
+		send[len(send)-1] += ";"
+		lines = append(lines, send...)
+	}
+	return indentLines(4, lines)
 }
 
 // pass is params as arguments, each after prefix: &project_id, &task_id.

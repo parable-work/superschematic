@@ -637,6 +637,7 @@ impl MilestoneInputForm {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProjectInputForm {
     pub name: Option<String>,
+    pub owner_id: Option<String>,
     pub status: Option<String>,
     pub budget: Option<String>,
     pub description: Option<String>,
@@ -656,6 +657,7 @@ impl ProjectInputForm {
     pub fn new() -> Self {
         Self {
             name: None,
+            owner_id: None,
             status: None,
             budget: None,
             description: None,
@@ -723,6 +725,7 @@ impl ProjectInputForm {
     fn from_posted(posted: &Posted) -> Self {
         Self {
             name: posted.get("name").text(),
+            owner_id: posted.get("ownerId").text(),
             status: posted.get("status").text(),
             budget: posted.get("budget").text(),
             description: posted.get("description").text(),
@@ -737,6 +740,7 @@ impl ProjectInputForm {
     fn write(&self, at: &str, errors: &mut FormErrors) -> Map<String, Value> {
         let mut json = Map::new();
         put(&mut json, errors, "name", &format!("{at}name"), text(self.name.as_deref()));
+        put(&mut json, errors, "ownerId", &format!("{at}ownerId"), text(self.owner_id.as_deref()));
         put(&mut json, errors, "status", &format!("{at}status"), text(self.status.as_deref()));
         put(&mut json, errors, "budget", &format!("{at}budget"), number(self.budget.as_deref()));
         put(&mut json, errors, "description", &format!("{at}description"), text(self.description.as_deref()));
@@ -758,6 +762,7 @@ impl ProjectInputForm {
             [] => true,
             [Segment::Key(key), rest @ ..] => match key.as_str() {
                 "name" => rest.is_empty(),
+                "ownerId" => rest.is_empty(),
                 "status" => rest.is_empty(),
                 "budget" => rest.is_empty(),
                 "description" => rest.is_empty(),
@@ -793,6 +798,7 @@ impl<'de> Deserialize<'de> for ProjectInputForm {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProjectPatchForm {
     pub name: Option<String>,
+    pub owner_id: Option<String>,
     pub status: Option<String>,
     pub budget: Option<String>,
     pub description: Option<String>,
@@ -815,6 +821,7 @@ impl ProjectPatchForm {
     pub fn new() -> Self {
         Self {
             name: None,
+            owner_id: None,
             status: None,
             budget: None,
             description: None,
@@ -885,6 +892,7 @@ impl ProjectPatchForm {
     fn from_posted(posted: &Posted) -> Self {
         Self {
             name: posted.get("name").text(),
+            owner_id: posted.get("ownerId").text(),
             status: posted.get("status").text(),
             budget: posted.get("budget").text(),
             description: posted.get("description").text(),
@@ -902,6 +910,7 @@ impl ProjectPatchForm {
     fn write(&self, at: &str, errors: &mut FormErrors) -> Map<String, Value> {
         let mut json = Map::new();
         put(&mut json, errors, "name", &format!("{at}name"), text(self.name.as_deref()));
+        put(&mut json, errors, "ownerId", &format!("{at}ownerId"), text(self.owner_id.as_deref()));
         put(&mut json, errors, "status", &format!("{at}status"), text(self.status.as_deref()));
         put(&mut json, errors, "budget", &format!("{at}budget"), number(self.budget.as_deref()));
         put(&mut json, errors, "description", &format!("{at}description"), text(self.description.as_deref()));
@@ -933,6 +942,7 @@ impl ProjectPatchForm {
             [] => true,
             [Segment::Key(key), rest @ ..] => match key.as_str() {
                 "name" => rest.is_empty(),
+                "ownerId" => rest.is_empty(),
                 "status" => rest.is_empty(),
                 "budget" => rest.is_empty(),
                 "description" => rest.is_empty(),
@@ -1087,6 +1097,16 @@ pub async fn project_input_fields(
             }
         </div>
         <div class="field">
+            <label for="project-input-owner-id">"Owner"</label>
+            match choices.of("ownerId", "ownerId") {
+                Some(options) => choice_select(id: "project-input-owner-id", name: "ownerId", required: true, invalid: errors.invalid("ownerId"), options: choice_options(options, form.owner_id.as_deref())),
+                None => <input id="project-input-owner-id" name="ownerId" type="text" required=(true) value=(form.owner_id.clone()) aria-invalid=(errors.invalid("ownerId"))>,
+            }
+            for message in errors.of("ownerId") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
             <label for="project-input-status">"Status"</label>
             <select id="project-input-status" name="status" required=(true) aria-invalid=(errors.invalid("status"))>
                 <option value="planned" selected=(form.status.as_deref() == Some("planned"))>"Planned"</option>
@@ -1172,6 +1192,16 @@ pub async fn project_patch_fields(
                 None => <input id="project-patch-name" name="name" type="text" required=(true) minlength="2" maxlength="80" value=(form.name.clone()) aria-invalid=(errors.invalid("name"))>,
             }
             for message in errors.of("name") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="project-patch-owner-id">"Owner"</label>
+            match choices.of("ownerId", "ownerId") {
+                Some(options) => choice_select(id: "project-patch-owner-id", name: "ownerId", required: true, invalid: errors.invalid("ownerId"), options: choice_options(options, form.owner_id.as_deref())),
+                None => <input id="project-patch-owner-id" name="ownerId" type="text" required=(true) value=(form.owner_id.clone()) aria-invalid=(errors.invalid("ownerId"))>,
+            }
+            for message in errors.of("ownerId") {
                 <p class="field-error">(message)</p>
             }
         </div>
@@ -1794,6 +1824,16 @@ pub async fn project_update_project_args_fields(
                 None => <input id="project-update-project-name" name="name" type="text" required=(true) minlength="2" maxlength="80" value=(form.input.name.clone()) aria-invalid=(errors.invalid("name"))>,
             }
             for message in errors.of("name") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="project-update-project-owner-id">"Owner"</label>
+            match choices.of("ownerId", "ownerId") {
+                Some(options) => choice_select(id: "project-update-project-owner-id", name: "ownerId", required: true, invalid: errors.invalid("ownerId"), options: choice_options(options, form.input.owner_id.as_deref())),
+                None => <input id="project-update-project-owner-id" name="ownerId" type="text" required=(true) value=(form.input.owner_id.clone()) aria-invalid=(errors.invalid("ownerId"))>,
+            }
+            for message in errors.of("ownerId") {
                 <p class="field-error">(message)</p>
             }
         </div>

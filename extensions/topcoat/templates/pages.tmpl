@@ -6,7 +6,7 @@
 //! operation serves it, and a resource under an item as a section of the
 //! item's page and as pages under it. A layout puts each page in `<main>`,
 //! after a nav of the resources the caller may list and the trail from the
-//! index to the page.
+//! index to the page, each item by its title.
 //!
 //! Every page calls its operation through `operations`, so the route's
 //! rules hold: the caller admitted as the route admits it, the arguments
@@ -15,23 +15,24 @@
 //! argument form decodes them; one that does not decode is no page (404).
 //! A post that succeeds goes on with 303 (POST-redirect-GET): to the item
 //! after a create, an edit or an action, to the list after a delete. A
-//! refused form renders again with each error at its control, 422, or the
-//! route's status for another refusal, a conflict's (409) as the form's
-//! own message; a refused caller keeps the route's status: 401 with a link
-//! to the app's sign-in page (`Settings`), 403, 404.
+//! refused post answers with its `Refusal`'s status: the form again with
+//! each error at its control, 422 for what the form's `parse` refuses and
+//! the route's status for what the operation refuses, a conflict's (409)
+//! message the form's own; a refused caller (401, 403) and an item that is
+//! not there (404) render on their own, a 401 with a link to the app's
+//! sign-in page (`Settings`). Every form and display component takes the
+//! app's `Settings` choices.
 //!
 //! The app's `.discover()` registers the pages and the layout. The markup
 //! is semantic HTML with `ss-` classes and ships no styles.
 
 use std::fmt::Write as _;
 
-use crate::api::runtime::ApiError;
 {{- if .Pages.Uses "types" }}
 use crate::api::types;
 {{- end }}
-{{- with .Pages.Imports "forms" }}
-use crate::forms::{ {{- . -}} };
-{{- end }}
+use crate::choices::Choices;
+use crate::forms::{ {{- .Pages.Imports "forms" -}} };
 use crate::operations;
 use crate::records::{ {{- .Pages.Imports "records" -}} };
 use crate::views::{ {{- .Pages.Imports "views" -}} };
@@ -41,7 +42,7 @@ use serde::de::DeserializeOwned;
 {{- if .Pages.Uses "value" }}
 use serde_json::Value;
 {{- end }}
-use topcoat::context::{Cx, try_app_context};
+use topcoat::context::{Cx, {{ if .Pages.Uses "memoize" }}memoize, {{ end }}try_app_context};
 {{- if .Pages.Uses "form" }}
 use topcoat::router::content::Form;
 {{- end }}
@@ -64,14 +65,17 @@ path_param!(pub {{ .Name }});
 
 /// What the app tells the pages, in its app context
 /// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
-/// title, which heads every page, and its sign-in page, which a page that
+/// title, which heads every page; its sign-in page, which a page that
 /// refuses a caller who is not signed in (401) links to, with the page to
-/// come back to as `next`. Without it the title is the service's name and
-/// a refusal has no link.
+/// come back to as `next`; and the choices every form and display component
+/// the pages render takes, by each field's path (`lines.productId`), so a
+/// form offers an id's records and a table names them. Without it the title
+/// is the service's name, a refusal has no link and there are no choices.
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub title: Option<String>,
     pub sign_in: Option<String>,
+    pub choices: Choices,
 }
 
 impl Settings {
@@ -94,6 +98,14 @@ impl Settings {
         self
     }
 
+    /// These settings with the choices the pages' forms and display
+    /// components take.
+    #[must_use]
+    pub fn choices(mut self, choices: Choices) -> Self {
+        self.choices = choices;
+        self
+    }
+
     /// The settings the app put in its context, or the defaults.
     fn of(cx: &Cx) -> Self {
         try_app_context::<Settings>(cx).cloned().unwrap_or_default()
@@ -110,6 +122,12 @@ impl Settings {
         let join = if url.contains('?') { '&' } else { '?' };
         Some(format!("{url}{join}next={}", encode(next)))
     }
+}
+
+/// The choices the app's `Settings` give the pages' forms and display
+/// components.
+fn choices_of(cx: &Cx) -> Choices {
+    try_app_context::<Settings>(cx).map(|settings| settings.choices.clone()).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
@@ -140,7 +158,8 @@ fn encode(value: &str) -> String {
     out
 }
 
-/// A path's percent-encoded segment as text, for a label.
+/// A path's percent-encoded segment as text, for a label and a route's
+/// value.
 fn decode(segment: &str) -> String {
     let bytes = segment.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -172,72 +191,42 @@ fn title_or(title: &str, noun: &str) -> String {
     if title.trim().is_empty() { noun.to_owned() } else { title.to_owned() }
 }
 {{- end }}
-{{- if .Pages.Uses "noSuchPage" }}
+{{- if .Pages.Uses "pageRefusal" }}
 
 /// The refusal of a page whose route holds a value its argument does not
-/// decode, as an argument form decodes it.
-fn no_such_page() -> ApiError {
-    ApiError::not_found("There is no such page")
+/// decode, as an argument form decodes it, or that its operation refuses.
+fn no_such_page() -> Refusal {
+    let errors = FormErrors { form: vec!["There is no such page".to_owned()], ..FormErrors::default() };
+    Refusal { status: StatusCode::NOT_FOUND, errors }
+}
+
+/// Whether a refusal is of one of the route's values, at its argument's
+/// name.
+fn at_route(refusal: &Refusal, route: &[&str]) -> bool {
+    route.iter().any(|name| refusal.errors.fields.contains_key(*name))
+}
+
+/// A refusal as a page shows it: one of the route's values is no such
+/// page; any other as it is.
+fn page_refusal(refusal: Refusal, route: &[&str]) -> Refusal {
+    if at_route(&refusal, route) { no_such_page() } else { refusal }
 }
 {{- end }}
-{{- if .Pages.Uses "outcome" }}
+{{- if .Pages.Uses "alone" }}
 
-/// What a posted form comes to: the operation's result; the form again,
-/// with its errors and the status to render it with, after a row button
-/// (200) or a refusal of what it holds; or a refusal that renders on its
-/// own, with the route's status, of the caller (401, 403) or of an item
-/// that is not there (404).
-enum Outcome<T, F> {
-    Done(T),
-    Again(F, FormErrors, StatusCode),
-    Refused(ApiError),
-}
-
-/// An operation's refusal of a form: a refused caller or a missing item
-/// renders on its own; any other refusal is the form's errors at their
-/// controls, 422 for a bad request (400) and the route's status otherwise,
-/// a conflict (409) as the form's own message.
-fn refused<T, F>(form: F, err: ApiError) -> Outcome<T, F> {
-    match err.status.as_u16() {
-        401 | 403 | 404 => Outcome::Refused(err),
-        400 | 422 => Outcome::Again(form, FormErrors::from_api(&err), StatusCode::UNPROCESSABLE_ENTITY),
-        _ => {
-            let status = err.status;
-            Outcome::Again(form, FormErrors::from_api(&err), status)
-        }
-    }
+/// Whether a refusal renders on its own, in place of the page's form: a
+/// refused caller (401, 403), an item that is not there (404), or a route's
+/// value its argument refuses. Any other renders the form again.
+fn alone(refusal: &Refusal, route: &[&str]) -> bool {
+    matches!(refusal.status.as_u16(), 401 | 403 | 404) || at_route(refusal, route)
 }
 {{- end }}
-{{- if .Pages.Uses "routeRefused" }}
+{{- if .Pages.Uses "rowsAgain" }}
 
-/// Whether a form's errors refuse one of the route's values, at its name.
-fn route_refused(errors: &FormErrors, names: &[&str]) -> bool {
-    names.iter().any(|name| errors.fields.contains_key(*name))
-}
-{{- end }}
-{{- if .Pages.Uses "formRefusal" }}
-
-/// A form's errors as a refusal, for a page that fills the form itself: a
-/// list's or an item's arguments beside its path's.
-fn form_refusal(errors: &FormErrors, status: StatusCode) -> ApiError {
-    let mut messages = errors.form.clone();
-    for (name, list) in &errors.fields {
-        messages.extend(list.iter().map(|message| format!("{name}: {message}")));
-    }
-    ApiError::new(status, "invalid", messages.join("; "))
-}
-{{- end }}
-{{- if .Pages.Uses "routeRefusal" }}
-
-/// An operation's refusal of a route's value (400 at that parameter) as no
-/// such page; any other refusal as it is.
-fn route_refusal(err: ApiError, names: &[&str]) -> ApiError {
-    let parameter = err.details.as_deref().and_then(|details| details.get("parameter")).and_then(Value::as_str);
-    if err.status == StatusCode::BAD_REQUEST && parameter.is_some_and(|parameter| names.contains(&parameter)) {
-        no_such_page()
-    } else {
-        err
-    }
+/// What a row button gives its form: the form again, 200, without the
+/// operation.
+fn rows_again() -> Refusal {
+    Refusal { status: StatusCode::OK, errors: FormErrors::default() }
 }
 {{- end }}
 {{- if .Pages.Uses "routeValue" }}
@@ -306,12 +295,22 @@ fn held_json(value: &Value) -> Option<String> {
 }
 {{- end }}
 
-/// An operation's refusal in place of the page: the route's status, what
-/// the refusal says, and for a caller who is not signed in (401) a link to
-/// the app's sign-in page that comes back to `next`.
+/// What a refusal says: its form's messages, then each control's after its
+/// name.
+fn messages(refusal: &Refusal) -> Vec<String> {
+    let mut out = refusal.errors.form.clone();
+    for (name, list) in &refusal.errors.fields {
+        out.extend(list.iter().map(|message| format!("{name}: {message}")));
+    }
+    out
+}
+
+/// A refusal in place of the page: its status, what it says, and for a
+/// caller who is not signed in (401) a link to the app's sign-in page that
+/// comes back to `next`.
 #[component]
-async fn refusal(cx: &Cx, err: ApiError, #[into] next: String) -> topcoat::Result<impl View> {
-    let status = err.status;
+async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
+    let status = refusal.status;
     let sign_in = if status == StatusCode::UNAUTHORIZED { Settings::of(cx).sign_in_href(&next) } else { None };
     let heading = match status.as_u16() {
         401 => "Sign in to see this page",
@@ -319,11 +318,14 @@ async fn refusal(cx: &Cx, err: ApiError, #[into] next: String) -> topcoat::Resul
         404 => "Not found",
         _ => "Refused",
     };
+    let messages = messages(&refusal);
     Ok(view! {
         (status)
         <section class="ss-refusal" data-status=(status.as_str().to_owned())>
             <h1>(heading)</h1>
-            <p>(err.message)</p>
+            for message in messages {
+                <p>(message)</p>
+            }
             if let Some(href) = sign_in {
                 <p><a class="ss-sign-in" href=(href)>"Sign in"</a></p>
             }
@@ -346,7 +348,7 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut signed_out = false;
 {{- range .Pages.Top }}
     let link = Link { href: {{ rustString .Path }}, label: {{ rustString .Plural }} };
-    admit(operations::can_{{ .List.Snake }}(cx).await, link, &mut links, &mut signed_out);
+    admit(operations::can_{{ .List.Snake }}(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
 {{- end }}
     (links, signed_out)
 {{- else }}
@@ -358,17 +360,22 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
 
 /// Adds `link` when its guard admitted the caller, else notes whether it
 /// refused a caller who is not signed in.
-fn admit<T>(admitted: Result<T, ApiError>, link: Link, links: &mut Vec<Link>, signed_out: &mut bool) {
+fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, signed_out: &mut bool) {
     match admitted {
         Ok(_) => links.push(link),
-        Err(err) => *signed_out |= err.status == StatusCode::UNAUTHORIZED,
+        Err(status) => *signed_out |= status == StatusCode::UNAUTHORIZED,
     }
 }
 {{- end }}
 
-/// A collection in the trail: its words in a path, its labels, which of
-/// its pages exist, and the collections under its items.
+/// A collection in the trail: its key, its words in a path, its labels,
+/// which of its pages exist, whether an item has a title, and the
+/// collections under its items.
 struct Node {
+{{- if .Pages.Uses "itemTitle" }}
+    key: &'static str,
+    titled: bool,
+{{- end }}
     words: &'static [&'static str],
     plural: &'static str,
     noun: &'static str,
@@ -384,15 +391,32 @@ struct Node {
 /// Each collection with a page, and each on the way to one.
 const TREE: &[Node] = {{ .Pages.Tree }};
 
+/// A step of the trail: its label, its link (none for a page that does not
+/// exist and for the page itself), whether it is the page itself, and for
+/// an item whose type has a title the collection's key and the route's
+/// values to read it with.
+struct Crumb {
+    label: String,
+    href: Option<String>,
+    current: bool,
+{{- if .Pages.Uses "itemTitle" }}
+    item: Option<(&'static str, Vec<String>)>,
+{{- end }}
+}
+
 /// The trail from the index to the page at `path`: the index, then each
-/// collection's list, each item and the page under it, a link where a page
-/// shows it; the last is the page itself, which is not a link.
-fn trail(path: &str, title: &str) -> Vec<(String, Option<String>, bool)> {
-    let mut crumbs = vec![(title.to_owned(), Some(PREFIX.to_owned()))];
+/// collection's list, each item by its noun and id and the page under it,
+/// a link where a page shows it; the last is the page itself.
+fn trail(path: &str, title: &str) -> Vec<Crumb> {
+    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false{{ if .Pages.Uses "itemTitle" }}, item: None{{ end }} };
+    let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
     let segments: Vec<&str> =
         path.strip_prefix(PREFIX).unwrap_or_default().split('/').filter(|segment| !segment.is_empty()).collect();
     let mut nodes = TREE;
     let mut base = PREFIX.to_owned();
+{{- if .Pages.Uses "itemTitle" }}
+    let mut ids = Vec::new();
+{{- end }}
     let mut at = 0;
     while let Some(node) = nodes.iter().find(|node| segments[at..].starts_with(node.words)) {
         for word in node.words {
@@ -400,17 +424,25 @@ fn trail(path: &str, title: &str) -> Vec<(String, Option<String>, bool)> {
             base.push_str(word);
         }
         at += node.words.len();
-        crumbs.push((node.plural.to_owned(), node.list.then(|| base.clone())));
+        crumbs.push(crumb(node.plural.to_owned(), node.list.then(|| base.clone())));
         let Some(&item) = segments.get(at) else {
             break;
         };
         if let (Some(label), "new") = (node.create, item) {
-            crumbs.push((label.to_owned(), None));
+            crumbs.push(crumb(label.to_owned(), None));
             break;
         }
         base.push('/');
         base.push_str(item);
-        crumbs.push((format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone())));
+{{- if .Pages.Uses "itemTitle" }}
+        ids.push(decode(item));
+        crumbs.push(Crumb {
+            item: node.titled.then(|| (node.key, ids.clone())),
+            ..crumb(format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone()))
+        });
+{{- else }}
+        crumbs.push(crumb(format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone())));
+{{- end }}
         at += 1;
         let Some(&page) = segments.get(at) else {
             break;
@@ -421,22 +453,42 @@ fn trail(path: &str, title: &str) -> Vec<(String, Option<String>, bool)> {
             _ => node.actions.iter().find(|(verb, _)| *verb == page).map(|(_, label)| *label),
         };
         if let Some(label) = label {
-            crumbs.push((label.to_owned(), None));
+            crumbs.push(crumb(label.to_owned(), None));
             break;
         }
         nodes = node.children;
     }
-    let last = crumbs.len() - 1;
+    if let Some(last) = crumbs.last_mut() {
+        last.href = None;
+        last.current = true;
+    }
     crumbs
-        .into_iter()
-        .enumerate()
-        .map(|(index, (label, href))| if index == last { (label, None, true) } else { (label, href, false) })
-        .collect()
 }
+{{- if .Pages.Uses "itemTitle" }}
+
+/// The title of the item of the collection `key` at the route's `ids`, its
+/// title field's value, for the trail; none when it is empty or the caller
+/// may not read the item. The item's detail is the page's own call, which
+/// the request keeps.
+async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
+    match (key, ids) {
+{{- range .Pages.Resources }}
+{{- if .TitleExpr }}
+        ({{ rustString .Key }}, [{{ join .ItemParams ", " }}]) => match call_{{ .Detail.Snake }}(cx{{ passAfter .ItemParams "" }}).await {
+            Ok(item) => {{ .TitleExpr }},
+            Err(_) => None,
+        },
+{{- end }}
+{{- end }}
+        _ => None,
+    }
+    .filter(|title| !title.trim().is_empty())
+}
+{{- end }}
 
 /// Every page under `{{ .Pages.Prefix }}`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the trail from
-/// the index to the page, then the page in `<main>`.
+/// the index to the page, an item by its title, then the page in `<main>`.
 #[layout({{ rustString .Pages.Prefix }})]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
@@ -455,7 +507,20 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
+{{- if .Pages.Uses "itemTitle" }}
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        if let Some((key, ids)) = &crumb.item
+            && let Some(title) = item_title(cx, key, ids).await
+        {
+            crumb.label = title;
+        }
+    }
+{{- else }}
     let crumbs = trail(&path, &title);
+{{- end }}
+    let crumbs: Vec<(String, Option<String>, bool)> =
+        crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
@@ -510,56 +575,24 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 {{- range .Pages.Ops }}
-{{- if .Submit }}
-
-{{ doc (printf "Posts a form to %s%s: the result, the form again with its errors, or a refusal." .Snake (or (and .RouteFields ", its path's arguments the route's values") "")) }}
-async fn submit_{{ .Snake }}(cx: &Cx, {{ if .MutForm }}mut {{ end }}form: {{ .FormName }}{{ declareAfter .Params "&str" }}) -> Outcome<{{ .Output }}, {{ .FormName }}> {
-{{- if .ArgForm }}
-{{- range .RouteFields }}
-    form.{{ .Field }} = Some({{ .Param }}.to_owned());
-{{- end }}
-{{- end }}
-{{- if .Rows }}
-    if form.apply_action() {
-        return Outcome::Again(form, FormErrors::default(), StatusCode::OK);
-    }
-{{- end }}
-    let args = match form.parse() {
-{{- if .ArgForm }}
-        Ok(args) => args,
-{{- else }}
-        Ok(input) => crate::api::{{ .ArgsName }} { input{{ if .InputOptional }}: Some(input){{ end }} },
-{{- end }}
-{{- if and .ArgForm .RouteFields }}
-        Err(errors) if route_refused(&errors, &[{{ .RouteNames }}]) => return Outcome::Refused(no_such_page()),
-{{- end }}
-        Err(errors) => return Outcome::Again(form, errors, StatusCode::UNPROCESSABLE_ENTITY),
-    };
-    match operations::{{ .Snake }}(cx, args).await {
-        Ok(result) => Outcome::Done(result),
-        Err(err) => refused(form, err),
-    }
-}
-{{- end }}
 {{- if .Call }}
 
-{{ doc (printf "Calls %s%s%s." .Snake (or (and .RouteFields " with the route's values") "") (or (and .ArgForm " and each other argument's default") "")) }}
-async fn call_{{ .Snake }}(cx: &Cx{{ declareAfter .Params "&str" }}) -> Result<{{ .Output }}, ApiError> {
+{{ doc (printf "Calls %s%s%s; a refusal of a route's value is no such page.%s" .Snake (or (and .RouteFields " with the route's values") "") (or (and .ArgForm " and each other argument's default") "") (or (and .Memoized " The request keeps its result, which the page and the trail share.") "")) }}
+{{- if .Memoized }}
+#[memoize(as_ref)]
+{{- end }}
+async fn call_{{ .Snake }}(cx: &Cx{{ declareAfter .Params "&str" }}) -> Result<{{ .Output }}, Refusal> {
 {{- if .ArgForm }}
-    match submit_{{ .Snake }}(cx, {{ .NewForm }}{{ passAfter .Params "" }}).await {
-        Outcome::Done(result) => Ok(result),
-        Outcome::Again(_, errors, status) => Err(form_refusal(&errors, status)),
-        Outcome::Refused(err) => Err(err),
-    }
+    {{ .NewForm }}.submit(cx).await.map_err(|refusal| page_refusal(refusal, &[{{ .RouteNames }}]))
 {{- else if .RouteFields }}
     let args = crate::api::{{ .ArgsName }} {
 {{- range .RouteFields }}
         {{ .Field }}: route_value({{ .Param }}, {{ .Read }}).ok_or_else(no_such_page)?,
 {{- end }}
     };
-    operations::{{ .Snake }}(cx, args).await.map_err(|err| route_refusal(err, &[{{ .RouteNames }}]))
+    operations::{{ .Snake }}(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &[{{ .RouteNames }}]))
 {{- else }}
-    operations::{{ .Snake }}(cx).await
+    operations::{{ .Snake }}(cx).await.map_err(|err| Refusal::from_api(&err))
 {{- end }}
 }
 {{- end }}
@@ -604,13 +637,13 @@ pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if .ArgForm }}, Form(filter): Fo
     let admitted = operations::can_{{ .Snake }}(cx).await;
     Ok(view! {
         match admitted {
-            Err(err) => refusal(err: err, next: next),
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
             Ok(_) => {{ $r.Ident }}_list({{ props $r.ColParams }}{{ if .ArgForm }}filter: filter, {{ end }}next: next),
         }
     })
 }
 
-{{ doc (printf "The %s%s%s." $r.PluralLower (or (and .ArgForm " the filter finds, after the filter") "") (or (and $r.Create ", and a link to the new page when the caller may create one") "")) }}
+{{ doc (printf "The %s%s%s." $r.PluralLower (or (and .ArgForm " the filter finds, after the filter, which answers with its refusal's status") "") (or (and $r.Create ", and a link to the new page when the caller may create one") "")) }}
 #[component]
 async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ if .ArgForm }}, filter: {{ .ArgForm.Name }}{{ end }}, next: String) -> topcoat::Result<impl View> {
 {{- if .ArgForm }}
@@ -623,11 +656,12 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
         ..filter
     };
 {{- end }}
-    let listed = submit_{{ .Snake }}(cx, filter.clone(){{ passAfter .Params "&" }}).await;
+    let listed = filter.submit(cx).await;
     let errors = match &listed {
-        Outcome::Again(_, errors, _) => errors.clone(),
+        Err(refusal) if !alone(refusal, &[{{ .RouteNames }}]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
+    let choices = choices_of(cx);
 {{- else }}
     let listed = call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await;
 {{- end }}
@@ -644,35 +678,36 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
 {{- end }}
 {{- if .ArgForm }}
         <form method="get" class="ss-filter">
-            {{ .ArgForm.Component }}(form: filter, errors: errors)
+            {{ .ArgForm.Component }}(form: filter, errors: errors, choices: choices)
             <button type="submit">"Filter"</button>
         </form>
         match listed {
-            Outcome::Done(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
-            Outcome::Again(_, _, status) => (status),
-            Outcome::Refused(err) => refusal(err: err, next: next),
+            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
+            Err(refusal) if alone(&refusal, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
+            Err(refusal) => (refusal.status),
         }
 {{- else }}
         match listed {
             Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
-            Err(err) => refusal(err: err, next: next),
+            Err(refusal) => refused(refusal: refusal, next: next),
         }
 {{- end }}
     })
 }
 
-{{ doc (printf "%s as `%s` renders them%s." $r.Plural $r.RowTable (or (and $r.Linked ", each row linked to its page") "")) }}
+{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s." $r.Plural $r.RowTable (or (and $r.Linked ", each row linked to its page") "")) }}
 #[component]
-async fn {{ $r.Ident }}_rows({{ if $r.Linked }}{{ declare $r.ColParams "String" }}{{ if $r.ColParams }}, {{ end }}{{ end }}items: {{ .Output }}) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Output }}) -> topcoat::Result<impl View> {
     let rows: Vec<{{ $r.RowRecord }}> = items.iter().map({{ $r.RowRecord }}::from).collect();
 {{- if $r.Linked }}
     let hrefs: Vec<String> = rows.iter().map(|row| {{ $r.LinkExpr }}).collect();
 {{- end }}
+    let choices = choices_of(cx);
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">{{ rustString (printf "There are no %s." $r.PluralLower) }}</p>
         } else {
-            {{ $r.RowTable }}(rows: rows{{ if $r.Linked }}, hrefs: hrefs{{ end }})
+            {{ $r.RowTable }}(rows: rows, choices: choices{{ if $r.Linked }}, hrefs: hrefs{{ end }})
         }
     })
 }
@@ -708,7 +743,7 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
 {{- if .List }}
                 match listed {
                     Some(Ok(items)) => {{ .Ident }}_rows({{ if .Linked }}{{ props .ColParams }}{{ end }}items: items),
-                    Some(Err(err)) => <p class="ss-refused">(err.message)</p>,
+                    Some(Err(refusal)) => <p class="ss-refused">(messages(&refusal).join(" "))</p>,
                     None => "",
                 }
 {{- end }}
@@ -725,7 +760,7 @@ pub async fn {{ $r.Ident }}_item_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    Ok(view! { {{ $r.Ident }}_item({{ args $r.ItemParams }}) })
 }
 
-{{ doc (printf "One of the %s: its detail%s%s%s%s%s, each when the caller may.%s" $r.PluralLower (or (and $r.Update ", a link to edit it") "") (or (and $r.Delete ", a link to delete it") "") (or (and $r.Actions ", a form per action") "") (or (and $r.Sections ", the sections under it") "") "" (or (and $r.Actions " A refused action renders its form again as sent, with its errors.") "")) }}
+{{ doc (printf "One of the %s: its detail%s%s%s%s, each when the caller may.%s" $r.PluralLower (or (and $r.Update ", a link to edit it") "") (or (and $r.Delete ", a link to delete it") "") (or (and $r.Actions ", a form per action") "") (or (and $r.Sections ", the sections under it") "") (or (and $r.Actions " A refused action renders its form again as sent, with its errors.") "")) }}
 #[component]
 async fn {{ $r.Ident }}_item(
     cx: &Cx,
@@ -736,11 +771,15 @@ async fn {{ $r.Ident }}_item(
     #[default] {{ .Field }}: Option<({{ .ArgForm.Name }}, FormErrors)>,
 {{- end }}
 ) -> topcoat::Result<impl View> {
-    let href = {{ $r.Ident }}_item_href({{ pass $r.ItemParams "&" }}).unwrap_or_else(|| PREFIX.to_owned());
-    let found = call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await.map(|item| {
-        let record = {{ $r.DetailRecord }}::from(item);
-        ({{ $r.HeadingExpr }}, record)
-    });
+    let href = {{ $r.ItemExpr }};
+    let found = call_{{ .Snake }}(cx{{ passAfter .Params "&" }})
+        .await
+        .map(|item| {
+            let record = {{ $r.DetailRecord }}::from(item);
+            ({{ $r.HeadingExpr }}, record)
+        })
+        .map_err(Refusal::clone);
+    let choices = choices_of(cx);
 {{- with $r.Update }}
     let edits = operations::can_{{ .Snake }}(cx).await.is_ok();
 {{- end }}
@@ -755,10 +794,10 @@ async fn {{ $r.Ident }}_item(
 {{- end }}
     Ok(view! {
         match found {
-            Err(err) => refusal(err: err, next: href),
+            Err(refusal) => refused(refusal: refusal, next: href),
             Ok((heading, record)) => {
                 <h1>(heading)</h1>
-                {{ $r.DetailView }}(record: record)
+                {{ $r.DetailView }}(record: record, choices: choices.clone())
 {{- if or $r.Update $r.Delete }}
                 if {{ if and $r.Update $r.Delete }}edits || deletes{{ else if $r.Update }}edits{{ else }}deletes{{ end }} {
                     <p class="ss-actions">
@@ -778,7 +817,7 @@ async fn {{ $r.Ident }}_item(
 {{- range $r.Actions }}
                 if let Some((form, errors)) = {{ .Field }} {
                     <form method="post" action=(format!("{href}/{{ .Verb }}")) class="ss-action" data-action={{ rustString .Verb }}>
-                        {{ .ArgForm.Component }}(form: form, errors: errors)
+                        {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices.clone())
                         <button type="submit">{{ rustString .Label }}</button>
                     </form>
                 }
@@ -801,45 +840,36 @@ pub async fn {{ $r.Ident }}_new_page(cx: &Cx) -> topcoat::Result<impl View> {
     let form = {{ .NewFormOwned }};
     Ok(view! {
         match admitted {
-            Err(err) => refusal(err: err, next: next),
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
             Ok(_) => {{ $r.Ident }}_new(form: form, errors: FormErrors::default()),
         }
     })
 }
 
-{{ doc (printf "Creates one of the %s from the new page's form, then goes to %s (303); a row button or a refusal renders the form again." $r.PluralLower (or (and $r.CreatedLines "its page") "the page it came from")) }}
+{{ doc (printf "Creates one of the %s from the new page's form, then goes to %s (303); a row button or a refusal renders the form again with its status." $r.PluralLower (or (and (eq .DoneBinding "created") "its page") "the page it came from")) }}
 #[page(POST {{ rustString (printf "%s/new" $r.Path) }})]
 pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
-    let shown = match submit_{{ .Snake }}(cx, form{{ passAfter .Params "&" }}).await {
-{{- if $r.CreatedLines }}
-        Outcome::Done(created) => {
-            {{ $r.CreatedLines }}
-        }
-{{- else }}
-        Outcome::Done(_) => return Err(see_other({{ $r.BackExpr }}).into()),
-{{- end }}
-        Outcome::Again(form, errors, status) => Ok((form, errors, status)),
-        Outcome::Refused(err) => Err(err),
-    };
+{{ .SentLines }}
     Ok(view! {
-        match shown {
-            Ok((form, errors, status)) => {
-                (status)
-                {{ $r.Ident }}_new(form: form, errors: errors)
+        match sent {
+            sent if alone(&sent, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(sent, &[{{ .RouteNames }}]), next: next),
+            sent => {
+                (sent.status)
+                {{ $r.Ident }}_new(form: form, errors: sent.errors)
             },
-            Err(err) => refusal(err: err, next: next),
         }
     })
 }
 
 /// The new page's form, new or as sent with its errors.
 #[component]
-async fn {{ $r.Ident }}_new(form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
+    let choices = choices_of(cx);
     Ok(view! {
         <h1>{{ rustString $r.CreateLabel }}</h1>
         <form method="post" class="ss-form">
-            {{ .FormComponent }}(form: form, errors: errors)
+            {{ .FormComponent }}(form: form, errors: errors, choices: choices)
             <button type="submit">{{ rustString $r.SubmitLabel }}</button>
         </form>
     })
@@ -852,50 +882,47 @@ async fn {{ $r.Ident }}_new(form: {{ .FormName }}, errors: FormErrors) -> topcoa
 pub async fn {{ $r.Ident }}_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
     let shown = match operations::can_{{ .Snake }}(cx).await {
-        Err(err) => Err(err),
-        Ok(_) => call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }}).await.map(|item| {{ .ArgForm.Name }} {
-            input: {{ .PrefillFn }}(&serde_json::to_value(&item).unwrap_or_default()),
-            ..{{ .NewFormOwned }}
-        }),
+        Err(err) => Err(Refusal::from_api(&err)),
+        Ok(_) => call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }})
+            .await
+            .map(|item| {{ .ArgForm.Name }} {
+                input: {{ .PrefillFn }}(&serde_json::to_value(item).unwrap_or_default()),
+                ..{{ .NewFormOwned }}
+            })
+            .map_err(Refusal::clone),
     };
     Ok(view! {
         match shown {
             Ok(form) => {{ $r.Ident }}_edit(form: form, errors: FormErrors::default()),
-            Err(err) => refusal(err: err, next: next),
+            Err(refusal) => refused(refusal: refusal, next: next),
         }
     })
 }
 
-{{ doc (printf "Changes one of the %s from the edit page's form, then goes to its page (303); a row button or a refusal renders the form again." $r.PluralLower) }}
+{{ doc (printf "Changes one of the %s from the edit page's form, then goes to its page (303); a row button or a refusal renders the form again with its status." $r.PluralLower) }}
 #[page(POST {{ rustString (printf "%s/edit" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
-    let shown = match submit_{{ .Snake }}(cx, form{{ passAfter .Params "&" }}).await {
-        Outcome::Done(_) => {
-            let item = {{ $r.Ident }}_item_href({{ pass $r.ItemParams "&" }}).unwrap_or_else(|| PREFIX.to_owned());
-            return Err(see_other(item).into());
-        }
-        Outcome::Again(form, errors, status) => Ok((form, errors, status)),
-        Outcome::Refused(err) => Err(err),
-    };
+{{ .SentLines }}
     Ok(view! {
-        match shown {
-            Ok((form, errors, status)) => {
-                (status)
-                {{ $r.Ident }}_edit(form: form, errors: errors)
+        match sent {
+            sent if alone(&sent, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(sent, &[{{ .RouteNames }}]), next: next),
+            sent => {
+                (sent.status)
+                {{ $r.Ident }}_edit(form: form, errors: sent.errors)
             },
-            Err(err) => refusal(err: err, next: next),
         }
     })
 }
 
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
-async fn {{ $r.Ident }}_edit(form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
+    let choices = choices_of(cx);
     Ok(view! {
         <h1>{{ rustString (printf "Edit the %s" $r.NounLower) }}</h1>
         <form method="post" class="ss-form">
-            {{ .ArgForm.Component }}(form: form, errors: errors)
+            {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices)
             <button type="submit">"Save"</button>
         </form>
     })
@@ -911,28 +938,24 @@ pub async fn {{ $r.Ident }}_delete_page(cx: &Cx) -> topcoat::Result<impl View> {
     let form = {{ .NewFormOwned }};
     Ok(view! {
         match admitted {
-            Err(err) => refusal(err: err, next: next),
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
             Ok(_) => {{ $r.Ident }}_delete({{ props $r.ItemParams }}form: form, errors: FormErrors::default()),
         }
     })
 }
 
-{{ doc (printf "Deletes one of the %s from the confirmation's form, then goes %s (303); a refusal renders the confirmation again." $r.PluralLower (or (and $r.List "to the list") "back")) }}
+{{ doc (printf "Deletes one of the %s from the confirmation's form, then goes %s (303); a refusal renders the confirmation again with its status." $r.PluralLower (or (and $r.List "to the list") "back")) }}
 #[page(POST {{ rustString (printf "%s/delete" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_destroy_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
-    let shown = match submit_{{ .Snake }}(cx, form{{ passAfter .Params "&" }}).await {
-        Outcome::Done(_) => return Err(see_other({{ $r.BackExpr }}).into()),
-        Outcome::Again(form, errors, status) => Ok((form, errors, status)),
-        Outcome::Refused(err) => Err(err),
-    };
+{{ .SentLines }}
     Ok(view! {
-        match shown {
-            Ok((form, errors, status)) => {
-                (status)
-                {{ $r.Ident }}_delete({{ props $r.ItemParams }}form: form, errors: errors)
+        match sent {
+            sent if alone(&sent, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(sent, &[{{ .RouteNames }}]), next: next),
+            sent => {
+                (sent.status)
+                {{ $r.Ident }}_delete({{ props $r.ItemParams }}form: form, errors: sent.errors)
             },
-            Err(err) => refusal(err: err, next: next),
         }
     })
 }
@@ -941,17 +964,18 @@ pub async fn {{ $r.Ident }}_destroy_page(cx: &Cx, Form(form): Form<{{ .ArgForm.N
 /// sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }}, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let href = {{ $r.Ident }}_item_href({{ pass $r.ItemParams "&" }}).unwrap_or_else(|| PREFIX.to_owned());
-    let found = call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }}).await.map({{ $r.DetailRecord }}::from);
+    let href = {{ $r.ItemExpr }};
+    let found = call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }}).await.map({{ $r.DetailRecord }}::from).map_err(Refusal::clone);
+    let choices = choices_of(cx);
     Ok(view! {
         match found {
-            Err(err) => refusal(err: err, next: href),
+            Err(refusal) => refused(refusal: refusal, next: href),
             Ok(record) => {
                 <h1>{{ rustString (printf "Delete the %s" $r.NounLower) }}</h1>
                 <p class="ss-confirm">{{ rustString (printf "Delete this %s? It cannot be undone." $r.NounLower) }}</p>
-                {{ $r.DetailView }}(record: record)
+                {{ $r.DetailView }}(record: record, choices: choices.clone())
                 <form method="post" class="ss-form" data-action="delete">
-                    {{ .ArgForm.Component }}(form: form, errors: errors)
+                    {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices)
                     <button type="submit">{{ rustString (printf "Delete the %s" $r.NounLower) }}</button>
                 </form>
                 <p><a class="ss-back" href=(href)>{{ rustString (printf "Keep the %s" $r.NounLower) }}</a></p>
@@ -962,22 +986,18 @@ async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }},
 {{- end }}
 {{- range .Actions }}
 
-{{ doc (printf "%s: posts the action's form, then goes back to the item's page (303); a refusal renders the item's page again with the form as sent and its errors." .Label) }}
+{{ doc (printf "%s: posts the action's form, then goes back to the item's page (303); a refusal renders the item's page again with the form as sent, its errors and its status." .Label) }}
 #[page(POST {{ rustString (printf "%s/%s" $r.ItemPath .Verb) }})]
 pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
-{{ reads $r.ItemParams }}    let item = {{ $r.Ident }}_item_href({{ pass $r.ItemParams "&" }}).unwrap_or_else(|| PREFIX.to_owned());
-    let shown = match submit_{{ .Snake }}(cx, form{{ passAfter .Params "&" }}).await {
-        Outcome::Done(_) => return Err(see_other(item).into()),
-        Outcome::Again(form, errors, status) => Ok((form, errors, status)),
-        Outcome::Refused(err) => Err(err),
-    };
+{{ reads $r.ItemParams }}    let item = {{ $r.ItemExpr }};
+{{ .SentLines }}
     Ok(view! {
-        match shown {
-            Ok((form, errors, status)) => {
-                (status)
-                {{ $r.Ident }}_item({{ props $r.ItemParams }}{{ .Field }}: Some((form, errors)))
+        match sent {
+            sent if alone(&sent, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(sent, &[{{ .RouteNames }}]), next: item),
+            sent => {
+                (sent.status)
+                {{ $r.Ident }}_item({{ props $r.ItemParams }}{{ .Field }}: Some((form, sent.errors)))
             },
-            Err(err) => refusal(err: err, next: item),
         }
     })
 }
