@@ -4955,8 +4955,7 @@ database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
 on Postgres.
 
 Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
-the Go and TypeScript ones do; and a check of an `@envVars` field that
-collides with it outside a stack.
+the Go and TypeScript ones do.
 
 The design is reversible until the first release.
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request

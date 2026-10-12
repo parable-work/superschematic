@@ -123,9 +123,12 @@ type Input struct {
 	Registry *registry.Registry
 
 	// AuthDB is the loaded schema the config's authDb names, which the
-	// user model's route sets read their users from (D50). The loader
-	// reads it for an API with a @userSessions or @userAdministration set,
-	// and leaves it nil otherwise.
+	// user model's route sets read their users from (D50), and whose User
+	// table gives the API its identity config field (checkDerivedFields).
+	// The loader reads it for an API with a @userSessions or
+	// @userAdministration set, or with an @envVars field that takes the
+	// identity config field's name (TakesIdentityConfigField), and leaves
+	// it nil otherwise.
 	AuthDB *ir.Schema
 }
 
