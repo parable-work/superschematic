@@ -147,7 +147,7 @@ func (r run) generateServers() error {
 			}
 			plans = append(plans, planned{server: worker})
 		case APILanguageTypeScript:
-			if err := r.checkTypeScriptQueue(st.Name, w); err != nil {
+			if err := r.checkTypeScriptQueue(st.Name, w, services); err != nil {
 				return err
 			}
 			worker, _, err := r.planTypeScriptServer(st.Name, w, cloudSQL[w.Name], nil)
@@ -390,8 +390,22 @@ func (r run) checkTypeScriptExport(stackName, api, what, fn, typ string, methods
 // TypeScript types of its database leave out of their ./queues entry, as
 // they leave out a queue whose message the TypeScript queue client cannot
 // hold yet (D53).
-func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable) error {
+func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
 	db := w.Worker.Database
+	for _, svc := range services {
+		if svc.Name != w.Worker.API || db != "" {
+			continue
+		}
+		// The API's database: its authDb, or its one DB dependency.
+		if svc.AuthDB != nil {
+			db = svc.AuthDB.Name
+		}
+		for _, dep := range svc.Dependencies {
+			if db == "" && dep.Kind == ir.SchemaKindDB {
+				db = dep.Name
+			}
+		}
+	}
 	if db == "" || r.Options.LoadDependency == nil {
 		return nil
 	}

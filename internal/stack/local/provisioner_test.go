@@ -246,7 +246,13 @@ func newFixture(t *testing.T, envName string) *fixture {
 // any, the output root's Bun workspace holds.
 func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	t.Helper()
-	resolved := resolve(t, assemble(t), s, stacktest.AcmeShop(), envName)
+	return newFixtureWith(t, s, stacktest.AcmeShop(), envName)
+}
+
+// newFixtureWith is newFixtureOf over services rather than the shop's.
+func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName string) *fixture {
+	t.Helper()
+	resolved := resolve(t, assemble(t), s, services, envName)
 	data, err := stack.Marshal(resolved)
 	if err != nil {
 		t.Fatal(err)
