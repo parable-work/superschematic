@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
@@ -26,16 +28,20 @@ import (
 // entrypoints.
 const serverGenerator = "server"
 
-// generateServers writes the entrypoint of each Go and TypeScript server of
-// the stack the schema declares under servergen.StackDir (docs/stack-model.md,
-// sections 8.1, 8.2 and 8.6), and of each Go job beside them (section 8.7,
-// D52), and scaffolds each served API's implementation that is missing, a
-// Go server's in Go and a TypeScript server's in TypeScript (sections 8.5
-// and 8.6). No environment changes the servers or the jobs, but the
-// entrypoint of one that some environment connects to a database on Cloud
-// SQL links the Cloud SQL connector, or depends on the Node one. It plans
-// every entrypoint before it writes anything, so one it refuses leaves the
-// last build's entrypoints and every implementation as they were. A build
+// generateServers writes the entrypoint of each Go, TypeScript and Rust
+// server of the stack the schema declares under servergen.StackDir
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go job
+// beside them (section 8.7, D52), and scaffolds each served API's
+// implementation that is missing, a Go server's in Go, a TypeScript
+// server's in TypeScript and a Rust server's in Rust (sections 8.5 and
+// 8.6). The Rust servers' crates are the members of the output root's
+// Cargo workspace, whose root and lockfile it writes (D57). No environment
+// changes the servers or the jobs, but the entrypoint of a Go or
+// TypeScript one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector, or depends on the Node one; a Rust
+// one reaches Cloud SQL through its runtime alone. It plans every
+// entrypoint before it writes anything, so one it refuses leaves the last
+// build's entrypoints and every implementation as they were. A build
 // without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
@@ -75,8 +81,10 @@ func (r run) generateServers() error {
 	}
 	var plans []planned
 	var tsPlans []*servergen.TypeScriptServer
+	var rustPlans []*servergen.RustServer
 	scaffolding := map[string]bool{}
 	var tsScaffolds []*tsrestgen.APIOutput
+	var rustScaffolds []*rustrestgen.APIOutput
 	for _, s := range servers {
 		switch s.Language {
 		case APILanguageGo:
@@ -95,6 +103,13 @@ func (r run) generateServers() error {
 			}
 			tsPlans = append(tsPlans, server)
 			tsScaffolds = append(tsScaffolds, scaffolds...)
+		case APILanguageRust:
+			server, scaffolds, err := r.planRustServer(st.Name, s, cors)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, server)
+			rustScaffolds = append(rustScaffolds, scaffolds...)
 		default:
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		}
@@ -151,6 +166,11 @@ func (r run) generateServers() error {
 			return err
 		}
 	}
+	for _, output := range rustScaffolds {
+		if err := r.scaffoldRustImplementation(output, r.Options.RepositoryRoot); err != nil {
+			return err
+		}
+	}
 	if len(tsPlans) > 0 {
 		// The servers and the implementations join the output root's Bun
 		// workspace.
@@ -163,7 +183,12 @@ func (r run) generateServers() error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
-	if len(plans) == 0 && len(tsPlans) == 0 {
+	if len(plans) == 0 && len(tsPlans) == 0 && len(rustPlans) == 0 {
+		// The stack's Rust servers are gone, if it had any: the workspace's
+		// root names the other stacks' alone, or is removed.
+		if _, err := servergen.WriteRustWorkspace(r.Options.OutputRoot); err != nil {
+			return err
+		}
 		r.Skip(serverGenerator)
 		return nil
 	}
@@ -183,8 +208,68 @@ func (r run) generateServers() error {
 			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
 		}
 	}
+	for _, server := range rustPlans {
+		if err := servergen.WriteRust(server, servergen.ServerDir(r.Options.OutputRoot, st.Name, server.Name)); err != nil {
+			return err
+		}
+		if server.Docker == nil {
+			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
+		}
+	}
+	if err := r.writeRustWorkspace(len(rustPlans) > 0); err != nil {
+		return fmt.Errorf("stack %s: %w", st.Name, err)
+	}
 	r.Done(serverGenerator, dir)
 	return nil
+}
+
+// writeRustWorkspace writes the output root's Cargo workspace for the Rust
+// server crates on disk, every stack's (D57), and, when this stack has
+// one, brings its lockfile up to date with cargo (servergen.
+// UpdateRustLockfile), which the project commits, and says in one line how
+// to commit it when git ignores it. Without cargo on PATH, or when cargo
+// cannot resolve the workspace, as after a build of the stack alone,
+// before the crates its servers depend on are on disk, it says so in one
+// line and leaves the lockfile as it is: the image and the generated CI
+// build with --locked from it, and refuse a stale one.
+func (r run) writeRustWorkspace(rust bool) error {
+	members, err := servergen.WriteRustWorkspace(r.Options.OutputRoot)
+	if err != nil || !members || !rust {
+		return err
+	}
+	r.noteIgnoredRustLockfile()
+	lockfile := filepath.Join(r.Options.OutputRoot, servergen.RustLockfileName)
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		r.Logf("  - %s: no cargo on PATH to bring it up to date; run cargo update --workspace in %s once every service is built, and commit it\n", lockfile, r.Options.OutputRoot)
+		return nil
+	}
+	if err := servergen.UpdateRustLockfile(cargo, r.Options.OutputRoot); err != nil {
+		r.Logf("  - %s: not brought up to date: %v; build every service (superschematic build-all), which runs cargo update --workspace in %s, and commit it\n", lockfile, firstLine(err.Error()), r.Options.OutputRoot)
+	}
+	return nil
+}
+
+// noteIgnoredRustLockfile says, in one line, how to commit the Cargo
+// workspace's lockfile when git ignores it, as noteIgnoredLockfile says
+// for the Bun workspace's (D51, amended; D57).
+func (r run) noteIgnoredRustLockfile() {
+	rule, ignored := tsgen.IgnoredFile(r.Options.OutputRoot, servergen.RustLockfileName)
+	if !ignored {
+		return
+	}
+	by := "git"
+	if rule != "" {
+		by = rule
+	}
+	r.Logf("  - %s is ignored by %s; commit it, so images and CI build the Rust crates it pins: ignore the output root's contents, not the directory (dist/* and !dist/%s in place of dist/; docs/stack-model.md, section 8.6)\n",
+		filepath.Join(r.Options.OutputRoot, servergen.RustLockfileName), by, servergen.RustLockfileName)
+}
+
+// firstLine is s up to its first newline.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 // noteIgnoredLockfile says, in one line, how to commit the lockfile of the
@@ -460,6 +545,73 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		}
 	}
 	server, err := servergen.PlanTypeScript(in)
+	if err != nil {
+		return nil, nil, err
+	}
+	return server, scaffolds, nil
+}
+
+// planRustServer plans the entrypoint of the Rust server s of the stack
+// (D57): the Rust API crate of each API it serves, with its Deps, as that
+// API's own build writes it, its EnvConfig, and where each implementation
+// lives, at the naming file's [implementation_paths] rust template, by
+// the names its Cargo.toml gives it. It returns the APIs whose
+// implementation is missing, which the caller scaffolds.
+func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map[string]bool) (*servergen.RustServer, []*rustrestgen.APIOutput, error) {
+	out := r.Options.OutputRoot
+	in := servergen.RustInput{
+		Stack:              stackName,
+		Server:             s.Name,
+		Dir:                servergen.ServerDir(out, stackName, s.Name),
+		OutputRoot:         out,
+		Naming:             r.Options.Naming,
+		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		ImplementationRoot: r.Options.RepositoryRoot,
+		SDKDirs:            map[string]string{},
+		Paths:              r.Options.Paths,
+	}
+	var scaffolds []*rustrestgen.APIOutput
+	for _, ref := range s.Services {
+		served, err := r.servedRun(stackName, s.Name, ref.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		output, config, err := served.rustAPI()
+		if err != nil {
+			return nil, nil, err
+		}
+		if output == nil {
+			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		routes, err := served.APIOutput()
+		if err != nil {
+			return nil, nil, err
+		}
+		dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, ref.Name)
+		exists, err := rustrestgen.ImplementationExists(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !exists {
+			scaffolds = append(scaffolds, output)
+		}
+		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		in.APIs = append(in.APIs, servergen.RustAPIInput{
+			Output:         output,
+			Routes:         routes,
+			Config:         config,
+			Dir:            APIDir(out, ref.Name),
+			Implementation: impl,
+			CORS:           cors[ref.Name],
+		})
+		for _, call := range output.Deps.Calls {
+			in.SDKDirs[call.Service] = SDKDir(out, LangRust, call.Service)
+		}
+	}
+	server, err := servergen.PlanRust(in)
 	if err != nil {
 		return nil, nil, err
 	}

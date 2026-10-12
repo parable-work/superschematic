@@ -75,9 +75,17 @@ const LockfileName = "bun.lock"
 // A lockfile git tracks is not ignored, whatever the rules say. An output
 // root outside a repository, or a machine without git, reports none.
 func IgnoredLockfile(outputRoot string) (rule string, ignored bool) {
+	return IgnoredFile(outputRoot, LockfileName)
+}
+
+// IgnoredFile reports whether git ignores the file name in dir, and the
+// rule that does, as IgnoredLockfile reports it for the Bun workspace's
+// lockfile: the Cargo workspace's lockfile beside it is another file the
+// project commits (D57).
+func IgnoredFile(dir, name string) (rule string, ignored bool) {
 	checkIgnore := func(args ...string) ([]byte, error) {
-		cmd := exec.Command("git", append(append([]string{"check-ignore"}, args...), "--", LockfileName)...)
-		cmd.Dir = outputRoot
+		cmd := exec.Command("git", append(append([]string{"check-ignore"}, args...), "--", name)...)
+		cmd.Dir = dir
 		return cmd.Output()
 	}
 	// git exits 1 when no rule ignores the path and 128 outside a

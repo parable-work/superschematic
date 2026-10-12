@@ -1,0 +1,25 @@
+name: rs-orders
+kind: API
+types:
+  Order:
+    name: Order
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Orders
+    operations:
+      - name: placeOrder
+        typeRef: { name: Order }
+        required: true
+        httpMethod: POST
+        restPath: orders/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
