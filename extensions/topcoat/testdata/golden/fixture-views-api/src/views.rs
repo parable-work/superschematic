@@ -58,8 +58,10 @@ pub async fn address_detail(record: AddressRecord) -> topcoat::Result<impl View>
 }
 
 /// `AddressRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's title cell; a row past its end links nowhere.
 #[component]
-pub async fn address_table(rows: Vec<AddressRecord>) -> topcoat::Result<impl View> {
+pub async fn address_table(rows: Vec<AddressRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Address">
             <thead>
@@ -69,9 +71,16 @@ pub async fn address_table(rows: Vec<AddressRecord>) -> topcoat::Result<impl Vie
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <th scope="row" data-field="recipient">(row.recipient)</th>
+                        <th scope="row" data-field="recipient">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.recipient)</a>
+                            } else {
+                                (row.recipient)
+                            }
+                        </th>
                         <td data-field="city">(row.city)</td>
                     </tr>
                 }
@@ -101,8 +110,10 @@ pub async fn comment_detail(record: CommentRecord) -> topcoat::Result<impl View>
 }
 
 /// `CommentRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn comment_table(rows: Vec<CommentRecord>) -> topcoat::Result<impl View> {
+pub async fn comment_table(rows: Vec<CommentRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Comment">
             <thead>
@@ -112,9 +123,16 @@ pub async fn comment_table(rows: Vec<CommentRecord>) -> topcoat::Result<impl Vie
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="text">(row.text)</td>
+                        <td data-field="text">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.text)</a>
+                            } else {
+                                (row.text)
+                            }
+                        </td>
                         <td data-field="replies">comment_table(rows: row.replies)</td>
                     </tr>
                 }
@@ -144,8 +162,10 @@ pub async fn money_detail(record: MoneyRecord) -> topcoat::Result<impl View> {
 }
 
 /// `MoneyRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn money_table(rows: Vec<MoneyRecord>) -> topcoat::Result<impl View> {
+pub async fn money_table(rows: Vec<MoneyRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Money">
             <thead>
@@ -155,9 +175,16 @@ pub async fn money_table(rows: Vec<MoneyRecord>) -> topcoat::Result<impl View> {
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="cents">(row.cents)</td>
+                        <td data-field="cents">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.cents)</a>
+                            } else {
+                                (row.cents)
+                            }
+                        </td>
                         <td data-field="currency">(row.currency)</td>
                     </tr>
                 }
@@ -190,8 +217,10 @@ pub async fn order_line_detail(record: OrderLineRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderLineRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn order_line_table(rows: Vec<OrderLineRecord>) -> topcoat::Result<impl View> {
+pub async fn order_line_table(rows: Vec<OrderLineRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderLine">
             <thead>
@@ -202,9 +231,16 @@ pub async fn order_line_table(rows: Vec<OrderLineRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="sku">(row.sku)</td>
+                        <td data-field="sku">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.sku)</a>
+                            } else {
+                                (row.sku)
+                            }
+                        </td>
                         <td data-field="quantity">(row.quantity)</td>
                         <td data-field="price">money_detail(record: row.price)</td>
                     </tr>
@@ -309,8 +345,10 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per summary field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's title cell; a row past its end links nowhere.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <caption>"Orders"</caption>
@@ -323,9 +361,16 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <th scope="row" data-field="reference">(row.reference)</th>
+                        <th scope="row" data-field="reference">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.reference)</a>
+                            } else {
+                                (row.reference)
+                            }
+                        </th>
                         <td data-field="status"><data value=(&row.status)>(order_status_label(&row.status))</data></td>
                         <td data-field="placedAt"><time datetime=(&row.placed_at)>(&row.placed_at)</time></td>
                         <td data-field="shipTo">(row.ship_to.recipient)</td>

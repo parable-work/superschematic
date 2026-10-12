@@ -36,8 +36,10 @@ pub async fn greeting_detail(record: GreetingRecord) -> topcoat::Result<impl Vie
 }
 
 /// `GreetingRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn greeting_table(rows: Vec<GreetingRecord>) -> topcoat::Result<impl View> {
+pub async fn greeting_table(rows: Vec<GreetingRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Greeting">
             <thead>
@@ -46,9 +48,16 @@ pub async fn greeting_table(rows: Vec<GreetingRecord>) -> topcoat::Result<impl V
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="message">(row.message)</td>
+                        <td data-field="message">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.message)</a>
+                            } else {
+                                (row.message)
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>

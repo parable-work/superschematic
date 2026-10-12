@@ -32,6 +32,9 @@ type view struct {
 	// records, so its components box their views: a recursive component
 	// needs a view of a known size.
 	Boxed bool
+	// LinksTitle reports whether a row's link is on its title's cell,
+	// which the columns hold; else it is on its first.
+	LinksTitle bool
 }
 
 // viewField is one field of a record as its components render it.
@@ -217,15 +220,37 @@ func (b *viewBuilder) view(rec record) (view, error) {
 			v.Columns = columns
 		}
 	}
+	// A row's link, its entry of the table's hrefs, is on its title's
+	// cell, or its first when the columns hold no title.
+	linked := 0
+	for i, column := range v.Columns {
+		if title != nil && column.JSONName == title.JSONName {
+			linked, v.LinksTitle = i, true
+		}
+	}
 	for i, column := range v.Columns {
 		// The title's cell heads its row.
 		open, close := "<td data-field=", "</td>"
 		if title != nil && column.JSONName == title.JSONName {
 			open, close = `<th scope="row" data-field=`, "</th>"
 		}
-		v.Columns[i].Cell = indentLines(cellIndent, wrapLines(open+rustString(column.JSONName)+">", close, column.value))
+		value := column.value
+		if i == linked {
+			value = linkLines(value)
+		}
+		v.Columns[i].Cell = indentLines(cellIndent, wrapLines(open+rustString(column.JSONName)+">", close, value))
 	}
 	return v, nil
+}
+
+// linkLines puts a cell's value in a link to its row's page, `href`, when
+// the row has one.
+func linkLines(value []string) []string {
+	lines := []string{"if let Some(href) = &href {"}
+	lines = append(lines, indentEach(4, wrapLines("<a href=(href)>", "</a>", value))...)
+	lines = append(lines, "} else {")
+	lines = append(lines, indentEach(4, value)...)
+	return append(lines, "}")
 }
 
 // componentName is the snake-case stem of a type's components: OrderView

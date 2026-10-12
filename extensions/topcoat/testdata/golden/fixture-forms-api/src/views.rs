@@ -77,8 +77,10 @@ pub async fn account_view_detail(record: AccountViewRecord) -> topcoat::Result<i
 }
 
 /// `AccountViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result<impl View> {
+pub async fn account_view_table(rows: Vec<AccountViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="AccountView">
             <thead>
@@ -92,9 +94,16 @@ pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="email">(row.email)</td>
                         <td data-field="displayName">(row.display_name)</td>
                         <td data-field="plan"><data value=(&row.plan)>(plan_label(&row.plan))</data></td>
@@ -131,8 +140,10 @@ pub async fn billing_address_detail(record: BillingAddressRecord) -> topcoat::Re
 }
 
 /// `BillingAddressRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn billing_address_table(rows: Vec<BillingAddressRecord>) -> topcoat::Result<impl View> {
+pub async fn billing_address_table(rows: Vec<BillingAddressRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="BillingAddress">
             <thead>
@@ -143,9 +154,16 @@ pub async fn billing_address_table(rows: Vec<BillingAddressRecord>) -> topcoat::
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="line1">(row.line1)</td>
+                        <td data-field="line1">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.line1)</a>
+                            } else {
+                                (row.line1)
+                            }
+                        </td>
                         <td data-field="city">(row.city)</td>
                         <td data-field="postcode">(row.postcode)</td>
                     </tr>
@@ -252,8 +270,10 @@ pub async fn booking_input_detail(record: BookingInputRecord) -> topcoat::Result
 }
 
 /// `BookingInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn booking_input_table(rows: Vec<BookingInputRecord>) -> topcoat::Result<impl View> {
+pub async fn booking_input_table(rows: Vec<BookingInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="BookingInput">
             <thead>
@@ -271,9 +291,16 @@ pub async fn booking_input_table(rows: Vec<BookingInputRecord>) -> topcoat::Resu
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="guest">guest_detail(record: row.guest)</td>
+                        <td data-field="guest">
+                            if let Some(href) = &href {
+                                <a href=(href)>guest_detail(record: row.guest)</a>
+                            } else {
+                                guest_detail(record: row.guest)
+                            }
+                        </td>
                         <td data-field="billing">
                             match row.billing {
                                 Some(value) => billing_address_detail(record: value),
@@ -355,8 +382,10 @@ pub async fn booking_view_detail(record: BookingViewRecord) -> topcoat::Result<i
 }
 
 /// `BookingViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn booking_view_table(rows: Vec<BookingViewRecord>) -> topcoat::Result<impl View> {
+pub async fn booking_view_table(rows: Vec<BookingViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="BookingView">
             <thead>
@@ -366,9 +395,16 @@ pub async fn booking_view_table(rows: Vec<BookingViewRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="rooms">(row.rooms)</td>
                     </tr>
                 }
@@ -401,8 +437,10 @@ pub async fn guest_detail(record: GuestRecord) -> topcoat::Result<impl View> {
 }
 
 /// `GuestRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn guest_table(rows: Vec<GuestRecord>) -> topcoat::Result<impl View> {
+pub async fn guest_table(rows: Vec<GuestRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Guest">
             <thead>
@@ -413,9 +451,16 @@ pub async fn guest_table(rows: Vec<GuestRecord>) -> topcoat::Result<impl View> {
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="name">(row.name)</td>
+                        <td data-field="name">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.name)</a>
+                            } else {
+                                (row.name)
+                            }
+                        </td>
                         <td data-field="email">(row.email)</td>
                         <td data-field="phone">(row.phone)</td>
                     </tr>
@@ -456,8 +501,10 @@ pub async fn note_input_detail(record: NoteInputRecord) -> topcoat::Result<impl 
 }
 
 /// `NoteInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<impl View> {
+pub async fn note_input_table(rows: Vec<NoteInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="NoteInput">
             <thead>
@@ -467,9 +514,16 @@ pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="text">(row.text)</td>
+                        <td data-field="text">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.text)</a>
+                            } else {
+                                (row.text)
+                            }
+                        </td>
                         <td data-field="tags">
                             match row.tags {
                                 Some(value) => {
@@ -524,8 +578,10 @@ pub async fn room_request_detail(record: RoomRequestRecord) -> topcoat::Result<i
 }
 
 /// `RoomRequestRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn room_request_table(rows: Vec<RoomRequestRecord>) -> topcoat::Result<impl View> {
+pub async fn room_request_table(rows: Vec<RoomRequestRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="RoomRequest">
             <thead>
@@ -536,9 +592,16 @@ pub async fn room_request_table(rows: Vec<RoomRequestRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="roomId">(row.room_id)</td>
+                        <td data-field="roomId">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.room_id)</a>
+                            } else {
+                                (row.room_id)
+                            }
+                        </td>
                         <td data-field="adults">(row.adults)</td>
                         <td data-field="extras">
                             match row.extras {
@@ -608,8 +671,10 @@ pub async fn signup_input_detail(record: SignupInputRecord) -> topcoat::Result<i
 }
 
 /// `SignupInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn signup_input_table(rows: Vec<SignupInputRecord>) -> topcoat::Result<impl View> {
+pub async fn signup_input_table(rows: Vec<SignupInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="SignupInput">
             <thead>
@@ -625,9 +690,16 @@ pub async fn signup_input_table(rows: Vec<SignupInputRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="email">(row.email)</td>
+                        <td data-field="email">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.email)</a>
+                            } else {
+                                (row.email)
+                            }
+                        </td>
                         <td data-field="displayName">(row.display_name)</td>
                         <td data-field="handle">(row.handle)</td>
                         <td data-field="website">(row.website)</td>

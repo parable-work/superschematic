@@ -36,8 +36,10 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <thead>
@@ -46,9 +48,16 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -76,8 +85,10 @@ pub async fn reservation_detail(record: ReservationRecord) -> topcoat::Result<im
 }
 
 /// `ReservationRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn reservation_table(rows: Vec<ReservationRecord>) -> topcoat::Result<impl View> {
+pub async fn reservation_table(rows: Vec<ReservationRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Reservation">
             <thead>
@@ -87,9 +98,16 @@ pub async fn reservation_table(rows: Vec<ReservationRecord>) -> topcoat::Result<
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="held">(if row.held { "Yes" } else { "No" })</td>
                     </tr>
                 }
@@ -114,8 +132,10 @@ pub async fn stock_run_detail(record: StockRunRecord) -> topcoat::Result<impl Vi
 }
 
 /// `StockRunRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn stock_run_table(rows: Vec<StockRunRecord>) -> topcoat::Result<impl View> {
+pub async fn stock_run_table(rows: Vec<StockRunRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="StockRun">
             <thead>
@@ -124,9 +144,16 @@ pub async fn stock_run_table(rows: Vec<StockRunRecord>) -> topcoat::Result<impl 
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="done">(if row.done { "Yes" } else { "No" })</td>
+                        <td data-field="done">
+                            if let Some(href) = &href {
+                                <a href=(href)>(if row.done { "Yes" } else { "No" })</a>
+                            } else {
+                                (if row.done { "Yes" } else { "No" })
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>

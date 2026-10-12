@@ -40,8 +40,10 @@ pub async fn create_tenant_input_detail(record: CreateTenantInputRecord) -> topc
 }
 
 /// `CreateTenantInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>) -> topcoat::Result<impl View> {
+pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="CreateTenantInput">
             <thead>
@@ -51,9 +53,16 @@ pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>) -> to
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="name">(row.name)</td>
+                        <td data-field="name">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.name)</a>
+                            } else {
+                                (row.name)
+                            }
+                        </td>
                         <td data-field="slug">(row.slug)</td>
                     </tr>
                 }
@@ -86,8 +95,10 @@ pub async fn tenant_view_detail(record: TenantViewRecord) -> topcoat::Result<imp
 }
 
 /// `TenantViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn tenant_view_table(rows: Vec<TenantViewRecord>) -> topcoat::Result<impl View> {
+pub async fn tenant_view_table(rows: Vec<TenantViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="TenantView">
             <thead>
@@ -98,9 +109,16 @@ pub async fn tenant_view_table(rows: Vec<TenantViewRecord>) -> topcoat::Result<i
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="name">(row.name)</td>
                         <td data-field="userCount">(row.user_count)</td>
                     </tr>

@@ -68,8 +68,13 @@ pub async fn {{ .Detail }}(record: {{ .Record }}) -> topcoat::Result<impl View> 
 }
 
 /// `{{ .Record }}`s as a table: a column per {{ if eq (len .Columns) (len .Fields) }}field{{ else }}summary field{{ end }} and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's {{ if .LinksTitle }}title{{ else }}first{{ end }} cell; a row past its end links nowhere.
 #[component]
-pub async fn {{ .Table }}(rows: Vec<{{ .Record }}>) -> topcoat::Result<impl View> {
+pub async fn {{ .Table }}(rows: Vec<{{ .Record }}>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+{{- if not .Columns }}
+    let _ = hrefs;
+{{- end }}
     Ok(view! {
         <table class="ss-table" data-type={{ rustString .TypeName }}>
 {{- if .Caption }}
@@ -83,8 +88,14 @@ pub async fn {{ .Table }}(rows: Vec<{{ .Record }}>) -> topcoat::Result<impl View
                 </tr>
             </thead>
             <tbody>
-                for {{ if .Columns }}row{{ else }}_row{{ end }} in rows {
+{{- if .Columns }}
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
+{{- else }}
+                for _row in rows {
+                    <tr>
+{{- end }}
 {{- range .Columns }}
 {{ .Cell }}
 {{- end }}

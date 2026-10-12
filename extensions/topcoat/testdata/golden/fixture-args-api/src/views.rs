@@ -48,8 +48,10 @@ pub async fn order_note_input_detail(record: OrderNoteInputRecord) -> topcoat::R
 }
 
 /// `OrderNoteInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat::Result<impl View> {
+pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderNoteInput">
             <thead>
@@ -58,9 +60,16 @@ pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat:
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="text">(row.text)</td>
+                        <td data-field="text">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.text)</a>
+                            } else {
+                                (row.text)
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -92,8 +101,10 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <thead>
@@ -104,9 +115,16 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="status"><data value=(&row.status)>(order_status_label(&row.status))</data></td>
                         <td data-field="note">(row.note)</td>
                     </tr>
@@ -140,8 +158,10 @@ pub async fn review_view_detail(record: ReviewViewRecord) -> topcoat::Result<imp
 }
 
 /// `ReviewViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn review_view_table(rows: Vec<ReviewViewRecord>) -> topcoat::Result<impl View> {
+pub async fn review_view_table(rows: Vec<ReviewViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="ReviewView">
             <thead>
@@ -152,9 +172,16 @@ pub async fn review_view_table(rows: Vec<ReviewViewRecord>) -> topcoat::Result<i
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="rating">(row.rating)</td>
                         <td data-field="title">(row.title)</td>
                     </tr>
@@ -184,8 +211,10 @@ pub async fn write_review_input_detail(record: WriteReviewInputRecord) -> topcoa
 }
 
 /// `WriteReviewInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn write_review_input_table(rows: Vec<WriteReviewInputRecord>) -> topcoat::Result<impl View> {
+pub async fn write_review_input_table(rows: Vec<WriteReviewInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="WriteReviewInput">
             <thead>
@@ -195,9 +224,16 @@ pub async fn write_review_input_table(rows: Vec<WriteReviewInputRecord>) -> topc
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="rating">(row.rating)</td>
+                        <td data-field="rating">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.rating)</a>
+                            } else {
+                                (row.rating)
+                            }
+                        </td>
                         <td data-field="title">(row.title)</td>
                     </tr>
                 }

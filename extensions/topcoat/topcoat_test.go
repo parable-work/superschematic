@@ -148,8 +148,8 @@ func TestTheCrateIsWrittenOnlyBesideARustServer(t *testing.T) {
 	}
 
 	unknown := rustOutputs()
-	unknown["topcoat"] = map[string]any{"enabled": true, "pages": true}
-	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "pages") {
+	unknown["topcoat"] = map[string]any{"enabled": true, "layouts": true}
+	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "layouts") {
 		t.Errorf("an undeclared key in outputs.topcoat: %v", err)
 	}
 }
@@ -210,13 +210,13 @@ func skipped(result *registry.Result, reason string) bool {
 // whose routes have a webhook's signature check, service clauses and
 // traffic controls, fixture-views-api, whose result's fields are of every
 // kind a display component renders, fixture-user-routes-api, whose users
-// are the core user model's (D50), and fixture-args-api, whose arguments
-// make argument forms, with testdata/golden/<service>; -update rewrites
-// them.
+// are the core user model's (D50), fixture-args-api, whose arguments make
+// argument forms, and fixture-pages-api, whose resources make pages, with
+// testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService} {
 		root := testpaths.TempDir(t)
-		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
+		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
 		}
 		got := treeOf(t, topcoat.Dir(root, service))
@@ -378,8 +378,9 @@ func TestViewsRenderRecords(t *testing.T) {
 
 // TestDisplayShapesTheComponents builds fixture-views-api: OrderView's
 // @display gives its table the caption Orders and its summary fields as
-// columns, in order, its title field heading each row and naming the
-// detail with the noun as fallback; a nested Address shows its title in a
+// columns, in order, its title field heading each row, a row's link
+// (hrefs) on it, and naming the detail with the noun as fallback; a nested
+// Address shows its title in a
 // cell, and Money, which declares no title, its detail; Comment, which
 // nests itself, boxes its views.
 func TestDisplayShapesTheComponents(t *testing.T) {
@@ -408,7 +409,7 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<caption>"Orders"</caption>`,
-		`<th scope="row" data-field="reference">(row.reference)</th>`,
+		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(row.reference)</a>\n                            } else {\n                                (row.reference)\n                            }\n                        </th>",
 		`let label = label_of(Some(record.reference.as_str()), Some("Order"));`,
 		`<td data-field="shipTo">(row.ship_to.recipient)</td>`,
 		`<td data-field="price">money_detail(record: row.price)</td>`,
@@ -554,11 +555,23 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 
 // crateOptions are what a test of the Topcoat crate adds to its build: the
 // crate's features, which clippy and cargo test turn on, lines of the
-// manifest's [dev-dependencies], and files of tests/ beside app.rs.
+// manifest's [dev-dependencies], files of tests/ beside app.rs, and the
+// config's outputs when they are not outputsOf the service's.
 type crateOptions struct {
 	features        []string
 	devDependencies string
 	files           map[string]string
+	outputs         map[string]any
+}
+
+// outputsOf are a fixture's outputs in the tests that build every fixture
+// alike: rustOutputs, with the pages on for fixture-pages-api, the one
+// fixture whose crate has them.
+func outputsOf(service string) map[string]any {
+	if service == pagesService {
+		return pagesOutputs()
+	}
+	return rustOutputs()
 }
 
 // cargoTestCrateWith is cargoTestCrate with options.
@@ -572,7 +585,11 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 		t.Skip("cargo not available")
 	}
 	root := testpaths.TempDir(t)
-	if _, err := buildService(t, service, root, rustOutputs()); err != nil {
+	outputs := options.outputs
+	if outputs == nil {
+		outputs = outputsOf(service)
+	}
+	if _, err := buildService(t, service, root, outputs); err != nil {
 		t.Fatalf("build %s: %v", service, err)
 	}
 	dir := topcoat.Dir(root, service)

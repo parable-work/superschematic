@@ -55,6 +55,9 @@ type crate struct {
 	// label functions of the enums they show.
 	Views      []view
 	EnumLabels []enumLabel
+	// Pages are the pages of each resource the operations describe, nil
+	// unless outputs.topcoat.pages turns them on (pages.go).
+	Pages *pagesModel
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -240,6 +243,12 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			return nil, err
 		}
 	}
+	if cfg.WritesPages() {
+		title := humanize(strings.ReplaceAll(service, "-", " "))
+		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, c.Logf); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
@@ -404,19 +413,26 @@ func (c *crate) write(dir string) error {
 	if len(c.Views) > 0 {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
-	tmpl, err := template.New("topcoat").Funcs(template.FuncMap{
+	if c.Pages != nil {
+		files = append(files, struct{ template, path string }{"pages.tmpl", filepath.Join("src", "pages.rs")})
+	}
+	funcs := template.FuncMap{
 		"rustString":   rustString,
 		"escapeBraces": escapeBraces,
 		"join":         strings.Join,
 		"doc":          doc,
 		"doc4":         doc4,
-	}).ParseFS(templates, "templates/*.tmpl")
+	}
+	for name, fn := range pageFuncs {
+		funcs[name] = fn
+	}
+	tmpl, err := template.New("topcoat").Funcs(funcs).ParseFS(templates, "templates/*.tmpl")
 	if err != nil {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

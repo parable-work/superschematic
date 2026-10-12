@@ -109,8 +109,10 @@ pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl Vi
 }
 
 /// `GridViewRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn grid_view_table(rows: Vec<GridViewRecord>) -> topcoat::Result<impl View> {
+pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="GridView">
             <thead>
@@ -123,9 +125,16 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>) -> topcoat::Result<impl 
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.id)</a>
+                            } else {
+                                (row.id)
+                            }
+                        </td>
                         <td data-field="labels">
                             <ul class="ss-list">
                                 for item in row.labels {
@@ -204,8 +213,10 @@ pub async fn point_detail(record: PointRecord) -> topcoat::Result<impl View> {
 }
 
 /// `PointRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn point_table(rows: Vec<PointRecord>) -> topcoat::Result<impl View> {
+pub async fn point_table(rows: Vec<PointRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Point">
             <thead>
@@ -215,9 +226,16 @@ pub async fn point_table(rows: Vec<PointRecord>) -> topcoat::Result<impl View> {
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="x">(row.x)</td>
+                        <td data-field="x">
+                            if let Some(href) = &href {
+                                <a href=(href)>(row.x)</a>
+                            } else {
+                                (row.x)
+                            }
+                        </td>
                         <td data-field="y">(row.y)</td>
                     </tr>
                 }
@@ -301,8 +319,10 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Res
 }
 
 /// `SaveGridInputRecord`s as a table: a column per field and a row per record.
+/// `hrefs` links each row to a page: the i-th, unless it is empty, row
+/// i's first cell; a row past its end links nowhere.
 #[component]
-pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>) -> topcoat::Result<impl View> {
+pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="SaveGridInput">
             <thead>
@@ -314,20 +334,37 @@ pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>) -> topcoat::R
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
                         <td data-field="labels">
-                            <ul class="ss-list">
-                                for item in row.labels {
-                                    <li>
-                                        <ul class="ss-list">
-                                            for item_2 in item {
-                                                <li>(item_2)</li>
-                                            }
-                                        </ul>
-                                    </li>
-                                }
-                            </ul>
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    <ul class="ss-list">
+                                        for item in row.labels {
+                                            <li>
+                                                <ul class="ss-list">
+                                                    for item_2 in item {
+                                                        <li>(item_2)</li>
+                                                    }
+                                                </ul>
+                                            </li>
+                                        }
+                                    </ul>
+                                </a>
+                            } else {
+                                <ul class="ss-list">
+                                    for item in row.labels {
+                                        <li>
+                                            <ul class="ss-list">
+                                                for item_2 in item {
+                                                    <li>(item_2)</li>
+                                                }
+                                            </ul>
+                                        </li>
+                                    }
+                                </ul>
+                            }
                         </td>
                         <td data-field="shades">
                             <ul class="ss-list">
