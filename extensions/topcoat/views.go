@@ -40,6 +40,10 @@ type view struct {
 	// LinksTitle reports whether a row's link is on its title's cell,
 	// which the columns hold; else it is on its first.
 	LinksTitle bool
+	// UntitledLet binds `untitled`, the text of a linked row whose linked
+	// cell has none: the type's noun and the row's id. It is empty when
+	// that cell always has text.
+	UntitledLet string
 }
 
 // viewField is one field of a record as its components render it.
@@ -50,8 +54,11 @@ type viewField struct {
 	// of the table: view! markup, indented to its place.
 	Entry string
 	Cell  string
-	// value is the markup of the field's value in a cell.
+	// value is the markup of the field's value in a cell, and blank the
+	// Rust of whether that cell has no text, from `row`; empty when it
+	// always has some.
 	value []string
+	blank string
 	// choices reports whether the field's value reads the app's choices.
 	choices bool
 }
@@ -198,6 +205,7 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		}
 		vf.Entry = indentLines(detailIndent, fieldEntry(vf, shape.render("record."+rf.Name, rf.JSONName, rf.Optional, false)))
 		vf.value = shape.render("row."+rf.Name, rf.JSONName, rf.Optional, true)
+		vf.blank = shape.blank("row."+rf.Name, rf.Optional)
 		v.DetailChoices = v.DetailChoices || vf.choices
 		v.Fields = append(v.Fields, vf)
 		byJSON[rf.JSONName] = vf
@@ -246,6 +254,11 @@ func (b *viewBuilder) view(rec record) (view, error) {
 			linked, v.LinksTitle = i, true
 		}
 	}
+	// A linked cell without text links the type's noun and the row's id,
+	// so every row can be reached.
+	if len(v.Columns) > 0 && v.Columns[linked].blank != "" {
+		v.UntitledLet = "let untitled = (href.is_some() && " + v.Columns[linked].blank + ").then" + untitledText(typeDef, rec, v.Columns[linked].JSONName) + ";"
+	}
 	for i, column := range v.Columns {
 		v.TableChoices = v.TableChoices || column.choices
 		// The title's cell heads its row.
@@ -255,7 +268,7 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		}
 		value := column.value
 		if i == linked {
-			value = linkLines(value)
+			value = linkLines(value, v.UntitledLet != "")
 		}
 		v.Columns[i].Cell = indentLines(cellIndent, wrapLines(open+rustString(column.JSONName)+">", close, value))
 	}
@@ -263,13 +276,38 @@ func (b *viewBuilder) view(rec record) (view, error) {
 }
 
 // linkLines puts a cell's value in a link to its row's page, `href`, when
-// the row has one.
-func linkLines(value []string) []string {
+// the row has one; with untitled, the link's text is `untitled` when the
+// row binds it, the cell having none.
+func linkLines(value []string, untitled bool) []string {
+	text := value
+	if untitled {
+		text = []string{"if let Some(untitled) = untitled {", "    (untitled)", "} else {"}
+		text = append(text, indentEach(4, value)...)
+		text = append(text, "}")
+	}
 	lines := []string{"if let Some(href) = &href {"}
-	lines = append(lines, indentEach(4, wrapLines("<a href=(href)>", "</a>", value))...)
+	lines = append(lines, indentEach(4, wrapLines("<a href=(href)>", "</a>", text))...)
 	lines = append(lines, "} else {")
 	lines = append(lines, indentEach(4, value)...)
 	return append(lines, "}")
+}
+
+// untitledText is the Rust of `then`'s argument that names a linked row
+// whose cell, linked's, has no text: the type's @display noun, else its
+// name in words, and the row's `id` when the record holds one as text or a
+// whole number and it is not the linked cell (`Widget 7`), as the pages'
+// trail names an item without a title.
+func untitledText(typeDef *ir.TypeDef, rec record, linked string) string {
+	noun := humanize(typeDef.Name)
+	if typeDef.Display != nil && typeDef.Display.Noun != "" {
+		noun = typeDef.Display.Noun
+	}
+	for _, field := range rec.Fields {
+		if field.JSONName == "id" && linked != "id" && (field.Type == "String" || field.Type == "i64") {
+			return "(|| format!(" + rustString(noun+" {}") + ", row." + field.Name + "))"
+		}
+	}
+	return "_some(" + rustString(noun) + ")"
 }
 
 // componentName is the snake-case stem of a type's components: OrderView
@@ -489,6 +527,42 @@ func (s valueShape) markup(expr, path string, cell bool, depth int) []string {
 		return append(lines, "        </div>", "    }", "</dl>")
 	}
 	return []string{"(" + expr + ")"}
+}
+
+// blank is the Rust of whether expr, a value of the shape (in an Option
+// when optional), renders no text in a table's cell: an absent value,
+// blank text or time, an empty list or map, or a record whose title is
+// blank; empty for a value that always renders text, a number, a boolean,
+// an enum, JSON or a record's detail.
+func (s valueShape) blank(expr string, optional bool) string {
+	if !optional {
+		return s.blankOf(expr)
+	}
+	inner := s.blankOf("value")
+	if inner == "" {
+		return expr + ".is_none()"
+	}
+	return expr + ".as_ref().is_none_or(|value| " + inner + ")"
+}
+
+// blankOf is blank of a value that is there, expr, or a reference to it.
+func (s valueShape) blankOf(expr string) string {
+	switch s.kind {
+	case textValue, timeValue:
+		return expr + ".trim().is_empty()"
+	case listValue, mapValue:
+		return expr + ".is_empty()"
+	case objectValue:
+		if s.object.title == "" {
+			return ""
+		}
+		title := expr + "." + s.object.title
+		if s.object.titleOptional {
+			return title + ".as_deref().is_none_or(|title| title.trim().is_empty())"
+		}
+		return title + ".trim().is_empty()"
+	}
+	return ""
 }
 
 // binding is a loop binding's name at depth: item, then item_2.

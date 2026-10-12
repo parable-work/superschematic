@@ -215,7 +215,8 @@ pub async fn address_detail(record: AddressRecord, #[default] choices: Choices) 
 /// `AddressRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's title cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn address_table(
     rows: Vec<AddressRecord>,
@@ -233,10 +234,17 @@ pub async fn address_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.recipient.trim().is_empty()).then_some("Address");
                     <tr>
                         <th scope="row" data-field="recipient">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "recipient", &row.recipient))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "recipient", &row.recipient))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "recipient", &row.recipient))
                             }
@@ -273,7 +281,8 @@ pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) 
 /// `CommentRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn comment_table(
     rows: Vec<CommentRecord>,
@@ -291,10 +300,17 @@ pub async fn comment_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.text.trim().is_empty()).then_some("Comment");
                     <tr>
                         <td data-field="text">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "text", &row.text))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "text", &row.text))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "text", &row.text))
                             }
@@ -392,7 +408,8 @@ pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choi
 /// `OrderLineRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_line_table(
     rows: Vec<OrderLineRecord>,
@@ -411,10 +428,17 @@ pub async fn order_line_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.sku.trim().is_empty()).then_some("Order line");
                     <tr>
                         <td data-field="sku">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "sku", &row.sku))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "sku", &row.sku))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "sku", &row.sku))
                             }
@@ -540,7 +564,8 @@ pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choi
 /// `OrderViewRecord`s as a table: a column per summary field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's title cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_view_table(
     rows: Vec<OrderViewRecord>,
@@ -561,10 +586,17 @@ pub async fn order_view_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.reference.trim().is_empty()).then(|| format!("Order {}", row.id));
                     <tr>
                         <th scope="row" data-field="reference">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "reference", &row.reference))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "reference", &row.reference))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "reference", &row.reference))
                             }

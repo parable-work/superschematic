@@ -402,6 +402,11 @@ The acme shop builds its configs with the core binary, which refuses
 
 <Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_prefix" />
 
+A path serves the one service the table lists. With more,
+`pages_prefix` is a table of each service whose pages are on and its
+prefix, `{ "shop-orders" = "/console" }`, since two consoles one app links
+cannot share a path or nest one inside the other.
+
 The pages need the forms, the records and the display components, and a
 prefix under `/api` or `/_superschematic`, which the crate serves itself,
 is refused.
@@ -411,11 +416,13 @@ results. A GET of a collection that returns a list is its list, and a GET
 of an item that returns one record its item's page; either makes the
 collection a resource. A POST to the collection is its new page, a PUT or
 PATCH of an item with an input its edit page, a DELETE of an item its
-delete, and any other method on a word after an item an action, a form on
-the item's page. A collection under an item, `products/{productId}/reviews`,
+delete, and a POST, PUT or PATCH of a word after an item, one that names
+no collection, an action, a form on the item's page. A collection under an item, `products/{productId}/reviews`,
 is nested: its pages live under the item's, and its list and its new link
 are a section of the item's page when the parent has one. Any other
-operation gets no page, and the build log says why. Each resource is
+operation gets no page, and the build log says why: a PUT or DELETE of a
+whole collection among them, which no page does, and a DELETE of a word
+after an item, which an action's form would do without asking first. Each resource is
 named by its type's `@display` (`noun`, `plural`, `createLabel`,
 `titleField`) where it declares them, else by its path's words.
 
@@ -438,7 +445,10 @@ it too, the edit form filled from the item and the delete confirmed on a
 page of its own before its POST.
 
 Every page calls its operation in-process, so the route's caller rule and
-argument checks hold, and takes its input through the [forms](#forms). A
+argument checks hold, and takes its input through the [forms](#forms).
+The route's rate limit, body limit and timeout do not: an in-process call
+applies none of them, so the console is limited as the app's own pages
+are. A
 route's values come from the page's path, never from the form's hidden
 inputs, and one its argument does not decode is no page (404). A post
 that succeeds redirects (303): to the item after a create, an edit or an
@@ -452,8 +462,11 @@ link to the app's sign-in page that comes back to the page.
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
 `aria-current`, and a breadcrumb trail from the index to the page, an
-item by its title where its type declares one. List rows link to their
-items through the `hrefs` prop each `<type>_table` takes. The markup has
+item by its title where its type declares one. A list whose path extends
+another's, `orders/archived` beside `orders/{id}`, is its own in both,
+never an order named archived. List rows link to their items through the
+`hrefs` prop each `<type>_table` takes, a row without a title by its noun
+and id. The markup has
 the display components' `ss-` classes and no styles.
 
 The app's `.discover()` registers the pages, as it registers the

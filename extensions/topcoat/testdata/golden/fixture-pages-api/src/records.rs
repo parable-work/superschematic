@@ -12,6 +12,131 @@ use crate::api::types;
 use crate::wire;
 use topcoat::runtime::record;
 
+/// The record of `types::Comment`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentRecord {
+    pub id: String,
+    pub text: String,
+}
+
+impl CommentRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            text: wire::string(&json["text"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        json.insert("text".to_owned(), wire::put_string(&self.text));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Comment> for CommentRecord {
+    fn from(value: &types::Comment) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Comment> for CommentRecord {
+    fn from(value: types::Comment) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::Document`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentRecord {
+    pub id: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+}
+
+impl DocumentRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            title: wire::optional(&json["title"], wire::string),
+            body: wire::optional(&json["body"], wire::string),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        if let Some(value) = &self.title {
+            json.insert("title".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.body {
+            json.insert("body".to_owned(), wire::put_string(value));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Document> for DocumentRecord {
+    fn from(value: &types::Document) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Document> for DocumentRecord {
+    fn from(value: types::Document) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::DocumentInput`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentInputRecord {
+    pub title: Option<String>,
+    pub body: Option<String>,
+}
+
+impl DocumentInputRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            title: wire::optional(&json["title"], wire::string),
+            body: wire::optional(&json["body"], wire::string),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        if let Some(value) = &self.title {
+            json.insert("title".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.body {
+            json.insert("body".to_owned(), wire::put_string(value));
+        }
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::DocumentInput> for DocumentInputRecord {
+    fn from(value: &types::DocumentInput) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::DocumentInput> for DocumentInputRecord {
+    fn from(value: types::DocumentInput) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::Member`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

@@ -102,13 +102,30 @@ services = ["shop-orders"]
 
 A listed service gets the crate with every default when its server is
 Rust. `outputs.topcoat` in its config, when present, wins. The table's
-`pages_prefix` also turns on the listed services' pages, under it:
+`pages_prefix` also turns on the listed service's pages, under it:
 
 ```toml
 [extension.topcoat]
 services = ["shop-orders"]
 pages_prefix = "/console"
 ```
+
+A path serves one listed service. With more than one, `pages_prefix` is a
+table of the services whose pages are on, each with its own prefix, and a
+service it does not name has none:
+
+```toml
+[extension.topcoat]
+services = ["shop-orders", "shop-catalog"]
+pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/catalog" }
+```
+
+An app that links two crates registers each one's pages, layout and
+index at its prefix, so the table refuses one path for several services,
+which would register a page twice, as Topcoat's router refuses, and a
+prefix that is, or is under, another's, which would put one console's
+layout around the other's pages. It refuses a service `services` does
+not list too.
 
 ## The app
 
@@ -632,7 +649,7 @@ API sends it, its compact text, which a record holds and `to_string()`
 gives.
 
 ```rust
-let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id.to_string(), product.name)));
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id().to_string(), product.name)));
 view! { order_view_detail(record: OrderViewRecord::from(order), choices: choices) }
 ```
 
@@ -650,8 +667,12 @@ Topcoat requires of a recursive component.
 A table's rows link to pages through `hrefs`, a prop every
 `<type>_table` takes, empty by default: its i-th entry, unless it is
 empty, links row i, on its title's cell, or on its first cell when the
-columns hold no title. The [pages](#pages) fill it; a page of the app's
-own can too:
+columns hold no title. A linked cell without text, an absent or blank
+title say, links the type's noun in its place (its `@display` noun, else
+its name in words), with the row's `id` when the record holds one as
+text or a whole number, `Document intro`, as the pages' trail names an
+item without a title, so every row can be reached. The [pages](#pages)
+fill `hrefs`; a page of the app's own can too:
 
 ```rust
 let hrefs: Vec<String> = rows.iter().map(|row| format!("/orders/{}", row.id)).collect();
@@ -681,14 +702,17 @@ in-process call, and not `@requireService`), by REST path and result:
 | `POST C` with an input or arguments | the new page, `<prefix>/C/new`, and its POST |
 | `PUT` or `PATCH C/{p}` with an input | the edit page, `<prefix>/C/{p}/edit`, and its POST |
 | `DELETE C/{p}` | a link to `<prefix>/C/{p}/delete`, which confirms, and its POST |
-| any other method on `C/{p}/<verb>` | the action's form on the item's page, posting to `<prefix>/C/{p}/<verb>` |
+| `POST`, `PUT` or `PATCH C/{p}/<verb>`, where `C/{p}/<verb>` names no collection | the action's form on the item's page, posting to `<prefix>/C/{p}/<verb>` |
 | `C/{p}/D` | D nested under C's item: its pages under `<prefix>/C/{p}/D`, and its list and new link a section of C's item page when C has one |
 
 A list or a detail makes C a resource; the edit page, the delete and the
 actions need the detail, whose page holds them. Every other operation is
 left out, and the build log says why: `no page for viewer.me: a GET of
 auth/me, a path that ends in a word, is a list only when it returns a list
-of records`.
+of records`. Among them are a `PUT`, `PATCH` or `DELETE` of a
+collection's own path, `widgets` or `widgets/{id}/parts`, which would
+change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action's
+form posts from the item's page in one click and a delete asks first.
 
 A resource is named by its type's `@display` (`noun`, `plural`,
 `createLabel`, `titleField`), else by its path's last word: `projects`
@@ -699,7 +723,11 @@ the detail's path parameter names one of its fields (`{id}` and `id`).
 ### What each page does
 
 Every page calls its operation through `operations`, so the route's
-rules hold, and takes its input through the [forms](#forms):
+rules hold, and takes its input through the [forms](#forms). The route's
+traffic controls are not among those rules: an in-process call applies
+no `@rateLimit`, `@bodyLimit` or `@timeout` ([route
+controls](#route-controls)), so the pages are limited only as the app
+limits its own routes.
 
 - **A list** checks the guard, renders the filter form (a GET, read from
   the query), and the result as `<type>_table` with each row linked, and a
@@ -735,7 +763,11 @@ after `<nav class="ss-nav">`, a link to each resource no item holds whose
 list the caller may use (`can_<operation>`), the current one
 `aria-current`, and `<nav class="ss-trail">`, the trail from the index to
 the page: each list, each item by its title (its type's `titleField`),
-else by its noun and id, then the page. The item's detail, which the
+else by its noun and id, then the page. Where a collection's path extends
+another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
+pages' collection, current in the nav and the trail, never an item named
+`archived`; under an item, a collection is read before the item's
+actions. The item's detail, which the
 item's page calls too, is called once per request (`#[memoize]`). The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
@@ -746,7 +778,7 @@ The pages, the layout and the index are `#[page]`s and a `#[layout]`,
 which the app's `.discover()` registers, as it registers the procedures:
 
 ```rust
-let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id(), product.name)));
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id().to_string(), product.name)));
 Router::builder()
     .discover()
     .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in").choices(choices))
@@ -761,6 +793,13 @@ page for an action; without it a 401 has no link), and the
 [choices](#choices-the-app-supplies) every form and display component of
 the pages takes, by each field's path: `lines.productId` makes each
 line's product a select on the new-order page and its name in an order's
-lines. The page functions and their path parameters are public, so an
+lines. They are one set for every resource, so a path names its field in
+each form and component that holds one; choices per resource or per page
+are open. The page functions and their path parameters are public, so an
 app's own page can link to one with
 `href!(pages::projects_item_page, pages::ProjectId(id))`.
+
+An app that mounts two services' pages gives each a prefix of its own,
+as the [table](#the-config) requires: each crate registers its index and
+its layout at its prefix, and Topcoat's router refuses a page registered
+twice.

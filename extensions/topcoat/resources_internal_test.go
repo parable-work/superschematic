@@ -83,10 +83,12 @@ func one(name string) ir.TypeRef  { return ir.TypeRef{Name: name} }
 // TestTheOperationsDescribeResources classifies an operation of each shape
 // a page serves, and of each it does not: a list and a detail make a
 // collection a resource; POST on it is its new page; PATCH, DELETE and a
-// verb after an item are its edit page, its delete button and an action,
-// each needing the detail; a collection under an item is nested, under a
-// collection without pages of its own when nothing lists or reads that
-// one; and every other operation is left out with its reason.
+// POST, PUT or PATCH of a verb after an item are its edit page, its delete
+// button and an action, each needing the detail; a collection under an
+// item is nested, under a collection without pages of its own when nothing
+// lists or reads that one; and every other operation is left out with its
+// reason: a PUT or DELETE of a collection's path, nested or not, among
+// them, and a DELETE of a verb after an item, which no page asks first.
 func TestTheOperationsDescribeResources(t *testing.T) {
 	s := newShapes()
 	s.add("listThings", opShape{method: "GET", path: "things", result: list("Thing"), extra: "q", query: true, argForm: true})
@@ -97,12 +99,18 @@ func TestTheOperationsDescribeResources(t *testing.T) {
 	s.add("deleteThing", opShape{method: "DELETE", path: "things/{id}", result: one("Thing"), argForm: true})
 	s.add("archiveThing", opShape{method: "POST", path: "things/{id}/archive", result: one("Thing"), extra: "reason", argForm: true})
 	s.add("archiveAgain", opShape{method: "PUT", path: "things/{id}/archive", result: one("Thing"), argForm: true})
+	s.add("labelThing", opShape{method: "PUT", path: "things/{id}/label", result: one("Thing"), extra: "label", argForm: true})
+	s.add("scrapThing", opShape{method: "DELETE", path: "things/{id}/scrap", result: one("Thing"), argForm: true})
+	s.add("replaceThings", opShape{method: "PUT", path: "things", result: list("Thing"), extra: "names", argForm: true})
 	s.add("shipThing", opShape{method: "POST", path: "things/{id}/ship", result: one("Thing"), extra: "carrier"})
 	s.add("editThing", opShape{method: "POST", path: "things/{id}/edit", result: one("Thing"), argForm: true})
 	s.add("pokeThing", opShape{method: "POST", path: "things/{id}", result: one("Thing"), argForm: true})
 	s.add("listParts", opShape{method: "GET", path: "things/{thingId}/parts", result: list("Part")})
 	s.add("addPart", opShape{method: "POST", path: "things/{thingId}/parts", result: one("Part"), input: "PartInput", argForm: true})
+	s.add("replaceParts", opShape{method: "PUT", path: "things/{thingId}/parts", result: list("Part"), extra: "names", argForm: true})
+	s.add("clearParts", opShape{method: "DELETE", path: "things/{thingId}/parts", result: list("Part"), argForm: true})
 	s.add("listBooks", opShape{method: "GET", path: "libraries/{libraryId}/books", result: list("Book")})
+	s.add("foundLibrary", opShape{method: "POST", path: "libraries", result: one("Thing"), extra: "name", argForm: true})
 	s.add("listGadgets", opShape{method: "GET", path: "gadgets", result: list("Gadget")})
 	s.add("tuneGadget", opShape{method: "PATCH", path: "gadgets/{id}", result: one("Gadget"), input: "GadgetPatch", argForm: true})
 	s.add("buildGadget", opShape{method: "POST", path: "gadgets", result: one("Gadget")})
@@ -133,8 +141,12 @@ func TestTheOperationsDescribeResources(t *testing.T) {
 	if things.list.d.endpoint.Name != "listThings" || things.update.d.endpoint.Name != "updateThing" || things.create.d.endpoint.Name != "createThing" {
 		t.Errorf("things' list, update and create are %s, %s and %s", things.list.name(), things.update.name(), things.create.name())
 	}
-	if len(things.actions) != 1 || things.actions[0].verb != "archive" || things.actions[0].d.endpoint.Name != "archiveThing" {
-		t.Errorf("things' actions are %+v, want archive alone", things.actions)
+	var verbs []string
+	for _, action := range things.actions {
+		verbs = append(verbs, action.verb+":"+action.d.endpoint.Name)
+	}
+	if got := strings.Join(verbs, " "); got != "archive:archiveThing label:labelThing" {
+		t.Errorf("things' actions are %s, want archive and label", got)
 	}
 	if things.param != "thing_id" {
 		t.Errorf("things' item parameter is %s, want thing_id", things.param)
@@ -156,19 +168,24 @@ func TestTheOperationsDescribeResources(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"thing.replaceThing": "its resource's edit page updates it through thing.updateThing",
-		"thing.archiveAgain": "the action archive of its resource is thing.archiveThing",
-		"thing.shipThing":    "its arguments have no form",
-		"thing.editThing":    "its word, edit, names the item's edit page",
-		"thing.pokeThing":    "a POST of an item, with no word after it, is no action",
-		"thing.tuneGadget":   "its resource, gadgets, has no detail page to hold it",
-		"thing.buildGadget":  "it takes nothing a form could fill",
-		"thing.me":           "a GET of auth/me, a path that ends in a word, is a list only when it returns a list of records",
-		"thing.summarize":    "a GET of things/{id}/summary, a path that ends in a word, is a list only when it returns a list of records",
-		"thing.count":        "a GET of counts/{id}, a path that ends in a parameter, is a detail only when it returns one record",
-		"thing.orderWidget":  "no list or detail makes widgets a resource, nor POST widgets an action of one",
-		"thing.reindex":      "a browser holds no service credential (@requireService)",
-		"thing.readFile":     "its path segment {name}.txt is not a word or a parameter alone",
+		"thing.replaceThing":  "its resource's edit page updates it through thing.updateThing",
+		"thing.archiveAgain":  "the action archive of its resource is thing.archiveThing",
+		"thing.scrapThing":    "a DELETE of things/{id}/scrap is no action: an action's form posts from the item's page, without the confirmation a delete asks",
+		"thing.replaceThings": "a PUT of things, a collection, changes all of it, which no page does",
+		"thing.replaceParts":  "a PUT of things/{thingId}/parts, a collection, changes all of it, which no page does",
+		"thing.clearParts":    "a DELETE of things/{thingId}/parts, a collection, changes all of it, which no page does",
+		"thing.foundLibrary":  "no list or detail makes libraries a resource",
+		"thing.shipThing":     "its arguments have no form",
+		"thing.editThing":     "its word, edit, names the item's edit page",
+		"thing.pokeThing":     "a POST of an item, with no word after it, is no action",
+		"thing.tuneGadget":    "its resource, gadgets, has no detail page to hold it",
+		"thing.buildGadget":   "it takes nothing a form could fill",
+		"thing.me":            "a GET of auth/me, a path that ends in a word, is a list only when it returns a list of records",
+		"thing.summarize":     "a GET of things/{id}/summary, a path that ends in a word, is a list only when it returns a list of records",
+		"thing.count":         "a GET of counts/{id}, a path that ends in a parameter, is a detail only when it returns one record",
+		"thing.orderWidget":   "no list or detail makes widgets a resource, nor POST widgets an action of one",
+		"thing.reindex":       "a browser holds no service credential (@requireService)",
+		"thing.readFile":      "its path segment {name}.txt is not a word or a parameter alone",
 	}
 	got := map[string]string{}
 	for _, left := range out {

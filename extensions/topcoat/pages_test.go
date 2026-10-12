@@ -35,8 +35,13 @@ func pagesOutputs() map[string]any {
 // of the choices, the edit form filled from the item and a conflict (409)
 // the form's message; a nested resource's pages live under its parent's
 // item, and one under a collection without pages has no place in the nav;
-// and a refused caller keeps the route's status: 401 with a sign-in link
-// that comes back, 403 and 404, a route's value that does not decode 404.
+// a refused caller keeps the route's status: 401 with a sign-in link that
+// comes back, 403 and 404, a route's value that does not decode 404; an
+// untitled document's row links its noun and id; the drafts' list at
+// documents/drafts is its own in the nav and the trail, never a document;
+// a document's comments are a collection under it, which no PUT or DELETE
+// of theirs, nor the DELETE of its cover, turns into a form; and a
+// document starts from an optional input that its edit page requires.
 func TestPagesServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, pagesService, pagesAppTest)
 }
@@ -159,7 +164,12 @@ func TestABadPagesConfigIsRefused(t *testing.T) {
 // TestTheNamingFileTurnsPagesOn builds fixture-pages-api, whose config has
 // no outputs.topcoat, under a superschematic.toml whose [extension.topcoat]
 // lists it with a pages_prefix: its crate has the pages under it, as
-// outputs.topcoat.pages would give it. A bad prefix fails assembly.
+// outputs.topcoat.pages would give it. A table of prefixes turns on the
+// pages of the listed services it names, each under its own, and leaves
+// the others' off. A bad prefix fails assembly, and so do one prefix for
+// several services, a service the table does not list, and two prefixes
+// one of which is, or is under, the other: an app that links two crates
+// would register a page twice.
 func TestTheNamingFileTurnsPagesOn(t *testing.T) {
 	names, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-pages-api\"]\npages_prefix = \"/admin\"\n"), "superschematic.toml")
 	if err != nil {
@@ -178,29 +188,73 @@ func TestTheNamingFileTurnsPagesOn(t *testing.T) {
 	if files, _ := readCrate(t, listed, pagesService, outputs); files["pages.rs"] != "" {
 		t.Error("a table without pages_prefix wrote pages")
 	}
-	for _, table := range []string{"pages_prefix = \"/api\"", "pages_prefix = true"} {
+
+	each, err := registry.ParseNaming([]byte(`[extension.topcoat]
+services = ["fixture-pages-api", "fixture-args-api"]
+pages_prefix = { "fixture-pages-api" = "/admin/projects" }
+`), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	if files, _ := readCrate(t, each, pagesService, outputs); !strings.Contains(files["pages.rs"], `pub const PREFIX: &str = "/admin/projects";`) {
+		t.Error("a table of prefixes wrote no pages under the service's")
+	}
+	if files, _ := readCrate(t, each, argsService, outputs); files["lib.rs"] == "" || files["pages.rs"] != "" {
+		t.Errorf("a listed service the prefixes do not name: lib.rs %d bytes, pages.rs %d, want a crate without pages", len(files["lib.rs"]), len(files["pages.rs"]))
+	}
+
+	for table, want := range map[string]string{
+		"pages_prefix = \"/api\"":                                                            "under /api",
+		"pages_prefix = true":                                                                "must be a path or a table",
+		"services = [\"a\", \"b\"]\npages_prefix = \"/console\"":                             `give each service its own: pages_prefix = { "a" = "/console", ... }`,
+		"services = [\"a\"]\npages_prefix = { b = \"/console\" }":                            `names "b", which services does not list`,
+		"services = [\"a\"]\npages_prefix = { a = 1 }":                                       "pages_prefix.a must be a path",
+		"services = [\"a\"]\npages_prefix = { a = \"/console/\" }":                           "pages_prefix.a",
+		"services = [\"a\", \"b\"]\npages_prefix = { a = \"/console\", b = \"/console\" }":   "overlap",
+		"services = [\"a\", \"b\"]\npages_prefix = { a = \"/console\", b = \"/console/b\" }": "overlap",
+	} {
 		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table+"\n"), "superschematic.toml")
 		if err != nil {
 			t.Fatalf("ParseNaming: %v", err)
 		}
-		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil {
-			t.Errorf("[extension.topcoat] %s: assembled, want it refused", table)
+		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("[extension.topcoat] %s: %v, want it refused with %q", table, err, want)
 		}
+	}
+	// Two services, each under its own prefix, a sibling of the other's.
+	names, err = registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"a\", \"b\"]\npages_prefix = { a = \"/console/a\", b = \"/console/b\" }\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	if _, err := registry.Assemble(names, topcoat.Extension{}); err != nil {
+		t.Errorf("two services' prefixes side by side: %v", err)
 	}
 }
 
 // TestATableLinksItsRows builds fixture-views-api, whose crate has no
 // pages: a table's hrefs link each row's title cell, or its first cell for
 // a type whose columns hold no title, and a row without an href, or past
-// their end, links nowhere.
+// their end, links nowhere. A linked cell without text links the type's
+// noun, and the row's id when it holds one, in its place.
 func TestATableLinksItsRows(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), viewsService, rustOutputs())
 	views := files["views.rs"]
+	linked := func(field, rustField string) string {
+		value := "(text_of(&choices, \"" + field + "\", &row." + rustField + "))"
+		return "\n                            if let Some(href) = &href {\n                                <a href=(href)>\n" +
+			"                                    if let Some(untitled) = untitled {\n                                        (untitled)\n" +
+			"                                    } else {\n                                        " + value + "\n                                    }\n" +
+			"                                </a>\n                            } else {\n                                " + value + "\n"
+	}
 	for _, want := range []string{
 		"pub async fn order_view_table(\n    rows: Vec<OrderViewRecord>,\n    #[default] choices: Choices,\n    #[default] hrefs: Vec<String>,\n)",
 		"let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();",
-		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(text_of(&choices, \"reference\", &row.reference))</a>",
-		"<td data-field=\"text\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(text_of(&choices, \"text\", &row.text))</a>",
+		"<th scope=\"row\" data-field=\"reference\">" + linked("reference", "reference"),
+		"<td data-field=\"text\">" + linked("text", "text"),
+		// The title's absence, and blank text, name the row by its noun and
+		// id, or by its noun alone.
+		`let untitled = (href.is_some() && row.reference.trim().is_empty()).then(|| format!("Order {}", row.id));`,
+		`let untitled = (href.is_some() && row.text.trim().is_empty()).then_some("Comment");`,
 	} {
 		if !strings.Contains(views, want) {
 			t.Errorf("views.rs lacks %q", want)
@@ -218,10 +272,11 @@ use async_trait::async_trait;
 use http::request::Parts;
 use schemas_fixture_pages_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
 use schemas_fixture_pages_api_topcoat::api::{
-    types, Implementations, MemberImplementation, ProjectArchiveProjectArgs, ProjectCreateProjectArgs,
-    ProjectDeleteProjectArgs, ProjectGetProjectArgs, ProjectImplementation, ProjectListProjectsArgs,
-    ProjectUpdateProjectArgs, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation, TaskListLabelledTasksArgs, TaskListTasksArgs,
-    ViewerImplementation,
+    types, DocumentClearCommentsArgs, DocumentCreateDocumentArgs, DocumentGetDocumentArgs, DocumentImplementation,
+    DocumentListCommentsArgs, DocumentRemoveCoverArgs, DocumentReplaceCommentsArgs, DocumentReplaceDocumentArgs, Implementations,
+    MemberImplementation, ProjectArchiveProjectArgs, ProjectCreateProjectArgs, ProjectDeleteProjectArgs, ProjectGetProjectArgs,
+    ProjectImplementation, ProjectListProjectsArgs, ProjectUpdateProjectArgs, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation,
+    TaskListLabelledTasksArgs, TaskListTasksArgs, ViewerImplementation,
 };
 use schemas_fixture_pages_api_topcoat::choices::Choices;
 use schemas_fixture_pages_api_topcoat::pages::Settings;
@@ -245,12 +300,18 @@ fn wire(text: &str) -> String {
     serde_json::to_value(uuid(text)).unwrap().as_str().unwrap().to_owned()
 }
 
-// The projects, their tasks and the members, in memory, as one app's
-// requests change them.
+// The projects, their tasks, the documents and the members, in memory, as
+// one app's requests change them, and the documents each read asked for.
 struct Store {
     projects: Mutex<Vec<types::Project>>,
     tasks: Mutex<Vec<(types::IdentityUUID, types::Task)>>,
+    documents: Mutex<Vec<types::Document>>,
+    read: Mutex<Vec<String>>,
     next: Mutex<u32>,
+}
+
+fn document(id: &str, title: Option<&str>) -> types::Document {
+    types::Document { id: id.to_owned(), title: title.map(str::to_owned), body: None }
 }
 
 impl Store {
@@ -286,6 +347,8 @@ impl Store {
                 uuid(APOLLO),
                 types::Task { id: uuid(ROCKET), title: "Build the rocket".to_owned(), done: false },
             )]),
+            documents: Mutex::new(vec![document("intro", None), document("guide", Some("Guide"))]),
+            read: Mutex::new(Vec::new()),
             next: Mutex::new(500),
         })
     }
@@ -391,6 +454,48 @@ impl TaskImplementation for Shop {
 }
 
 #[async_trait]
+impl DocumentImplementation for Shop {
+    async fn list_documents(&self, _ctx: RequestContext) -> Result<Vec<types::Document>, ApiError> {
+        Ok(self.0.documents.lock().unwrap().clone())
+    }
+    async fn list_drafts(&self, _ctx: RequestContext) -> Result<Vec<types::Document>, ApiError> {
+        Ok(vec![document("plan", Some("The plan"))])
+    }
+    async fn get_document(&self, _ctx: RequestContext, args: DocumentGetDocumentArgs) -> Result<types::Document, ApiError> {
+        self.0.read.lock().unwrap().push(args.id.clone());
+        let documents = self.0.documents.lock().unwrap();
+        documents.iter().find(|document| document.id == args.id).cloned().ok_or_else(|| ApiError::not_found("No such document"))
+    }
+    async fn list_comments(&self, _ctx: RequestContext, args: DocumentListCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+        Ok(vec![types::Comment { id: "first".to_owned(), text: format!("On {}", args.document_id) }])
+    }
+    async fn create_document(&self, _ctx: RequestContext, args: DocumentCreateDocumentArgs) -> Result<types::Document, ApiError> {
+        let (title, body) = args.input.map_or((None, None), |input| (input.title, input.body));
+        let mut next = self.0.next.lock().unwrap();
+        *next += 1;
+        let created = types::Document { id: format!("doc-{next}"), title, body };
+        self.0.documents.lock().unwrap().push(created.clone());
+        Ok(created)
+    }
+    async fn replace_document(&self, _ctx: RequestContext, args: DocumentReplaceDocumentArgs) -> Result<types::Document, ApiError> {
+        let mut documents = self.0.documents.lock().unwrap();
+        let document = documents.iter_mut().find(|document| document.id == args.id).ok_or_else(|| ApiError::not_found("No such document"))?;
+        document.title = args.input.title;
+        document.body = args.input.body;
+        Ok(document.clone())
+    }
+    async fn replace_comments(&self, _ctx: RequestContext, _args: DocumentReplaceCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+        Err(ApiError::not_implemented("replace_comments"))
+    }
+    async fn clear_comments(&self, _ctx: RequestContext, _args: DocumentClearCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+        Err(ApiError::not_implemented("clear_comments"))
+    }
+    async fn remove_cover(&self, _ctx: RequestContext, _args: DocumentRemoveCoverArgs) -> Result<types::Document, ApiError> {
+        Err(ApiError::not_implemented("remove_cover"))
+    }
+}
+
+#[async_trait]
 impl MemberImplementation for Shop {
     async fn list_members(&self, _ctx: RequestContext) -> Result<Vec<types::Member>, ApiError> {
         Ok(vec![types::Member { id: uuid(NOWHERE), email: "ada@example.com".to_owned() }])
@@ -415,7 +520,8 @@ impl Authenticator for NoRequests {
 }
 
 // A page's caller, by the x-caller header: a reader of projects, a writer,
-// a reader of members, one with no permission, or none.
+// a reader of members, an editor of documents, one with no permission, or
+// none.
 struct Callers;
 
 #[async_trait]
@@ -426,6 +532,7 @@ impl PageAuthenticator for Callers {
             "reader" => &["projects.read"],
             "writer" => &["projects"],
             "members" => &["members.read"],
+            "editor" => &["documents"],
             "nobody" => &[],
             _ => return Ok(None),
         };
@@ -435,6 +542,7 @@ impl PageAuthenticator for Callers {
 
 fn implementations(store: &Arc<Store>) -> Implementations {
     Implementations {
+        document: Arc::new(Shop(Arc::clone(store))),
         member: Arc::new(Shop(Arc::clone(store))),
         project: Arc::new(Shop(Arc::clone(store))),
         task: Arc::new(Shop(Arc::clone(store))),
@@ -784,6 +892,73 @@ async fn a_nested_resource_has_pages_under_its_parents_item() {
     assert!(labelled.html.contains(r#"<li><span>Labels</span></li><li><span>Label rocket</span></li><li><span aria-current="page">Tasks</span></li>"#), "{}", labelled.html);
     let index = get(&app, "/console", "reader").await;
     assert!(!index.html.contains("/console/labels"), "{}", index.html);
+}
+
+#[tokio::test]
+async fn documents_link_an_untitled_row_and_read_the_most_specific_path() {
+    let store = Store::new();
+    let app = app(&store);
+    // A document without a title links its row by its noun and id.
+    let list = get(&app, "/console/documents", "editor").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert!(list.html.contains(r#"<th scope="row" data-field="title"><a href="/console/documents/intro">Document intro</a></th>"#), "{}", list.html);
+    assert!(list.html.contains(r#"<th scope="row" data-field="title"><a href="/console/documents/guide">Guide</a></th>"#), "{}", list.html);
+    assert!(list.html.contains(r#"<li><a href="/console/documents" aria-current="page">Documents</a></li><li><a href="/console/documents/drafts">Drafts</a></li>"#), "{}", list.html);
+
+    // documents/drafts is the drafts' list, which the nav and the trail
+    // mark, not a document named drafts.
+    let drafts = get(&app, "/console/documents/drafts", "editor").await;
+    assert_eq!(drafts.status, StatusCode::OK, "{}", drafts.html);
+    assert!(drafts.html.contains("<h1>Drafts</h1>") && drafts.html.contains("The plan"), "{}", drafts.html);
+    assert!(drafts.html.contains(r#"<li><a href="/console">Projects console</a></li><li><span aria-current="page">Drafts</span></li>"#), "{}", drafts.html);
+    assert!(drafts.html.contains(r#"<li><a href="/console/documents">Documents</a></li><li><a href="/console/documents/drafts" aria-current="page">Drafts</a></li>"#), "{}", drafts.html);
+    assert!(!store.read.lock().unwrap().iter().any(|id| id == "drafts"), "a document named drafts was read");
+
+    // A document, read with its query argument left out: its edit link and
+    // its comments, and no form for the PUT or the DELETE of its comments,
+    // nor for the DELETE of its cover.
+    let item = get(&app, "/console/documents/intro", "editor").await;
+    assert_eq!(item.status, StatusCode::OK, "{}", item.html);
+    assert!(item.html.contains("<h1>Document</h1>"), "{}", item.html);
+    assert!(item.html.contains(r#"<a class="ss-edit" href="/console/documents/intro/edit">Edit</a>"#), "{}", item.html);
+    assert!(item.html.contains(r#"<section class="ss-section" data-resource="comments"><h2><a href="/console/documents/intro/comments">Comments</a></h2>"#), "{}", item.html);
+    assert!(!item.html.contains("data-action") && !item.html.contains("ss-delete"), "{}", item.html);
+    assert!(item.html.contains(r#"<li><a href="/console/documents">Documents</a></li><li><span aria-current="page">Document intro</span></li>"#), "{}", item.html);
+
+    // The comments are a collection under the document, never its action.
+    let comments = get(&app, "/console/documents/intro/comments", "editor").await;
+    assert_eq!(comments.status, StatusCode::OK, "{}", comments.html);
+    assert!(comments.html.contains("On intro"), "{}", comments.html);
+    assert!(comments.html.contains(r#"<li><a href="/console/documents/intro">Document intro</a></li><li><span aria-current="page">Comments</span></li>"#), "{}", comments.html);
+    for uri in ["/console/documents/intro/comments", "/console/documents/intro/cover"] {
+        let posted = post(&app, uri, "editor", "documentId=intro").await;
+        assert!(posted.status.is_client_error(), "POST {uri}: {} {}", posted.status, posted.html);
+    }
+}
+
+#[tokio::test]
+async fn a_document_starts_from_an_optional_input_and_is_replaced_through_a_required_one() {
+    let store = Store::new();
+    let app = app(&store);
+    let new = get(&app, "/console/documents/new", "editor").await;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.html);
+    assert!(new.html.contains(r#"name="title""#) && new.html.contains(r#"name="body""#), "{}", new.html);
+    let created = post(&app, "/console/documents/new", "editor", "title=&body=").await;
+    assert_eq!(created.status, StatusCode::SEE_OTHER, "{}", created.html);
+    let location = created.location.unwrap();
+    let id = location.strip_prefix("/console/documents/").unwrap_or_default().to_owned();
+    assert!(id.starts_with("doc-"), "{location}");
+    let list = get(&app, "/console/documents", "editor").await;
+    assert!(list.html.contains(&format!(r#"<a href="{location}">Document {id}</a>"#)), "{}", list.html);
+
+    let edit = get(&app, "/console/documents/guide/edit", "editor").await;
+    assert_eq!(edit.status, StatusCode::OK, "{}", edit.html);
+    assert!(edit.html.contains(r#"value="Guide""#), "{}", edit.html);
+    let saved = post(&app, "/console/documents/guide/edit", "editor", "id=guide&title=Handbook&body=All+of+it").await;
+    assert_eq!(saved.status, StatusCode::SEE_OTHER, "{}", saved.html);
+    assert_eq!(saved.location.as_deref(), Some("/console/documents/guide"));
+    let shown = get(&app, "/console/documents/guide", "editor").await;
+    assert!(shown.html.contains("<h1>Handbook</h1>"), "{}", shown.html);
 }
 
 #[tokio::test]

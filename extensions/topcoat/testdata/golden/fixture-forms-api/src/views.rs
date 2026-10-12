@@ -239,7 +239,8 @@ pub async fn account_view_detail(record: AccountViewRecord, #[default] choices: 
 /// `AccountViewRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn account_view_table(
     rows: Vec<AccountViewRecord>,
@@ -261,10 +262,17 @@ pub async fn account_view_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Account view");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }
@@ -327,7 +335,8 @@ pub async fn billing_address_detail(record: BillingAddressRecord, #[default] cho
 /// `BillingAddressRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn billing_address_table(
     rows: Vec<BillingAddressRecord>,
@@ -347,10 +356,17 @@ pub async fn billing_address_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.line1.trim().is_empty()).then_some("Billing address");
                     <tr>
                         <td data-field="line1">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "line1", &row.line1))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "line1", &row.line1))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "line1", &row.line1))
                             }
@@ -619,7 +635,8 @@ pub async fn booking_view_detail(record: BookingViewRecord, #[default] choices: 
 /// `BookingViewRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn booking_view_table(
     rows: Vec<BookingViewRecord>,
@@ -637,10 +654,17 @@ pub async fn booking_view_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Booking view");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }
@@ -685,7 +709,8 @@ pub async fn guest_detail(record: GuestRecord, #[default] choices: Choices) -> t
 /// `GuestRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn guest_table(
     rows: Vec<GuestRecord>,
@@ -704,10 +729,17 @@ pub async fn guest_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Guest");
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "name", &row.name))
                             }
@@ -760,7 +792,8 @@ pub async fn note_input_detail(record: NoteInputRecord, #[default] choices: Choi
 /// `NoteInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn note_input_table(
     rows: Vec<NoteInputRecord>,
@@ -778,10 +811,17 @@ pub async fn note_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.text.trim().is_empty()).then_some("Note input");
                     <tr>
                         <td data-field="text">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "text", &row.text))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "text", &row.text))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "text", &row.text))
                             }
@@ -843,7 +883,8 @@ pub async fn room_request_detail(record: RoomRequestRecord, #[default] choices: 
 /// `RoomRequestRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn room_request_table(
     rows: Vec<RoomRequestRecord>,
@@ -862,10 +903,17 @@ pub async fn room_request_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.room_id.trim().is_empty()).then_some("Room");
                     <tr>
                         <td data-field="roomId">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "roomId", &row.room_id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "roomId", &row.room_id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "roomId", &row.room_id))
                             }
@@ -962,7 +1010,8 @@ pub async fn signup_input_detail(record: SignupInputRecord, #[default] choices: 
 /// `SignupInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn signup_input_table(
     rows: Vec<SignupInputRecord>,
@@ -986,10 +1035,17 @@ pub async fn signup_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.email.trim().is_empty()).then_some("Signup input");
                     <tr>
                         <td data-field="email">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "email", &row.email))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "email", &row.email))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "email", &row.email))
                             }

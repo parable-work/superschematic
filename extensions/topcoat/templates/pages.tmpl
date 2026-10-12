@@ -406,7 +406,10 @@ struct Crumb {
 
 /// The trail from the index to the page at `path`: the index, then each
 /// collection's list, each item by its noun and id and the page under it,
-/// a link where a page shows it; the last is the page itself.
+/// a link where a page shows it; the last is the page itself. Where two
+/// collections' words begin the rest of the path, the one with more words
+/// is its collection (`widgets/archived`, not an item of `widgets`), and a
+/// collection under an item is read before the item's own pages.
 fn trail(path: &str, title: &str) -> Vec<Crumb> {
     let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false{{ if .Pages.Uses "itemTitle" }}, item: None{{ end }} };
     let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
@@ -418,7 +421,9 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
     let mut ids = Vec::new();
 {{- end }}
     let mut at = 0;
-    while let Some(node) = nodes.iter().find(|node| segments[at..].starts_with(node.words)) {
+    while let Some(node) =
+        nodes.iter().filter(|node| segments[at..].starts_with(node.words)).max_by_key(|node| node.words.len())
+    {
         for word in node.words {
             base.push('/');
             base.push_str(word);
@@ -447,6 +452,10 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         let Some(&page) = segments.get(at) else {
             break;
         };
+        nodes = node.children;
+        if nodes.iter().any(|child| segments[at..].starts_with(child.words)) {
+            continue;
+        }
         let label = match page {
             "edit" if node.edit => Some("Edit"),
             "delete" if node.delete => Some("Delete"),
@@ -454,9 +463,8 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         };
         if let Some(label) = label {
             crumbs.push(crumb(label.to_owned(), None));
-            break;
         }
-        nodes = node.children;
+        break;
     }
     if let Some(last) = crumbs.last_mut() {
         last.href = None;
@@ -487,22 +495,26 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
 {{- end }}
 
 /// Every page under `{{ .Pages.Prefix }}`: the site's title, a nav of each resource the
-/// caller may list, the current one marked (`aria-current`), the trail from
-/// the index to the page, an item by its title, then the page in `<main>`.
+/// caller may list, the current one marked (`aria-current`), the one whose
+/// path is the longest the page's begins with, the trail from the index to
+/// the page, an item by its title, then the page in `<main>`.
 #[layout({{ rustString .Pages.Prefix }})]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
     let path = uri(cx).path().to_owned();
     let (links, _) = listed(cx).await;
+    // The resource the page is at or under: the link with the longest path,
+    // so a list whose path extends another's (`widgets/archived`) is the
+    // current one on its own pages.
+    let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+    let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
         .into_iter()
         .map(|link| {
-            let current = if path == link.href {
-                Some("page")
-            } else if path.strip_prefix(link.href).is_some_and(|rest| rest.starts_with('/')) {
-                Some("true")
-            } else {
-                None
+            let current = match under {
+                Some(href) if href == link.href && path == href => Some("page"),
+                Some(href) if href == link.href => Some("true"),
+                _ => None,
             };
             (link.href, link.label, current)
         })

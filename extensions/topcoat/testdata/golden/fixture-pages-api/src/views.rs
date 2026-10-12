@@ -20,7 +20,7 @@
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
 
 use crate::choices::Choices;
-use crate::records::{MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, TaskInputRecord, TaskRecord, ViewerRecord};
+use crate::records::{CommentRecord, DocumentInputRecord, DocumentRecord, MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, TaskInputRecord, TaskRecord, ViewerRecord};
 use topcoat::view::{View, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -99,6 +99,250 @@ pub fn project_status_label(value: &str) -> &str {
     }
 }
 
+/// `CommentRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="Comment" role="group">
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="text">
+                    <dt>"Text"</dt>
+                    <dd>(text_of(&choices, "text", &record.text))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `CommentRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn comment_table(
+    rows: Vec<CommentRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Comment">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="text">"Text"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Comment");
+                    <tr>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="text">(text_of(&choices, "text", &row.text))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `DocumentRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn document_detail(record: DocumentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let label = label_of(record.title.as_deref(), None);
+    Ok(view! {
+        <div class="ss-detail" data-type="Document" role="group" aria-label=(label)>
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="title">
+                    <dt>"Title"</dt>
+                    <dd>
+                        match record.title {
+                            Some(value) => (text_of(&choices, "title", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="body">
+                    <dt>"Body"</dt>
+                    <dd>
+                        match record.body {
+                            Some(value) => (text_of(&choices, "body", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `DocumentRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn document_table(
+    rows: Vec<DocumentRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Document">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="title">"Title"</th>
+                    <th scope="col" data-field="body">"Body"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.as_ref().is_none_or(|value| value.trim().is_empty())).then(|| format!("Document {}", row.id));
+                    <tr>
+                        <td data-field="id">(text_of(&choices, "id", &row.id))</td>
+                        <th scope="row" data-field="title">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        match row.title {
+                                            Some(value) => (text_of(&choices, "title", &value)),
+                                            None => "",
+                                        }
+                                    }
+                                </a>
+                            } else {
+                                match row.title {
+                                    Some(value) => (text_of(&choices, "title", &value)),
+                                    None => "",
+                                }
+                            }
+                        </th>
+                        <td data-field="body">
+                            match row.body {
+                                Some(value) => (text_of(&choices, "body", &value)),
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `DocumentInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn document_input_detail(record: DocumentInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="DocumentInput" role="group">
+            <dl>
+                <div data-field="title">
+                    <dt>"Title"</dt>
+                    <dd>
+                        match record.title {
+                            Some(value) => (text_of(&choices, "title", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="body">
+                    <dt>"Body"</dt>
+                    <dd>
+                        match record.body {
+                            Some(value) => (text_of(&choices, "body", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `DocumentInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn document_input_table(
+    rows: Vec<DocumentInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="DocumentInput">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="title">"Title"</th>
+                    <th scope="col" data-field="body">"Body"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.as_ref().is_none_or(|value| value.trim().is_empty())).then_some("Document input");
+                    <tr>
+                        <td data-field="title">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        match row.title {
+                                            Some(value) => (text_of(&choices, "title", &value)),
+                                            None => "",
+                                        }
+                                    }
+                                </a>
+                            } else {
+                                match row.title {
+                                    Some(value) => (text_of(&choices, "title", &value)),
+                                    None => "",
+                                }
+                            }
+                        </td>
+                        <td data-field="body">
+                            match row.body {
+                                Some(value) => (text_of(&choices, "body", &value)),
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
 /// `MemberRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
@@ -122,7 +366,8 @@ pub async fn member_detail(record: MemberRecord, #[default] choices: Choices) ->
 /// `MemberRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn member_table(
     rows: Vec<MemberRecord>,
@@ -140,10 +385,17 @@ pub async fn member_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Member");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }
@@ -184,7 +436,8 @@ pub async fn milestone_detail(record: MilestoneRecord, #[default] choices: Choic
 /// `MilestoneRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn milestone_table(
     rows: Vec<MilestoneRecord>,
@@ -202,10 +455,17 @@ pub async fn milestone_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.trim().is_empty()).then_some("Milestone");
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "title", &row.title))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "title", &row.title))
                             }
@@ -251,7 +511,8 @@ pub async fn milestone_input_detail(record: MilestoneInputRecord, #[default] cho
 /// `MilestoneInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn milestone_input_table(
     rows: Vec<MilestoneInputRecord>,
@@ -269,10 +530,17 @@ pub async fn milestone_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.trim().is_empty()).then_some("Milestone");
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "title", &row.title))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "title", &row.title))
                             }
@@ -372,7 +640,8 @@ pub async fn project_detail(record: ProjectRecord, #[default] choices: Choices) 
 /// `ProjectRecord`s as a table: a column per summary field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's title cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_table(
     rows: Vec<ProjectRecord>,
@@ -393,10 +662,17 @@ pub async fn project_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then(|| format!("Project {}", row.id));
                     <tr>
                         <th scope="row" data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "name", &row.name))
                             }
@@ -466,7 +742,8 @@ pub async fn project_input_detail(record: ProjectInputRecord, #[default] choices
 /// `ProjectInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_input_table(
     rows: Vec<ProjectInputRecord>,
@@ -488,10 +765,17 @@ pub async fn project_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Project input");
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "name", &row.name))
                             }
@@ -606,7 +890,8 @@ pub async fn project_patch_detail(record: ProjectPatchRecord, #[default] choices
 /// `ProjectPatchRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_patch_table(
     rows: Vec<ProjectPatchRecord>,
@@ -631,10 +916,17 @@ pub async fn project_patch_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Project patch");
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "name", &row.name))
                             }
@@ -713,7 +1005,8 @@ pub async fn task_detail(record: TaskRecord, #[default] choices: Choices) -> top
 /// `TaskRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's title cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn task_table(
     rows: Vec<TaskRecord>,
@@ -733,11 +1026,18 @@ pub async fn task_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.trim().is_empty()).then(|| format!("Task {}", row.id));
                     <tr>
                         <td data-field="id">(text_of(&choices, "id", &row.id))</td>
                         <th scope="row" data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "title", &row.title))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "title", &row.title))
                             }
@@ -769,7 +1069,8 @@ pub async fn task_input_detail(record: TaskInputRecord, #[default] choices: Choi
 /// `TaskInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn task_input_table(
     rows: Vec<TaskInputRecord>,
@@ -786,10 +1087,17 @@ pub async fn task_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.trim().is_empty()).then_some("Task input");
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "title", &row.title))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "title", &row.title))
                             }
@@ -820,7 +1128,8 @@ pub async fn viewer_detail(record: ViewerRecord, #[default] choices: Choices) ->
 /// `ViewerRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn viewer_table(
     rows: Vec<ViewerRecord>,
@@ -837,10 +1146,17 @@ pub async fn viewer_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.subject.trim().is_empty()).then_some("Viewer");
                     <tr>
                         <td data-field="subject">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "subject", &row.subject))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "subject", &row.subject))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "subject", &row.subject))
                             }

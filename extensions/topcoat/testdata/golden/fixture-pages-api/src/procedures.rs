@@ -100,6 +100,255 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
     })
 }
 
+/// document.listDocuments, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/list-documents")]
+pub async fn document_list_documents(cx: &Cx) -> topcoat::Result<Result<Vec<DocumentRecord>, ProblemRecord>> {
+    Ok(call_document_list_documents(cx).await)
+}
+
+/// The body of the document_list_documents procedure.
+pub async fn call_document_list_documents(cx: &Cx) -> Result<Vec<DocumentRecord>, ProblemRecord> {
+    let value = operations::document_list_documents(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, DocumentRecord::from_wire))
+}
+
+/// The arguments of document.createDocument, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentCreateDocumentArgsRecord {
+    pub input: Option<DocumentInputRecord>,
+}
+
+impl DocumentCreateDocumentArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentCreateDocumentArgs, ProblemRecord> {
+        Ok(crate::api::DocumentCreateDocumentArgs {
+            input: decode("input", self.input.as_ref().map_or(Value::Null, DocumentInputRecord::to_wire))?,
+        })
+    }
+}
+
+/// document.createDocument, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/create-document")]
+pub async fn document_create_document(cx: &Cx, args: DocumentCreateDocumentArgsRecord) -> topcoat::Result<Result<DocumentRecord, ProblemRecord>> {
+    Ok(call_document_create_document(cx, args).await)
+}
+
+/// The body of the document_create_document procedure.
+pub async fn call_document_create_document(cx: &Cx, args: DocumentCreateDocumentArgsRecord) -> Result<DocumentRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_create_document(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(DocumentRecord::from_wire(&json))
+}
+
+/// document.listDrafts, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/list-drafts")]
+pub async fn document_list_drafts(cx: &Cx) -> topcoat::Result<Result<Vec<DocumentRecord>, ProblemRecord>> {
+    Ok(call_document_list_drafts(cx).await)
+}
+
+/// The body of the document_list_drafts procedure.
+pub async fn call_document_list_drafts(cx: &Cx) -> Result<Vec<DocumentRecord>, ProblemRecord> {
+    let value = operations::document_list_drafts(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, DocumentRecord::from_wire))
+}
+
+/// The arguments of document.clearComments, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentClearCommentsArgsRecord {
+    pub document_id: String,
+}
+
+impl DocumentClearCommentsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentClearCommentsArgs, ProblemRecord> {
+        Ok(crate::api::DocumentClearCommentsArgs {
+            document_id: decode("documentId", wire::put_string(&self.document_id))?,
+        })
+    }
+}
+
+/// document.clearComments, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/clear-comments")]
+pub async fn document_clear_comments(cx: &Cx, args: DocumentClearCommentsArgsRecord) -> topcoat::Result<Result<Vec<CommentRecord>, ProblemRecord>> {
+    Ok(call_document_clear_comments(cx, args).await)
+}
+
+/// The body of the document_clear_comments procedure.
+pub async fn call_document_clear_comments(cx: &Cx, args: DocumentClearCommentsArgsRecord) -> Result<Vec<CommentRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_clear_comments(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, CommentRecord::from_wire))
+}
+
+/// The arguments of document.listComments, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentListCommentsArgsRecord {
+    pub document_id: String,
+}
+
+impl DocumentListCommentsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentListCommentsArgs, ProblemRecord> {
+        Ok(crate::api::DocumentListCommentsArgs {
+            document_id: decode("documentId", wire::put_string(&self.document_id))?,
+        })
+    }
+}
+
+/// document.listComments, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/list-comments")]
+pub async fn document_list_comments(cx: &Cx, args: DocumentListCommentsArgsRecord) -> topcoat::Result<Result<Vec<CommentRecord>, ProblemRecord>> {
+    Ok(call_document_list_comments(cx, args).await)
+}
+
+/// The body of the document_list_comments procedure.
+pub async fn call_document_list_comments(cx: &Cx, args: DocumentListCommentsArgsRecord) -> Result<Vec<CommentRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_list_comments(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, CommentRecord::from_wire))
+}
+
+/// The arguments of document.replaceComments, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentReplaceCommentsArgsRecord {
+    pub document_id: String,
+    pub texts: Vec<String>,
+}
+
+impl DocumentReplaceCommentsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentReplaceCommentsArgs, ProblemRecord> {
+        Ok(crate::api::DocumentReplaceCommentsArgs {
+            document_id: decode("documentId", wire::put_string(&self.document_id))?,
+            texts: decode("texts", wire::put_list(&self.texts, wire::put_string))?,
+        })
+    }
+}
+
+/// document.replaceComments, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/replace-comments")]
+pub async fn document_replace_comments(cx: &Cx, args: DocumentReplaceCommentsArgsRecord) -> topcoat::Result<Result<Vec<CommentRecord>, ProblemRecord>> {
+    Ok(call_document_replace_comments(cx, args).await)
+}
+
+/// The body of the document_replace_comments procedure.
+pub async fn call_document_replace_comments(cx: &Cx, args: DocumentReplaceCommentsArgsRecord) -> Result<Vec<CommentRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_replace_comments(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, CommentRecord::from_wire))
+}
+
+/// The arguments of document.getDocument, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentGetDocumentArgsRecord {
+    pub id: String,
+    pub revision: Option<f64>,
+}
+
+impl DocumentGetDocumentArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentGetDocumentArgs, ProblemRecord> {
+        Ok(crate::api::DocumentGetDocumentArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+            revision: decode("revision", self.revision.as_ref().map_or(Value::Null, wire::put_number))?,
+        })
+    }
+}
+
+/// document.getDocument, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/get-document")]
+pub async fn document_get_document(cx: &Cx, args: DocumentGetDocumentArgsRecord) -> topcoat::Result<Result<DocumentRecord, ProblemRecord>> {
+    Ok(call_document_get_document(cx, args).await)
+}
+
+/// The body of the document_get_document procedure.
+pub async fn call_document_get_document(cx: &Cx, args: DocumentGetDocumentArgsRecord) -> Result<DocumentRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_get_document(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(DocumentRecord::from_wire(&json))
+}
+
+/// The arguments of document.replaceDocument, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentReplaceDocumentArgsRecord {
+    pub input: DocumentInputRecord,
+    pub id: String,
+}
+
+impl DocumentReplaceDocumentArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentReplaceDocumentArgs, ProblemRecord> {
+        Ok(crate::api::DocumentReplaceDocumentArgs {
+            input: decode("input", DocumentInputRecord::to_wire(&self.input))?,
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// document.replaceDocument, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/replace-document")]
+pub async fn document_replace_document(cx: &Cx, args: DocumentReplaceDocumentArgsRecord) -> topcoat::Result<Result<DocumentRecord, ProblemRecord>> {
+    Ok(call_document_replace_document(cx, args).await)
+}
+
+/// The body of the document_replace_document procedure.
+pub async fn call_document_replace_document(cx: &Cx, args: DocumentReplaceDocumentArgsRecord) -> Result<DocumentRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_replace_document(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(DocumentRecord::from_wire(&json))
+}
+
+/// The arguments of document.removeCover, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentRemoveCoverArgsRecord {
+    pub id: String,
+}
+
+impl DocumentRemoveCoverArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::DocumentRemoveCoverArgs, ProblemRecord> {
+        Ok(crate::api::DocumentRemoveCoverArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// document.removeCover, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/document/remove-cover")]
+pub async fn document_remove_cover(cx: &Cx, args: DocumentRemoveCoverArgsRecord) -> topcoat::Result<Result<DocumentRecord, ProblemRecord>> {
+    Ok(call_document_remove_cover(cx, args).await)
+}
+
+/// The body of the document_remove_cover procedure.
+pub async fn call_document_remove_cover(cx: &Cx, args: DocumentRemoveCoverArgsRecord) -> Result<DocumentRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::document_remove_cover(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(DocumentRecord::from_wire(&json))
+}
+
 /// member.listMembers, called from the browser.
 #[procedure("/_superschematic/fixture-pages-api/member/list-members")]
 pub async fn member_list_members(cx: &Cx) -> topcoat::Result<Result<Vec<MemberRecord>, ProblemRecord>> {

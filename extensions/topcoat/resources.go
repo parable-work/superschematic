@@ -24,8 +24,8 @@ const (
 	pageUpdate = "update"
 	// pageDelete is DELETE C/{p}: a button with a confirmation page.
 	pageDelete = "delete"
-	// pageAction is any other method on C/{p}/<verb>: a form on the item's
-	// page.
+	// pageAction is a POST, PUT or PATCH of C/{p}/<verb>, where <verb>
+	// names no collection: a form on the item's page.
 	pageAction = "action"
 )
 
@@ -186,15 +186,17 @@ func (f pageForms) inputFormOf(d declared) *form {
 //     detail; either makes C a resource;
 //   - POST C, with an input or arguments, is the resource's new page;
 //   - PUT or PATCH C/{p} with an input is its edit page, DELETE C/{p} its
-//     delete button, and any other method on C/{p}/<verb> an action, each
-//     on the item's page, so each needs the resource's detail;
+//     delete button, and a POST, PUT or PATCH of C/{p}/<verb> an action,
+//     each on the item's page, so each needs the resource's detail;
 //   - a resource under another's item (C/{p}/D) is nested: its pages are
 //     under the item's, and its list and new page a section of the item's
 //     page when the parent has a detail.
 //
 // Every other operation is left out with its reason: a GET of one object
-// on a path with no parameter, say. roots are the collections no item
-// holds, sorted by key, each with its children.
+// on a path with no parameter, a PUT, PATCH or DELETE of a collection's
+// path, which would change all of it, or a DELETE of C/{p}/<verb>, which
+// an action would do without asking first, say. roots are the collections
+// no item holds, sorted by key, each with its children.
 func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*resourceNode, out []leftOut) {
 	nodes := map[string]*resourceNode{}
 	leave := func(d declared, reason string) {
@@ -295,11 +297,19 @@ func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*reso
 			default:
 				node.create = &classified{d: d, kind: pageCreate, node: node, segs: segs}
 			}
+		case nodes[collectionKey(segs)] != nil && method != "POST":
+			// A path that names a collection is the collection's, never an
+			// action of the item above it: widgets/{id}/parts.
+			leave(d, fmt.Sprintf("a %s of %s, a collection, changes all of it, which no page does", method, spell(segs)))
+		case nodes[collectionKey(segs)] != nil:
+			leave(d, fmt.Sprintf("no list or detail makes %s a resource", spell(segs)))
 		case n >= 3 && segs[n-2].param != "" && resource(segs[:n-2]) != nil:
 			node := resource(segs[:n-2])
 			switch {
 			case node.detail == nil:
 				leave(d, fmt.Sprintf("its resource, %s, has no detail page to hold it", spell(segs[:n-2])))
+			case method == "DELETE":
+				leave(d, fmt.Sprintf("a DELETE of %s is no action: an action's form posts from the item's page, without the confirmation a delete asks", spell(segs)))
 			case last.word == "edit" || last.word == "delete":
 				leave(d, fmt.Sprintf("its word, %s, names the item's %s page", last.word, last.word))
 			case node.action(last.word) != nil:

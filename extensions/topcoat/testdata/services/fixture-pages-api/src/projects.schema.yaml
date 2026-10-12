@@ -6,6 +6,14 @@
 # member reader lists; and the signed-in viewer, one object on a path with
 # no parameter, which is no resource. Reading a project needs
 # projects.read and changing one projects.write.
+#
+# Documents, whose paths are the edge cases: a title that may be absent,
+# the drafts' list at documents/drafts beside a document at
+# documents/{id}, a document read with a query argument, started from an
+# optional input that its replacement requires, and a document's comments,
+# which a PUT and a DELETE of their whole collection would change and a
+# DELETE of its cover would remove, none of which has a page. Reading a
+# document needs documents.read and changing one documents.write.
 name: fixture-pages-api
 kind: API
 scalars:
@@ -179,6 +187,41 @@ types:
         required: true
         validateMinLength: 1
         validateMaxLength: 120
+  # A document, whose title may be absent: a list links such a document
+  # by its noun and id.
+  Document:
+    name: Document
+    role: APIView
+    display:
+      titleField: title
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: title
+        typeRef: { name: string }
+      - name: body
+        typeRef: { name: string }
+  DocumentInput:
+    name: DocumentInput
+    role: APIInput
+    fields:
+      - name: title
+        typeRef: { name: string }
+        validateMaxLength: 80
+      - name: body
+        typeRef: { name: string }
+        validateMaxLength: 2000
+  Comment:
+    name: Comment
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: text
+        typeRef: { name: string }
+        required: true
   Member:
     name: Member
     role: APIView
@@ -330,6 +373,111 @@ operationSets:
             required: true
           - name: input
             typeRef: { name: TaskInput }
+            required: true
+  - name: DocumentQueries
+    operations:
+      # Every document.
+      - name: listDocuments
+        typeRef: { name: Document, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: documents
+        permissions: [documents.read]
+      # The documents not yet published, a collection whose path extends
+      # the documents'.
+      - name: listDrafts
+        typeRef: { name: Document, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: documents/drafts
+        permissions: [documents.read]
+      # One document, at its latest revision unless the query names one.
+      - name: getDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: GET
+        restPath: "documents/{id}"
+        permissions: [documents.read]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: revision
+            typeRef: { name: number }
+            isQuery: true
+            validateMin: 1
+      # A document's comments.
+      - name: listComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.read]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+  - name: DocumentMutations
+    operations:
+      # Starts a document, blank unless the input says otherwise.
+      - name: createDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: POST
+        restPath: documents
+        permissions: [documents.write]
+        arguments:
+          - name: input
+            typeRef: { name: DocumentInput }
+      # Replaces a document's title and body.
+      - name: replaceDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: PUT
+        restPath: "documents/{id}"
+        permissions: [documents.write]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: input
+            typeRef: { name: DocumentInput }
+            required: true
+      # Replaces every comment of a document.
+      - name: replaceComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.write]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+          - name: texts
+            typeRef: { name: string, isArray: true }
+            required: true
+      # Removes every comment of a document.
+      - name: clearComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: DELETE
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.write]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+      # Removes a document's cover image.
+      - name: removeCover
+        typeRef: { name: Document }
+        required: true
+        httpMethod: DELETE
+        restPath: "documents/{id}/cover"
+        permissions: [documents.write]
+        arguments:
+          - name: id
+            typeRef: { name: string }
             required: true
   - name: MemberQueries
     operations:

@@ -48,7 +48,8 @@ pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choi
 /// `OrderViewRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_view_table(
     rows: Vec<OrderViewRecord>,
@@ -65,10 +66,17 @@ pub async fn order_view_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Order view");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }
@@ -103,7 +111,8 @@ pub async fn reservation_detail(record: ReservationRecord, #[default] choices: C
 /// `ReservationRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn reservation_table(
     rows: Vec<ReservationRecord>,
@@ -121,10 +130,17 @@ pub async fn reservation_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Reservation");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }

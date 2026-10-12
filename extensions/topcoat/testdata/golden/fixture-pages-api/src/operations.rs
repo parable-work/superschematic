@@ -20,6 +20,112 @@ use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
 use topcoat::context::{Cx, app_context};
 
+/// document.listDocuments (`GET /api/documents`): Every document.
+pub async fn document_list_documents(cx: &Cx) -> Result<Vec<types::Document>, ApiError> {
+    let caller = can_document_list_documents(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .list_documents(operations::DOCUMENT_LIST_DOCUMENTS.context(caller))
+        .await
+}
+
+/// document.createDocument (`POST /api/documents`): Starts a document, blank unless the input says otherwise.
+pub async fn document_create_document(cx: &Cx, args: crate::api::DocumentCreateDocumentArgs) -> Result<types::Document, ApiError> {
+    let caller = can_document_create_document(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .create_document(operations::DOCUMENT_CREATE_DOCUMENT.context(caller), args)
+        .await
+}
+
+/// document.listDrafts (`GET /api/documents/drafts`): The documents not yet published, a collection whose path extends
+pub async fn document_list_drafts(cx: &Cx) -> Result<Vec<types::Document>, ApiError> {
+    let caller = can_document_list_drafts(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .list_drafts(operations::DOCUMENT_LIST_DRAFTS.context(caller))
+        .await
+}
+
+/// document.clearComments (`DELETE /api/documents/{documentId}/comments`): Removes every comment of a document.
+pub async fn document_clear_comments(cx: &Cx, args: crate::api::DocumentClearCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+    let caller = can_document_clear_comments(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .clear_comments(operations::DOCUMENT_CLEAR_COMMENTS.context(caller), args)
+        .await
+}
+
+/// document.listComments (`GET /api/documents/{documentId}/comments`): A document's comments.
+pub async fn document_list_comments(cx: &Cx, args: crate::api::DocumentListCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+    let caller = can_document_list_comments(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .list_comments(operations::DOCUMENT_LIST_COMMENTS.context(caller), args)
+        .await
+}
+
+/// document.replaceComments (`PUT /api/documents/{documentId}/comments`): Replaces every comment of a document.
+pub async fn document_replace_comments(cx: &Cx, args: crate::api::DocumentReplaceCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
+    let caller = can_document_replace_comments(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .replace_comments(operations::DOCUMENT_REPLACE_COMMENTS.context(caller), args)
+        .await
+}
+
+/// document.getDocument (`GET /api/documents/{id}`): One document, at its latest revision unless the query names one.
+pub async fn document_get_document(cx: &Cx, args: crate::api::DocumentGetDocumentArgs) -> Result<types::Document, ApiError> {
+    let caller = can_document_get_document(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .get_document(operations::DOCUMENT_GET_DOCUMENT.context(caller), args)
+        .await
+}
+
+/// document.replaceDocument (`PUT /api/documents/{id}`): Replaces a document's title and body.
+pub async fn document_replace_document(cx: &Cx, args: crate::api::DocumentReplaceDocumentArgs) -> Result<types::Document, ApiError> {
+    let caller = can_document_replace_document(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .replace_document(operations::DOCUMENT_REPLACE_DOCUMENT.context(caller), args)
+        .await
+}
+
+/// document.removeCover (`DELETE /api/documents/{id}/cover`): Removes a document's cover image.
+pub async fn document_remove_cover(cx: &Cx, args: crate::api::DocumentRemoveCoverArgs) -> Result<types::Document, ApiError> {
+    let caller = can_document_remove_cover(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .document
+        .remove_cover(operations::DOCUMENT_REMOVE_COVER.context(caller), args)
+        .await
+}
+
 /// member.listMembers (`GET /api/members`): Everyone who works on projects.
 pub async fn member_list_members(cx: &Cx) -> Result<Vec<types::Member>, ApiError> {
     let caller = can_member_list_members(cx).await?;
@@ -160,6 +266,60 @@ pub async fn viewer_me(cx: &Cx) -> Result<types::Viewer, ApiError> {
         .viewer
         .me(operations::VIEWER_ME.context(caller))
         .await
+}
+
+/// Admits the caller of document.listDocuments as its route does: 401 without one, 403
+/// without one of documents.read. The caller, for the implementation.
+pub async fn can_document_list_documents(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_LIST_DOCUMENTS).await
+}
+
+/// Admits the caller of document.createDocument as its route does: 401 without one, 403
+/// without one of documents.write. The caller, for the implementation.
+pub async fn can_document_create_document(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_CREATE_DOCUMENT).await
+}
+
+/// Admits the caller of document.listDrafts as its route does: 401 without one, 403
+/// without one of documents.read. The caller, for the implementation.
+pub async fn can_document_list_drafts(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_LIST_DRAFTS).await
+}
+
+/// Admits the caller of document.clearComments as its route does: 401 without one, 403
+/// without one of documents.write. The caller, for the implementation.
+pub async fn can_document_clear_comments(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_CLEAR_COMMENTS).await
+}
+
+/// Admits the caller of document.listComments as its route does: 401 without one, 403
+/// without one of documents.read. The caller, for the implementation.
+pub async fn can_document_list_comments(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_LIST_COMMENTS).await
+}
+
+/// Admits the caller of document.replaceComments as its route does: 401 without one, 403
+/// without one of documents.write. The caller, for the implementation.
+pub async fn can_document_replace_comments(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_REPLACE_COMMENTS).await
+}
+
+/// Admits the caller of document.getDocument as its route does: 401 without one, 403
+/// without one of documents.read. The caller, for the implementation.
+pub async fn can_document_get_document(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_GET_DOCUMENT).await
+}
+
+/// Admits the caller of document.replaceDocument as its route does: 401 without one, 403
+/// without one of documents.write. The caller, for the implementation.
+pub async fn can_document_replace_document(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_REPLACE_DOCUMENT).await
+}
+
+/// Admits the caller of document.removeCover as its route does: 401 without one, 403
+/// without one of documents.write. The caller, for the implementation.
+pub async fn can_document_remove_cover(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::DOCUMENT_REMOVE_COVER).await
 }
 
 /// Admits the caller of member.listMembers as its route does: 401 without one, 403

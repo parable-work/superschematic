@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/registry"
 )
@@ -77,17 +78,24 @@ func (Extension) Register(r *registry.Registry) error {
 // Services lists services whose crate is written as if their config
 // enabled outputs.topcoat, which a binary without the extension never
 // reads: a project builds the same configs with the core binary and with
-// this one. PagesPrefix, when set, also turns on those services' pages,
-// under it, as outputs.topcoat.pages would.
+// this one. PagesPrefixes turns on the pages of the listed services it
+// names, each under its prefix, as outputs.topcoat.pages would.
 type Table struct {
-	Services    []string
-	PagesPrefix string
+	Services      []string
+	PagesPrefixes map[string]string
 }
 
 // decodeTable decodes the [extension.topcoat] table, refusing a key it
-// does not declare.
+// does not declare. pages_prefix is a path, the prefix of the one service
+// the table lists, or a table of the listed services whose pages are on,
+// each with its prefix: `pages_prefix = { "shop-orders" = "/console" }`.
+// Two services' pages never share a prefix, nor is one's under another's:
+// an app that links both crates would register a page twice, which
+// Topcoat's router refuses, or put one console's layout around the
+// other's pages.
 func decodeTable(table map[string]any) (Table, error) {
 	var out Table
+	var prefix any
 	for key, value := range table {
 		switch key {
 		case "services":
@@ -103,19 +111,63 @@ func decodeTable(table map[string]any) (Table, error) {
 				out.Services = append(out.Services, name)
 			}
 		case "pages_prefix":
-			prefix, ok := value.(string)
-			if !ok {
-				return out, fmt.Errorf("[extension.topcoat] pages_prefix must be a path, got %T", value)
-			}
-			if err := CheckPagesPrefix(prefix); err != nil {
-				return out, fmt.Errorf("[extension.topcoat] pages_prefix: %w", err)
-			}
-			out.PagesPrefix = prefix
+			prefix = value
 		default:
 			return out, fmt.Errorf("[extension.topcoat]: unknown key %q (the table takes services and pages_prefix)", key)
 		}
 	}
-	return out, nil
+	if prefix == nil {
+		return out, nil
+	}
+	prefixes, err := pagesPrefixes(prefix, out.Services)
+	out.PagesPrefixes = prefixes
+	return out, err
+}
+
+// pagesPrefixes is the prefix of each listed service whose pages
+// pages_prefix turns on.
+func pagesPrefixes(value any, services []string) (map[string]string, error) {
+	prefixes := map[string]string{}
+	switch value := value.(type) {
+	case string:
+		if err := CheckPagesPrefix(value); err != nil {
+			return nil, fmt.Errorf("[extension.topcoat] pages_prefix: %w", err)
+		}
+		if len(services) > 1 {
+			return nil, fmt.Errorf("[extension.topcoat] pages_prefix %q would serve the pages of %d services at one path, and an app that links two of their crates registers each page twice; give each service its own: pages_prefix = { %q = %q, ... }",
+				value, len(services), services[0], value)
+		}
+		for _, service := range services {
+			prefixes[service] = value
+		}
+	case map[string]any:
+		for _, service := range sortedKeys(value) {
+			if !slices.Contains(services, service) {
+				return nil, fmt.Errorf("[extension.topcoat] pages_prefix names %q, which services does not list", service)
+			}
+			prefix, ok := value[service].(string)
+			if !ok {
+				return nil, fmt.Errorf("[extension.topcoat] pages_prefix.%s must be a path, got %T", service, value[service])
+			}
+			if err := CheckPagesPrefix(prefix); err != nil {
+				return nil, fmt.Errorf("[extension.topcoat] pages_prefix.%s: %w", service, err)
+			}
+			for _, other := range sortedKeys(prefixes) {
+				if taken := prefixes[other]; under(prefix, taken) || under(taken, prefix) {
+					return nil, fmt.Errorf("[extension.topcoat] pages_prefix: %s's %q and %s's %q overlap, and an app that links both crates would serve one's pages inside the other's; give each a path of its own", other, taken, service, prefix)
+				}
+			}
+			prefixes[service] = prefix
+		}
+	default:
+		return nil, fmt.Errorf("[extension.topcoat] pages_prefix must be a path or a table of each service's path, got %T", value)
+	}
+	return prefixes, nil
+}
+
+// under reports whether path is prefix or under it.
+func under(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 // OutputSchema is the JSON Schema of outputs.topcoat.
@@ -214,8 +266,8 @@ func configOf(c registry.GenerateContext, table Table) (Config, error) {
 	var cfg Config
 	if c.Outputs == nil || c.Outputs.Raw[OutputKey] == nil {
 		cfg.Enabled = slices.Contains(table.Services, c.Config.Name)
-		if cfg.Enabled && table.PagesPrefix != "" {
-			cfg.Pages = &PagesConfig{Enabled: true, Prefix: table.PagesPrefix}
+		if prefix, ok := table.PagesPrefixes[c.Config.Name]; cfg.Enabled && ok {
+			cfg.Pages = &PagesConfig{Enabled: true, Prefix: prefix}
 		}
 		return cfg, nil
 	}

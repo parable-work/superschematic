@@ -29,10 +29,10 @@
 use std::fmt::Write as _;
 use crate::api::types;
 use crate::choices::Choices;
-use crate::forms::{FormErrors, MilestoneInputForm, ProjectArchiveProjectArgsForm, ProjectDeleteProjectArgsForm, ProjectInputForm, ProjectListProjectsArgsForm, ProjectPatchForm, ProjectUpdateProjectArgsForm, Refusal, TaskAddTaskArgsForm, project_archive_project_args_fields, project_delete_project_args_fields, project_input_fields, project_list_projects_args_fields, project_update_project_args_fields, task_add_task_args_fields};
+use crate::forms::{DocumentGetDocumentArgsForm, DocumentInputForm, DocumentReplaceDocumentArgsForm, FormErrors, MilestoneInputForm, ProjectArchiveProjectArgsForm, ProjectDeleteProjectArgsForm, ProjectInputForm, ProjectListProjectsArgsForm, ProjectPatchForm, ProjectUpdateProjectArgsForm, Refusal, TaskAddTaskArgsForm, document_input_fields, document_replace_document_args_fields, project_archive_project_args_fields, project_delete_project_args_fields, project_input_fields, project_list_projects_args_fields, project_update_project_args_fields, task_add_task_args_fields};
 use crate::operations;
-use crate::records::{MemberRecord, ProjectRecord, TaskRecord};
-use crate::views::{member_table, project_detail, project_table, task_detail, task_table};
+use crate::records::{CommentRecord, DocumentRecord, MemberRecord, ProjectRecord, TaskRecord};
+use crate::views::{comment_table, document_detail, document_table, member_table, project_detail, project_table, task_detail, task_table};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize, try_app_context};
@@ -47,6 +47,8 @@ pub const PREFIX: &str = "/console";
 
 /// The site's title when the app's `Settings` give none.
 const TITLE: &str = "Fixture pages api";
+
+path_param!(pub document_id);
 
 path_param!(pub label_id);
 
@@ -283,6 +285,10 @@ struct Link {
 async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut links = Vec::new();
     let mut signed_out = false;
+    let link = Link { href: "/console/documents", label: "Documents" };
+    admit(operations::can_document_list_documents(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
+    let link = Link { href: "/console/documents/drafts", label: "Drafts" };
+    admit(operations::can_document_list_drafts(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     let link = Link { href: "/console/members", label: "Members" };
     admit(operations::can_member_list_members(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     let link = Link { href: "/console/projects", label: "Projects" };
@@ -319,6 +325,49 @@ struct Node {
 
 /// Each collection with a page, and each on the way to one.
 const TREE: &[Node] = &[
+    Node {
+        key: "documents",
+        titled: true,
+        words: &["documents"],
+        plural: "Documents",
+        noun: "Document",
+        list: true,
+        detail: true,
+        create: Some("New document"),
+        edit: true,
+        delete: false,
+        actions: &[],
+        children: &[
+            Node {
+                key: "documents/{}/comments",
+                titled: false,
+                words: &["comments"],
+                plural: "Comments",
+                noun: "Comment",
+                list: true,
+                detail: false,
+                create: None,
+                edit: false,
+                delete: false,
+                actions: &[],
+                children: &[],
+            },
+        ],
+    },
+    Node {
+        key: "documents/drafts",
+        titled: false,
+        words: &["documents", "drafts"],
+        plural: "Drafts",
+        noun: "Draft",
+        list: true,
+        detail: false,
+        create: None,
+        edit: false,
+        delete: false,
+        actions: &[],
+        children: &[],
+    },
     Node {
         key: "labels",
         titled: false,
@@ -406,7 +455,10 @@ struct Crumb {
 
 /// The trail from the index to the page at `path`: the index, then each
 /// collection's list, each item by its noun and id and the page under it,
-/// a link where a page shows it; the last is the page itself.
+/// a link where a page shows it; the last is the page itself. Where two
+/// collections' words begin the rest of the path, the one with more words
+/// is its collection (`widgets/archived`, not an item of `widgets`), and a
+/// collection under an item is read before the item's own pages.
 fn trail(path: &str, title: &str) -> Vec<Crumb> {
     let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false, item: None };
     let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
@@ -416,7 +468,9 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
     let mut base = PREFIX.to_owned();
     let mut ids = Vec::new();
     let mut at = 0;
-    while let Some(node) = nodes.iter().find(|node| segments[at..].starts_with(node.words)) {
+    while let Some(node) =
+        nodes.iter().filter(|node| segments[at..].starts_with(node.words)).max_by_key(|node| node.words.len())
+    {
         for word in node.words {
             base.push('/');
             base.push_str(word);
@@ -441,6 +495,10 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         let Some(&page) = segments.get(at) else {
             break;
         };
+        nodes = node.children;
+        if nodes.iter().any(|child| segments[at..].starts_with(child.words)) {
+            continue;
+        }
         let label = match page {
             "edit" if node.edit => Some("Edit"),
             "delete" if node.delete => Some("Delete"),
@@ -448,9 +506,8 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         };
         if let Some(label) = label {
             crumbs.push(crumb(label.to_owned(), None));
-            break;
         }
-        nodes = node.children;
+        break;
     }
     if let Some(last) = crumbs.last_mut() {
         last.href = None;
@@ -465,6 +522,10 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
 /// the request keeps.
 async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
     match (key, ids) {
+        ("documents", [document_id]) => match call_document_get_document(cx, document_id).await {
+            Ok(item) => DocumentRecord::from(item).title,
+            Err(_) => None,
+        },
         ("projects", [project_id]) => match call_project_get_project(cx, project_id).await {
             Ok(item) => Some(ProjectRecord::from(item).name),
             Err(_) => None,
@@ -479,22 +540,26 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
 }
 
 /// Every page under `/console`: the site's title, a nav of each resource the
-/// caller may list, the current one marked (`aria-current`), the trail from
-/// the index to the page, an item by its title, then the page in `<main>`.
+/// caller may list, the current one marked (`aria-current`), the one whose
+/// path is the longest the page's begins with, the trail from the index to
+/// the page, an item by its title, then the page in `<main>`.
 #[layout("/console")]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
     let path = uri(cx).path().to_owned();
     let (links, _) = listed(cx).await;
+    // The resource the page is at or under: the link with the longest path,
+    // so a list whose path extends another's (`widgets/archived`) is the
+    // current one on its own pages.
+    let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+    let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
         .into_iter()
         .map(|link| {
-            let current = if path == link.href {
-                Some("page")
-            } else if path.strip_prefix(link.href).is_some_and(|rest| rest.starts_with('/')) {
-                Some("true")
-            } else {
-                None
+            let current = match under {
+                Some(href) if href == link.href && path == href => Some("page"),
+                Some(href) if href == link.href => Some("true"),
+                _ => None,
             };
             (link.href, link.label, current)
         })
@@ -563,6 +628,33 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// Calls document_list_documents; a refusal of a route's value is no such page.
+async fn call_document_list_documents(cx: &Cx) -> Result<Vec<types::Document>, Refusal> {
+    operations::document_list_documents(cx).await.map_err(|err| Refusal::from_api(&err))
+}
+
+/// Calls document_get_document with the route's values and each other
+/// argument's default; a refusal of a route's value is no such page. The
+/// request keeps its result, which the page and the trail share.
+#[memoize(as_ref)]
+async fn call_document_get_document(cx: &Cx, document_id: &str) -> Result<types::Document, Refusal> {
+    DocumentGetDocumentArgsForm::new(document_id).submit(cx).await.map_err(|refusal| page_refusal(refusal, &["id"]))
+}
+
+/// Calls document_list_comments with the route's values; a refusal of a route's
+/// value is no such page.
+async fn call_document_list_comments(cx: &Cx, document_id: &str) -> Result<Vec<types::Comment>, Refusal> {
+    let args = crate::api::DocumentListCommentsArgs {
+        document_id: route_value(document_id, as_text).ok_or_else(no_such_page)?,
+    };
+    operations::document_list_comments(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["documentId"]))
+}
+
+/// Calls document_list_drafts; a refusal of a route's value is no such page.
+async fn call_document_list_drafts(cx: &Cx) -> Result<Vec<types::Document>, Refusal> {
+    operations::document_list_drafts(cx).await.map_err(|err| Refusal::from_api(&err))
+}
+
 /// Calls task_list_labelled_tasks with the route's values; a refusal of a
 /// route's value is no such page.
 async fn call_task_list_labelled_tasks(cx: &Cx, label_id: &str) -> Result<Vec<types::Task>, Refusal> {
@@ -609,6 +701,15 @@ async fn call_task_get_task(cx: &Cx, project_id: &str, task_id: &str) -> Result<
     operations::task_get_task(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["projectId", "id"]))
 }
 
+/// `DocumentInputForm` filled from a `Document` as the API sends it: each field
+/// the two share by name and kind; any other as a new form has it.
+fn fill_document_input_form_from_document(json: &Value) -> DocumentInputForm {
+    let mut form = DocumentInputForm::new();
+    form.title = held(&json["title"]);
+    form.body = held(&json["body"]);
+    form
+}
+
 /// `MilestoneInputForm` filled from a `Milestone` as the API sends it: each
 /// field the two share by name and kind; any other as a new form has it.
 fn fill_milestone_input_form_from_milestone(json: &Value) -> MilestoneInputForm {
@@ -635,6 +736,338 @@ fn fill_project_patch_form_from_project(json: &Value) -> ProjectPatchForm {
         form.milestones = rows.iter().map(fill_milestone_input_form_from_milestone).collect();
     }
     form
+}
+
+/// The path of the documents: `/console/documents`.
+fn documents_href() -> Option<String> {
+    Some("/console/documents".to_owned())
+}
+
+/// The path of one of the documents: `/console/documents/{document_id}`.
+fn documents_item_href(document_id: &str) -> Option<String> {
+    Some(format!("{}/{}", documents_href()?, seg(document_id)?))
+}
+
+/// The list of documents, when the caller may list them.
+#[page("/console/documents")]
+pub async fn documents_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_document_list_documents(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => documents_list(next: next),
+        }
+    })
+}
+
+/// The documents, and a link to the new page when the caller may create one.
+#[component]
+async fn documents_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
+    let listed = call_document_list_documents(cx).await;
+    let creates = operations::can_document_create_document(cx).await.is_ok();
+    let new_href = format!("{}/new", documents_href().unwrap_or_default());
+    Ok(view! {
+        <h1>"Documents"</h1>
+        if creates {
+            <p class="ss-actions"><a class="ss-new" href=(new_href)>"New document"</a></p>
+        }
+        match listed {
+            Ok(items) => documents_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Documents as `document_table` renders them, the app's choices naming their
+/// values, each row linked to its page.
+#[component]
+async fn documents_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat::Result<impl View> {
+    let rows: Vec<DocumentRecord> = items.iter().map(DocumentRecord::from).collect();
+    let hrefs: Vec<String> = rows.iter().map(|row| documents_item_href(&row.id).unwrap_or_default()).collect();
+    let choices = choices_of(cx);
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no documents."</p>
+        } else {
+            document_table(rows: rows, choices: choices, hrefs: hrefs)
+        }
+    })
+}
+
+/// One of the documents, when the caller may read it, with the route's status
+/// when not.
+#[page("/console/documents/{document_id}")]
+pub async fn documents_item_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let document_id = path_param::<DocumentId>(cx).to_owned();
+    Ok(view! { documents_item(document_id: document_id) })
+}
+
+/// One of the documents: its detail, a link to edit it, the sections under it,
+/// each when the caller may.
+#[component]
+async fn documents_item(
+    cx: &Cx,
+    document_id: String,
+) -> topcoat::Result<impl View> {
+    let href = documents_item_href(&document_id).unwrap_or_else(|| PREFIX.to_owned());
+    let found = call_document_get_document(cx, &document_id)
+        .await
+        .map(|item| {
+            let record = DocumentRecord::from(item);
+            (title_or(record.title.as_deref().unwrap_or_default(), "Document"), record)
+        })
+        .map_err(Refusal::clone);
+    let choices = choices_of(cx);
+    let edits = operations::can_document_replace_document(cx).await.is_ok();
+    Ok(view! {
+        match found {
+            Err(refusal) => refused(refusal: refusal, next: href),
+            Ok((heading, record)) => {
+                <h1>(heading)</h1>
+                document_detail(record: record, choices: choices.clone())
+                if edits {
+                    <p class="ss-actions">
+                        if edits {
+                            <a class="ss-edit" href=(format!("{href}/edit"))>"Edit"</a>
+                        }
+                    </p>
+                }
+                documents_comments_section(document_id: document_id.clone())
+            },
+        }
+    })
+}
+
+/// The page that creates one of the documents, when the caller may.
+#[page("/console/documents/new")]
+pub async fn documents_new_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_document_create_document(cx).await;
+    let form = DocumentInputForm::new();
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => documents_new(form: form, errors: FormErrors::default()),
+        }
+    })
+}
+
+/// Creates one of the documents from the new page's form, then goes to its page
+/// (303); a row button or a refusal renders the form again with its status.
+#[page(POST "/console/documents/new")]
+pub async fn documents_create_page(cx: &Cx, Form(form): Form<DocumentInputForm>) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let sent = match form.parse() {
+        Ok(input) => match operations::document_create_document(cx, crate::api::DocumentCreateDocumentArgs { input: Some(input) }).await {
+            Ok(created) => {
+                let created = DocumentRecord::from(created);
+                return Err(see_other(documents_item_href(&created.id).unwrap_or_else(|| documents_href().unwrap_or_else(|| PREFIX.to_owned()))).into());
+            }
+            Err(err) => Refusal::from_api(&err),
+        },
+        Err(errors) => Refusal::from(errors),
+    };
+    Ok(view! {
+        match sent {
+            sent if alone(&sent, &[]) => refused(refusal: page_refusal(sent, &[]), next: next),
+            sent => {
+                (sent.status)
+                documents_new(form: form, errors: sent.errors)
+            },
+        }
+    })
+}
+
+/// The new page's form, new or as sent with its errors.
+#[component]
+async fn documents_new(cx: &Cx, form: DocumentInputForm, errors: FormErrors) -> topcoat::Result<impl View> {
+    let choices = choices_of(cx);
+    Ok(view! {
+        <h1>"New document"</h1>
+        <form method="post" class="ss-form">
+            document_input_fields(form: form, errors: errors, choices: choices)
+            <button type="submit">"Create"</button>
+        </form>
+    })
+}
+
+/// The page that edits one of the documents, when the caller may: its form
+/// filled from the item, each field the item holds.
+#[page("/console/documents/{document_id}/edit")]
+pub async fn documents_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let next = current(cx);
+    let shown = match operations::can_document_replace_document(cx).await {
+        Err(err) => Err(Refusal::from_api(&err)),
+        Ok(_) => call_document_get_document(cx, &document_id)
+            .await
+            .map(|item| DocumentReplaceDocumentArgsForm {
+                input: fill_document_input_form_from_document(&serde_json::to_value(item).unwrap_or_default()),
+                ..DocumentReplaceDocumentArgsForm::new(document_id.as_str())
+            })
+            .map_err(Refusal::clone),
+    };
+    Ok(view! {
+        match shown {
+            Ok(form) => documents_edit(form: form, errors: FormErrors::default()),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Changes one of the documents from the edit page's form, then goes to its
+/// page (303); a row button or a refusal renders the form again with its
+/// status.
+#[page(POST "/console/documents/{document_id}/edit")]
+pub async fn documents_update_page(cx: &Cx, Form(form): Form<DocumentReplaceDocumentArgsForm>) -> topcoat::Result<impl View> {
+    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let next = current(cx);
+    // The route's values, never the hidden inputs, which a reader can change.
+    let form = DocumentReplaceDocumentArgsForm {
+        id: Some(document_id.clone()),
+        ..form
+    };
+    let sent = match form.submit(cx).await {
+        Ok(_) => {
+            return Err(see_other(documents_item_href(&document_id).unwrap_or_else(|| PREFIX.to_owned())).into());
+        }
+        Err(refusal) => refusal,
+    };
+    Ok(view! {
+        match sent {
+            sent if alone(&sent, &["id"]) => refused(refusal: page_refusal(sent, &["id"]), next: next),
+            sent => {
+                (sent.status)
+                documents_edit(form: form, errors: sent.errors)
+            },
+        }
+    })
+}
+
+/// The edit page's form, filled from the item or as sent with its errors.
+#[component]
+async fn documents_edit(cx: &Cx, form: DocumentReplaceDocumentArgsForm, errors: FormErrors) -> topcoat::Result<impl View> {
+    let choices = choices_of(cx);
+    Ok(view! {
+        <h1>"Edit the document"</h1>
+        <form method="post" class="ss-form">
+            document_replace_document_args_fields(form: form, errors: errors, choices: choices)
+            <button type="submit">"Save"</button>
+        </form>
+    })
+}
+
+/// The path of the comments: `/console/documents/{document_id}/comments`; none
+/// when a value cannot be a segment.
+fn documents_comments_href(document_id: &str) -> Option<String> {
+    Some(format!("/console/documents/{}/comments", seg(document_id)?))
+}
+
+/// The list of comments, when the caller may list them.
+#[page("/console/documents/{document_id}/comments")]
+pub async fn documents_comments_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let next = current(cx);
+    let admitted = operations::can_document_list_comments(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => documents_comments_list(document_id: document_id, next: next),
+        }
+    })
+}
+
+/// The comments.
+#[component]
+async fn documents_comments_list(cx: &Cx, document_id: String, next: String) -> topcoat::Result<impl View> {
+    let listed = call_document_list_comments(cx, &document_id).await;
+    Ok(view! {
+        <h1>"Comments"</h1>
+        match listed {
+            Ok(items) => documents_comments_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Comments as `comment_table` renders them, the app's choices naming their
+/// values.
+#[component]
+async fn documents_comments_rows(cx: &Cx, items: Vec<types::Comment>) -> topcoat::Result<impl View> {
+    let rows: Vec<CommentRecord> = items.iter().map(CommentRecord::from).collect();
+    let choices = choices_of(cx);
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no comments."</p>
+        } else {
+            comment_table(rows: rows, choices: choices)
+        }
+    })
+}
+
+/// The comments of an item, on the item's page: the list, when the caller may
+/// list them.
+#[component]
+async fn documents_comments_section(cx: &Cx, document_id: String) -> topcoat::Result<impl View> {
+    let listed = match operations::can_document_list_comments(cx).await {
+        Ok(_) => Some(call_document_list_comments(cx, &document_id).await),
+        Err(_) => None,
+    };
+    let href = documents_comments_href(&document_id).unwrap_or_default();
+    Ok(view! {
+        if listed.is_some() {
+            <section class="ss-section" data-resource="comments">
+                <h2><a href=(href.clone())>"Comments"</a></h2>
+                match listed {
+                    Some(Ok(items)) => documents_comments_rows(items: items),
+                    Some(Err(refusal)) => <p class="ss-refused">(messages(&refusal).join(" "))</p>,
+                    None => "",
+                }
+            </section>
+        }
+    })
+}
+
+/// The list of drafts, when the caller may list them.
+#[page("/console/documents/drafts")]
+pub async fn documents_drafts_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_document_list_drafts(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => documents_drafts_list(next: next),
+        }
+    })
+}
+
+/// The drafts.
+#[component]
+async fn documents_drafts_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
+    let listed = call_document_list_drafts(cx).await;
+    Ok(view! {
+        <h1>"Drafts"</h1>
+        match listed {
+            Ok(items) => documents_drafts_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Drafts as `document_table` renders them, the app's choices naming their
+/// values.
+#[component]
+async fn documents_drafts_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat::Result<impl View> {
+    let rows: Vec<DocumentRecord> = items.iter().map(DocumentRecord::from).collect();
+    let choices = choices_of(cx);
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no drafts."</p>
+        } else {
+            document_table(rows: rows, choices: choices)
+        }
+    })
 }
 
 /// The list of tasks, when the caller may list them.

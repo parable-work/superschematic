@@ -386,7 +386,8 @@ func TestViewsRenderRecords(t *testing.T) {
 // TestDisplayShapesTheComponents builds fixture-views-api: OrderView's
 // @display gives its table the caption Orders and its summary fields as
 // columns, in order, its title field heading each row, a row's link
-// (hrefs) on it, and naming the detail with the noun as fallback; a nested
+// (hrefs) on it, its noun and id the link's text when the title is blank,
+// and naming the detail with the noun as fallback; a nested
 // Address shows its title in a
 // cell, and Money, which declares no title, its detail; Comment, which
 // nests itself, boxes its views.
@@ -416,7 +417,8 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<caption>"Orders"</caption>`,
-		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(text_of(&choices, \"reference\", &row.reference))</a>\n                            } else {\n                                (text_of(&choices, \"reference\", &row.reference))\n                            }\n                        </th>",
+		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>\n                                    if let Some(untitled) = untitled {\n                                        (untitled)\n                                    } else {\n                                        (text_of(&choices, \"reference\", &row.reference))\n                                    }\n                                </a>\n                            } else {\n                                (text_of(&choices, \"reference\", &row.reference))\n                            }\n                        </th>",
+		`let untitled = (href.is_some() && row.reference.trim().is_empty()).then(|| format!("Order {}", row.id));`,
 		`let label = label_of(Some(record.reference.as_str()), Some("Order"));`,
 		`<td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>`,
 		`<td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>`,

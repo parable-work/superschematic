@@ -48,7 +48,8 @@ pub async fn greeting_detail(record: GreetingRecord, #[default] choices: Choices
 /// `GreetingRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn greeting_table(
     rows: Vec<GreetingRecord>,
@@ -65,10 +66,17 @@ pub async fn greeting_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.message.trim().is_empty()).then_some("Greeting");
                     <tr>
                         <td data-field="message">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "message", &row.message))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "message", &row.message))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "message", &row.message))
                             }

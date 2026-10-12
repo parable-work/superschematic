@@ -66,7 +66,8 @@ pub async fn create_tenant_input_detail(record: CreateTenantInputRecord, #[defau
 /// `CreateTenantInputRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn create_tenant_input_table(
     rows: Vec<CreateTenantInputRecord>,
@@ -84,10 +85,17 @@ pub async fn create_tenant_input_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Create tenant input");
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "name", &row.name))
                             }
@@ -127,7 +135,8 @@ pub async fn tenant_view_detail(record: TenantViewRecord, #[default] choices: Ch
 /// `TenantViewRecord`s as a table: a column per field and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's first cell; a row past
-/// its end links nowhere.
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn tenant_view_table(
     rows: Vec<TenantViewRecord>,
@@ -146,10 +155,17 @@ pub async fn tenant_view_table(
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Tenant view");
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
                             } else {
                                 (text_of(&choices, "id", &row.id))
                             }

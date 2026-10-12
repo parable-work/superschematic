@@ -1,6 +1,6 @@
 # The Topcoat extension's fixture for generated pages: a resource of every
 # shape its operations describe, a nested one, one only some callers list,
-# and an operation that fits none.
+# an operation that fits none, and paths at the edges of the rules.
 name: fixture-pages-api
 kind: API
 outputs: {}

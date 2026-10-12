@@ -33,7 +33,7 @@ func CheckPagesPrefix(prefix string) error {
 		return fmt.Errorf("the pages' prefix %q must hold no parameter", prefix)
 	}
 	for _, reserved := range []string{"/api", "/_superschematic"} {
-		if prefix == reserved || strings.HasPrefix(prefix, reserved+"/") {
+		if under(prefix, reserved) {
 			return fmt.Errorf("the pages' prefix %q is under %s, which the crate serves itself", prefix, reserved)
 		}
 	}
@@ -725,7 +725,9 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		}
 		o.PrefillFn = b.prefill(input.Struct, r.node.detail.d.op.TypeRef.Name)
 	}
-	if o.FormName() != "" {
+	// A page renders the form of every operation it submits; an item's
+	// page only submits its detail's, through call_<op>, and renders none.
+	if o.FormName() != "" && c.kind != pageDetail {
 		b.m.importName("forms", o.FormComponent())
 	}
 	b.m.Ops = append(b.m.Ops, o)

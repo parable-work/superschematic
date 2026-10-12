@@ -102,7 +102,8 @@ pub async fn {{ .Detail }}(record: {{ .Record }}, #[default] choices: Choices) -
 /// `{{ .Record }}`s as a table: a column per {{ if eq (len .Columns) (len .Fields) }}field{{ else }}summary field{{ end }} and a row per record.
 /// `choices` labels the values they name. `hrefs` links each row to a
 /// page: the i-th, unless it is empty, row i's {{ if .LinksTitle }}title{{ else }}first{{ end }} cell; a row past
-/// its end links nowhere.
+/// its end links nowhere.{{ if .UntitledLet }} A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.{{ end }}
 #[component]
 pub async fn {{ .Table }}(
     rows: Vec<{{ .Record }}>,
@@ -131,6 +132,9 @@ pub async fn {{ .Table }}(
 {{- if .Columns }}
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+{{- if .UntitledLet }}
+                    {{ .UntitledLet }}
+{{- end }}
                     <tr>
 {{- else }}
                 for _row in rows {

@@ -583,6 +583,100 @@ fn decode<T: DeserializeOwned>(errors: &mut FormErrors, key: &str, json: Value) 
     }
 }
 
+/// The form of `DocumentInput`, each field as the browser sends it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentInputForm {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    /// The post sent more than `MAX_PAIRS` pairs, past which the form read
+    /// none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentInputForm {
+    /// A new form: each field's `@default`, a required nested object's new
+    /// form, and each list's first rows: its listMin, or one when the
+    /// input requires the list. An optional nested object starts empty.
+    pub fn new() -> Self {
+        Self {
+            title: None,
+            body: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser posted, from its pairs: each control read by its
+    /// name, a list's rows in the order of their indexes.
+    /// `Form<DocumentInputForm>` decodes a post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self::from_post(&Posted::from_pairs(pairs))
+    }
+
+    /// The form as posted: its fields
+    /// and whether the post sent more than the form reads.
+    fn from_post(posted: &Posted) -> Self {
+        Self {
+            overflow: posted.overflow,
+            ..Self::from_posted(posted)
+        }
+    }
+
+    /// The input: each field read as the input type's JSON, then parsed by
+    /// the type's rules with undeclared keys refused; else each control's
+    /// errors, or the form's when its post sent more than it reads.
+    pub fn parse(&self) -> Result<types::DocumentInput, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let json = self.write("", &mut errors);
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        types::validators::parse_document_input(Value::Object(json), UnknownFields::Refuse).map_err(FormErrors::from)
+    }
+
+    /// The form as posted under `posted`.
+    fn from_posted(posted: &Posted) -> Self {
+        Self {
+            title: posted.get("title").text(),
+            body: posted.get("body").text(),
+            overflow: false,
+        }
+    }
+
+    /// Each field as the input type's JSON, its controls named under `at`;
+    /// a value a control cannot hold is an error at the control.
+    fn write(&self, at: &str, errors: &mut FormErrors) -> Map<String, Value> {
+        let mut json = Map::new();
+        put(&mut json, errors, "title", &format!("{at}title"), text(self.title.as_deref()));
+        put(&mut json, errors, "body", &format!("{at}body"), text(self.body.as_deref()));
+        json
+    }
+
+    /// Whether the component shows the errors at `path`: at a control, a
+    /// nested object's or a list's fieldset, or a row.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [] => true,
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "title" => rest.is_empty(),
+                "body" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentInputForm {
+    /// Reads the pairs of a post, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
 /// The form of `MilestoneInput`, each field as the browser sends it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MilestoneInputForm {
@@ -1067,6 +1161,45 @@ impl<'de> Deserialize<'de> for TaskInputForm {
     }
 }
 
+/// The fields of `DocumentInputForm`, each with its label, its value as sent,
+/// the attributes the input type's rules give it and its errors; a nested
+/// object's in a fieldset, and a list's rows with their buttons. `form` is
+/// a new form when the page passes none, and `choices` turns a text or
+/// number field the app names into a select.
+#[component]
+pub async fn document_input_fields(
+    #[default(DocumentInputForm::new())] form: DocumentInputForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentInputForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <div class="field">
+            <label for="document-input-title">"Title"</label>
+            match choices.of("title", "title") {
+                Some(options) => choice_select(id: "document-input-title", name: "title", required: false, invalid: errors.invalid("title"), options: choice_options(options, form.title.as_deref())),
+                None => <input id="document-input-title" name="title" type="text" maxlength="80" value=(form.title.clone()) aria-invalid=(errors.invalid("title"))>,
+            }
+            for message in errors.of("title") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="document-input-body">"Body"</label>
+            match choices.of("body", "body") {
+                Some(options) => choice_select(id: "document-input-body", name: "body", required: false, invalid: errors.invalid("body"), options: choice_options(options, form.body.as_deref())),
+                None => <textarea id="document-input-body" name="body" rows="6" maxlength="2000" aria-invalid=(errors.invalid("body"))>"\n"(form.body.clone())</textarea>,
+            }
+            for message in errors.of("body") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
 /// The fields of `ProjectInputForm`, each with its label, its value as sent,
 /// the attributes the input type's rules give it and its errors; a nested
 /// object's in a fieldset, and a list's rows with their buttons. `form` is
@@ -1345,6 +1478,601 @@ pub async fn task_input_fields(
                 None => <input id="task-input-title" name="title" type="text" required=(true) minlength="1" maxlength="120" value=(form.title.clone()) aria-invalid=(errors.invalid("title"))>,
             }
             for message in errors.of("title") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
+/// The arguments of document.clearComments, each as the browser sends it. Sent
+/// by POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentClearCommentsArgsForm {
+    pub document_id: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentClearCommentsArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(document_id: impl ToString) -> Self {
+        Self {
+            document_id: Some(document_id.to_string()),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<DocumentClearCommentsArgsForm>` decodes a
+    /// post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            document_id: posted.get("documentId").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::DocumentClearCommentsArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_document_id = single(&mut errors, "documentId", text(self.document_id.as_deref()));
+        let Some(arg_document_id) = arg_document_id else {
+            return Err(errors);
+        };
+        let args = crate::api::DocumentClearCommentsArgs {
+            document_id: arg_document_id,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::document_clear_comments`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::Comment>, Refusal> {
+        let args = self.parse()?;
+        operations::document_clear_comments(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(_path: &[Segment]) -> bool {
+        false
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentClearCommentsArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `DocumentClearCommentsArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input. `choices` turns a text or number control the
+/// app names into a select.
+#[component]
+pub async fn document_clear_comments_args_fields(
+    #[default] form: DocumentClearCommentsArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentClearCommentsArgsForm::shows);
+    let _ = choices;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="documentId" value=(form.document_id.clone())>
+    })
+}
+
+/// The arguments of document.getDocument, each as the browser sends it. A
+/// filter, sent by GET and read from the query.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentGetDocumentArgsForm {
+    pub id: Option<String>,
+    pub revision: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentGetDocumentArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "get";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            revision: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<DocumentGetDocumentArgsForm>` decodes a
+    /// query this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            revision: posted.get("revision").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The filter the current request's query holds, so a page's form shows
+    /// the filters in effect: what `Form<DocumentGetDocumentArgsForm>` reads on GET.
+    pub fn from_query(cx: &Cx) -> topcoat::Result<Self> {
+        let query = uri(cx).query().unwrap_or_default();
+        Ok(Form::<Self>::from_bytes(query.as_bytes())?.0)
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::DocumentGetDocumentArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let arg_revision = single(&mut errors, "revision", number(self.revision.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(arg_revision) = arg_revision else {
+            return Err(errors);
+        };
+        let args = crate::api::DocumentGetDocumentArgs {
+            id: arg_id,
+            revision: arg_revision,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::document_get_document`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::Document, Refusal> {
+        let args = self.parse()?;
+        operations::document_get_document(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "revision" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentGetDocumentArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `DocumentGetDocumentArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input. `choices` turns a text or number control the
+/// app names into a select.
+#[component]
+pub async fn document_get_document_args_fields(
+    #[default] form: DocumentGetDocumentArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentGetDocumentArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="document-get-document-revision">"Revision"</label>
+            match choices.of("revision", "revision") {
+                Some(options) => choice_select(id: "document-get-document-revision", name: "revision", required: false, invalid: errors.invalid("revision"), options: choice_options(options, form.revision.as_deref())),
+                None => <input id="document-get-document-revision" name="revision" type="number" step="any" min="1" value=(form.revision.clone()) aria-invalid=(errors.invalid("revision"))>,
+            }
+            for message in errors.of("revision") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
+/// The arguments of document.removeCover, each as the browser sends it. Sent by
+/// POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentRemoveCoverArgsForm {
+    pub id: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentRemoveCoverArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<DocumentRemoveCoverArgsForm>` decodes a post
+    /// this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::DocumentRemoveCoverArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let args = crate::api::DocumentRemoveCoverArgs {
+            id: arg_id,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::document_remove_cover`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::Document, Refusal> {
+        let args = self.parse()?;
+        operations::document_remove_cover(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(_path: &[Segment]) -> bool {
+        false
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentRemoveCoverArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `DocumentRemoveCoverArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input. `choices` turns a text or number control the
+/// app names into a select.
+#[component]
+pub async fn document_remove_cover_args_fields(
+    #[default] form: DocumentRemoveCoverArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentRemoveCoverArgsForm::shows);
+    let _ = choices;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+    })
+}
+
+/// The arguments of document.replaceComments, each as the browser sends it.
+/// Sent by POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentReplaceCommentsArgsForm {
+    pub document_id: Option<String>,
+    pub texts: Vec<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentReplaceCommentsArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(document_id: impl ToString) -> Self {
+        Self {
+            document_id: Some(document_id.to_string()),
+            texts: Vec::new(),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<DocumentReplaceCommentsArgsForm>` decodes a
+    /// post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            document_id: posted.get("documentId").first(),
+            texts: posted.get("texts").values(false),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::DocumentReplaceCommentsArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_document_id = single(&mut errors, "documentId", text(self.document_id.as_deref()));
+        let arg_texts = list(&mut errors, "texts", &self.texts, text);
+        let Some(arg_document_id) = arg_document_id else {
+            return Err(errors);
+        };
+        let Some(arg_texts) = arg_texts else {
+            return Err(errors);
+        };
+        let args = crate::api::DocumentReplaceCommentsArgs {
+            document_id: arg_document_id,
+            texts: arg_texts,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::document_replace_comments`). A refusal is the status a
+    /// page answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::Comment>, Refusal> {
+        let args = self.parse()?;
+        operations::document_replace_comments(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "texts" => shows_all(rest),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentReplaceCommentsArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `DocumentReplaceCommentsArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input. `choices` turns a text or number control the
+/// app names into a select.
+#[component]
+pub async fn document_replace_comments_args_fields(
+    #[default] form: DocumentReplaceCommentsArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentReplaceCommentsArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="documentId" value=(form.document_id.clone())>
+        <fieldset class="ss-list" data-field="texts">
+            <legend>"Texts"</legend>
+            for message in errors.under("texts") {
+                <p class="field-error">(message)</p>
+            }
+            #[key(i0)]
+            for (i0, row0) in form.texts.iter().cloned().map(Some).chain([None]).enumerate() {
+                <div class="field ss-row">
+                    let id = format!("document-replace-comments-texts-{i0}");
+                    let label = format!("Texts {}", i0 + 1);
+                    <label for=(&id)>(&label)</label>
+                    match choices.of("texts", "texts") {
+                        Some(options) => choice_select(id: &id, name: "texts", required: false, invalid: errors.invalid("texts"), options: choice_options(options, row0.as_deref())),
+                        None => <input id=(&id) name="texts" type="text" value=(row0.clone()) aria-invalid=(errors.invalid("texts"))>,
+                    }
+                </div>
+            }
+        </fieldset>
+    })
+}
+
+/// The arguments of document.replaceDocument, each as the browser sends it, its
+/// input's fields beside them. Sent by POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentReplaceDocumentArgsForm {
+    pub id: Option<String>,
+    pub input: DocumentInputForm,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl DocumentReplaceDocumentArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default, and
+    /// the input's new form.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            input: DocumentInputForm::new(),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value, and the input's fields by their names.
+    /// `Form<DocumentReplaceDocumentArgsForm>` decodes a post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            input: DocumentInputForm::from_post(&posted),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, the input parsed by its form, then checked as
+    /// the router checks a request's (`Args::check`); else each control's
+    /// errors, or the form's when the browser sent more than it reads. `check`
+    /// refuses the first argument that breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::DocumentReplaceDocumentArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let input = match self.input.parse() {
+            Ok(input) => Some(input),
+            Err(refused) => {
+                errors.merge(refused);
+                None
+            }
+        };
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(input) = input else {
+            return Err(errors);
+        };
+        let args = crate::api::DocumentReplaceDocumentArgs {
+            id: arg_id,
+            input,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::document_replace_document`). A refusal is the status a
+    /// page answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::Document, Refusal> {
+        let args = self.parse()?;
+        operations::document_replace_document(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control or the input's. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        DocumentInputForm::shows(path)
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentReplaceDocumentArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `DocumentReplaceDocumentArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input; then the input's fields. `choices` turns a
+/// text or number control the app names into a select.
+#[component]
+pub async fn document_replace_document_args_fields(
+    #[default] form: DocumentReplaceDocumentArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(DocumentReplaceDocumentArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="document-replace-document-title">"Title"</label>
+            match choices.of("title", "title") {
+                Some(options) => choice_select(id: "document-replace-document-title", name: "title", required: false, invalid: errors.invalid("title"), options: choice_options(options, form.input.title.as_deref())),
+                None => <input id="document-replace-document-title" name="title" type="text" maxlength="80" value=(form.input.title.clone()) aria-invalid=(errors.invalid("title"))>,
+            }
+            for message in errors.of("title") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="document-replace-document-body">"Body"</label>
+            match choices.of("body", "body") {
+                Some(options) => choice_select(id: "document-replace-document-body", name: "body", required: false, invalid: errors.invalid("body"), options: choice_options(options, form.input.body.as_deref())),
+                None => <textarea id="document-replace-document-body" name="body" rows="6" maxlength="2000" aria-invalid=(errors.invalid("body"))>"\n"(form.input.body.clone())</textarea>,
+            }
+            for message in errors.of("body") {
                 <p class="field-error">(message)</p>
             }
         </div>
