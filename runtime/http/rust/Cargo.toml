@@ -38,9 +38,10 @@ reqwest = { version = "0.13.2", default-features = false, features = ["native-tl
 # password-hash crate's PHC reader, since the runtime reads a PHC string in
 # the one form every identity runtime writes.
 argon2 = { version = "0.5.3", default-features = false, optional = true }
-# The identity feature's CORS layer. Already in axum's tree.
-tower-layer = { version = "0.3.3", optional = true }
-tower-service = { version = "0.3.3", optional = true }
+# The site CORS layer (D55, D57) and the identity feature's. Already in
+# axum's tree.
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
 # The identity-postgres feature's client, reading and writing Postgres UUIDs
 # as the uuid crate's.
 tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"], optional = true }
@@ -65,7 +66,7 @@ http-client = ["dep:reqwest"]
 # session and administration routes, over an identity store. The store runs
 # its SQL through a client the service binds; the two features below add
 # the default bindings. A password hash runs on tokio's blocking pool.
-identity = ["dep:argon2", "dep:tower-layer", "dep:tower-service", "tokio/rt"]
+identity = ["dep:argon2", "tokio/rt"]
 # The identity store's Postgres client, over tokio-postgres.
 identity-postgres = ["identity", "dep:tokio-postgres"]
 # The identity store's SQLite client, over rusqlite.

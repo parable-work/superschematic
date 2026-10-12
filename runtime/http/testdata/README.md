@@ -6,6 +6,7 @@ behave alike.
 | Path | What it holds |
 |---|---|
 | `serviceauth_parity.json` | The service step's vectors (D37). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
+| `cors_parity.json` | The decisions of a site's CORS (D55, amended): Go's `cors.Policy.Decide`, TypeScript's `corsDecision` and Rust's `cors::Policy::decide`. Its `comment` states the harness; `runtime/http/go/cors` writes it with `-update`. |
 | `stackconfig_parity.json` | The vectors of the readers of a stack's derived fields (D51, D57): `LoadDatabase`, `LoadService`, `LoadBucket`, `LoadCallers` and `LoadCORS` and their TypeScript and Rust twins. Its `comment` states the harness; `runtime/http/go/stackconfig` writes it with `-update`. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |
 | `identity/` | The fixture the identity stores run against: `fixture-user-model-db.json` (its identity descriptor), `create.sql` (its Postgres DDL) and `sqlite/create.sql` (its SQLite DDL). `TestIdentityStoreFixtureIsCurrent` in `internal/generator` fails when they are stale and rewrites them with `-update`. |
