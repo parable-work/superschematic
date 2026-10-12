@@ -39,8 +39,9 @@ service's name, a hyphen, and the job's class in kebab case
 
 On the local target, run runs the job against the environment stack dev
 runs, from another terminal. It reads the environment the last build
-resolved and the program stack dev rendered, builds the job's binary from
-its entrypoint module at <output-root>/server/<stack>/<job>, and runs it
+resolved and the program stack dev rendered, builds a Go job's binary from
+its entrypoint module at <output-root>/server/<stack>/<job>, or installs
+the Bun workspace for a TypeScript job's main.ts there, and runs it
 with the environment's values, secrets and keys, its timeout and its
 retries, each line of its output with the job's name in front. It builds
 no schema, so a change to the job's implementation is in the run, and a
