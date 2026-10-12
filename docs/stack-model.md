@@ -218,8 +218,10 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a CORS field per served API that a site calls, `<API>_CORS`
   (`SHOP_API_CORS`), named by the core's rule over the API's own name as
   the callers field is. It lists the public origin of each site whose site
-  edge reaches the API, which its server answers CORS for and no other
-  (D55, section 8.10).
+  edge reaches the API, which its server answers CORS for (D55, section
+  8.10). For any other origin the field answers no preflight, which goes
+  on to the API, whose identity runtime answers the trusted origins of its
+  identity config (D55, amended).
 
 A site has no config of its own to fill: its one binding per site edge,
 named after the API it reaches, is what the deploy writes into the site's
@@ -1571,7 +1573,8 @@ API's service with its generated `NewIdentity`, from the config
 field: JSON, the runtime's defaults when unset, and a refused config stops
 the server. The implementation writes no auth middleware. A preflight
 goes to the router that registers the method it asks about, whose CORS
-middleware answers the trusted origins. OpenTelemetry export
+middleware answers the trusted origins, a preflight the site's CORS hands
+on included (section 8.10). OpenTelemetry export
 is not set up: the runtime records spans through the global tracer, and an
 exporter would add the OTLP client's dependencies to every server.
 
@@ -2558,11 +2561,19 @@ config may leave `outputs` out.
   origin, credentials, `Accept`, `Authorization` and `Content-Type`, the
   methods of the API's operations and a max age of ten minutes, and any
   other request from it carries the origin and credentials. Any other
-  origin gets `Vary` alone. On a server that serves several APIs, a
-  request is the API's whose routes take it, a preflight by the method it
-  asks for. The vectors in `runtime/http/testdata/cors_parity.json` hold
-  both runtimes to one decision, and the generated entrypoints wire it for
-  each API a site of the stack calls.
+  origin gets `Vary` alone, and the site's CORS does not answer its
+  preflight: the request reaches the API, which answers it as it would
+  with no site (D55, amended). An identity API's CORS answers the trusted
+  origins of its identity config there, with the method and headers they
+  ask for (D50), and an origin neither lists gets the API's 405
+  (Go) or 404 (TypeScript), with no `Access-Control-Allow-Origin`. An
+  origin that is both a site and trusted gets the site's answer. On a
+  server that serves several APIs, a request is the API's whose routes
+  take it, a preflight by the method it asks for. The vectors in
+  `runtime/http/testdata/cors_parity.json` hold both runtimes to one
+  decision, which says whether the server answers a request itself, and
+  the generated entrypoints wire it for each API a site of the stack
+  calls, around the server and so outside each identity API's own CORS.
 - **Publish.** A target publishes a site through its `Sites` seam
   (`registry.SitePublisher`): the files of a build under their digest,
   and the site's config for a run. The site's platform writes where it

@@ -200,8 +200,10 @@ async function main(): Promise<void> {
 {{- if .AnyCORS }}
 
   // A site's browser calls an API here from the site's origin: each API a
-  // site calls answers CORS for the origins its CORS field lists, and no
-  // other, the API a request is by the operations that take it.
+  // site calls answers CORS for the origins its CORS field lists, the API a
+  // request is by the operations that take it, and hands a preflight from
+  // another origin on to the app, so an identity API's CORS still answers
+  // its trusted origins (section 8.10).
   const handle = corsHandler(
     [
 {{- range .APIs }}

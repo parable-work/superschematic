@@ -23,9 +23,10 @@ var corsAPIs = map[string]struct {
 }
 
 // corsPolicy is the CORS policy of api, an API a site calls: the origins
-// its CORS field lists, which the server answers CORS for and no other,
-// and the methods of its operations. In an environment where no site
-// calls api the field lists none, and the server answers no CORS.
+// its CORS field lists, which the server answers CORS for, and the methods
+// of its operations. In an environment where no site calls api the field
+// lists none, and only the API's own CORS answers any origin: an identity
+// API's, for its config's trusted origins.
 func corsPolicy(api string) (cors.Policy, error) {
 	a, ok := corsAPIs[api]
 	if !ok {

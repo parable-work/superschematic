@@ -184,8 +184,9 @@ func run(logger *zap.Logger) error {
 	// whose token this keeps on the request's context (section 9.4).
 	handler = serviceauth.CaptureAuthorization(handler)
 	// A site's browser calls an API here from the site's origin: each API a
-	// site calls answers CORS for the origins its CORS field lists, and no
-	// other (section 8.10).
+	// site calls answers CORS for the origins its CORS field lists, and
+	// hands a preflight from another origin on to the API's router, so an
+	// identity API's CORS still answers its trusted origins (section 8.10).
 	handler = cors.Handler(handler, []cors.API{
 		{Policy: shopOrdersCORS, Match: corsRoutes(shopOrdersRouter)},
 	})
