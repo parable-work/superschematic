@@ -173,6 +173,8 @@ func TestStackCommands(t *testing.T) {
 	stackDir := demoTree(t)
 	ext := &stacktest.Extension{}
 	exts := []registry.Extension{ext}
+	// progress is what the last command wrote to stderr.
+	var progress string
 	run := func(args ...string) (string, error) {
 		t.Helper()
 		var stdout, stderr bytes.Buffer
@@ -184,6 +186,7 @@ func TestStackCommands(t *testing.T) {
 		err := root.Execute()
 		assert.NotContains(t, stdout.String()+stderr.String(), "key-", "a secret value reached the output")
 		assert.NotContains(t, stdout.String()+stderr.String(), "local \"key\"", "a secret value reached the output")
+		progress = stderr.String()
 		return stdout.String(), err
 	}
 	useTerminal(t, nil)
@@ -212,7 +215,11 @@ func TestStackCommands(t *testing.T) {
 	n := len(ext.Provisioner.Calls())
 	out, err = run("deploy", "Staging", "--image", demoImage(1))
 	require.NoError(t, err)
+	// The run is deployed once, on stdout; the progress on stderr ends
+	// with the last step (the first live run printed the line twice).
 	assert.Equal(t, "deployed Staging\n", out)
+	assert.Equal(t, 1, strings.Count(out+progress, "deployed Staging"), "stdout:\n%s\nstderr:\n%s", out, progress)
+	assert.True(t, strings.HasSuffix(progress, "step 4/4: migrate contract\n"), "stderr:\n%s", progress)
 	assert.Equal(t, []string{"Value of DemoConfig.API_KEY (read by demo-api): "}, term.prompts)
 	var steps []string
 	for _, call := range ext.Provisioner.Calls()[n:] {

@@ -187,7 +187,8 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	if err := d.write(ctx); err != nil {
 		return nil, err
 	}
-	s.logf("deployed %s", s.run.Name())
+	// The log ends with the last step: the command says the run is
+	// deployed, once, on its output.
 	return d.manifest, nil
 }
 
