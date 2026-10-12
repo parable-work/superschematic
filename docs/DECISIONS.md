@@ -5204,3 +5204,50 @@ cancel's 409 as the form's message, and a signed-out post of 4,000 or
 50,000 lines rendered with 51.
 
 The rule is reversible until the first release.
+
+### D44, amended: a submission keeps its route's status, long text is a textarea, and a display component reads a time and names an id
+
+Building acme's order pages on the generated forms found five gaps.
+`submit` folded every refusal, a 401, 403, 404 or 409, into `FormErrors`,
+so a page that answered with the route's status, as `/orders` did,
+parsed the form and called the operation itself. A label ran a number
+into its word: `line1` read "Line1". A cancel's reason of up to 500
+characters and a review's body of up to 5000 were one-line inputs. And a
+display component showed a timestamp as the API's text,
+`2026-10-09T14:30:00Z`, and an order line's product as its raw id, since
+an API type does not say which table an id refers to.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An argument form's `submit(cx)` returns `Result<Output, Refusal>`. `Refusal { status, errors }` is the status a page answers with and the errors it renders the form again with: 422 for a form `parse` refused, else the route's status, as the JSON API answers, and `FormErrors::from_api`. `Refusal::from(errors)` and `Refusal::from_api(&err)` build one for a page over an input form, which knows the operation it calls. `parse()` is unchanged. acme's `/orders`, its cancel and `/orders/new` answer with it: a signed-out shopper's order is 401, a second cancel 409. | A `(StatusCode, FormErrors)` tuple, whose parts a page names itself; a status on `FormErrors`, which `parse`'s errors would carry as 422 too; a `submit` on an input form, which does not know the operation that takes it, as one input type may serve several |
+| A number that ends a word is a word of its own in a label: `line1` is "Line 1", `addressLine2` "Address line 2". An acronym or a single letter keeps its digits (`awsS3Bucket` is "Aws S3 bucket", `HTTP2Enabled` "HTTP2 enabled", `v2` "V2"), and a number followed by lowercase letters stays in its word (`md5sum`). A form, a display component and an argument share the rule; ids are unchanged. | Splitting every letter from a digit, which reads `awsS3Bucket` as "Aws S 3 bucket"; a list of technical words that keep their digits (`sha256`, `base64`), which a `@docs` title gives one field instead |
+| A text field or argument whose `maxLength`, its own or its scalar's, is 500 or more is long text, a `<textarea rows="6">` with `minlength`, `maxlength`, a placeholder and its hint, which renders the value as sent after a newline, since a browser drops one after the start tag. A textarea takes no `pattern`, so `parse` alone checks it. The app's choices still make it a select. | 200, which would make the titles and names this repository's schemas bound at 200 textareas; a hint per field in the schema, which no schema declares yet |
+| A display component shows a date, a time or a date-time as a `<time>` whose `datetime` is the value as the API sends it and whose text is the same for every reader, in English and UTC, with no locale or zone of the server's: a date-time "9 Oct 2026, 14:30 UTC", converted from its offset and cut to the minute, a date "9 Oct 2026", a time "14:30". Text that is none of them shows as it is. `views.rs` writes the text itself, `date_time_text`, `date_text` and `time_text`, public, each written when a component shows its kind, so the crate gains no dependency. This replaces the display amendment's text the API sends. | The API's text, which a reader parses by eye; the server's locale or zone, which are not the reader's; a date crate the crate does not otherwise need; formatting in the reader's zone, which takes a script the components do not ship, and which `datetime` leaves an app free to add |
+| `choices` is a module of its own, written when the crate has a form or a display component, and `forms` re-exports `Choices` and `Choice`, so code that names `forms::Choices` compiles. `<type>_detail` and `<type>_table` take an optional `choices` and show the label it gives a text or number value, else the value: a list's items and a map's values by their field's path, and a nested record's component gets `choices.under(field)`, so `lines.productId` names the products of an order's lines table. A choice matches a value whose text is its value exactly, an id's compact text, which a record holds and `to_string()` gives; acme's catalog choices are that text, and its order page names each line's product. `Choices` gains `label` and `under`, and shares its entries, so `under` copies none for each row. | Inferring the table an id refers to from its name or a source table's foreign key, which an API type does not declare; matching a UUID in either of its texts, which would parse values per cell and differ from what a form's select sends back; a second type of choices for display |
+| Money is not formatted. superscalar's `Finance.Money` is an integer of a currency's smallest unit that names no currency, so neither its decimal places nor its symbol are known, and no scalar holds a currency code; no schema here uses it outside test fixtures, and acme's prices are `Generic.Int64` fields named `*Cents`. A component shows such values as numbers. | Formatting a `*Cents` field by its name, a rule no schema states; assuming two decimal places for `Finance.Money` |
+
+Status: built. The goldens cover the seven fixtures again: fixture-forms-api
+gains `BillingAddress.line2` and `BookingInput.requests`, long text with
+a minLength, a pattern and a description, and fixture-views-api's
+`OrderView` gains `collectAt`, a `Temporal.Time`. `TestLabelsAndIDs`
+checks the label rule. Through `Router::handle`,
+`TestTheCrateServesATopcoatApp` submits `getTenant`'s filter signed out
+(401), without its permission (403), as a reader (200) and with a flag
+that is no boolean (422); `TestArgumentFormsServeATopcoatApp` answers a
+cancel the operation refuses as not found (404) or in conflict (409), a
+missing code with 422, builds each `Refusal`, and renders the 500
+characters of a reason as a textarea; `TestFormsServeATopcoatApp`
+renders the requests' textarea with its lengths and hint and no pattern,
+books its lines and leading newline as sent, renders a refused one again
+escaped after the newline, and labels `line2` "Line 2";
+`TestViewsRenderRecords` renders a date-time, a date and a time as text,
+one with an offset in UTC across a year's end, and the three functions'
+edge cases, then a detail's and a table's values by the app's choices,
+two records down, in a list and in a row's title cell, an unnamed value
+as it is and a label escaped, all in a crate with no forms. acme's tests
+see `/orders` signed out answer 401 with the form's message, a
+signed-out order 401, a second cancel 409, the reason and the review's
+body as textareas, "Line 1", the order's line named "Anvil", and its
+placing time in UTC.
+
+The rule is reversible until the first release.
