@@ -245,7 +245,7 @@ func (r run) writeRustWorkspace(rust bool) error {
 		return nil
 	}
 	if err := servergen.UpdateRustLockfile(cargo, r.Options.OutputRoot); err != nil {
-		r.Logf("  - %s: not brought up to date: %v; build every service (superschematic build-all), which runs cargo update --workspace in %s, and commit it\n", lockfile, firstLine(err.Error()), r.Options.OutputRoot)
+		r.Logf("  - %s: not brought up to date: %v; build every service (superschematic build-all), which runs cargo update --workspace in %s, and commit it\n", lockfile, oneLine(err.Error()), r.Options.OutputRoot)
 	}
 	return nil
 }
@@ -266,10 +266,16 @@ func (r run) noteIgnoredRustLockfile() {
 		filepath.Join(r.Options.OutputRoot, servergen.RustLockfileName), by, servergen.RustLockfileName)
 }
 
-// firstLine is s up to its first newline.
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(s, "\n")
-	return line
+// oneLine is cargo's message s on one line: its lines, trimmed, joined by
+// colons, without the blank ones and cargo's "Caused by:" headings.
+func oneLine(s string) string {
+	var parts []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" && line != "Caused by:" {
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, ": ")
 }
 
 // noteIgnoredLockfile says, in one line, how to commit the lockfile of the
