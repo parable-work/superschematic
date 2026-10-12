@@ -395,8 +395,16 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 // emulator and the emulator's endpoint, which the runtimes' GCS
 // implementation reaches with no credential (D54). The edge needs no
 // resource: the emulator checks no caller.
+//
+// A Rust server has no Bucket in its runtime, and D57 leaves it out, so
+// the edge is refused, as gcp's connector refuses it, rather than handing
+// the server variables nothing reads.
 func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
-	return registry.Connected{Value: ir.BucketConnection{Name: ctx.To.ResourceName, Endpoint: ctx.To.Address}}, nil
+	from, to := ctx.From, ctx.To
+	if from.Language == registry.APILanguageRust {
+		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Bucket in its runtime to reach bucket %s with: buckets from a Rust server are not built (D57)", from.Kind, from.Name, from.Language, from.Kind, to.Name)
+	}
+	return registry.Connected{Value: ir.BucketConnection{Name: to.ResourceName, Endpoint: to.Address}}, nil
 }
 
 // lowerDatabase lowers a database deployable to the environment's Postgres

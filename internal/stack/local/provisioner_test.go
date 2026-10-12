@@ -711,7 +711,7 @@ func (f *fixture) rollout(t *testing.T, id string) error {
 // (D57): its wave builds its crate with cargo in its module, into the
 // program directory's Cargo target directory, and runs the binary its
 // Cargo.toml names from target/release with the environment a Go server
-// gets, its database and bucket included; Orders still builds with go.
+// gets, its database included; Orders still builds with go.
 // Applying the wave again builds into the same target directory and
 // restarts the server.
 func TestApplyRunsARustServer(t *testing.T) {
@@ -752,11 +752,9 @@ func TestApplyRunsARustServer(t *testing.T) {
 		t.Errorf("shop-api's PORT = %q, want %d", got, f.apiPort)
 	}
 	for name, value := range map[string]string{
-		"SHOP_DB_DATABASE_URL":       local.DatabaseURL(f.pgPort, "shop_db"),
-		"SHOP_MEDIA_BUCKET_NAME":     "shop-media",
-		"SHOP_MEDIA_BUCKET_ENDPOINT": fmt.Sprintf("http://127.0.0.1:%d", f.stPort),
-		"STRIPE_KEY":                 "sk_test_123",
-		"LOG_LEVEL":                  "info",
+		"SHOP_DB_DATABASE_URL": local.DatabaseURL(f.pgPort, "shop_db"),
+		"STRIPE_KEY":           "sk_test_123",
+		"LOG_LEVEL":            "info",
 	} {
 		if got := envValue(api.cmd.Env, name); got != value {
 			t.Errorf("shop-api's %s = %q, want %q", name, got, value)
@@ -842,7 +840,7 @@ func TestApplyRefusesARustServerItCannotRun(t *testing.T) {
 		},
 		{
 			name:     "two servers naming one binary",
-			services: stacktest.InRust(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop())), "shop-api", "shop-orders"),
+			services: stacktest.InRust(stacktest.WithoutBuckets(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop()))), "shop-api", "shop-orders"),
 			setup: func(t *testing.T, f *fixture) {
 				f.writeCrate(t, "shop-api", crate("server"))
 				f.writeCrate(t, "Orders", crate("server"))

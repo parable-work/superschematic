@@ -81,12 +81,6 @@
           "kind": "API"
         }
       ],
-      "buckets": [
-        {
-          "name": "shop-media",
-          "kind": "Bucket"
-        }
-      ],
       "language": "RUST",
       "exposed": true,
       "resourceName": "shop-api",
@@ -108,15 +102,6 @@
           "edge": "sql:shop-api->shop-db"
         },
         {
-          "field": "SHOP_MEDIA_BUCKET",
-          "source": "derived",
-          "value": {
-            "endpoint": "http://127.0.0.1:25673",
-            "name": "shop-media"
-          },
-          "edge": "bucket:shop-api->shop-media"
-        },
-        {
           "field": "STRIPE_KEY",
           "source": "secret",
           "secret": "PaymentsSecrets.STRIPE_KEY"
@@ -136,19 +121,6 @@
       "dialect": "postgres",
       "resourceName": "shop-db",
       "address": "127.0.0.1:32673"
-    },
-    {
-      "name": "shop-media",
-      "kind": "bucket",
-      "platform": "local.gcs",
-      "services": [
-        {
-          "name": "shop-media",
-          "kind": "Bucket"
-        }
-      ],
-      "resourceName": "shop-media",
-      "address": "http://127.0.0.1:25673"
     },
     {
       "name": "shop-orders-fulfil-orders",
@@ -297,18 +269,6 @@
     }
   ],
   "edges": [
-    {
-      "id": "bucket:shop-api->shop-media",
-      "kind": "bucket",
-      "from": "shop-api",
-      "to": "shop-media",
-      "service": {
-        "name": "shop-media",
-        "kind": "Bucket"
-      },
-      "connector": "local.process-gcs",
-      "field": "SHOP_MEDIA_BUCKET"
-    },
     {
       "id": "http:Orders->shop-api",
       "kind": "http",
@@ -538,14 +498,6 @@
               "value": "postgres://postgres@127.0.0.1:32673/shop_db?sslmode=disable"
             },
             {
-              "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-              "value": "http://127.0.0.1:25673"
-            },
-            {
-              "name": "SHOP_MEDIA_BUCKET_NAME",
-              "value": "shop-media"
-            },
-            {
               "name": "STRIPE_KEY",
               "secret": "PaymentsSecrets.STRIPE_KEY"
             }
@@ -581,28 +533,6 @@
         "phase": "infrastructure",
         "owners": [
           "shop-db"
-        ]
-      },
-      {
-        "id": "shop-media.bucket",
-        "type": "local:storage/bucket:Bucket",
-        "properties": {
-          "container": {
-            "$output": {
-              "resource": "storage.container",
-              "name": "name"
-            }
-          },
-          "endpoint": "http://127.0.0.1:25673",
-          "name": "shop-media",
-          "service": "shop-media"
-        },
-        "dependsOn": [
-          "storage.container"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-media"
         ]
       },
       {
@@ -760,48 +690,6 @@
         "owners": [
           "shop-orders-ship-orders"
         ]
-      },
-      {
-        "id": "storage.container",
-        "type": "local:docker/container:Container",
-        "properties": {
-          "args": [
-            "-scheme",
-            "http",
-            "-host",
-            "0.0.0.0",
-            "-port",
-            "4443",
-            "-backend",
-            "filesystem",
-            "-filesystem-root",
-            "/storage",
-            "-public-host",
-            "127.0.0.1:25673",
-            "-external-url",
-            "http://127.0.0.1:25673"
-          ],
-          "image": "fsouza/fake-gcs-server:1.56.1",
-          "labels": {
-            "superschematic.environment": "Dev",
-            "superschematic.stack": "rust-stack"
-          },
-          "name": "superschematic-rust-stack-dev-storage",
-          "ports": [
-            {
-              "containerPort": 4443,
-              "host": "127.0.0.1",
-              "hostPort": 25673
-            }
-          ],
-          "readiness": {
-            "http": "/storage/v1/b"
-          }
-        },
-        "phase": "infrastructure",
-        "owners": [
-          "shop-media"
-        ]
       }
     ]
   },
@@ -812,10 +700,8 @@
         "Orders.calls.shop-api.key",
         "postgres.container",
         "shop-db.database.shop-db",
-        "shop-media.bucket",
         "shop-orders-fulfil-orders.calls.shop-api.key",
-        "shop-orders-ship-orders.calls.shop-api.key",
-        "storage.container"
+        "shop-orders-ship-orders.calls.shop-api.key"
       ]
     },
     {

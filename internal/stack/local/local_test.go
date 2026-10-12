@@ -161,15 +161,17 @@ func rustStack() *ir.Stack {
 	return s
 }
 
-// rustShop is the acme-shop services with shop-api written in Rust: its
-// server, which reaches shop-db through its authDb and shop-media through
-// its buckets, is a Rust process.
-func rustShop() []stack.Service { return stacktest.InRust(stacktest.AcmeShop(), "shop-api") }
+// rustShop is the acme-shop services with shop-api written in Rust and no
+// bucket, which a Rust server does not reach (D57): its server, which
+// reaches shop-db through its authDb, is a Rust process.
+func rustShop() []stack.Service {
+	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+}
 
 // TestRustGolden resolves the shop with shop-api in Rust in Dev: shop-api's
-// process is a Rust one, with the sql edge, bucket edge and port a Go
-// server's has, and no binary in the program, since the provisioner reads
-// the binary's name from the crate as it builds it.
+// process is a Rust one, with the sql edge and port a Go server's has, and
+// no binary in the program, since the provisioner reads the binary's name
+// from the crate as it builds it.
 func TestRustGolden(t *testing.T) {
 	checkGoldenEnvironment(t, assemble(t), rustStack(), rustShop(), "Dev")
 	env := resolve(t, assemble(t), rustStack(), rustShop(), "Dev")
@@ -375,6 +377,15 @@ func TestRefusals(t *testing.T) {
 			}
 		}
 		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
+	})
+	t.Run("a Rust server's bucket", func(t *testing.T) {
+		// shop-api lists shop-media; the Rust runtime has no Bucket, so
+		// the edge is refused as gcp refuses it, and nothing else is.
+		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-api"), "Dev")
+		want := "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)"
+		if len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering || !strings.Contains(errs.List[0].Message, want) {
+			t.Errorf("got %v, want the one lowering error %q", errs, want)
+		}
 	})
 	t.Run("a Rust job or worker", func(t *testing.T) {
 		// shop-orders' server is a Rust process; its job and its worker
