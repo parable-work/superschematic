@@ -12,6 +12,36 @@ use crate::api::types;
 use crate::wire;
 use topcoat::runtime::record;
 
+/// The record of `types::AccountKey`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountKeyRecord {}
+
+impl AccountKeyRecord {
+    /// The record of the type's JSON, as the API sends it: the type has no
+    /// field a record holds.
+    pub fn from_wire(_json: &serde_json::Value) -> Self {
+        Self {}
+    }
+
+    /// The type's JSON, as a request carries it: an empty object.
+    pub fn to_wire(&self) -> serde_json::Value {
+        serde_json::Value::Object(serde_json::Map::new())
+    }
+}
+
+impl From<&types::AccountKey> for AccountKeyRecord {
+    fn from(value: &types::AccountKey) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::AccountKey> for AccountKeyRecord {
+    fn from(value: types::AccountKey) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::AccountView`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

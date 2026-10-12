@@ -255,6 +255,21 @@ func (c *crate) ProceduresTakeArgs() bool {
 	return false
 }
 
+// RecordsUseWire reports whether a record field reads its value with a
+// wire helper, so records.rs imports the module. A record whose fields are
+// all left out reads none, and neither does a field that holds a nested
+// record by itself.
+func (c *crate) RecordsUseWire() bool {
+	for _, r := range c.Records {
+		for _, field := range r.Fields {
+			if strings.Contains(field.Read, "wire::") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // FormsUse reports whether a form writes a field with the helper put, so
 // forms.rs declares it.
 func (c *crate) FormsUse(put string) bool {

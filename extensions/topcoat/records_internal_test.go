@@ -52,3 +52,44 @@ func TestRecordsLeaveOutWhatThePageMustNotHold(t *testing.T) {
 		t.Errorf("AccountRecord's fields = %+v, want name alone", fields)
 	}
 }
+
+// TestRecordsWithoutLeavesImportNoWire builds the records of a type whose
+// fields are all left out, and of one whose only field holds it: neither
+// reads a value with a wire helper, so records.rs does not import the
+// module, which clippy would deny as unused. A field of a string does.
+func TestRecordsWithoutLeavesImportNoWire(t *testing.T) {
+	schema := ir.NewSchema("fixture", ir.SchemaKindAPI)
+	schema.Types["Key"] = &ir.TypeDef{Name: "Key", Fields: []*ir.FieldDef{
+		{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Secret: true},
+		{Name: "hint", TypeRef: ir.TypeRef{Name: "string"}, UIHidden: true},
+	}}
+	schema.Types["Rotation"] = &ir.TypeDef{Name: "Rotation", Fields: []*ir.FieldDef{
+		{Name: "key", TypeRef: ir.TypeRef{Name: "Key"}, Required: true},
+	}}
+	schema.Types["Account"] = &ir.TypeDef{Name: "Account", Fields: []*ir.FieldDef{
+		{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}}
+	recordsOf := func(results ...string) []record {
+		t.Helper()
+		var ops []declared
+		for _, name := range results {
+			ops = append(ops, declared{op: &ir.FieldDef{Name: "get" + name, TypeRef: ir.TypeRef{Name: name}}})
+		}
+		b := newRecordBuilder(schemaSet{schema})
+		if err := b.addResults(ops); err != nil {
+			t.Fatal(err)
+		}
+		return b.sorted()
+	}
+
+	records := recordsOf("Rotation")
+	if len(records) != 2 || len(records[0].Fields) != 0 || records[0].Name != "KeyRecord" {
+		t.Fatalf("records = %+v, want an empty KeyRecord and RotationRecord", records)
+	}
+	if (&crate{Records: records}).RecordsUseWire() {
+		t.Error("records whose fields read no leaf import wire")
+	}
+	if !(&crate{Records: recordsOf("Rotation", "Account")}).RecordsUseWire() {
+		t.Error("records with a string field do not import wire")
+	}
+}

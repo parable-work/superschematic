@@ -17,7 +17,7 @@
 //! The markup has `ss-` classes and `data-field` attributes, the field's
 //! JSON key, for a stylesheet or a test, and no style of its own.
 
-use crate::records::{AccountViewRecord, NoteInputRecord, SignupInputRecord};
+use crate::records::{AccountKeyRecord, AccountViewRecord, NoteInputRecord, SignupInputRecord};
 use topcoat::view::{View, component, view};
 
 /// Labels a value of `Plan`: its member's name in words. A value the
@@ -28,6 +28,37 @@ pub fn plan_label(value: &str) -> &str {
         "pro" => "Pro",
         other => other,
     }
+}
+
+/// `AccountKeyRecord` as a description list: each field's label and value.
+#[component]
+pub async fn account_key_detail(record: AccountKeyRecord) -> topcoat::Result<impl View> {
+    let _ = record;
+    Ok(view! {
+        <div class="ss-detail" data-type="AccountKey" role="group">
+            <dl>
+            </dl>
+        </div>
+    })
+}
+
+/// `AccountKeyRecord`s as a table: a column per field and a row per record.
+#[component]
+pub async fn account_key_table(rows: Vec<AccountKeyRecord>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="AccountKey">
+            <thead>
+                <tr>
+                </tr>
+            </thead>
+            <tbody>
+                for _row in rows {
+                    <tr>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
 }
 
 /// `AccountViewRecord` as a description list: each field's label and value.

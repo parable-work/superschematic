@@ -1,6 +1,7 @@
 # Accounts, signed up through a form: the input's fields are an email, a
 # URL, strings with rules, an enum, an integer and a number scalar, and a
-# boolean. A note's input holds a list, which a form does not.
+# boolean. A note's input holds a list, which a form does not. An account's
+# key has a secret field and a @uiHidden one, so its record has none.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -86,6 +87,17 @@ types:
       - name: newsletter
         typeRef: { name: boolean }
         required: true
+  AccountKey:
+    name: AccountKey
+    role: APIView
+    fields:
+      - name: key
+        typeRef: { name: string }
+        required: true
+        secret: true
+      - name: hint
+        typeRef: { name: string }
+        uiHidden: true
 operationSets:
   - name: AccountMutations
     operations:
@@ -111,4 +123,14 @@ operationSets:
             required: true
           - name: input
             typeRef: { name: NoteInput }
+            required: true
+      # Issue an account a new key.
+      - name: rotateKey
+        typeRef: { name: AccountKey }
+        required: true
+        httpMethod: POST
+        restPath: "accounts/{id}/key"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
             required: true

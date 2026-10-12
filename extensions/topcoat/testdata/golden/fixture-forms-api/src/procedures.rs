@@ -131,6 +131,37 @@ pub async fn call_account_sign_up(cx: &Cx, args: AccountSignUpArgsRecord) -> Res
     Ok(AccountViewRecord::from_wire(&json))
 }
 
+/// The arguments of account.rotateKey, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountRotateKeyArgsRecord {
+    pub id: String,
+}
+
+impl AccountRotateKeyArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::AccountRotateKeyArgs, ProblemRecord> {
+        Ok(crate::api::AccountRotateKeyArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// account.rotateKey, called from the browser.
+#[procedure("/_superschematic/fixture-forms-api/account/rotate-key")]
+pub async fn account_rotate_key(cx: &Cx, args: AccountRotateKeyArgsRecord) -> topcoat::Result<Result<AccountKeyRecord, ProblemRecord>> {
+    Ok(call_account_rotate_key(cx, args).await)
+}
+
+/// The body of the account_rotate_key procedure.
+pub async fn call_account_rotate_key(cx: &Cx, args: AccountRotateKeyArgsRecord) -> Result<AccountKeyRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::account_rotate_key(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(AccountKeyRecord::from_wire(&json))
+}
+
 /// The arguments of account.annotate, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

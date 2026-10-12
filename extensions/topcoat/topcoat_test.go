@@ -309,7 +309,9 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // formsAppTest: a page renders the signup form's fields with the
 // attributes its input type's rules give them; a post that breaks a rule,
 // or that the operation refuses, re-renders as sent with 422 and each
-// field's errors; a valid post signs up and redirects.
+// field's errors; a valid post signs up and redirects. Its AccountKey,
+// whose fields are a secret one and a @uiHidden one, is an empty record
+// that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, formsService, formsAppTest)
 }
@@ -941,8 +943,11 @@ const formsAppTest = `use std::sync::Arc;
 
 use async_trait::async_trait;
 use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
-use schemas_fixture_forms_api_topcoat::api::{types, AccountAnnotateArgs, AccountImplementation, AccountSignUpArgs, Implementations};
+use schemas_fixture_forms_api_topcoat::api::{
+    types, AccountAnnotateArgs, AccountImplementation, AccountRotateKeyArgs, AccountSignUpArgs, Implementations,
+};
 use schemas_fixture_forms_api_topcoat::forms::{signup_input_fields, FormErrors, SignupInputForm};
+use schemas_fixture_forms_api_topcoat::records::AccountKeyRecord;
 use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
 use serde_json::json;
 use topcoat::context::Cx;
@@ -972,6 +977,9 @@ impl AccountImplementation for Accounts {
     }
     async fn annotate(&self, _ctx: RequestContext, _args: AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
         Err(ApiError::not_implemented("annotate"))
+    }
+    async fn rotate_key(&self, _ctx: RequestContext, _args: AccountRotateKeyArgs) -> Result<types::AccountKey, ApiError> {
+        Err(ApiError::not_implemented("rotateKey"))
     }
 }
 
@@ -1087,6 +1095,14 @@ fn a_form_parses_into_its_input() {
     let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
     assert!(!errors.of("handle").is_empty(), "{errors:?}");
     assert!(errors.of("email").is_empty(), "{errors:?}");
+}
+
+#[test]
+fn a_record_whose_fields_are_all_left_out_is_empty() {
+    let key = types::AccountKey { key: "sk_123".to_string(), hint: Some("sk_".to_string()) };
+    let record = AccountKeyRecord::from(&key);
+    assert_eq!(record, AccountKeyRecord {});
+    assert_eq!(record.to_wire(), json!({}));
 }
 `
 
