@@ -30,9 +30,9 @@ const serverGenerator = "server"
 // generateServers writes the entrypoint of each Go and TypeScript server of
 // the stack the schema declares under servergen.StackDir (docs/stack-model.md,
 // sections 8.1, 8.2 and 8.6), and of each Go and TypeScript job and worker
-// beside them (sections 8.7 and 8.8, D52, D53), and scaffolds each served API's implementation that is missing, a
-// Go server's in Go and a TypeScript server's in TypeScript (sections 8.5
-// and 8.6). No environment changes the servers or the jobs, but the
+// beside them (sections 8.7 and 8.8, D52, D53), and scaffolds each served
+// API's implementation that is missing, a Go server's in Go and a
+// TypeScript server's in TypeScript (sections 8.5 and 8.6). No environment changes the servers or the jobs, but the
 // entrypoint of one that some environment connects to a database on Cloud
 // SQL links the Cloud SQL connector, or depends on the Node one. It plans
 // every entrypoint before it writes anything, so one it refuses leaves the
