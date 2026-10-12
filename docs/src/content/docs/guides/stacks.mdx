@@ -1119,8 +1119,12 @@ The workflow:
   `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
   is not committed or no longer matches the packages the build wrote, and
   type-checks each TypeScript server and the implementation of each API
-  one serves with `tsc --noEmit`. Every job that sets up Bun installs the
-  release a TypeScript server's image runs on.
+  one serves with `tsc --noEmit`. For a stack with a
+  [static site](/superschematic/guides/static-sites/) it installs the same
+  workspace and builds each site with its build script, as `stack deploy`
+  does, so a site that does not build fails the pull request. Every job
+  that sets up Bun installs the release a TypeScript server's image runs
+  on.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>
@@ -1135,6 +1139,13 @@ The workflow:
   the `Production` environment required reviewers in the repository's
   settings, and each production deploy waits for their approval.
   `workflow_dispatch` runs the same on demand from the branch.
+- A deploy or preview job of an environment with a site sets up Bun,
+  even when the schemas root installs with npm, and installs the
+  workspace from `schemas/dist/bun.lock` after the build, since `stack
+  deploy` builds the site on the runner. Jobs, workers and buckets need
+  nothing more: the deploy builds a job's or a worker's image on the
+  target, as it builds a server's, and a bucket is a resource of the
+  environment's graph.
 - One deploy runs at a time per environment, and one preview job per
   member.
 

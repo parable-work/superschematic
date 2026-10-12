@@ -3386,6 +3386,12 @@ The GitHub workflow:
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
+  - For a stack with a site (section 8.10), `check` installs the same
+    workspace from its lockfile, and builds each site with its build
+    script in its package, `bun run <build>`, as `stack deploy` does, so a
+    site that does not build fails the pull request. The ci generator
+    locates each site's package under the repository root, as it locates
+    the TypeScript implementations (`CIStack.Sites`).
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).
@@ -3404,6 +3410,15 @@ The GitHub workflow:
   environment's required reviewers approve it. Reviewers are a setting of
   the repository, not of the stack. `workflow_dispatch` runs `check` and,
   from the branch, the deploys.
+- A `deploy` or `preview` job of an environment with a site sets up Bun,
+  at `tools.env`'s release, even in a project whose schemas root installs
+  with npm, and installs the output root's workspace from its lockfile
+  after the build, since `stack deploy` builds the site on the runner
+  after a frozen install. A `plan` job does neither: `stack plan` builds
+  no site. Jobs, workers and buckets need nothing more of the workflow:
+  the deploy builds a job's or a worker's image through the target's
+  builder, as a server's, and a bucket, a job's schedule and a worker
+  pool are resources of the graph.
 - One deploy at a time per environment, and one preview job per member,
   neither cancelled by the next. A plan job has a group per pull request
   and environment: GitHub keeps one pending job per group and cancels the

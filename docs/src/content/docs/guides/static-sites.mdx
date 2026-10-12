@@ -162,6 +162,13 @@ superschematic stack build Staging
 superschematic stack deploy Staging --site shop-web=sha256:...
 ```
 
+The [generated CI](/superschematic/guides/stacks/#generated-ci) builds each
+site too: its `check` job installs the workspace from
+`schemas/dist/bun.lock` and runs the site's build script, so a site that
+does not build fails the pull request, and each job that deploys the site
+sets up Bun and installs the workspace first, even in a project whose
+schemas root installs with npm.
+
 ### On Google Cloud
 
 The gcp target serves each site from a Cloud Storage bucket of its own,

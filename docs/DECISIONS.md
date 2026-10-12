@@ -4360,9 +4360,16 @@ Status: built.
   goldens actionlint checks.
 
 The amendments below ship the archives the workflow's builds link and
-pin each generated module to the release. No generated workflow has run
-on GitHub Actions: a run needs a release, a project bootstrapped with a
-GitHub remote, and a repository that turns the workflow on.
+pin each generated module to the release. The workflow builds a stack's
+static sites (D55): `check` installs the output root's Bun workspace and
+builds each site, and the deploy and preview jobs of an environment with
+a site set up Bun, even in an npm project, and install the workspace,
+since `stack deploy` builds the site on the runner (`CIStack.Sites`,
+`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+workflow: the deploy builds their images on the target and applies the
+rest as graph resources. No generated workflow has run on GitHub
+Actions: a run needs a release, a project bootstrapped with a GitHub
+remote, and a repository that turns the workflow on.
 
 Not built:
 - a check that the committed workflow is current;

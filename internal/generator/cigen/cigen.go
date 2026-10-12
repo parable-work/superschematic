@@ -168,7 +168,8 @@ func writeFiles(dir string, files []registry.CIFile) error {
 // reads it. The implementations of the APIs a TypeScript server serves
 // lie under the build's repository root, the parent of the schemas root,
 // at the naming file's [implementation_paths] typescript template, where
-// the server generator finds them.
+// the server generator finds them, and each site's package lies at its
+// resolved directory under the same root, where the deploy builds it.
 func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnvironment) (registry.CIStack, error) {
 	if c.Options.ServicePath == "" {
 		return registry.CIStack{}, fmt.Errorf("stack %s: the ci generator locates the stack from its service path, and the build has none", name)
@@ -218,6 +219,20 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 	}
 	for _, env := range envs {
 		for _, d := range env.Deployables {
+			if d.Kind == ir.DeployableSite && d.Site != nil {
+				if _, ok := out.Sites[d.Name]; ok {
+					continue
+				}
+				dir, err := rel("the site "+d.Name+",", filepath.Join(implementationRoot, filepath.FromSlash(d.Site.Dir)))
+				if err != nil {
+					return registry.CIStack{}, err
+				}
+				if out.Sites == nil {
+					out.Sites = map[string]registry.CISite{}
+				}
+				out.Sites[d.Name] = registry.CISite{Dir: dir, Build: d.Site.Build}
+				continue
+			}
 			if d.Kind != ir.DeployableServer || d.Language != registry.APILanguageTypeScript {
 				continue
 			}
