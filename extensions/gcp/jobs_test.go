@@ -297,6 +297,86 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	}
 }
 
+// TestStateBucketLifecycle: bootstrap gives the state bucket, one that
+// exists already too, a rule that deletes the build contexts and the
+// migration documents after 30 days, once; every other object a deploy
+// writes there is a manifest, which the rule leaves, as it leaves Pulumi's
+// state. A deploy after the rule deleted every object it covers builds
+// nothing and runs, since the images are found by their tags.
+func TestStateBucketLifecycle(t *testing.T) {
+	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
+	f.cloud.buckets[stateBucket] = "us-east1"
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	target, _ := f.reg.Target(gcp.Target)
+	ctx := context.Background()
+	req := registry.BootstrapRequest{Environment: env, Provisioner: f.prov, Dir: t.TempDir()}
+	if _, err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	const set = "lifecycle of bucket " + stateBucket + ": delete superschematic/builds/, superschematic/migrations/ after 30 days"
+	first := f.cloud.Changes()
+	if !slices.Contains(first, set) || slices.ContainsFunc(first, func(c string) bool { return strings.HasPrefix(c, "create bucket") }) {
+		t.Fatalf("bootstrap over an existing bucket changed:\n%s", strings.Join(first, "\n"))
+	}
+	if _, err := target.Bootstrap.Bootstrap(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if again := f.cloud.Changes(); len(again) != len(first) {
+		t.Errorf("the second bootstrap changed %v", again[len(first):])
+	}
+
+	rule := f.cloud.lifecycle[stateBucket]
+	pruned := func(object string) bool {
+		return slices.ContainsFunc(rule.Prefixes, func(p string) bool { return strings.HasPrefix(object, p) })
+	}
+	for _, kept := range []string{".pulumi/stacks/shop/Staging.json", ".pulumi/history/shop/Staging/x.history.json", "superschematic/manifests/shop/Staging.json"} {
+		if pruned(kept) {
+			t.Errorf("the rule deletes %s", kept)
+		}
+	}
+
+	f.ready(t)
+	o := stack.DeployOptions{
+		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
+		Sources: shopSources(t),
+		Planner: firstPlanner,
+	}
+	if _, err := stack.Deploy(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	var contexts, documents int
+	for key := range f.cloud.objects {
+		object, ok := strings.CutPrefix(key, stateBucket+"/")
+		switch {
+		case !ok:
+		case strings.HasPrefix(object, "superschematic/builds/"):
+			contexts++
+		case strings.HasPrefix(object, "superschematic/migrations/"):
+			documents++
+		case !strings.HasPrefix(object, "superschematic/manifests/"):
+			t.Errorf("the deploy wrote %s, which the rule neither deletes nor is meant to keep", object)
+		}
+		if ok && pruned(object) {
+			delete(f.cloud.objects, key)
+		}
+	}
+	if contexts != 5 || documents < 3 {
+		t.Errorf("the deploy wrote %d contexts and %d migration documents", contexts, documents)
+	}
+
+	n := len(f.prov.Calls())
+	m, err := stack.Deploy(ctx, o)
+	if err != nil {
+		t.Fatalf("a deploy after the rule pruned the bucket: %v", err)
+	}
+	if got := steps(f.prov.Calls()[n:]); slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "cloud build") }) {
+		t.Errorf("a deploy after the rule pruned the bucket built:\n%s", strings.Join(got, "\n"))
+	}
+	if m.Status != stack.StatusDeployed {
+		t.Errorf("the deploy after the prune is %s", m.Status)
+	}
+}
+
 // TestMigrationJobGrantsAndRecovers: a deploy whose plan has no steps runs
 // the job for the servers and jobs that connect when they changed, with no
 // plan in the document; an execution that fails stops the deploy with the

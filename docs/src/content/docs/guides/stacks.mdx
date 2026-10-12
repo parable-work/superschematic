@@ -31,7 +31,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `calls` in an API's config, and a build ordered by output | |
 | Go: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which dials Cloud SQL through the Cloud SQL connector where an environment places its database there | the same for TypeScript and Rust servers; OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's; a lifecycle rule for old build contexts and job documents in the state bucket |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
@@ -982,7 +982,9 @@ superschematic stack run Staging shop-orders-ship-orders
 
 - **`bootstrap`** runs once per project with an owner's credentials, and
   is safe to run again. It enables the APIs, creates the state bucket
-  `<project>-superschematic-state` and its KMS key, and applies the
+  `<project>-superschematic-state` and its KMS key, gives the bucket a
+  lifecycle rule that deletes build contexts and migration job documents
+  after 30 days, and applies the
   Artifact Registry repository named after the stack, the
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
@@ -1040,7 +1042,8 @@ superschematic stack run Staging shop-orders-ship-orders
   type the run's name, or with `--yes`. What the stack's runs in the
   project share stays: bootstrap's resources, the stack's images, its
   migration job `<stack>-migrate`, and the build contexts and job
-  documents in the state bucket. **`outputs`** prints the applied outputs.
+  documents in the state bucket, until its lifecycle rule deletes them.
+  **`outputs`** prints the applied outputs.
 
 A build's context is the repository root, or the directory the naming
 file's

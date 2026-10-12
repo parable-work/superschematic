@@ -1367,6 +1367,17 @@ again: each step creates what is missing and leaves the rest.
    and the key `pulumi-state` in key ring `superschematic`, in the
    environment's region. Pulumi keeps its state in the bucket, encrypted
    with the key, and the deploy manifests sit beside it (section 11.2).
+   The bucket gets a lifecycle rule, on a bucket that exists already
+   too, which deletes the build contexts under `superschematic/builds/`
+   and the migration job documents and plans under
+   `superschematic/migrations/` once they are 30 days old, live and
+   noncurrent versions alike. A deploy writes each of them just before
+   the build or the execution that reads it, every time it needs one, and
+   never reads one again: it compares a context's digest with the one the
+   manifest records, and the builder finds an image by its tag and
+   uploads a context again for a build it runs (section 11.2), so a
+   deleted context costs nothing. Pulumi's state and the manifests have no
+   rule, and the bucket's other rules stay as they are.
 3. It applies a bootstrap graph through the provisioner, in a Pulumi
    project of its own, `<stack>-bootstrap`, with a Pulumi stack per GCP
    project:

@@ -28,7 +28,25 @@ const (
 
 	// manifestPrefix is where the deploy manifests sit in the bucket.
 	manifestPrefix = "superschematic/manifests/"
+
+	// stateRetentionDays is how long the state bucket keeps a build
+	// context, a migration job document or a plan (stateLifecycle).
+	stateRetentionDays = 30
 )
+
+// stateLifecycle is the state bucket's lifecycle rule (D46): it deletes
+// the build contexts under buildPrefix, and the job documents and plans
+// under migrationPrefix, once they are stateRetentionDays old. A deploy
+// writes each just before the build or the execution that reads it, every
+// time it needs one, and nothing reads one afterwards: the deploy compares
+// a context's digest with the one the manifest records, the builder finds
+// an image by its tag, `context-<digest>`, and uploads the context again
+// for a build it runs, so a deleted context costs nothing. Pulumi's state,
+// under `.pulumi/`, and the deploy manifests, under manifestPrefix, have
+// no rule. A site's files sit in the site's own bucket, not this one.
+func stateLifecycle() LifecycleRule {
+	return LifecycleRule{Prefixes: []string{buildPrefix, migrationPrefix}, AgeDays: stateRetentionDays}
+}
 
 // stateBucket is the state bucket of a project: the project id, which is
 // unique, and a fixed suffix.

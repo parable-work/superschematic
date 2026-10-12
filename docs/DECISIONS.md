@@ -4268,9 +4268,19 @@ its tests fake; its golden job document is
 runner's `job` command, its Cloud SQL dialer and its grants run in its
 tests against Postgres, the dialer replaced by one of a local server and
 Cloud Storage by a fake of its API. None of it has run against Google
-Cloud. Not built: a deploy lock beyond the provisioner's and the
-runner's, and a lifecycle rule that prunes old contexts and job documents
-from the bucket.
+Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
+that exists already too, that deletes the build contexts under
+`superschematic/builds/` and the job documents and plans under
+`superschematic/migrations/` after 30 days, live and noncurrent versions
+alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). Nothing
+reads one after the build or the execution it was written for: a deploy
+compares a context's digest with the manifest's, the builder finds an
+image by its tag and uploads the context again for a build, and each
+execution's documents are written again, so a deleted one costs nothing.
+Pulumi's state and the manifests have no rule.
+`TestStateBucketLifecycle` deletes every object the rule covers after a
+deploy, and the next deploy builds nothing. Not built: a deploy lock
+beyond the provisioner's and the runner's.
 
 ### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
 

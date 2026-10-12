@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -60,6 +61,12 @@ type Cloud interface {
 	// EnsureBucket creates a bucket with uniform access, public access
 	// prevention and object versioning, unless it exists.
 	EnsureBucket(ctx context.Context, project, bucket, location string) (created bool, err error)
+
+	// EnsureLifecycleRule gives a bucket rule unless it has it already: it
+	// puts rule in place of the bucket's rules that delete objects under
+	// the same prefixes, or after its rules when none does, and keeps the
+	// bucket's other rules. It reports whether it changed the bucket.
+	EnsureLifecycleRule(ctx context.Context, bucket string, rule LifecycleRule) (changed bool, err error)
 
 	// EnsureKey creates a key ring and a symmetric encryption key in it,
 	// unless they exist.
@@ -133,6 +140,16 @@ type Cloud interface {
 	// ends, so it reads again until it finds some or wait has passed, and
 	// then returns none.
 	ExecutionStderr(ctx context.Context, run *JobRun, match string, wait time.Duration) ([]string, error)
+}
+
+// LifecycleRule is a bucket's lifecycle rule that deletes each object
+// whose name begins with one of Prefixes once it is AgeDays old. In a
+// bucket that keeps versions, as the state bucket does, the rule makes a
+// live object noncurrent, and a later pass of Cloud Storage's lifecycle
+// deletes that version, which is as old.
+type LifecycleRule struct {
+	Prefixes []string
+	AgeDays  int
 }
 
 // BuildSpec is a Cloud Build build of a Docker image.
@@ -324,6 +341,70 @@ func (c *googleCloud) EnsureBucket(ctx context.Context, project, bucket, locatio
 		return false, fmt.Errorf("gcp: create bucket %s in %s: %w", bucket, project, err)
 	}
 	return true, nil
+}
+
+func (c *googleCloud) EnsureLifecycleRule(ctx context.Context, bucket string, rule LifecycleRule) (bool, error) {
+	if err := c.clients(ctx); err != nil {
+		return false, err
+	}
+	handle := c.storage.Bucket(bucket)
+	attrs, err := handle.Attrs(ctx)
+	if err != nil {
+		return false, fmt.Errorf("gcp: bucket %s: %w", bucket, err)
+	}
+	rules, changed := withLifecycleRule(attrs.Lifecycle.Rules, rule)
+	if !changed {
+		return false, nil
+	}
+	// The update replaces the bucket's whole lifecycle, so it applies only
+	// to the configuration it was read from.
+	_, err = handle.If(storage.BucketConditions{MetagenerationMatch: attrs.MetaGeneration}).
+		Update(ctx, storage.BucketAttrsToUpdate{Lifecycle: &storage.Lifecycle{Rules: rules}})
+	if err != nil {
+		return false, fmt.Errorf("gcp: set the lifecycle of bucket %s: %w", bucket, err)
+	}
+	return true, nil
+}
+
+// withLifecycleRule returns rules with rule in place of the first rule
+// that deletes objects under the same prefixes, in any order, and with no
+// other such rule, or with rule after them when none does; and whether
+// that differs from rules.
+func withLifecycleRule(rules []storage.LifecycleRule, rule LifecycleRule) ([]storage.LifecycleRule, bool) {
+	want := storage.LifecycleRule{
+		Action:    storage.LifecycleAction{Type: storage.DeleteAction},
+		Condition: storage.LifecycleCondition{AgeInDays: int64(rule.AgeDays), MatchesPrefix: slices.Sorted(slices.Values(rule.Prefixes))},
+	}
+	ours := func(r storage.LifecycleRule) bool {
+		return r.Action.Type == storage.DeleteAction &&
+			slices.Equal(slices.Sorted(slices.Values(r.Condition.MatchesPrefix)), want.Condition.MatchesPrefix)
+	}
+	out := make([]storage.LifecycleRule, 0, len(rules)+1)
+	placed := false
+	for _, r := range rules {
+		switch {
+		case !ours(r):
+			out = append(out, r)
+		case !placed:
+			out = append(out, want)
+			placed = true
+		}
+	}
+	if !placed {
+		out = append(out, want)
+	}
+	if len(out) != len(rules) {
+		return out, true
+	}
+	for i := range out {
+		a, b := out[i], rules[i]
+		a.Condition.MatchesPrefix = slices.Sorted(slices.Values(a.Condition.MatchesPrefix))
+		b.Condition.MatchesPrefix = slices.Sorted(slices.Values(b.Condition.MatchesPrefix))
+		if !reflect.DeepEqual(a, b) {
+			return out, true
+		}
+	}
+	return rules, false
 }
 
 // isConflict reports whether err is the JSON API's 409, which a bucket
