@@ -5204,3 +5204,36 @@ cancel's 409 as the form's message, and a signed-out post of 4,000 or
 50,000 lines rendered with 51.
 
 The rule is reversible until the first release.
+
+## D57. A Rust server gets a generated entrypoint, a `Deps` over a Postgres pool, and an implementation crate, and reaches Cloud SQL through the socket Cloud Run mounts
+
+D51 gave a TypeScript API what a Go one has in a stack: a generated
+entrypoint, an image, a `Deps`, an implementation scaffold, and readers of
+the derived fields (section 3.4 of `docs/stack-model.md`). A Rust API has
+none of these. The generator logs "a RUST server, which gets no generated
+entrypoint yet" and writes nothing; the `local` target refuses the
+language; gcp's sql and bucket connectors refuse it; the Rust HTTP runtime
+reads no derived field, opens no database and logs nothing; and the
+generated `config.rs` reads `@envVars` alone. So acme-shop's Rust server
+runs beside the stack, by hand, over a SQLite file. D50's Rust stack
+entrypoint, which would read `<API>_IDENTITY`, waits on this. This entry is
+D51's twin for Rust.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server is Rust when the APIs it serves are, by `outputs.api.language` `RUST`, as D51 reads TypeScript. `local.process` and the local provisioner take `rust`; `gcp.cloudrun` already does. Jobs and workers stay Go, as D52 and D53 leave TypeScript ones. | A language on `@server`, which could disagree with the API's own generated server. |
+| The Rust HTTP runtime gains `stackconfig`: `load_database`, `load_service`, `load_bucket`, `load_callers` and `load_cors`, reading the variables Go's `stackconfig` reads, with their refusals. `runtime/http/testdata/stackconfig_parity.json` holds it to Go's encoding, as it holds TypeScript's. `<API>_IDENTITY` is the identity config's JSON, which `identity::Config::parse` reads. | Readers in the generated crate, written once per API. |
+| A Rust server's database is a pool of tokio-postgres connections (`deadpool-postgres`), behind the runtime's `postgres` feature: `connect(&Database)` and `ping(&Pool)`. A URL connects as it says. A Cloud SQL database connects over the Unix socket Cloud Run mounts at `/cloudsql/<connection name>`, which gcp's workload already adds, as the IAM database user the connector creates, with an access token from the metadata server as the password, fetched for each new connection. So no Google library enters the runtime (D6), and connectors in other languages are untouched. The identity store's `Client` runs over the same pool. | Google's Cloud SQL Rust connector, which does not exist. The Cloud SQL Auth Proxy as a sidecar, a second container per server. A password in Secret Manager, which section 7.4 keeps for platforms without IAM authentication. sqlx, a larger tree than the tokio-postgres the identity store already uses. |
+| The generated `config.rs` reads the derived fields too: each `<DB>_DATABASE`, `<API>_SERVICE`, `<BUCKET>_BUCKET`, `<API>_CALLERS`, `<API>_CORS` and `<API>_IDENTITY` the server's resolution gives the API, through the runtime's readers, beside the `@envVars` fields. | Reading the variables in the entrypoint alone, which leaves a project's own binary without them. |
+| The API crate gains `deps.rs`: `Deps` (`config`, a pool per database, a client per callee from its Rust SDK, and a `tracing` span for the API), and `Handlers`, the namespace implementations, from which the entrypoint builds `Implementations` with its authenticators. `[implementation_paths] rust` defaults to `rust/{service}`, and the scaffold writes a crate there once, whose `create(deps)` returns the `Handlers`, never into a directory that holds a `Cargo.toml`. | `Implementations` as the implementation's return, which would make it build the identity and service authenticators the entrypoint already builds. |
+| The entrypoint is `<output-root>/server/<stack>/<server>/` with `Cargo.toml`, `src/main.rs`, a Dockerfile and its ignore file. `main.rs`, on a tokio runtime, initializes JSON-line logging (the runtime's `logging`, over `tracing-subscriber`); loads each API's config; opens a pool per database; builds a client per `calls` edge with its credential source; calls each `create`; builds the identity service from `<API>_IDENTITY` over the authDb's pool, the service authenticator from `<API>_CALLERS`, and the site CORS from `<API>_CORS`; merges each API's router; serves `/healthz` and `/readyz` (which pings each pool, and answers 503 while draining) on `$PORT`; and drains for ten seconds on SIGTERM. | One binary per API, which a server that serves two APIs cannot be. |
+| The image builds the server with the Rust toolchain `tools.env` pins, from a build context that holds the superscalar checkout its crates name by path, as Go's checkout mode does, and runs it as `distroless/cc` non-root. `stack dev` builds it with `cargo build` and runs the binary, probed on `/readyz`. | Building on the host and copying the binary, which ties the image to the host's architecture and libc. |
+| acme-shop proves it with `shop-stock`, the API the auth guide's service callers section sketches (D37): a Rust API over `shop-db`'s `StockLevel`, whose stock anyone may list, whose levels staff with `stock.write` set, and whose reservations only `shop-orders`' server may make (`@requireService`). `shop-orders` reserves stock through it when an order is placed, so a Go server calls a Rust one with a service credential and forwards the shopper. `shop-stack` deploys it on a Rust server, and `TestStackDevRunsTheShop` calls it. | Moving `shop-orders` to Rust, which the Topcoat app and the Go tests are built on. A fixture alone, which nothing would run end to end. |
+
+Status: not built.
+
+Not built, and out of this entry: Rust jobs and workers; buckets from a
+Rust server, which gcp's bucket connector keeps refusing; and
+OpenTelemetry export.
+
+The rule is reversible until the first release.
