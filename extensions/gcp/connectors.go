@@ -20,17 +20,15 @@ const serverlessAuthorizationHeader = "X-Serverless-Authorization"
 // IAM condition; and an IAM database user on the instance, which the
 // migration job gives read and write privileges on the edge's DB
 // service's tables.
-// The derived value is the Cloud SQL connection the entrypoint's connector
-// dials, so there is no password.
-//
-// A Rust server or job has no Cloud SQL connector to dial with. Section
-// 7.4's other form, a generated password and Cloud Run's Cloud SQL mount,
-// waits for a password form of the derived value, so the edge is refused.
+// The derived value is the Cloud SQL connection the entrypoint dials, so
+// there is no password: a Go or TypeScript entrypoint through its
+// language's Cloud SQL connector, and a Rust one, whose language has none,
+// over the Unix socket Cloud Run mounts at /cloudsql/<connection name>
+// (lowerWorkload), as the same IAM database user, with an access token
+// from the metadata server as its password (D57). The grants, the user
+// and the value are the same whatever the language.
 func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
-	if from.Language == registry.APILanguageRust {
-		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Cloud SQL connector to reach %s with IAM authentication; the password form of docs/stack-model.md section 7.4 is not built", from.Kind, from.Name, from.Language, from.Kind, to.Name)
-	}
 	v := valuesOf(ctx.Environment)
 	account := from.Name + ".account"
 	member := ir.Output{Resource: account, Name: "member"}

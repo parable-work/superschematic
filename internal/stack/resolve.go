@@ -912,8 +912,29 @@ func (r *resolver) placeServer(d *deployable) {
 	}
 	d.res.Language = lang
 	if !slices.Contains(d.platform.Languages, d.res.Language) {
-		r.fail(CodeUnrealizable, "%s %s is a %s %s, and platform %s runs only %s", d.res.Kind, d.res.Name, d.res.Language, d.res.Kind, d.platform.Name, strings.Join(d.platform.Languages, ", "))
+		msg := fmt.Sprintf("%s %s is a %s %s, and platform %s runs only %s", d.res.Kind, d.res.Name, d.res.Language, d.res.Kind, d.platform.Name, strings.Join(d.platform.Languages, ", "))
+		if scope := unbuiltDeployable(d.res.Kind, d.res.Language); scope != "" {
+			msg += "; " + scope
+		}
+		r.fail(CodeUnrealizable, "%s", msg)
 	}
+}
+
+// unbuiltDeployable says which decision left a job or a worker in lang
+// out, so that a refusal of one names the scope rather than the platform
+// alone: a job or a worker is written in its API's language, and only Go
+// ones have an entrypoint.
+func unbuiltDeployable(kind ir.DeployableKind, lang string) string {
+	if kind != ir.DeployableJob && kind != ir.DeployableWorker {
+		return ""
+	}
+	switch lang {
+	case registry.APILanguageTypeScript:
+		return "TypeScript jobs and workers are not built (D52, D53)"
+	case registry.APILanguageRust:
+		return "Rust jobs and workers are not built (D57)"
+	}
+	return ""
 }
 
 // serverLanguage returns the language of a server: that of the APIs it

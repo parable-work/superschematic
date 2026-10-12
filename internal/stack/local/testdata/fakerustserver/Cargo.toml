@@ -1,0 +1,13 @@
+# A fake Rust server that honours the contract of a generated entrypoint
+# (docs/stack-model.md, section 8.1) for the local target's integration
+# test (D57). It depends on nothing, so cargo builds it offline, and its
+# binary is its package's name.
+[package]
+name = "fake-rust-server"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Its own workspace, so no Cargo.toml above the directory it is copied to
+# claims it.
+[workspace]

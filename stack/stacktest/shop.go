@@ -1,6 +1,8 @@
 package stacktest
 
 import (
+	"slices"
+
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
@@ -194,6 +196,20 @@ func WithoutJobSettings(s *ir.Stack) *ir.Stack {
 		env.Settings = kept
 	}
 	return s
+}
+
+// InRust returns services with each API that names lists written in
+// Rust, as a schema config's `outputs.api.language: RUST` says: the shop
+// with Rust servers, for a target that runs them (D57).
+func InRust(services []stack.Service, names ...string) []stack.Service {
+	out := make([]stack.Service, len(services))
+	for i, svc := range services {
+		if slices.Contains(names, svc.Name) {
+			svc.Language = registry.APILanguageRust
+		}
+		out[i] = svc
+	}
+	return out
 }
 
 // WithoutBuckets returns services with no bucket: the shop for a target

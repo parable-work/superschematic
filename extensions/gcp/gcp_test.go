@@ -163,6 +163,21 @@ func TestServiceAuthGolden(t *testing.T) {
 	}
 }
 
+// TestRustGolden resolves RustShop, the shop with shop-api written in Rust
+// and no bucket (rustShop, D57), in Staging and Preview: shop-api's server
+// is a Rust Cloud Run service with the sql edge, the database user, the
+// Cloud SQL volume and mount, and the variables a Go server's has.
+func TestRustGolden(t *testing.T) {
+	reg := assemble(t)
+	s := stacktest.WithoutBucketSettings(shop())
+	s.Name = "RustShop"
+	for _, env := range []string{"Staging", "Preview"} {
+		t.Run(env, func(t *testing.T) {
+			checkGolden(t, reg, s, rustShop(), env)
+		})
+	}
+}
+
 // checkGolden resolves env of s and checks the environment.json it writes
 // against the golden file, which -update rewrites, and that it
 // round-trips.
