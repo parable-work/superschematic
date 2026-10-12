@@ -237,7 +237,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      WorkerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableWorker,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(workerSettings),
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },

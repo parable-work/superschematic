@@ -12,6 +12,9 @@
   "dependencies": {
     "{{ .PackageName }}": "workspace:*",
     "{{ .TypesPackage }}": "workspace:*",
+{{- if and .Deps.DatabaseTypesPackage (ne .Deps.DatabaseTypesPackage .TypesPackage) }}
+    "{{ .Deps.DatabaseTypesPackage }}": "workspace:*",
+{{- end }}
     "{{ .RuntimePackage }}": "*"
   },
   "devDependencies": {

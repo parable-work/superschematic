@@ -38,6 +38,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-optimistic-db"},
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
+		// A DB with queues (D53): queues.ts holds each as the HTTP runtime's
+		// queue client reads it.
+		{service: "fixture-queue-db"},
 	}
 
 	for _, tc := range cases {

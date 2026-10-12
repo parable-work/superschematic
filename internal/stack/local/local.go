@@ -183,7 +183,7 @@ func Register(r *registry.Registry) error {
 		{
 			Name:      JobPlatform,
 			Kind:      ir.DeployableJob,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerJob,
@@ -191,7 +191,7 @@ func Register(r *registry.Registry) error {
 		{
 			Name:      WorkerPlatform,
 			Kind:      ir.DeployableWorker,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerWorker,
@@ -406,7 +406,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go"]},
+	    "language": {"enum": ["go", "typescript"]},
 	    "api": {"type": "string", "minLength": 1},
 	    "job": {"type": "string", "minLength": 1},
 	    "schedule": {"type": "string", "minLength": 1},

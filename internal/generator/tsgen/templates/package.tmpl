@@ -41,6 +41,10 @@
     "./identity": {
       "types": "./identity.ts",
       "import": "./identity.ts"
+    }{{end}}{{if .Queues}},
+    "./queues": {
+      "types": "./queues.ts",
+      "import": "./queues.ts"
     }{{end}}{{if .HasEnvConfig}},
     "./config": {
       "types": "./config.ts",

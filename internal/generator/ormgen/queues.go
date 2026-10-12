@@ -39,6 +39,10 @@ type Queue struct {
 	// Fields are the message's fields, in declaration order, each the
 	// column of its name.
 	Fields []Field
+
+	// Statements are the queue's statements on Postgres, which the
+	// TypeScript types' queues.ts carries too (sqlutil.QueueStatements).
+	Statements sqlutil.QueueStatements
 }
 
 // queuesOf reads the schema's queues, sorted by name. It refuses a field
@@ -77,6 +81,11 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 			}
 			q.Fields = append(q.Fields, field)
 		}
+		columns := make([]string, len(q.Fields))
+		for i, f := range q.Fields {
+			columns[i] = f.QuotedDBName
+		}
+		q.Statements = sqlutil.PostgresQueueStatements(q.QuotedTableName, columns)
 		queues = append(queues, q)
 	}
 	return queues, nil
@@ -94,16 +103,6 @@ func docLines(doc string) []string {
 		lines = append(lines, strings.TrimSpace(line))
 	}
 	return lines
-}
-
-// ReturnedColumns are the message's columns a claim returns, of the row
-// aliased q, after the ID, the token and the attempt, in field order.
-func (q Queue) ReturnedColumns() string {
-	columns := make([]string, len(q.Fields))
-	for i, f := range q.Fields {
-		columns[i] = "q." + f.QuotedDBName
-	}
-	return strings.Join(columns, ", ")
 }
 
 // QueueScanTemp is the Go type of the variable a claim scans the field's

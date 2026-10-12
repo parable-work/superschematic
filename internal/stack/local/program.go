@@ -167,16 +167,18 @@ func (s *Server) what() string {
 
 // Job is a job node (D52): the job's entrypoint module, built with the
 // servers and run with its environment on its schedule, in its time zone,
-// while the environment runs, or once by `stack run`. A run that outlives
-// TimeoutSeconds is stopped, and a failed run is run again up to Retries
-// times.
+// while the environment runs, or once by `stack run`. A Go job's module is
+// built into Binary; a TypeScript job's main.ts runs on Bun, with no
+// binary. A run that outlives TimeoutSeconds is stopped, and a failed run
+// is run again up to Retries times.
 type Job struct {
 	ID             string   `json:"id"`
 	Deployable     string   `json:"deployable"`
 	Name           string   `json:"name"`
 	Wave           int      `json:"wave"`
+	Language       string   `json:"language"`
 	Module         string   `json:"module"`
-	Binary         string   `json:"binary"`
+	Binary         string   `json:"binary,omitempty"`
 	API            string   `json:"api"`
 	Job            string   `json:"job"`
 	Schedule       string   `json:"schedule,omitempty"`
@@ -663,7 +665,13 @@ func jobOf(res *ir.Resource) (*Job, error) {
 	if j.Retries, ok = intValue(res.Properties["retries"]); !ok || j.Retries < 0 {
 		return nil, fmt.Errorf("its retries is not a number of zero or more")
 	}
-	j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
+	switch j.Language, _ = res.Properties["language"].(string); j.Language {
+	case LanguageGo:
+		j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
+	case LanguageTypeScript:
+	default:
+		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s jobs", j.Language, LanguageGo, LanguageTypeScript)
+	}
 	env, err := envOf(res.Properties["env"])
 	if err != nil {
 		return nil, err
