@@ -133,3 +133,25 @@ func TestCrateNameToModulePath(t *testing.T) {
 		}
 	}
 }
+
+// TestUseLine: a use declaration sorts its items as rustfmt does, self,
+// then lower case, then upper case, names one item without braces, and
+// wraps past 100 columns.
+func TestUseLine(t *testing.T) {
+	for _, tc := range []struct {
+		path  string
+		items []string
+		want  string
+	}{
+		{"crate::runtime", []string{"ServiceAuthConfig"}, "use crate::runtime::ServiceAuthConfig;"},
+		{"crate::runtime::stackconfig", []string{"self"}, "use crate::runtime::stackconfig::{self};"},
+		{"crate::runtime", []string{"ServiceAuthConfig", "identity"}, "use crate::runtime::{identity, ServiceAuthConfig};"},
+		{"crate::runtime::stackconfig", []string{"Service", "self", "Cors"}, "use crate::runtime::stackconfig::{self, Cors, Service};"},
+		{"schemas_shop_api", []string{"Deps", "Handlers", "CartsImplementation", "ProductsImplementation", "StockImplementation", "CartsGetCartArgs"},
+			"use schemas_shop_api::{\n    CartsGetCartArgs, CartsImplementation, Deps, Handlers, ProductsImplementation,\n    StockImplementation,\n};"},
+	} {
+		if got := UseLine(tc.path, tc.items); got != tc.want {
+			t.Errorf("UseLine(%s, %v) =\n%s\nwant\n%s", tc.path, tc.items, got, tc.want)
+		}
+	}
+}

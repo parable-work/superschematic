@@ -3,6 +3,7 @@
 package rustutil
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 
@@ -165,4 +166,51 @@ func PrimitiveToRustType(value string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// UseLine renders a use declaration of items under path, as rustfmt lays
+// one out: `use path::item;` for one, `use path::{a, b};` for more, the
+// items sorted with self first, then lower case, then upper case, and,
+// when the line passes 100 columns, the items on lines of their own
+// indented four spaces, as many to a line as fit.
+func UseLine(path string, items []string) string {
+	items = append([]string(nil), items...)
+	rank := func(item string) int {
+		switch {
+		case item == "self":
+			return 0
+		case item != "" && strings.ToLower(item[:1]) == item[:1]:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if ri, rj := rank(items[i]), rank(items[j]); ri != rj {
+			return ri < rj
+		}
+		return items[i] < items[j]
+	})
+	if len(items) == 1 && items[0] != "self" {
+		return "use " + path + "::" + items[0] + ";"
+	}
+	line := "use " + path + "::{" + strings.Join(items, ", ") + "};"
+	if len(line) <= 100 {
+		return line
+	}
+	var b strings.Builder
+	b.WriteString("use " + path + "::{\n")
+	row := ""
+	for _, item := range items {
+		next := item + ","
+		if row != "" && 4+len(row)+1+len(next) > 100 {
+			b.WriteString("    " + row + "\n")
+			row = ""
+		}
+		if row != "" {
+			row += " "
+		}
+		row += next
+	}
+	b.WriteString("    " + row + "\n};")
+	return b.String()
 }
