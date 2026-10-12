@@ -5217,15 +5217,16 @@ writes a TypeScript server.
 | An implementation that exists and exports no `createJobs` fails the stack's build, saying what to add, as a Go one without `NewJobs` does. The build reads the exports from the package's sources: a declaration, an export list, or a re-export of a whole module, which may export it. | Leaving it to `tsc`, which the generated CI runs on servers alone, or to Bun, which fails only when the job runs. |
 | `local.job` takes TypeScript: the provisioner installs the output root's workspace once, as for a TypeScript server, and runs `bun main.ts` in the job's package for each run, `stack run`'s included, with nothing to build. The program's job node records its language. `gcp.cloudrunjob` already took TypeScript, since it runs the image. | A binary from `bun build --compile`, a build step D51 avoids. |
 
-Status: built. `TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's
-job under Bun against Postgres: it enqueues in a transaction that commits
-and one that rolls back, logs its start and end, and exits 1 with
-`job failed` when it fails. `TestStackDevRunsTypeScriptJobsAndWorkers` runs
-`stack run` on a TypeScript job against `stack dev`.
-`TestTypeScriptJobAndWorkerRunOnBun` checks the local provisioner's
-commands, `TestATypeScriptImplementationThatPredatesItsJobsFails` the
-build's refusal, and the servergen goldens the packages. No TypeScript job
-has run on Cloud Run.
+Status: built in #348. `TestTypeScriptJobAndWorkerRunOnPostgres` runs
+ts-shop's job under Bun against Postgres: it enqueues in a transaction
+that commits and one that rolls back, logs its start and end, and exits 1
+with `job failed` when it fails.
+`TestStackDevRunsTypeScriptJobsAndWorkers` runs `stack run` on a
+TypeScript job against `stack dev`. `TestTypeScriptJobAndWorkerRunOnBun`
+checks the local provisioner's commands,
+`TestATypeScriptImplementationThatPredatesItsJobsFails` the build's
+refusal, and the servergen goldens the packages. No TypeScript job has run
+on Cloud Run.
 
 ### D53, amended: a TypeScript worker claims through the HTTP runtime, over queue definitions the DB's TypeScript types export, with the Go ORM's statements
 
@@ -5242,8 +5243,8 @@ ORM's semantics, since one queue may have Go and TypeScript callers.
 | The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
 | `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
 
-Status: built. `TestQueueParityWithTypeScriptOnPostgres` runs the Go ORM
-and the TypeScript client against one Postgres, and
+Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
+Go ORM and the TypeScript client against one Postgres, and
 `TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
 `TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
 it handles a message, retries one that fails once after the backoff, marks
@@ -5251,8 +5252,9 @@ dead one that fails past its retries, and on SIGTERM gives the handler
 still running its grace, then releases its message and exits 0.
 `TestStackDevRunsTypeScriptJobsAndWorkers` runs a TypeScript worker under
 `stack dev`, and the runtime's tests run `runWorker` and the client, the
-latter against Postgres when `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL`
-names one. No TypeScript worker has run on Cloud Run.
+latter against Postgres when
+`SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
+worker has run on Cloud Run.
 
 Not built:
 - a `POINT` or `INTERVAL` column in a TypeScript queue's message;
