@@ -27,9 +27,9 @@ import (
 // ORM claims and reads back, its enum's default included; and the
 // TypeScript client releases and completes claims the Go ORM made. Both
 // run the statements sqlutil.PostgresQueueStatements writes, so each sees
-// the other's states, attempts and tokens. It needs Bun, the HTTP runtime's
-// build, and the database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, and
-// skips without the database.
+// the other's states, attempts and tokens. It needs Bun, builds the HTTP
+// runtime, and runs on the database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL,
+// skipping without it.
 func TestQueueParityWithTypeScriptOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -42,9 +42,16 @@ func TestQueueParityWithTypeScriptOnPostgres(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
 	}
 	paths := testpaths.Local(t)
-	for _, built := range []string{filepath.Join(paths.HTTPRuntimeTypeScript, "dist", "postgres.js"), filepath.Join(paths.ScalarTypeScript, "dist")} {
-		if _, err := os.Stat(built); err != nil {
-			testpaths.RequireOrSkipTS(t, fmt.Sprintf("the TypeScript runtimes are not built (bun run build in runtime/http/typescript): %v", err))
+	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist")); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar TypeScript binding not built: %v", err))
+	}
+	// The HTTP runtime's dist/, which the workspace's root overrides the
+	// package with, built as the TypeScript generators' tests build it.
+	for _, step := range [][]string{{"install", "--frozen-lockfile"}, {"run", "build"}} {
+		cmd := exec.Command(bun, step...)
+		cmd.Dir = paths.HTTPRuntimeTypeScript
+		if out, err := cmd.CombinedOutput(); err != nil {
+			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun %s in the HTTP runtime (likely offline): %v\n%s", strings.Join(step, " "), err, out))
 		}
 	}
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, queueFixture))
