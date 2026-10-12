@@ -239,8 +239,10 @@ in neither Go's `EnvConfig` nor `values-schema.json`, since its variables
 follow the environment's edges: the generated entrypoint reads it with
 `stackconfig.LoadCallers` (section 8.1). The TypeScript API package's
 `EnvConfig` holds all four, read through the TypeScript HTTP runtime's
-readers (section 8.6). The Rust loader reads no derived field yet (section
-12).
+readers (section 8.6). The Rust API crate's `EnvConfig` holds them too,
+beside the API's CORS field and, for an API over the user model, its
+identity config, read through the Rust HTTP runtime's `stackconfig`
+readers (D57).
 
 What a connector derives for each edge kind has a contract, in
 `ir/derived_value.go` and `ir/service_auth.go`. Resolution checks every
@@ -3477,8 +3479,8 @@ whatever the deploy decides is affected, and needs no list of its own.
    `ir/service_auth.go`, which the local and gcp connectors write and
    `stackconfig.LoadCallers` reads (section 9.2). The TypeScript API
    package's `loadEnvConfig()` reads them through the TypeScript HTTP
-   runtime's readers (section 8.6). Next: the Rust loader reads the
-   derived fields, in the PR that gives it `Deps`.
+   runtime's readers (section 8.6), and the Rust API crate's
+   `config::load_env_config()` through the Rust HTTP runtime's (D57).
 4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
    and constructor signature, and the one-time implementation scaffold
    (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
@@ -3495,8 +3497,10 @@ whatever the deploy decides is affected, and needs no list of its own.
    output root's Bun workspace holds the implementations, and the
    `server` generator writes each TypeScript server's package, `main.ts`
    and Dockerfile at `server/<stack>/<server>` in the pass that writes the
-   Go servers' (section 8.6). Next: OpenTelemetry export; then `Deps`, the
-   constructor signature, the scaffold and the entrypoint in Rust.
+   Go servers' (section 8.6). For Rust, `Deps`, `Handlers`,
+   `Implementations::new` and the scaffold at `[implementation_paths]
+   rust` have landed (D57). Next: OpenTelemetry export; then the
+   entrypoint in Rust.
    `examples/acme-shop` keeps its implementations at the scaffold layout,
    `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
    which the entrypoints of its `shop-stack` import (section 14,

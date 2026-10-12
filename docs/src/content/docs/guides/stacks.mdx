@@ -180,8 +180,9 @@ templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
-`variables`. The TypeScript and Rust config loaders do not read derived
-fields yet.
+`variables`. The TypeScript API package's `loadEnvConfig()` and the
+Rust API crate's `config::load_env_config()` read them too, through the
+HTTP runtimes' readers.
 
 The API package also gets `deps.go`, with what the implementation is built
 from and the signature of its constructor:
