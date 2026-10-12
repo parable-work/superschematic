@@ -17,18 +17,21 @@ mod http_client;
 pub mod identity;
 mod jws;
 mod jwt;
+// A stack server's JSON-line log (D57), with the `logging` feature.
+#[cfg(feature = "logging")]
+pub mod logging;
 mod openapi;
 mod operation;
 mod params;
 mod path;
-/// A stack server's database (D57), with the `postgres` feature.
+// A stack server's database (D57), with the `postgres` feature.
 #[cfg(feature = "postgres")]
 pub mod postgres;
 mod ratelimit;
 mod request_id;
 mod response;
 mod service_auth;
-/// The readers of the config fields an API's edges derive in a stack (D57).
+// The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;
 mod token_source;
 

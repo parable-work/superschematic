@@ -52,6 +52,9 @@ rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 deadpool-postgres = { version = "0.14.2", default-features = false, features = ["rt_tokio_1"], optional = true }
 native-tls = { version = "0.2.18", optional = true }
 postgres-native-tls = { version = "0.5.3", optional = true }
+# The logging feature's subscriber (D57): its registry alone, since the
+# runtime writes the JSON lines itself, in the TypeScript logger's shape.
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"], optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
@@ -73,6 +76,9 @@ identity-sqlite = ["identity", "dep:rusqlite"]
 # through the http-client feature. With identity-postgres, the identity
 # store runs over the same pool.
 postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "tokio/rt"]
+# A stack server's log (D57): one JSON object per line on stdout, in the
+# TypeScript logger's shape, as a layer over tracing-subscriber's registry.
+logging = ["dep:tracing-subscriber"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }
