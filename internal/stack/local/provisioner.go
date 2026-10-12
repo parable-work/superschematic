@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -52,8 +55,10 @@ var inheritedVariables = []string{
 //     contract back to back, since no server of a previous version runs;
 //     migrate contract has nothing left to run;
 //   - rollout: it builds each Go server's entrypoint module with `go
-//     build`, and installs the output root's Bun workspace once for the
-//     TypeScript servers, whose main.ts Bun runs as it is (D51); it starts
+//     build`, and each Rust server's crate with `cargo build --release
+//     --locked` into the program directory's RustTargetDir (D57), and
+//     installs the output root's Bun workspace once for the TypeScript
+//     servers, whose main.ts Bun runs as it is (D51); it starts
 //     each server with its environment (its literals, its secrets from the
 //     environment's secrets file, its derived variables, and PORT), and
 //     waits until it answers ReadinessPath.
@@ -584,6 +589,8 @@ func (p *Provisioner) lookPath(name string) (string, error) {
 			return "", fmt.Errorf("local: go is not on PATH; the local target builds each Go server with go build: %w", err)
 		case "bun":
 			return "", fmt.Errorf("local: bun is not on PATH; the local target runs each TypeScript server on Bun (https://bun.sh): %w", err)
+		case "cargo":
+			return "", fmt.Errorf("local: cargo is not on PATH; the local target builds each Rust server with cargo build: %w", err)
 		}
 		return "", fmt.Errorf("local: %s is not on PATH: %w", name, err)
 	}
@@ -829,10 +836,10 @@ func (p *Provisioner) ensureDatabase(ctx context.Context, docker string, c *Cont
 	return nil
 }
 
-// startServers builds each Go server's entrypoint module, and installs
-// the output root's Bun workspace once for the TypeScript servers, then
-// starts each server, and waits until every one is ready. A server this
-// provisioner already runs is stopped first.
+// startServers builds each Go server's entrypoint module and each Rust
+// server's crate, and installs the output root's Bun workspace once for
+// the TypeScript servers, then starts each server, and waits until every
+// one is ready. A server this provisioner already runs is stopped first.
 func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRequest, prog *Program, servers []*Server) error {
 	if req.OutputRoot == "" {
 		return errors.New("local: the request names no output root, where the build wrote each server's entrypoint module")
@@ -847,12 +854,8 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	}
 	tools := map[string]string{}
 	for _, s := range servers {
-		tool := "go"
-		if s.Language == LanguageTypeScript {
-			tool = "bun"
-		}
 		if tools[s.Language] == "" {
-			if tools[s.Language], err = p.lookPath(tool); err != nil {
+			if tools[s.Language], err = p.lookPath(toolOf(s.Language)); err != nil {
 				return err
 			}
 		}
@@ -866,6 +869,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	if err != nil {
 		return err
 	}
+	var binaries map[string]string
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
@@ -880,6 +884,19 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 				return err
 			}
 			builds = append(builds, built{server: s, cmd: Command{Path: tools[s.Language], Args: []string{TypeScriptEntrypoint}, Dir: module, Env: env}})
+			continue
+		}
+		if s.Language == LanguageRust {
+			if binaries == nil {
+				if binaries, err = rustBinaries(req.OutputRoot, prog); err != nil {
+					return err
+				}
+			}
+			binary, err := p.buildRust(ctx, req.Dir, s, module, tools[s.Language], binaries[s.ID])
+			if err != nil {
+				return err
+			}
+			builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
 			continue
 		}
 		binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(s.Binary)))
@@ -936,6 +953,100 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 // TypeScriptEntrypoint is the file of a TypeScript server's entrypoint
 // module that Bun runs (docs/stack-model.md, section 8.6).
 const TypeScriptEntrypoint = "main.ts"
+
+// toolOf is the executable that builds or runs a server written in
+// language.
+func toolOf(language string) string {
+	switch language {
+	case LanguageTypeScript:
+		return "bun"
+	case LanguageRust:
+		return "cargo"
+	}
+	return "go"
+}
+
+// buildRust builds a Rust server's crate, in module, with `cargo build
+// --release --locked` into the program directory's Cargo target
+// directory, RustTargetDir, and returns the path of its binary there,
+// target/release/<binary> (D57). The target directory lies outside the
+// server's directory, which each build of the stack empties, so a rebuild
+// compiles only what changed. --locked builds the versions the crate's
+// Cargo.lock pins, and refuses a crate with none or a stale one; --quiet
+// leaves cargo's progress out of a failure, whose diagnostics reach the
+// user in the error, as `go build`'s do.
+func (p *Provisioner) buildRust(ctx context.Context, programDir string, s *Server, module, cargo, binary string) (string, error) {
+	target, err := filepath.Abs(filepath.Join(programDir, RustTargetDir))
+	if err != nil {
+		return "", err
+	}
+	p.printf("build %s: cargo build --release --locked in %s", s.Deployable, s.Module)
+	if _, err := p.runner().Run(ctx, Command{Path: cargo, Args: []string{"build", "--release", "--locked", "--quiet", "--target-dir", target}, Dir: module, Env: os.Environ()}); err != nil {
+		return "", fmt.Errorf("local: build server %s: %w", s.Deployable, err)
+	}
+	return filepath.Join(target, "release", binary), nil
+}
+
+// rustBinaries returns the binary each Rust server of the program builds,
+// by the server's ID, as its crate's Cargo.toml names it (rustBinary).
+// Every Rust server of the environment builds into one target directory,
+// where two binaries of one name would be one file, so it refuses two
+// servers whose crates name the same binary.
+func rustBinaries(outputRoot string, prog *Program) (map[string]string, error) {
+	binaries := map[string]string{}
+	builtBy := map[string]string{}
+	for _, s := range prog.Servers {
+		if s.Language != LanguageRust {
+			continue
+		}
+		name, err := rustBinary(filepath.Join(outputRoot, filepath.FromSlash(s.Module)))
+		if err != nil {
+			return nil, fmt.Errorf("local: server %s: %w", s.Deployable, err)
+		}
+		if other, taken := builtBy[name]; taken {
+			return nil, fmt.Errorf("local: servers %s and %s both build a binary named %s into one Cargo target directory, %s; name each crate's binary after its server", other, s.Deployable, name, RustTargetDir)
+		}
+		builtBy[name] = s.Deployable
+		binaries[s.ID] = name
+	}
+	return binaries, nil
+}
+
+// rustBinary returns the binary the Rust crate in dir builds, as its
+// Cargo.toml names it: its one `[[bin]]`'s name, or else its package's,
+// which is the name cargo gives the binary of src/main.rs.
+func rustBinary(dir string) (string, error) {
+	path := filepath.Join(dir, "Cargo.toml")
+	var manifest struct {
+		Package struct {
+			Name string `toml:"name"`
+		} `toml:"package"`
+		Bin []struct {
+			Name string `toml:"name"`
+		} `toml:"bin"`
+	}
+	if _, err := toml.DecodeFile(path, &manifest); errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("no Cargo.toml in %s, the crate the stack's build writes for a Rust server (D57)", dir)
+	} else if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	name := manifest.Package.Name
+	switch len(manifest.Bin) {
+	case 0:
+	case 1:
+		name = manifest.Bin[0].Name
+	default:
+		return "", fmt.Errorf("%s declares %d binaries; a server's crate builds one", path, len(manifest.Bin))
+	}
+	if !binaryNamePattern.MatchString(name) {
+		return "", fmt.Errorf("%s names no binary cargo builds: its [package] name, or its one [[bin]]'s, is %q", path, name)
+	}
+	return name, nil
+}
+
+// binaryNamePattern is the shape of a binary's name cargo accepts, and so
+// a name that stays one file in the target directory.
+var binaryNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // installWorkspace installs the Bun workspace whose root is the output
 // root, which links each TypeScript server to the generated packages and

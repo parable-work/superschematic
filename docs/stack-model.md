@@ -1269,7 +1269,8 @@ run on demand (section 8.7, D52), and a site's publish to its bucket
 (section 8.10, D55). Its golden environments resolve the acme-shop stack
 of section 4.1, shop-orders' job and worker, shop-api's bucket and the
 site shop-web included, in a staging, a production and a parameterized
-preview environment.
+preview environment, and the stack with shop-api written in Rust and no
+bucket (D57).
 
 ### 7.1 What the engineer enters
 
@@ -1300,9 +1301,9 @@ Bootstrap reads the GitHub repository from the git remote.
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, which dials the mount's socket as the IAM user (section 7.4, D57) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
-| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket` |
+| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
@@ -1436,20 +1437,26 @@ over the client libraries, which a test replaces with a fake.
 
 Where the server's language has a Cloud SQL connector (Go, TypeScript),
 connections use IAM database authentication through it, so there is no
-password. Otherwise the platform generates a password into Secret Manager
-and uses the Cloud SQL mount Cloud Run provides. The server's database
-field is the same either way (section 3.4).
+password. A Rust server, whose language has none, uses IAM database
+authentication too, over the socket of the Cloud SQL mount Cloud Run
+provides (D57). A platform without IAM authentication would generate a
+password into Secret Manager instead. The server's database field is the
+same in every form (section 3.4).
 
-The connector form is built for Go. The sql connector derives the Cloud
-SQL connection (section 7.2), and the generated Go entrypoint dials it with
-the Cloud SQL Go connector, `cloud.google.com/go/cloudsqlconn`, under pgx:
-IAM database authentication, the instance's public IP, which the instance
-admits only through a connector, and a certificate refreshed when a dial
-needs it rather than in the background, since Cloud Run throttles an
-instance's CPU between requests (section 8.1). A TypeScript server gets no
-entrypoint yet. A Rust server's sql edge fails to lower until the derived
-value has a password form. An IAM database user starts with no privileges
-in its database; the migration job grants them (section 8.4, D46).
+The sql connector derives the Cloud SQL connection (section 7.2), with the
+same grants and IAM database user whatever the language. The generated Go
+entrypoint dials it with the Cloud SQL Go connector,
+`cloud.google.com/go/cloudsqlconn`, under pgx: IAM database
+authentication, the instance's public IP, which the instance admits only
+through a connector, and a certificate refreshed when a dial needs it
+rather than in the background, since Cloud Run throttles an instance's CPU
+between requests (section 8.1). A TypeScript entrypoint dials it with
+`@google-cloud/cloud-sql-connector` (section 8.6, D51). A Rust one
+connects over `/cloudsql/<connection name>`, the socket of the volume every
+workload with a sql edge mounts, as the IAM user, with an access token from
+the metadata server as the password, fetched for each new connection
+(D57). An IAM database user starts with no privileges in its database; the
+migration job grants them (section 8.4, D46).
 
 ### 7.5 Defaults
 
@@ -1698,7 +1705,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
 | bucket | one fake-gcs-server container per environment beside Postgres's, `superschematic-<stack>-<environment>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
-| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1), or a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
@@ -1725,8 +1732,14 @@ connections: a command `docker exec` runs inside it (Postgres's
 `pg_isready`), or a path it answers 200 on (the emulator's list of
 buckets). Beside it are the models `stack dev` writes for it
 (`models/<service>.json`), the plans it applies
-(`migrations/<service>.plan.json`) and the Go servers', workers' and
-jobs' binaries it builds (`bin/`). A TypeScript server has no binary: the provisioner
+(`migrations/<service>.plan.json`), the Go servers', workers' and
+jobs' binaries it builds (`bin/`), and the Cargo target directory every
+Rust server of the environment builds into (`target/`), which keeps the
+compiled dependencies from run to run, where the server's own directory,
+which each build of the stack empties, would lose them. A Rust server's
+binary is its crate's one `[[bin]]`, or else its package's name; two Rust
+servers whose crates name one binary are refused, since they would build
+one file. A TypeScript server has no binary: the provisioner
 runs `bun install` once at the output root, whatever the number of
 TypeScript servers and waves, then starts each with `bun main.ts`. The
 install is the one an engineer runs, not frozen: it writes the
@@ -1742,9 +1755,9 @@ callers first, and SIGKILL ten seconds later.
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
 on one port (`local-distinct-ports`), which names each container by its
-name. The platform runs Go and TypeScript
-servers; a Rust server, which has no entrypoint yet, does not resolve
-(`unrealizable`).
+name. The platform runs Go, TypeScript and Rust servers; a TypeScript or
+Rust job or worker does not resolve (`unrealizable`), since D52, D53 and
+D57 leave them out.
 
 Not built:
 
