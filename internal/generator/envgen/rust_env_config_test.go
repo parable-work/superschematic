@@ -142,3 +142,11 @@ func TestCORSAndIdentityFields(t *testing.T) {
 		}
 	}
 }
+
+// TestRustFieldName: an EnvConfig field is its config field's name in
+// lower case.
+func TestRustFieldName(t *testing.T) {
+	if got := envgen.RustFieldName("SHOP_DB_DATABASE"); got != "shop_db_database" {
+		t.Errorf("RustFieldName = %q", got)
+	}
+}

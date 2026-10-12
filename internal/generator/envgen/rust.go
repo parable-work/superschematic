@@ -63,6 +63,14 @@ func rustTemplateFuncs() template.FuncMap {
 }
 
 func toRustFieldName(key string) string {
+	return RustFieldName(key)
+}
+
+// RustFieldName is the Rust field that holds the config field or setting
+// named key, in the @envVars struct and in EnvConfig: the name in lower
+// case (SHOP_DB_DATABASE is shop_db_database). A Rust entrypoint reads a
+// derived, callers, CORS or identity field of an API's EnvConfig by it.
+func RustFieldName(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
 }
 
