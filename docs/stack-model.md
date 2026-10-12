@@ -1726,9 +1726,10 @@ connections: a command `docker exec` runs inside it (Postgres's
 buckets). Beside it are the models `stack dev` writes for it
 (`models/<service>.json`), the plans it applies
 (`migrations/<service>.plan.json`) and the Go servers', workers' and
-jobs' binaries it builds (`bin/`). A TypeScript server has no binary: the provisioner
-runs `bun install` once at the output root, whatever the number of
-TypeScript servers and waves, then starts each with `bun main.ts`. The
+jobs' binaries it builds (`bin/`). A TypeScript server, worker or job has
+no binary: the provisioner runs `bun install` once at the output root,
+whatever the number of TypeScript servers and waves, then starts each
+with `bun main.ts`, and runs a TypeScript job the same way. The
 install is the one an engineer runs, not frozen: it writes the
 workspace's lockfile, or brings the committed one up to date with the
 packages the build wrote, so the lockfile follows the schemas through
@@ -2068,6 +2069,18 @@ as they are, with no build step (D51). The pieces mirror Go's:
   Bun runs `main.ts` as it is. A mismatch between the implementation and
   `Deps` shows when `tsc` checks the package, as the generated CI's
   `check` does (section 11.3), not when Bun runs it.
+- **Jobs and workers.** Each job (section 8.7) and worker (section 8.8)
+  of a TypeScript API gets a package of its own beside the servers', at
+  `<output-root>/server/<stack>/<job>/`, with the server's
+  `package.json`, `tsconfig.json`, Dockerfile and ignore file. Its
+  `main.ts` takes the wiring the server's shares, `wiring.ts.tmpl`: the
+  API's config, a pool per database, a client per API called, a handle
+  per bucket and the `Deps` literal, as the server builds them. It builds
+  no identity service, reads no callers or CORS field, and listens on no
+  port, so its Dockerfile sets no `PORT` and exposes nothing. SIGTERM or
+  SIGINT aborts the signal it hands the job or the worker loop; a second
+  signal exits at once, as a server's does. It ends its pools before it
+  exits.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -2130,7 +2143,11 @@ export abstract class ShipOrders {}
   `Deps` as the API: the API generator writes a `Jobs` interface, a method
   per job taking a context and returning an error, and the scaffold writes
   `NewJobs` with a method that returns the not-implemented error (section
-  8.5).
+  8.5). A TypeScript API's `deps.ts` declares `Jobs`, a method per job in
+  camel case, `shipOrders(signal: AbortSignal): Promise<void>`, and
+  `JobsConstructor`, `(deps: Deps) => Jobs | Promise<Jobs>`; the scaffold
+  exports `createJobs` with a method that throws the runtime's
+  `notImplemented()`. The signal is Go's context: SIGTERM aborts it.
 - **Deployable.** Each job of an API in the stack is a deployable of kind
   `job`, named after its API service and its class in kebab case
   (`shop-orders-ship-orders`, `ir.JobDeployableName`). Not after the
@@ -2175,7 +2192,15 @@ export abstract class ShipOrders {}
   records the run as failed and runs it again if its retries allow. It
   serves no port and answers no health check. A package that predates its
   jobs, with no `NewJobs`, fails the build with the signature to add
-  (section 8.5).
+  (section 8.5). A TypeScript job's package (section 8.6) does the same on
+  Bun: `main.ts` calls the implementation's `createJobs`, then the job's
+  method once with the signal, logs `job started`, then `job done` or
+  `job failed` with how long the run took in seconds, through the HTTP
+  runtime's logger, and exits 1 when the method rejects. An
+  implementation that exists and exports no `createJobs` fails the build
+  with what to add; the build reads the exports from its source, a
+  declaration, an export list or a re-export of a whole module, which
+  may export it.
 - **Image.** A job's Dockerfile is a server's (section 8.2), with the
   binary at `/job`. `stack build` builds it, `--image` and the deploy
   manifest pin it, and the deploy rolls it out, as they do a server's
@@ -2193,7 +2218,9 @@ export abstract class ShipOrders {}
   the timeout in seconds and the retries.
 - **Running locally.** The local target lowers a job to a
   `local:process/job:Job` node, and `stack dev` builds its binary in its
-  rollout wave, as it builds a server's, then runs each schedule beside
+  rollout wave, as it builds a server's, or, for a TypeScript job, installs
+  the output root's workspace and runs `bun main.ts` in its package with
+  nothing to build, then runs each schedule beside
   the servers until Ctrl-C (section 8.3): never two runs of one job at
   once, a run that comes due while the last goes on skipped, each line of
   its output with the job's name in front, a run stopped at the job's
@@ -2301,6 +2328,29 @@ export abstract class FulfilOrders {}
   not at all. Each field reaches its column as a table's does through a
   repository's `CreateOne`, and an optional field that is unset, or a
   required list that is nil, takes its column's default.
+- **The TypeScript client.** There is no TypeScript ORM, so the DB's
+  TypeScript types package carries each queue as data in `queues.ts`,
+  which its `package.json` exports as `./queues`, as it carries the
+  identity descriptor (D50): `orderPlacedQueue`, a
+  `QueueDefinition<OrderPlaced>` with the queue's table, its arguments,
+  the column each field writes, and its statements on Postgres. One
+  function, `sqlutil.PostgresQueueStatements`, writes those statements for
+  the Go ORM's `queues.go` and for `queues.ts`, so the two run the same
+  SQL: they claim, complete, fail, extend and release each other's
+  messages under each other's tokens. The file imports nothing but the
+  message's type, so the types package gains no dependency. The HTTP
+  runtime's `./postgres` entry runs a definition:
+  `enqueue(client, orderPlacedQueue, msg)` writes the message in the
+  transaction `client` runs, and `postgresQueue(pool, orderPlacedQueue)`
+  returns the claims below, with `ClaimLostError` for a lost claim. A
+  field writes its column as the Go ORM writes it, classified alike: a
+  JSON field its JSON text, an unset optional field or list nothing, so
+  the column's default, and an unset enum its schema default. Read back,
+  each column is what the TypeScript types hold: a timestamp a `Date`, a
+  date its `YYYY-MM-DD` text, a 64-bit integer a number, a JSON column its
+  value. A queue whose message holds a value the client cannot write and
+  read back yet, a `POINT` or an `INTERVAL` column, is left out of
+  `queues.ts`, which says why.
 - **Claim.** `<Database>.<Queue>Queue()` returns the queue's claims: `Claim`
   takes up to n messages that are ready and due, or claimed past their
   claim's expiry, with `FOR UPDATE SKIP LOCKED`, gives each a new claim
@@ -2313,7 +2363,8 @@ export abstract class FulfilOrders {}
   message since. A message whose last attempt's claim expired is dead, so
   a message that kills its worker every time stops coming back. Times are
   the database's clock. Delivery is at least once, and handlers are
-  idempotent. The Go ORM runs on Postgres alone, so the claims do too:
+  idempotent. The Go ORM runs on Postgres alone, and so does the
+  TypeScript client, so the claims do too:
   resolution refuses a worker whose queue's database the environment
   places on a platform of another dialect, SQLite or D1, which no runtime
   claims on yet.
@@ -2334,7 +2385,13 @@ export abstract class FulfilOrders {}
   `WorkersConstructor`. The scaffold writes `NewWorkers` and a method that
   returns the not-implemented error, which fails each message. A stack's
   build refuses an implementation that predates its workers, with no
-  `NewWorkers`, printing what to add (section 8.5).
+  `NewWorkers`, printing what to add (section 8.5). A TypeScript API's
+  `deps.ts` declares `Workers`, a method per worker in camel case,
+  `fulfilOrders(message: OrderPlaced, signal: AbortSignal):
+  Promise<void>`, the message typed from the database's TypeScript types,
+  which the API's build then requires, and `WorkersConstructor`; the
+  scaffold exports `createWorkers`, and an implementation that exports
+  none fails the stack's build, as one without `createJobs` does.
 - **Deployable.** Each worker of an API in the stack is a deployable of
   kind `worker`, named as a job is (`shop-orders-fulfil-orders`,
   `ir.WorkerDeployableName`). Its edges, its config, its secrets, its env
@@ -2370,10 +2427,21 @@ export abstract class FulfilOrders {}
   - on SIGTERM or SIGINT claims no more, lets the running methods finish
     within the grace, then cancels them, releases their messages and
     exits 0.
+
+  A TypeScript worker's package (section 8.6) does the same on Bun: its
+  `main.ts` calls the implementation's `createWorkers` and runs
+  `runWorker` (`@superschematic/http-runtime/worker`), the twin of
+  `worker.Run`, over `postgresQueue`'s claims, with the concurrency
+  `workerConcurrency` reads from `WORKER_CONCURRENCY`. Each method gets a
+  signal that aborts when the grace is over. JavaScript cannot stop a
+  method that ignores it: its message is released all the same, and its
+  outcome, when it comes, is logged and changes nothing, since the process
+  exits once the loop stops.
 - **Local.** `stack dev` runs each worker as a process with no port,
-  ready once it starts, its output prefixed with its name. Its exit stops
+  a TypeScript one as `bun main.ts`, ready once it starts, its output
+  prefixed with its name. Its exit stops
   the environment, as a server's does (section 8.3).
-- **gcp.** A worker is a Cloud Run worker pool (`gcp.cloudrunworker`,
+- **gcp.** A worker, in Go or TypeScript, is a Cloud Run worker pool (`gcp.cloudrunworker`,
   `gcp:cloudrunv2/workerPool:WorkerPool`, GA in the pinned pulumi-gcp
   9.37.1), which has no port, no URL and no IAM of its own (section 7.2).
   It scales manually to the worker's instances, and to zero when the
@@ -2390,7 +2458,8 @@ export abstract class FulfilOrders {}
 
 Not built:
 
-- A worker in TypeScript or Rust, and the claims in their runtimes.
+- A worker in Rust, and the claims in its runtime.
+- A `POINT` or `INTERVAL` column in a TypeScript queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 - Removing `done` messages, which stay in the table, and an operator's
   command to read and retry dead ones.
@@ -3675,16 +3744,16 @@ model, or retired, when it lands.
    and a second target (GKE or Cloudflare) added as a registration, with
    the generic connector (section 6.2) so compute can mix. Built so far:
    - TypeScript servers on Bun (section 8.6, D51);
-   - jobs and scheduled jobs, on the local target and on gcp as Cloud
-     Run jobs with Cloud Scheduler (section 8.7, D52);
+   - jobs and scheduled jobs, in Go and TypeScript, on the local target
+     and on gcp as Cloud Run jobs with Cloud Scheduler (section 8.7, D52);
    - static sites, on the local target and on gcp from a bucket behind a
      load balancer with Cloud CDN, never run against Google Cloud
      (section 8.10, D55);
    - buckets, on the local target's storage emulator and on gcp in Cloud
      Storage, never run against Google Cloud (section 8.9, D54);
-   - queues in a DB service's database, and Go workers that handle them,
-     on the local target and on gcp as Cloud Run worker pools (section
-     8.8, D53).
+   - queues in a DB service's database, and Go and TypeScript workers
+     that handle them, on the local target and on gcp as Cloud Run worker
+     pools (section 8.8, D53).
    
    Not yet: a site's SDK clients in the browser, and a second target.
 

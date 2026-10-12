@@ -13,7 +13,7 @@ and keeps their wire contract:
 | success | `application/json` | `{data, meta: {requestId}}` |
 | failure | `application/problem+json` | RFC 9457: `type`, `title`, `status`, `detail`, `code`, `requestId`, `details`, extension members |
 
-Three entry points:
+Its entry points:
 
 - `@superschematic/http-runtime`, with no framework import:
   `RequestContext`, `HttpProblem` and the problem envelope, the success
@@ -71,12 +71,15 @@ Three entry points:
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
-  database connection (below). It is the only entry that imports `pg`.
+  database connection, and a queue's enqueue and claims (below). It is
+  the only entry that imports `pg`.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
   emulator that serves its API, over a derived bucket connection (below).
   It is the only entry that imports `@google-cloud/storage`.
+- `@superschematic/http-runtime/worker`, the claim loop of a stack's
+  worker (D53, below). It imports nothing.
 
 ## Authentication and permissions
 
@@ -309,6 +312,36 @@ connects when first used, so a database that is not up fails a query, not
 the open; the connector does read the instance's settings from the Cloud
 SQL Admin API when the pool opens. `ping(pool, timeoutMs)` resolves when
 `SELECT 1` answers in time, which is what `/readyz` asks of each pool.
+
+The same entry runs a queue (D53) over a definition a DB service's
+TypeScript types export from their `./queues` entry, such as
+`orderPlacedQueue`: the queue's table, its arguments, the column each
+field writes, and its statements on Postgres, which the generator writes
+from the one source the Go ORM's come from. `enqueue(client, queue, msg)`
+writes a message in the transaction `client` runs, each field as the Go
+ORM writes it: a JSON field its JSON text, an unset field nothing, so its
+column's default, and an unset enum its schema default.
+`postgresQueue(pool, queue)` returns the claims a worker makes: `claim(n)`
+takes up to n due messages with `FOR UPDATE SKIP LOCKED`, after marking
+dead each message whose last attempt's claim expired, and reads each
+column as the TypeScript types hold it (a 64-bit integer a number, a date
+its text); `complete`, `fail` (which resolves to whether the message is
+dead), `extend` and `release` take the message's ID and its claim's token
+and reject with `ClaimLostError` once the token no longer claims it.
+`src/queue.test.ts` runs them against the Postgres
+`SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names, and skips without
+one.
+
+`runWorker(queue, { signal, concurrency, graceMs, logger })`, from
+`@superschematic/http-runtime/worker`, is the twin of the Go runtime's
+`worker.Run`: it claims for its free slots, runs each message's handler
+with a signal of its own, extends the claim every third of the lease while
+the handler runs, completes the message when the handler resolves and
+fails it when it rejects, and logs each outcome. When `signal` aborts it
+claims no more, lets the running handlers finish within the grace, eight
+seconds unless set, then aborts their signal and releases their messages.
+`workerConcurrency(fallback)` reads `WORKER_CONCURRENCY`, which a platform
+sets.
 
 `Bucket`, from the main entry, is the provider-neutral interface of a
 bucket an API lists in its `buckets` (D54), which its `Deps` holds: `put`
