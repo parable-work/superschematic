@@ -174,8 +174,10 @@ impl OrderImplementation for Shop {
         Ok(order(types::OrderStatus::Placed, which(&args.id).to_owned()))
     }
     async fn cancel_order(&self, _ctx: RequestContext, args: OrderCancelOrderArgs) -> Result<types::OrderView, ApiError> {
-        if args.reason.as_deref() == Some("too late") {
-            return Err(ApiError::conflict("The order has shipped"));
+        match args.reason.as_deref() {
+            Some("too late") => return Err(ApiError::conflict("The order has shipped")),
+            Some("lost") => return Err(ApiError::not_found("No such order")),
+            _ => {}
         }
         let note = format!("cancelled {} {} {:?}", which(&args.id), json!(args.code), args.reason);
         Ok(order(types::OrderStatus::Cancelled, note))
@@ -212,7 +214,7 @@ async fn cancel_page() -> topcoat::Result<impl View> {
 async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
     let (status, note, errors) = match form.submit(cx).await {
         Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+        Err(refused) => (refused.status, None, refused.errors),
     };
     Ok(view! {
         (status)
@@ -241,7 +243,7 @@ async fn hold_page() -> topcoat::Result<impl View> {
 async fn hold(cx: &Cx, Form(form): Form<OrderHoldOrderArgsForm>) -> topcoat::Result<impl View> {
     let (status, note, errors) = match form.submit(cx).await {
         Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+        Err(refused) => (refused.status, None, refused.errors),
     };
     Ok(view! {
         (status)
@@ -256,7 +258,7 @@ async fn hold(cx: &Cx, Form(form): Form<OrderHoldOrderArgsForm>) -> topcoat::Res
 async fn add_note(cx: &Cx, Form(form): Form<OrderNoteOrderArgsForm>) -> topcoat::Result<impl View> {
     let (status, note, errors) = match form.submit(cx).await {
         Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+        Err(refused) => (refused.status, None, refused.errors),
     };
     Ok(view! {
         (status)
@@ -271,7 +273,7 @@ async fn add_note(cx: &Cx, Form(form): Form<OrderNoteOrderArgsForm>) -> topcoat:
 async fn tag(cx: &Cx, Form(form): Form<OrderTagOrderArgsForm>) -> topcoat::Result<impl View> {
     let (status, note, errors) = match form.submit(cx).await {
         Ok(order) => (StatusCode::OK, order.note, FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+        Err(refused) => (refused.status, None, refused.errors),
     };
     Ok(view! {
         (status)
@@ -286,7 +288,7 @@ async fn tag(cx: &Cx, Form(form): Form<OrderTagOrderArgsForm>) -> topcoat::Resul
 async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
     let (status, orders, errors) = match filter.submit(cx).await {
         Ok(orders) => (StatusCode::OK, orders, FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, Vec::new(), errors),
+        Err(refused) => (refused.status, Vec::new(), refused.errors),
     };
     Ok(view! {
         (status)
@@ -312,7 +314,7 @@ async fn new_filter_page() -> topcoat::Result<impl View> {
 async fn review(cx: &Cx, Form(form): Form<ProductReviewsWriteReviewArgsForm>) -> topcoat::Result<impl View> {
     let (status, title, errors) = match form.submit(cx).await {
         Ok(review) => (StatusCode::OK, Some(format!("{} {}", which(&review.id), review.title)), FormErrors::default()),
-        Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, None, errors),
+        Err(refused) => (refused.status, None, refused.errors),
     };
     Ok(view! {
         (status)
@@ -382,7 +384,8 @@ async fn an_argument_form_renders_its_path_hidden_and_its_rules_as_attributes() 
         r#"<option value="too_slow">Too slow</option>"#,
         r#"<label for="order-cancel-order-reason">Reason</label>"#,
         r#"<p class="field-hint" id="order-cancel-order-reason-hint">Why the order is cancelled, as the shopper wrote it.</p>"#,
-        r#"name="reason" type="text" maxlength="500" aria-describedby="order-cancel-order-reason-hint">"#,
+        // A reason of up to 500 characters is long text, a textarea.
+        "<textarea id=\"order-cancel-order-reason\" name=\"reason\" rows=\"6\" maxlength=\"500\" aria-describedby=\"order-cancel-order-reason-hint\">\n</textarea>",
     ] {
         assert!(html.contains(want), "missing {want} in {html}");
     }
@@ -405,7 +408,7 @@ async fn a_refused_post_renders_again_with_each_error_at_its_control() {
     let long = "x".repeat(501);
     let (status, html) = post("/cancel", &format!("id={ORDER}&code=too_slow&reason={long}")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
-    assert!(html.contains(&format!(r#"value="{long}" aria-invalid="true">"#)), "{html}");
+    assert!(html.contains(&format!("aria-invalid=\"true\">\n{long}</textarea>")), "{html}");
     assert!(html.contains(r#"<p class="field-error">must be at most 500 characters</p>"#), "{html}");
     assert!(html.contains(r#"<option value="too_slow" selected="">"#), "{html}");
 
@@ -419,8 +422,33 @@ async fn a_refused_post_renders_again_with_each_error_at_its_control() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
     assert!(html.contains(r#"<p class="field-error">does not match the declared type</p>"#), "{html}");
     let (status, html) = post("/cancel", &format!("id={ORDER}&code=too_slow&reason=too+late")).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert_eq!(status, StatusCode::CONFLICT, "{html}");
     assert!(html.contains(r#"<p class="form-error">The order has shipped</p>"#), "{html}");
+}
+
+#[tokio::test]
+async fn submit_keeps_the_routes_status() {
+    // The form parse refuses: 422, each error at its control.
+    let (status, html) = post("/cancel", &format!("id={ORDER}&reason=lost")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(html.contains(r#"<p class="field-error">is required</p>"#), "{html}");
+    // The operation's refusals: the route's status, its message the form's,
+    // the form as sent.
+    for (reason, status, message) in [
+        ("lost", StatusCode::NOT_FOUND, "No such order"),
+        ("too+late", StatusCode::CONFLICT, "The order has shipped"),
+    ] {
+        let (sent, html) = post("/cancel", &format!("id={ORDER}&code=too_slow&reason={reason}")).await;
+        assert_eq!(sent, status, "{html}");
+        assert!(html.contains(&format!(r#"<p class="form-error">{message}</p>"#)), "{html}");
+        assert!(html.contains(r#"<option value="too_slow" selected="">"#), "{html}");
+    }
+    // A refusal's errors are the form's: Refusal::from_api, and a parse's
+    // errors a 422.
+    let refused = schemas_fixture_args_api_topcoat::forms::Refusal::from_api(&ApiError::conflict("taken"));
+    assert_eq!((refused.status, refused.errors.form.as_slice()), (StatusCode::CONFLICT, ["taken".to_owned()].as_slice()));
+    let refused = schemas_fixture_args_api_topcoat::forms::Refusal::from(OrderCancelOrderArgsForm::new(ORDER).parse().unwrap_err());
+    assert_eq!((refused.status, refused.errors.of("code")), (StatusCode::UNPROCESSABLE_ENTITY, vec!["is required".to_owned()]));
 }
 
 #[tokio::test]

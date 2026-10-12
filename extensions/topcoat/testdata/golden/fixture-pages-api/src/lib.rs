@@ -13,14 +13,17 @@
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `views` renders each record as a description list and as a table.
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
 //! `pages` serves a page per resource the operations describe, under
 //! `/console`, with a layout and a nav; the app's `.discover()`
 //! registers them, and `pages::Settings` in its app context names its
-//! sign-in page.
+//! sign-in page and its choices.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod choices;
 pub mod forms;
 pub mod operations;
 pub mod pages;

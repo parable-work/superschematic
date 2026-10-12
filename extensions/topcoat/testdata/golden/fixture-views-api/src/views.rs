@@ -9,14 +9,17 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{AddressRecord, CommentRecord, MoneyRecord, OrderLineRecord, OrderViewRecord};
 use topcoat::view::{View, ViewExt, component, view};
 
@@ -24,6 +27,157 @@ use topcoat::view::{View, ViewExt, component, view};
 /// noun.
 fn label_of(title: Option<&str>, noun: Option<&'static str>) -> Option<String> {
     title.filter(|title| !title.is_empty()).or(noun).map(str::to_owned)
+}
+
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
+
+/// A date and time as a reader reads it, in UTC to the minute, whatever
+/// offset it was sent with: `2026-10-09T14:30:00Z` is "9 Oct 2026, 14:30
+/// UTC", and `2026-10-09T00:15:00+01:00` "8 Oct 2026, 23:15 UTC". Text
+/// that is no date and time, RFC 3339's, shows as it is. The `<time>`
+/// element's `datetime` keeps the value as sent.
+pub fn date_time_text(value: &str) -> String {
+    let Some((date, rest)) = value.split_once(['T', 't', ' ']) else {
+        return value.to_owned();
+    };
+    let (Some((year, month, day)), Some((hour, minute, east))) = (civil_date(date), clock(rest)) else {
+        return value.to_owned();
+    };
+    // Minutes since 1970-01-01T00:00Z.
+    let minutes = days_from_civil(year, month, day) * 1440 + i64::from(hour * 60 + minute) - east;
+    let (year, month, day) = civil_from_days(minutes.div_euclid(1440));
+    let minute = minutes.rem_euclid(1440);
+    format!("{day} {} {year}, {:02}:{:02} UTC", MONTHS[month as usize - 1], minute / 60, minute % 60)
+}
+
+/// A time, its seconds and their fraction or not, then its offset (`Z`,
+/// `+01:00`, or none for UTC): its hour, its minute and the offset east of
+/// UTC in minutes.
+fn clock(text: &str) -> Option<(u32, u32, i64)> {
+    let (time, offset) = text.split_at(text.find(['Z', 'z', '+', '-']).unwrap_or(text.len()));
+    let (hour, minute) = hour_minute(time)?;
+    let east = match offset.as_bytes() {
+        [] | [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), rest @ ..] if rest.len() == 5 => {
+            let (hours, minutes) = hour_minute(&offset[1..])?;
+            let east = i64::from(hours * 60 + minutes);
+            if *sign == b'-' { -east } else { east }
+        }
+        _ => return None,
+    };
+    Some((hour, minute, east))
+}
+
+/// The days from 1970-01-01 to a date of the proleptic Gregorian calendar.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let (era, year_of_era) = (year.div_euclid(400), year.rem_euclid(400));
+    let day_of_year = (153 * ((i64::from(month) + 9) % 12) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// The date `days` after 1970-01-01: its year, month and day.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let (era, day_of_era) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
+    let month = if shifted < 10 { shifted + 3 } else { shifted - 9 };
+    (year_of_era + era * 400 + i64::from(month <= 2), month as u32, day as u32)
+}
+
+/// A date as a reader reads it: `2026-10-09` is "9 Oct 2026". Text that is
+/// no date, `YYYY-MM-DD`, shows as it is.
+pub fn date_text(value: &str) -> String {
+    match civil_date(value) {
+        Some((year, month, day)) => format!("{day} {} {year}", MONTHS[month as usize - 1]),
+        None => value.to_owned(),
+    }
+}
+
+/// A time of day as a reader reads it, to the minute: `14:30:15` is
+/// "14:30". Text that is no 24-hour time, `HH:MM` with its seconds or
+/// not, shows as it is.
+pub fn time_text(value: &str) -> String {
+    match hour_minute(value) {
+        Some((hour, minute)) => format!("{hour:02}:{minute:02}"),
+        None => value.to_owned(),
+    }
+}
+
+/// The months as a reader reads them, in English and in short.
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// `YYYY-MM-DD`, a date that exists: its year, month and day.
+fn civil_date(text: &str) -> Option<(i64, u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year = digits(&bytes[0..4])?;
+    let month = digits(&bytes[5..7]).filter(|month| (1..=12).contains(month))?;
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let day = digits(&bytes[8..10]).filter(|day| (1..=days).contains(day))?;
+    Some((i64::from(year), month, day))
+}
+
+/// `HH:MM` in 24 hours, with `:SS` and a fraction of a second or not: its
+/// hour and its minute.
+fn hour_minute(text: &str) -> Option<(u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 5 || bytes[2] != b':' {
+        return None;
+    }
+    let hour = digits(&bytes[0..2]).filter(|hour| *hour < 24)?;
+    let minute = digits(&bytes[3..5]).filter(|minute| *minute < 60)?;
+    let seconds = match &bytes[5..] {
+        [] => true,
+        [b':', rest @ ..] if rest.len() >= 2 => {
+            digits(&rest[..2]).is_some_and(|second| second <= 60)
+                && match &rest[2..] {
+                    [] => true,
+                    [b'.', fraction @ ..] => !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit),
+                    _ => false,
+                }
+        }
+        _ => false,
+    };
+    seconds.then_some((hour, minute))
+}
+
+/// The number its ASCII digits spell, when they are all digits.
+fn digits(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .iter()
+        .all(u8::is_ascii_digit)
+        .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
 }
 
 /// Labels a value of `OrderStatus`: its member's name in words. A value the
@@ -38,19 +192,20 @@ pub fn order_status_label(value: &str) -> &str {
 }
 
 /// `AddressRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn address_detail(record: AddressRecord) -> topcoat::Result<impl View> {
+pub async fn address_detail(record: AddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.recipient.as_str()), None);
     Ok(view! {
         <div class="ss-detail" data-type="Address" role="group" aria-label=(label)>
             <dl>
                 <div data-field="recipient">
                     <dt>"Recipient"</dt>
-                    <dd>(record.recipient)</dd>
+                    <dd>(text_of(&choices, "recipient", &record.recipient))</dd>
                 </div>
                 <div data-field="city">
                     <dt>"City"</dt>
-                    <dd>(record.city)</dd>
+                    <dd>(text_of(&choices, "city", &record.city))</dd>
                 </div>
             </dl>
         </div>
@@ -58,10 +213,15 @@ pub async fn address_detail(record: AddressRecord) -> topcoat::Result<impl View>
 }
 
 /// `AddressRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's title cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn address_table(rows: Vec<AddressRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn address_table(
+    rows: Vec<AddressRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Address">
             <thead>
@@ -76,12 +236,12 @@ pub async fn address_table(rows: Vec<AddressRecord>, #[default] hrefs: Vec<Strin
                     <tr>
                         <th scope="row" data-field="recipient">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.recipient)</a>
+                                <a href=(href)>(text_of(&choices, "recipient", &row.recipient))</a>
                             } else {
-                                (row.recipient)
+                                (text_of(&choices, "recipient", &row.recipient))
                             }
                         </th>
-                        <td data-field="city">(row.city)</td>
+                        <td data-field="city">(text_of(&choices, "city", &row.city))</td>
                     </tr>
                 }
             </tbody>
@@ -90,18 +250,19 @@ pub async fn address_table(rows: Vec<AddressRecord>, #[default] hrefs: Vec<Strin
 }
 
 /// `CommentRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn comment_detail(record: CommentRecord) -> topcoat::Result<impl View> {
+pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Comment" role="group">
             <dl>
                 <div data-field="text">
                     <dt>"Text"</dt>
-                    <dd>(record.text)</dd>
+                    <dd>(text_of(&choices, "text", &record.text))</dd>
                 </div>
                 <div data-field="replies">
                     <dt>"Replies"</dt>
-                    <dd>comment_table(rows: record.replies)</dd>
+                    <dd>comment_table(rows: record.replies, choices: choices.under("replies"))</dd>
                 </div>
             </dl>
         </div>
@@ -110,10 +271,15 @@ pub async fn comment_detail(record: CommentRecord) -> topcoat::Result<impl View>
 }
 
 /// `CommentRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn comment_table(rows: Vec<CommentRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn comment_table(
+    rows: Vec<CommentRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Comment">
             <thead>
@@ -128,12 +294,12 @@ pub async fn comment_table(rows: Vec<CommentRecord>, #[default] hrefs: Vec<Strin
                     <tr>
                         <td data-field="text">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.text)</a>
+                                <a href=(href)>(text_of(&choices, "text", &row.text))</a>
                             } else {
-                                (row.text)
+                                (text_of(&choices, "text", &row.text))
                             }
                         </td>
-                        <td data-field="replies">comment_table(rows: row.replies)</td>
+                        <td data-field="replies">comment_table(rows: row.replies, choices: choices.under("replies"))</td>
                     </tr>
                 }
             </tbody>
@@ -143,18 +309,19 @@ pub async fn comment_table(rows: Vec<CommentRecord>, #[default] hrefs: Vec<Strin
 }
 
 /// `MoneyRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn money_detail(record: MoneyRecord) -> topcoat::Result<impl View> {
+pub async fn money_detail(record: MoneyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Money" role="group">
             <dl>
                 <div data-field="cents">
                     <dt>"Cents"</dt>
-                    <dd>(record.cents)</dd>
+                    <dd>(number_of(&choices, "cents", record.cents))</dd>
                 </div>
                 <div data-field="currency">
                     <dt>"Currency"</dt>
-                    <dd>(record.currency)</dd>
+                    <dd>(text_of(&choices, "currency", &record.currency))</dd>
                 </div>
             </dl>
         </div>
@@ -162,10 +329,15 @@ pub async fn money_detail(record: MoneyRecord) -> topcoat::Result<impl View> {
 }
 
 /// `MoneyRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn money_table(rows: Vec<MoneyRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn money_table(
+    rows: Vec<MoneyRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Money">
             <thead>
@@ -180,12 +352,12 @@ pub async fn money_table(rows: Vec<MoneyRecord>, #[default] hrefs: Vec<String>) 
                     <tr>
                         <td data-field="cents">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.cents)</a>
+                                <a href=(href)>(number_of(&choices, "cents", row.cents))</a>
                             } else {
-                                (row.cents)
+                                (number_of(&choices, "cents", row.cents))
                             }
                         </td>
-                        <td data-field="currency">(row.currency)</td>
+                        <td data-field="currency">(text_of(&choices, "currency", &row.currency))</td>
                     </tr>
                 }
             </tbody>
@@ -194,22 +366,23 @@ pub async fn money_table(rows: Vec<MoneyRecord>, #[default] hrefs: Vec<String>) 
 }
 
 /// `OrderLineRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_line_detail(record: OrderLineRecord) -> topcoat::Result<impl View> {
+pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderLine" role="group">
             <dl>
                 <div data-field="sku">
                     <dt>"Sku"</dt>
-                    <dd>(record.sku)</dd>
+                    <dd>(text_of(&choices, "sku", &record.sku))</dd>
                 </div>
                 <div data-field="quantity">
                     <dt>"Quantity"</dt>
-                    <dd>(record.quantity)</dd>
+                    <dd>(number_of(&choices, "quantity", record.quantity))</dd>
                 </div>
                 <div data-field="price">
                     <dt>"Price"</dt>
-                    <dd>money_detail(record: record.price)</dd>
+                    <dd>money_detail(record: record.price, choices: choices.under("price"))</dd>
                 </div>
             </dl>
         </div>
@@ -217,10 +390,15 @@ pub async fn order_line_detail(record: OrderLineRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderLineRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn order_line_table(rows: Vec<OrderLineRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn order_line_table(
+    rows: Vec<OrderLineRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderLine">
             <thead>
@@ -236,13 +414,13 @@ pub async fn order_line_table(rows: Vec<OrderLineRecord>, #[default] hrefs: Vec<
                     <tr>
                         <td data-field="sku">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.sku)</a>
+                                <a href=(href)>(text_of(&choices, "sku", &row.sku))</a>
                             } else {
-                                (row.sku)
+                                (text_of(&choices, "sku", &row.sku))
                             }
                         </td>
-                        <td data-field="quantity">(row.quantity)</td>
-                        <td data-field="price">money_detail(record: row.price)</td>
+                        <td data-field="quantity">(number_of(&choices, "quantity", row.quantity))</td>
+                        <td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>
                     </tr>
                 }
             </tbody>
@@ -251,19 +429,20 @@ pub async fn order_line_table(rows: Vec<OrderLineRecord>, #[default] hrefs: Vec<
 }
 
 /// `OrderViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl View> {
+pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.reference.as_str()), Some("Order"));
     Ok(view! {
         <div class="ss-detail" data-type="OrderView" role="group" aria-label=(label)>
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="reference">
                     <dt>"Reference"</dt>
-                    <dd>(record.reference)</dd>
+                    <dd>(text_of(&choices, "reference", &record.reference))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -271,20 +450,34 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
                 </div>
                 <div data-field="placedAt">
                     <dt>"Placed at"</dt>
-                    <dd><time datetime=(&record.placed_at)>(&record.placed_at)</time></dd>
+                    <dd><time datetime=(&record.placed_at)>(date_time_text(&record.placed_at))</time></dd>
                 </div>
                 <div data-field="deliverBy">
                     <dt>"Deliver by"</dt>
                     <dd>
                         match record.deliver_by {
-                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="collectAt">
+                    <dt>"Collect at"</dt>
+                    <dd>
+                        match record.collect_at {
+                            Some(value) => <time datetime=(&value)>(time_text(&value))</time>,
                             None => "",
                         }
                     </dd>
                 </div>
                 <div data-field="note">
                     <dt>"Note"</dt>
-                    <dd>(record.note)</dd>
+                    <dd>
+                        match record.note {
+                            Some(value) => (text_of(&choices, "note", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="gift">
                     <dt>"Gift"</dt>
@@ -292,27 +485,27 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
                 </div>
                 <div data-field="shipTo">
                     <dt>"Ship to"</dt>
-                    <dd>address_detail(record: record.ship_to)</dd>
+                    <dd>address_detail(record: record.ship_to, choices: choices.under("shipTo"))</dd>
                 </div>
                 <div data-field="billTo">
                     <dt>"Bill to"</dt>
                     <dd>
                         match record.bill_to {
-                            Some(value) => address_detail(record: value),
+                            Some(value) => address_detail(record: value, choices: choices.under("billTo")),
                             None => "",
                         }
                     </dd>
                 </div>
                 <div data-field="lines">
                     <dt>"Lines"</dt>
-                    <dd>order_line_table(rows: record.lines)</dd>
+                    <dd>order_line_table(rows: record.lines, choices: choices.under("lines"))</dd>
                 </div>
                 <div data-field="tags">
                     <dt>"Tags"</dt>
                     <dd>
                         <ul class="ss-list">
                             for item in record.tags {
-                                <li>(item)</li>
+                                <li>(text_of(&choices, "tags", &item))</li>
                             }
                         </ul>
                     </dd>
@@ -324,7 +517,7 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
                             for (key, entry) in record.attributes {
                                 <div>
                                     <dt>(key)</dt>
-                                    <dd>(entry)</dd>
+                                    <dd>(text_of(&choices, "attributes", &entry))</dd>
                                 </div>
                             }
                         </dl>
@@ -345,10 +538,15 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per summary field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's title cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(
+    rows: Vec<OrderViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <caption>"Orders"</caption>
@@ -366,14 +564,14 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<
                     <tr>
                         <th scope="row" data-field="reference">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.reference)</a>
+                                <a href=(href)>(text_of(&choices, "reference", &row.reference))</a>
                             } else {
-                                (row.reference)
+                                (text_of(&choices, "reference", &row.reference))
                             }
                         </th>
                         <td data-field="status"><data value=(&row.status)>(order_status_label(&row.status))</data></td>
-                        <td data-field="placedAt"><time datetime=(&row.placed_at)>(&row.placed_at)</time></td>
-                        <td data-field="shipTo">(row.ship_to.recipient)</td>
+                        <td data-field="placedAt"><time datetime=(&row.placed_at)>(date_time_text(&row.placed_at))</time></td>
+                        <td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>
                     </tr>
                 }
             </tbody>

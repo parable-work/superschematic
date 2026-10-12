@@ -5,7 +5,8 @@
 //! JSON API at `/api` serves the same reviews and admits the same session.
 //! An order is placed through the form with its lines as rows, filtered by
 //! the GET form on `/orders` and cancelled from its page, each refusal
-//! rendered at its control; a post of far more lines than an order holds
+//! rendered at its control with the route's status; an order's page names
+//! its lines' products; a post of far more lines than an order holds
 //! renders a form of 51. Over a SQLite file of shop-db's tables, the
 //! reviews, orders and sessions outlive the app.
 
@@ -150,6 +151,8 @@ async fn the_reviews_page_renders_the_form_from_the_input_rules() {
     assert!(page.body.contains("No reviews yet."), "{}", page.body);
     assert!(page.body.contains(r#"name="rating" type="number" required="" step="any" min="1" max="5""#), "{}", page.body);
     assert!(page.body.contains(r#"name="title" type="text" required="" minlength="1" maxlength="120""#), "{}", page.body);
+    // A body of up to 5000 characters is long text, a textarea.
+    assert!(page.body.contains("<textarea id=\"write-review-input-body\" name=\"body\" rows=\"6\" required=\"\" maxlength=\"5000\">\n</textarea>"), "{}", page.body);
 }
 
 #[tokio::test]
@@ -193,9 +196,10 @@ async fn a_wrong_password_signs_no_one_in() {
 #[tokio::test]
 async fn orders_need_their_permission() {
     let router = shop().await;
+    // The filter's submit keeps the route's 401, its message the form's.
     let signed_out = send(&router, "GET", "/orders", None, None).await;
     assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
-    assert!(signed_out.body.contains(r#"<p class="refusal">Authentication required</p>"#), "{}", signed_out.body);
+    assert!(signed_out.body.contains(r#"<p class="form-error">Authentication required</p>"#), "{}", signed_out.body);
     // The sign-in button, which opens the sign-in page with the page to
     // come back to.
     let button = r#"<form method="get" action="/sign-in" class="sign-in"><input type="hidden" name="next" value="/orders">"#;
@@ -241,11 +245,11 @@ async fn orders_need_their_permission() {
     assert_eq!(malformed.status, StatusCode::NOT_FOUND);
 
     // Placing an order signed out: the form, with the sign-in button
-    // first, refuses with the operation's message.
+    // first, refuses with the operation's status and message.
     let form = send(&router, "GET", "/orders/new", None, None).await;
     assert!(form.body.contains(r#"<input type="hidden" name="next" value="/orders/new">"#), "{}", form.body);
     let refused = send(&router, "POST", "/orders/new", None, Some(&order_form("2"))).await;
-    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(refused.status, StatusCode::UNAUTHORIZED);
     assert!(refused.body.contains(r#"<p class="form-error">Authentication required</p>"#), "{}", refused.body);
 }
 
@@ -265,10 +269,12 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
         r#"name="lines[0].quantity" type="number" required="" step="any" min="1" max="99">"#,
         r#"<button type="submit" class="ss-add" name="_action" value="add:lines" formnovalidate="">Add a line</button>"#,
         r#"name="shippingAddress.country" type="text" required="" pattern="^[A-Z]{2}$">"#,
+        // A number that ends a field's name is a word of its label.
+        r#"<label for="place-order-input-shipping-address-line1">Line 1</label>"#,
     ] {
         assert!(form.body.contains(want), "{want}\n{}", form.body);
     }
-    assert!(!form.body.contains("Line 2"), "{}", form.body);
+    assert!(!form.body.contains("<legend>Line 2</legend>"), "{}", form.body);
 
     // A row button adds a line and renders the form again, as sent, without
     // placing an order.
@@ -304,7 +310,12 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains(r#"<div data-field="status"><dt>Status</dt><dd><data value="placed">Placed</data></dd></div>"#), "{}", page.body);
     assert!(page.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd>3998</dd></div>"#), "{}", page.body);
-    assert!(page.body.contains(&format!(r#"<td data-field="productId">{anvil}</td>"#)), "{}", page.body);
+    // Each line's product by its name, the catalog's choices.
+    assert!(page.body.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", page.body);
+    assert!(!page.body.contains(&format!(">{anvil}<")), "{}", page.body);
+    // When it was placed, in UTC to the minute, the value as sent kept.
+    assert!(page.body.contains(r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime=""#), "{}", page.body);
+    assert!(page.body.contains(" UTC</time>"), "{}", page.body);
     let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert!(orders.body.contains(&format!(r#"<li><a href="{order}">"#)), "{}", orders.body);
 }
@@ -345,7 +356,7 @@ async fn an_order_is_cancelled_from_its_page() {
     let page = send(&router, "GET", &order, Some(&cookie), None).await;
     let form = format!(r#"<form method="post" action="{order}/cancel"><input type="hidden" name="id" value="{id}">"#);
     assert!(page.body.contains(&form), "{}", page.body);
-    assert!(page.body.contains(r#"<input id="order-cancel-order-reason" name="reason" type="text" maxlength="500">"#), "{}", page.body);
+    assert!(page.body.contains("<textarea id=\"order-cancel-order-reason\" name=\"reason\" rows=\"6\" maxlength=\"500\">\n</textarea>"), "{}", page.body);
     assert!(page.body.contains(r#"<button type="submit">Cancel order</button>"#), "{}", page.body);
 
     // A reason past its 500 characters: 422, the route's message at the
@@ -353,7 +364,8 @@ async fn an_order_is_cancelled_from_its_page() {
     let cancel = format!("{order}/cancel");
     let long = send(&router, "POST", &cancel, Some(&cookie), Some(&format!("reason={}", "x".repeat(501)))).await;
     assert_eq!(long.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(long.body.contains(r#"aria-invalid="true"><p class="field-error">must be at most 500 characters</p>"#), "{}", long.body);
+    let sent = format!("aria-invalid=\"true\">\n{}</textarea><p class=\"field-error\">must be at most 500 characters</p>", "x".repeat(501));
+    assert!(long.body.contains(&sent), "{}", long.body);
     assert!(long.body.contains(r#"<data value="placed">Placed</data>"#), "{}", long.body);
 
     // The route's id is the order cancelled, whatever the hidden input says.
@@ -366,12 +378,13 @@ async fn an_order_is_cancelled_from_its_page() {
     let untouched = send(&router, "GET", &other, Some(&cookie), None).await;
     assert!(untouched.body.contains(r#"<data value="placed">Placed</data>"#), "{}", untouched.body);
 
-    // Cancelling it again: the operation's 409, as the form's own message.
+    // Cancelling it again: the operation's 409, its status the page's and
+    // its message the form's own.
     let again = send(&router, "POST", &cancel, Some(&cookie), Some("reason=Twice")).await;
-    assert_eq!(again.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(again.status, StatusCode::CONFLICT);
     let message = format!(r#"<form method="post" action="{cancel}"><p class="form-error">order {id} is cancelled</p>"#);
     assert!(again.body.contains(&message), "{}", again.body);
-    assert!(again.body.contains(r#"value="Twice""#), "{}", again.body);
+    assert!(again.body.contains("maxlength=\"500\">\nTwice</textarea>"), "{}", again.body);
 }
 
 #[tokio::test]

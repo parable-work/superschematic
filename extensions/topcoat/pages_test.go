@@ -84,7 +84,7 @@ func TestPagesAreOffByDefault(t *testing.T) {
 	if strings.Contains(files["lib.rs"], "mod pages") {
 		t.Error("lib.rs declares pages without outputs.topcoat.pages")
 	}
-	if !strings.Contains(files["views.rs"], "pub async fn project_table(rows: Vec<ProjectRecord>, #[default] hrefs: Vec<String>)") {
+	if !strings.Contains(files["views.rs"], "    rows: Vec<ProjectRecord>,\n    #[default] choices: Choices,\n    #[default] hrefs: Vec<String>,\n") {
 		t.Error("views.rs's project_table takes no hrefs")
 	}
 
@@ -194,10 +194,10 @@ func TestATableLinksItsRows(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), viewsService, rustOutputs())
 	views := files["views.rs"]
 	for _, want := range []string{
-		"pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] hrefs: Vec<String>)",
+		"pub async fn order_view_table(\n    rows: Vec<OrderViewRecord>,\n    #[default] choices: Choices,\n    #[default] hrefs: Vec<String>,\n)",
 		"let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();",
-		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(row.reference)</a>",
-		"<td data-field=\"text\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(row.text)</a>",
+		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(text_of(&choices, \"reference\", &row.reference))</a>",
+		"<td data-field=\"text\">\n                            if let Some(href) = &href {\n                                <a href=(href)>(text_of(&choices, \"text\", &row.text))</a>",
 	} {
 		if !strings.Contains(views, want) {
 			t.Errorf("views.rs lacks %q", want)
@@ -608,7 +608,8 @@ async fn an_edit_page_is_filled_from_the_item_and_posts_redirects() {
         r#"value="Apollo""#,
         r#"<option value="active" selected="">Active</option>"#,
         r#"value="1200.5""#,
-        r#"value="To the moon""#,
+        // The description, up to 500 characters, is long text.
+        "name=\"description\" rows=\"6\" maxlength=\"500\">\nTo the moon</textarea>",
         r#"name="dueOn" type="date" value="2026-12-01""#,
         // The rows the project holds, a list of values and a list of
         // objects of another type with the same fields.

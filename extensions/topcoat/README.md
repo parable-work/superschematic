@@ -30,7 +30,8 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
 - renders each record as a description list and as a table, labeled by
-  the schema's titles and its types' `@display`
+  the schema's titles and its types' `@display`, a time in words and an
+  id by the name the app's choices give it
   ([Display components](#display-components)).
 - when asked, serves a page per resource the operations describe, under a
   prefix, with a layout, a nav and an index ([Pages](#pages)).
@@ -217,7 +218,11 @@ A form holds each field as the browser sends it, so a refused form
 renders again exactly as it was sent. A control is named by its field's
 path: `email`, a nested object's `shippingAddress.city`, a row's
 `lines[0].productId`, a list of values' `tags[0]`, and an argument by its
-name, beside its input's fields.
+name, beside its input's fields. It is labeled by the field's `@docs`
+title, else by its name in words, in which a number that ends a word is
+a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
+unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
+bucket").
 
 ### Input forms
 
@@ -277,7 +282,10 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
   none of its fields was sent, and parsed by its rules when one was;
   `check` refuses the first argument that breaks a rule. **`submit(cx)`**
   parses the form and makes the in-process call
-  (`operations::<ns>_<op>`), its refusal the form's errors.
+  (`operations::<ns>_<op>`). Its refusal is a `Refusal`, the status a
+  page answers with and the errors it renders the form again with: 422
+  and `parse`'s errors, or the route's status (401, 403, 404, 409, ...)
+  and the operation's ([Errors](#errors)).
 - **`<ns>_<op>_args_fields(form, errors, choices)`** renders each argument
   with the control an input field of its type gets, labeled by its name in
   words, its description a hint (`aria-describedby`), then the input's
@@ -297,9 +305,9 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 
 A page whose route holds a path argument fills it from the route before
 `submit`, rather than trusting the hidden input, which a reader can change.
-`submit` turns every refusal into the form's errors, a 401 or 403 too; a
-page that keeps the route's status calls `parse()` and the operation
-itself, as acme-shop's `/orders` does.
+The page answers with the refusal's status, so a refused caller gets the
+route's 401 or 403, and a cancel the operation refuses its 409, as the JSON
+API would answer:
 
 ```rust
 path_param!(id: types::IdentityUUID, error = not_found);
@@ -307,24 +315,25 @@ path_param!(id: types::IdentityUUID, error = not_found);
 #[page(POST "/orders/{id}/cancel")]
 async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
     let form = OrderCancelOrderArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
-    let errors = match form.submit(cx).await {
+    let refused = match form.submit(cx).await {
         Ok(_) => return Err(see_other("/orders").into()),
-        Err(errors) => errors,
+        Err(refused) => refused,
     };
     Ok(view! {
-        (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">order_cancel_order_args_fields(form: form, errors: errors)</form>
+        (refused.status)
+        <form method="post">order_cancel_order_args_fields(form: form, errors: refused.errors)</form>
     })
 }
 
 #[page("/orders")]
 async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
-    let (orders, errors) = match filter.submit(cx).await {
-        Ok(orders) => (orders, FormErrors::default()),
-        Err(errors) => (Vec::new(), errors),
+    let (status, orders, errors) = match filter.submit(cx).await {
+        Ok(orders) => (StatusCode::OK, orders, FormErrors::default()),
+        Err(refused) => (refused.status, Vec::new(), refused.errors),
     };
     let rows: Vec<OrderViewRecord> = orders.iter().map(OrderViewRecord::from).collect();
     Ok(view! {
+        (status)
         <form method=(OrderListOrdersArgsForm::METHOD)>
             order_list_orders_args_fields(form: filter, errors: errors)
             <button type="submit">"Filter"</button>
@@ -377,6 +386,12 @@ attributes its rules give it:
   (`step="any"`), so a held value with seconds is not refused;
 - `type="password"` for a `@secret` field, never rendered with its value:
   a form holds what a reader types, though a record leaves the field out;
+- a `<textarea>` for long text, a text field or argument whose
+  `maxLength`, its own or its scalar's, is **500** or more: a reason, a
+  review's body, not a name or a title. It takes `minlength` and
+  `maxlength`, but no `pattern`, which `parse` checks, and a newline after
+  its start tag, which a browser drops, so a value that starts with one
+  renders as sent;
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
@@ -403,6 +418,13 @@ its control: a quantity over 99 on the second line is shown on
 `errors.under(name)` a JSON value's or a list's with the place of each. A
 message no rendered control shows, an `@uiHidden` field's or a path
 argument's, renders with the form's own, after its name.
+
+A `Refusal` is the status a page answers with and the errors it renders
+the form again with. An argument form's `submit` returns one, and a page
+over an input form, which knows its operation, builds one:
+`Refusal::from(errors)` is `parse`'s refusal, 422, and
+`Refusal::from_api(&err)` the operation's, with the route's status (401,
+403, 404, 409, ...) and `FormErrors::from_api(&err)`.
 
 ### Rows without JavaScript
 
@@ -443,12 +465,13 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
 ### Choices the app supplies
 
 An input type does not say which values an id may take: a line's
-`productId` is a UUID, not a product. The page says, with `Choices`, which
-either kind of component takes: a text or number control it names renders
-as a `<select>` of the options, after a blank one, and the value held
-stays an option when no choice is it. A field is named by its path without
-the rows' indexes, for every row, or by its control's name, for one row,
-which wins:
+`productId` is a UUID, not a product. The page says, with `Choices`
+(`crate::choices`, re-exported from `forms`), which either kind of form
+component takes, as the [display components](#display-components) do: a
+text or number control it names renders as a `<select>` of the options,
+after a blank one, and the value held stays an option when no choice is
+it. A field is named by its path without the rows' indexes, for every
+row, or by its control's name, for one row, which wins:
 
 ```rust
 let choices = Choices::new()
@@ -547,13 +570,16 @@ page is a route of the app, and its controls are the app's to set.
 `views` has two components per record, which a page renders as it
 renders any component:
 
-- **`<type>_detail(record: <Type>Record)`** renders a record as a
+- **`<type>_detail(record: <Type>Record, choices)`** renders a record as a
   description list: a `<dt>` label and a `<dd>` value per field, each in a
   `<div data-field="<json key>">`, inside
   `<div class="ss-detail" data-type="<Type>" role="group">`.
-- **`<type>_table(rows: Vec<<Type>Record>)`** renders records as a
-  `<table class="ss-table">`: a header row of labels, then a row per
+- **`<type>_table(rows: Vec<<Type>Record>, choices)`** renders records as
+  a `<table class="ss-table">`: a header row of labels, then a row per
   record, each cell `data-field="<json key>"`.
+
+`choices`, optional, is the `Choices` a form takes ([Choices the app
+supplies](#choices-the-app-supplies)).
 
 A procedure's argument record has them too. A type without a record has
 none: a webhook's result, say ([what has no procedure](#what-has-no-procedure)).
@@ -573,9 +599,11 @@ in words. A value renders by its field's type:
 
 | The type's field | Renders as |
 | --- | --- |
-| A string, a UUID, a number | its text |
+| A string, a UUID, a number | its text, or the label the app's `choices` give it |
 | An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
-| `Temporal.DateTime`, `Temporal.Date`, `Temporal.Time` | `<time datetime="...">` with the text the API sends |
+| `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
+| `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
+| `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
 | A boolean | "Yes" or "No" |
 | An object type | its detail; in a table, its title when its type declares one |
 | A list of objects | its type's table |
@@ -583,6 +611,27 @@ in words. A value renders by its field's type:
 | A map | `<dl class="ss-map">` of its entries |
 | A union, or any JSON value | its JSON text in `<pre class="ss-json">` |
 | Optional, absent | nothing: an empty `<dd>` or `<td>` |
+
+A time's text is the same for every reader, in English and in UTC, with
+no locale or zone of the server's; `datetime` keeps the value as the API
+sends it, for a script that shows it in the reader's own zone. Text that
+is no date or time shows as it is. `views::date_time_text`, `date_text`
+and `time_text` write it for a page's own markup.
+
+An API type does not say which record an id names either, so a component
+shows the label the app's `choices` give a text or number value, an
+order line's product's name for its `productId`, and the value itself
+when they give none. A field is named by its path without the rows'
+indexes, `lines.productId` for each line of an order's detail, and a
+nested record's component gets the choices under its field. A choice
+matches a value whose text is the choice's value exactly: an id as the
+API sends it, its compact text, which a record holds and `to_string()`
+gives.
+
+```rust
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id.to_string(), product.name)));
+view! { order_view_detail(record: OrderViewRecord::from(order), choices: choices) }
+```
 
 The type's `@display` ([D48](../../docs/DECISIONS.md)) shapes both:
 `summaryFields` chooses and orders a table's columns (else every field),

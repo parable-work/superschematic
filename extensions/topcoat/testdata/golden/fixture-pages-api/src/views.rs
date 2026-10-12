@@ -9,14 +9,17 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, TaskInputRecord, TaskRecord, ViewerRecord};
 use topcoat::view::{View, component, view};
 
@@ -24,6 +27,65 @@ use topcoat::view::{View, component, view};
 /// noun.
 fn label_of(title: Option<&str>, noun: Option<&'static str>) -> Option<String> {
     title.filter(|title| !title.is_empty()).or(noun).map(str::to_owned)
+}
+
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
+
+/// A date as a reader reads it: `2026-10-09` is "9 Oct 2026". Text that is
+/// no date, `YYYY-MM-DD`, shows as it is.
+pub fn date_text(value: &str) -> String {
+    match civil_date(value) {
+        Some((year, month, day)) => format!("{day} {} {year}", MONTHS[month as usize - 1]),
+        None => value.to_owned(),
+    }
+}
+
+/// The months as a reader reads them, in English and in short.
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// `YYYY-MM-DD`, a date that exists: its year, month and day.
+fn civil_date(text: &str) -> Option<(i64, u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year = digits(&bytes[0..4])?;
+    let month = digits(&bytes[5..7]).filter(|month| (1..=12).contains(month))?;
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let day = digits(&bytes[8..10]).filter(|day| (1..=days).contains(day))?;
+    Some((i64::from(year), month, day))
+}
+
+/// The number its ASCII digits spell, when they are all digits.
+fn digits(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .iter()
+        .all(u8::is_ascii_digit)
+        .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
 }
 
 /// Labels a value of `ProjectStatus`: its member's name in words. A value the
@@ -38,18 +100,19 @@ pub fn project_status_label(value: &str) -> &str {
 }
 
 /// `MemberRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn member_detail(record: MemberRecord) -> topcoat::Result<impl View> {
+pub async fn member_detail(record: MemberRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Member" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="email">
                     <dt>"Email"</dt>
-                    <dd>(record.email)</dd>
+                    <dd>(text_of(&choices, "email", &record.email))</dd>
                 </div>
             </dl>
         </div>
@@ -57,10 +120,15 @@ pub async fn member_detail(record: MemberRecord) -> topcoat::Result<impl View> {
 }
 
 /// `MemberRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn member_table(rows: Vec<MemberRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn member_table(
+    rows: Vec<MemberRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Member">
             <thead>
@@ -75,12 +143,12 @@ pub async fn member_table(rows: Vec<MemberRecord>, #[default] hrefs: Vec<String>
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.id)</a>
+                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
                             } else {
-                                (row.id)
+                                (text_of(&choices, "id", &row.id))
                             }
                         </td>
-                        <td data-field="email">(row.email)</td>
+                        <td data-field="email">(text_of(&choices, "email", &row.email))</td>
                     </tr>
                 }
             </tbody>
@@ -89,20 +157,21 @@ pub async fn member_table(rows: Vec<MemberRecord>, #[default] hrefs: Vec<String>
 }
 
 /// `MilestoneRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn milestone_detail(record: MilestoneRecord) -> topcoat::Result<impl View> {
+pub async fn milestone_detail(record: MilestoneRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Milestone" role="group">
             <dl>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
                 <div data-field="dueOn">
                     <dt>"Due on"</dt>
                     <dd>
                         match record.due_on {
-                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                             None => "",
                         }
                     </dd>
@@ -113,10 +182,15 @@ pub async fn milestone_detail(record: MilestoneRecord) -> topcoat::Result<impl V
 }
 
 /// `MilestoneRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn milestone_table(rows: Vec<MilestoneRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn milestone_table(
+    rows: Vec<MilestoneRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Milestone">
             <thead>
@@ -131,14 +205,14 @@ pub async fn milestone_table(rows: Vec<MilestoneRecord>, #[default] hrefs: Vec<S
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.title)</a>
+                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
                             } else {
-                                (row.title)
+                                (text_of(&choices, "title", &row.title))
                             }
                         </td>
                         <td data-field="dueOn">
                             match row.due_on {
-                                Some(value) => <time datetime=(&value)>(&value)</time>,
+                                Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                                 None => "",
                             }
                         </td>
@@ -150,20 +224,21 @@ pub async fn milestone_table(rows: Vec<MilestoneRecord>, #[default] hrefs: Vec<S
 }
 
 /// `MilestoneInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn milestone_input_detail(record: MilestoneInputRecord) -> topcoat::Result<impl View> {
+pub async fn milestone_input_detail(record: MilestoneInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="MilestoneInput" role="group" aria-label="Milestone">
             <dl>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
                 <div data-field="dueOn">
                     <dt>"Due on"</dt>
                     <dd>
                         match record.due_on {
-                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                             None => "",
                         }
                     </dd>
@@ -174,10 +249,15 @@ pub async fn milestone_input_detail(record: MilestoneInputRecord) -> topcoat::Re
 }
 
 /// `MilestoneInputRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn milestone_input_table(rows: Vec<MilestoneInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn milestone_input_table(
+    rows: Vec<MilestoneInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="MilestoneInput">
             <thead>
@@ -192,14 +272,14 @@ pub async fn milestone_input_table(rows: Vec<MilestoneInputRecord>, #[default] h
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.title)</a>
+                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
                             } else {
-                                (row.title)
+                                (text_of(&choices, "title", &row.title))
                             }
                         </td>
                         <td data-field="dueOn">
                             match row.due_on {
-                                Some(value) => <time datetime=(&value)>(&value)</time>,
+                                Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                                 None => "",
                             }
                         </td>
@@ -211,19 +291,20 @@ pub async fn milestone_input_table(rows: Vec<MilestoneInputRecord>, #[default] h
 }
 
 /// `ProjectRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn project_detail(record: ProjectRecord) -> topcoat::Result<impl View> {
+pub async fn project_detail(record: ProjectRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.name.as_str()), Some("Project"));
     Ok(view! {
         <div class="ss-detail" data-type="Project" role="group" aria-label=(label)>
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="name">
                     <dt>"Name"</dt>
-                    <dd>(record.name)</dd>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -231,17 +312,22 @@ pub async fn project_detail(record: ProjectRecord) -> topcoat::Result<impl View>
                 </div>
                 <div data-field="budget">
                     <dt>"Budget"</dt>
-                    <dd>(record.budget)</dd>
+                    <dd>(number_of(&choices, "budget", record.budget))</dd>
                 </div>
                 <div data-field="description">
                     <dt>"Description"</dt>
-                    <dd>(record.description)</dd>
+                    <dd>
+                        match record.description {
+                            Some(value) => (text_of(&choices, "description", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="dueOn">
                     <dt>"Due on"</dt>
                     <dd>
                         match record.due_on {
-                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                             None => "",
                         }
                     </dd>
@@ -257,7 +343,7 @@ pub async fn project_detail(record: ProjectRecord) -> topcoat::Result<impl View>
                             Some(value) => {
                                 <ul class="ss-list">
                                     for item in value {
-                                        <li>(item)</li>
+                                        <li>(text_of(&choices, "tags", &item))</li>
                                     }
                                 </ul>
                             },
@@ -269,7 +355,7 @@ pub async fn project_detail(record: ProjectRecord) -> topcoat::Result<impl View>
                     <dt>"Milestones"</dt>
                     <dd>
                         match record.milestones {
-                            Some(value) => milestone_table(rows: value),
+                            Some(value) => milestone_table(rows: value, choices: choices.under("milestones")),
                             None => "",
                         }
                     </dd>
@@ -280,10 +366,15 @@ pub async fn project_detail(record: ProjectRecord) -> topcoat::Result<impl View>
 }
 
 /// `ProjectRecord`s as a table: a column per summary field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's title cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn project_table(rows: Vec<ProjectRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn project_table(
+    rows: Vec<ProjectRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Project">
             <caption>"Projects"</caption>
@@ -300,13 +391,13 @@ pub async fn project_table(rows: Vec<ProjectRecord>, #[default] hrefs: Vec<Strin
                     <tr>
                         <th scope="row" data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.name)</a>
+                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
                             } else {
-                                (row.name)
+                                (text_of(&choices, "name", &row.name))
                             }
                         </th>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
-                        <td data-field="budget">(row.budget)</td>
+                        <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
                     </tr>
                 }
             </tbody>
@@ -315,14 +406,15 @@ pub async fn project_table(rows: Vec<ProjectRecord>, #[default] hrefs: Vec<Strin
 }
 
 /// `ProjectInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn project_input_detail(record: ProjectInputRecord) -> topcoat::Result<impl View> {
+pub async fn project_input_detail(record: ProjectInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ProjectInput" role="group">
             <dl>
                 <div data-field="name">
                     <dt>"Name"</dt>
-                    <dd>(record.name)</dd>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -330,11 +422,16 @@ pub async fn project_input_detail(record: ProjectInputRecord) -> topcoat::Result
                 </div>
                 <div data-field="budget">
                     <dt>"Budget"</dt>
-                    <dd>(record.budget)</dd>
+                    <dd>(number_of(&choices, "budget", record.budget))</dd>
                 </div>
                 <div data-field="description">
                     <dt>"Description"</dt>
-                    <dd>(record.description)</dd>
+                    <dd>
+                        match record.description {
+                            Some(value) => (text_of(&choices, "description", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="tags">
                     <dt>"Tags"</dt>
@@ -343,7 +440,7 @@ pub async fn project_input_detail(record: ProjectInputRecord) -> topcoat::Result
                             Some(value) => {
                                 <ul class="ss-list">
                                     for item in value {
-                                        <li>(item)</li>
+                                        <li>(text_of(&choices, "tags", &item))</li>
                                     }
                                 </ul>
                             },
@@ -357,10 +454,15 @@ pub async fn project_input_detail(record: ProjectInputRecord) -> topcoat::Result
 }
 
 /// `ProjectInputRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn project_input_table(rows: Vec<ProjectInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn project_input_table(
+    rows: Vec<ProjectInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="ProjectInput">
             <thead>
@@ -378,20 +480,25 @@ pub async fn project_input_table(rows: Vec<ProjectInputRecord>, #[default] hrefs
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.name)</a>
+                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
                             } else {
-                                (row.name)
+                                (text_of(&choices, "name", &row.name))
                             }
                         </td>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
-                        <td data-field="budget">(row.budget)</td>
-                        <td data-field="description">(row.description)</td>
+                        <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
+                        <td data-field="description">
+                            match row.description {
+                                Some(value) => (text_of(&choices, "description", &value)),
+                                None => "",
+                            }
+                        </td>
                         <td data-field="tags">
                             match row.tags {
                                 Some(value) => {
                                     <ul class="ss-list">
                                         for item in value {
-                                            <li>(item)</li>
+                                            <li>(text_of(&choices, "tags", &item))</li>
                                         }
                                     </ul>
                                 },
@@ -406,14 +513,15 @@ pub async fn project_input_table(rows: Vec<ProjectInputRecord>, #[default] hrefs
 }
 
 /// `ProjectPatchRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn project_patch_detail(record: ProjectPatchRecord) -> topcoat::Result<impl View> {
+pub async fn project_patch_detail(record: ProjectPatchRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ProjectPatch" role="group">
             <dl>
                 <div data-field="name">
                     <dt>"Name"</dt>
-                    <dd>(record.name)</dd>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -421,17 +529,22 @@ pub async fn project_patch_detail(record: ProjectPatchRecord) -> topcoat::Result
                 </div>
                 <div data-field="budget">
                     <dt>"Budget"</dt>
-                    <dd>(record.budget)</dd>
+                    <dd>(number_of(&choices, "budget", record.budget))</dd>
                 </div>
                 <div data-field="description">
                     <dt>"Description"</dt>
-                    <dd>(record.description)</dd>
+                    <dd>
+                        match record.description {
+                            Some(value) => (text_of(&choices, "description", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="dueOn">
                     <dt>"Due on"</dt>
                     <dd>
                         match record.due_on {
-                            Some(value) => <time datetime=(&value)>(&value)</time>,
+                            Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                             None => "",
                         }
                     </dd>
@@ -443,7 +556,7 @@ pub async fn project_patch_detail(record: ProjectPatchRecord) -> topcoat::Result
                             Some(value) => {
                                 <ul class="ss-list">
                                     for item in value {
-                                        <li>(item)</li>
+                                        <li>(text_of(&choices, "tags", &item))</li>
                                     }
                                 </ul>
                             },
@@ -455,7 +568,7 @@ pub async fn project_patch_detail(record: ProjectPatchRecord) -> topcoat::Result
                     <dt>"Milestones"</dt>
                     <dd>
                         match record.milestones {
-                            Some(value) => milestone_input_table(rows: value),
+                            Some(value) => milestone_input_table(rows: value, choices: choices.under("milestones")),
                             None => "",
                         }
                     </dd>
@@ -475,10 +588,15 @@ pub async fn project_patch_detail(record: ProjectPatchRecord) -> topcoat::Result
 }
 
 /// `ProjectPatchRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn project_patch_table(rows: Vec<ProjectPatchRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn project_patch_table(
+    rows: Vec<ProjectPatchRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="ProjectPatch">
             <thead>
@@ -499,17 +617,22 @@ pub async fn project_patch_table(rows: Vec<ProjectPatchRecord>, #[default] hrefs
                     <tr>
                         <td data-field="name">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.name)</a>
+                                <a href=(href)>(text_of(&choices, "name", &row.name))</a>
                             } else {
-                                (row.name)
+                                (text_of(&choices, "name", &row.name))
                             }
                         </td>
                         <td data-field="status"><data value=(&row.status)>(project_status_label(&row.status))</data></td>
-                        <td data-field="budget">(row.budget)</td>
-                        <td data-field="description">(row.description)</td>
+                        <td data-field="budget">(number_of(&choices, "budget", row.budget))</td>
+                        <td data-field="description">
+                            match row.description {
+                                Some(value) => (text_of(&choices, "description", &value)),
+                                None => "",
+                            }
+                        </td>
                         <td data-field="dueOn">
                             match row.due_on {
-                                Some(value) => <time datetime=(&value)>(&value)</time>,
+                                Some(value) => <time datetime=(&value)>(date_text(&value))</time>,
                                 None => "",
                             }
                         </td>
@@ -518,7 +641,7 @@ pub async fn project_patch_table(rows: Vec<ProjectPatchRecord>, #[default] hrefs
                                 Some(value) => {
                                     <ul class="ss-list">
                                         for item in value {
-                                            <li>(item)</li>
+                                            <li>(text_of(&choices, "tags", &item))</li>
                                         }
                                     </ul>
                                 },
@@ -527,7 +650,7 @@ pub async fn project_patch_table(rows: Vec<ProjectPatchRecord>, #[default] hrefs
                         </td>
                         <td data-field="milestones">
                             match row.milestones {
-                                Some(value) => milestone_input_table(rows: value),
+                                Some(value) => milestone_input_table(rows: value, choices: choices.under("milestones")),
                                 None => "",
                             }
                         </td>
@@ -545,19 +668,20 @@ pub async fn project_patch_table(rows: Vec<ProjectPatchRecord>, #[default] hrefs
 }
 
 /// `TaskRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn task_detail(record: TaskRecord) -> topcoat::Result<impl View> {
+pub async fn task_detail(record: TaskRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.title.as_str()), Some("Task"));
     Ok(view! {
         <div class="ss-detail" data-type="Task" role="group" aria-label=(label)>
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
                 <div data-field="done">
                     <dt>"Done"</dt>
@@ -569,10 +693,15 @@ pub async fn task_detail(record: TaskRecord) -> topcoat::Result<impl View> {
 }
 
 /// `TaskRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's title cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn task_table(rows: Vec<TaskRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn task_table(
+    rows: Vec<TaskRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Task">
             <caption>"Tasks"</caption>
@@ -587,12 +716,12 @@ pub async fn task_table(rows: Vec<TaskRecord>, #[default] hrefs: Vec<String>) ->
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">(text_of(&choices, "id", &row.id))</td>
                         <th scope="row" data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.title)</a>
+                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
                             } else {
-                                (row.title)
+                                (text_of(&choices, "title", &row.title))
                             }
                         </th>
                         <td data-field="done">(if row.done { "Yes" } else { "No" })</td>
@@ -604,14 +733,15 @@ pub async fn task_table(rows: Vec<TaskRecord>, #[default] hrefs: Vec<String>) ->
 }
 
 /// `TaskInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn task_input_detail(record: TaskInputRecord) -> topcoat::Result<impl View> {
+pub async fn task_input_detail(record: TaskInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="TaskInput" role="group">
             <dl>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
             </dl>
         </div>
@@ -619,10 +749,15 @@ pub async fn task_input_detail(record: TaskInputRecord) -> topcoat::Result<impl 
 }
 
 /// `TaskInputRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn task_input_table(rows: Vec<TaskInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn task_input_table(
+    rows: Vec<TaskInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="TaskInput">
             <thead>
@@ -636,9 +771,9 @@ pub async fn task_input_table(rows: Vec<TaskInputRecord>, #[default] hrefs: Vec<
                     <tr>
                         <td data-field="title">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.title)</a>
+                                <a href=(href)>(text_of(&choices, "title", &row.title))</a>
                             } else {
-                                (row.title)
+                                (text_of(&choices, "title", &row.title))
                             }
                         </td>
                     </tr>
@@ -649,14 +784,15 @@ pub async fn task_input_table(rows: Vec<TaskInputRecord>, #[default] hrefs: Vec<
 }
 
 /// `ViewerRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn viewer_detail(record: ViewerRecord) -> topcoat::Result<impl View> {
+pub async fn viewer_detail(record: ViewerRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Viewer" role="group">
             <dl>
                 <div data-field="subject">
                     <dt>"Subject"</dt>
-                    <dd>(record.subject)</dd>
+                    <dd>(text_of(&choices, "subject", &record.subject))</dd>
                 </div>
             </dl>
         </div>
@@ -664,10 +800,15 @@ pub async fn viewer_detail(record: ViewerRecord) -> topcoat::Result<impl View> {
 }
 
 /// `ViewerRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn viewer_table(rows: Vec<ViewerRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn viewer_table(
+    rows: Vec<ViewerRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Viewer">
             <thead>
@@ -681,9 +822,9 @@ pub async fn viewer_table(rows: Vec<ViewerRecord>, #[default] hrefs: Vec<String>
                     <tr>
                         <td data-field="subject">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.subject)</a>
+                                <a href=(href)>(text_of(&choices, "subject", &row.subject))</a>
                             } else {
-                                (row.subject)
+                                (text_of(&choices, "subject", &row.subject))
                             }
                         </td>
                     </tr>

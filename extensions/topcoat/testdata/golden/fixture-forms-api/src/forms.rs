@@ -33,7 +33,12 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Map;
 use serde_json::Value;
 use topcoat::context::Cx;
+use topcoat::router::StatusCode;
 use topcoat::view::{View, component, view};
+
+/// The values the app names for a field, which a text or number control
+/// they name offers as a `<select>`; `crate::choices`, also here.
+pub use crate::choices::{Choice, Choices};
 
 /// Why a form was refused: each control's messages, and the form's own.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -200,58 +205,28 @@ impl From<ParseError> for FormErrors {
     }
 }
 
-/// Options the app supplies for a form's text and number controls, each
-/// of which then renders as a `<select>`. An input type does not say which
-/// values an id may take (a product's, a room's), so the page that renders
-/// the form says, per field.
-///
-/// A field is named by its path with the rows' indexes left out,
-/// `rooms.roomId` for every room's, or by its control's name,
-/// `rooms[0].roomId` for one row's, which wins.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Choices {
-    fields: Vec<(String, Vec<Choice>)>,
-}
-
-/// One option: the value a form sends and the label it shows.
+/// Why a form's submission was refused: the status a page answers with,
+/// and the errors it renders the form again with. 422 for a form `parse`
+/// refused; for the operation's refusal, the route's status (401, 403, 404,
+/// 409, ...), as the JSON API answers it, and its errors
+/// (`FormErrors::from_api`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct Choice {
-    pub value: String,
-    pub label: String,
+pub struct Refusal {
+    pub status: StatusCode,
+    pub errors: FormErrors,
 }
 
-impl Choices {
-    pub fn new() -> Self {
-        Self::default()
+impl Refusal {
+    /// The operation's refusal: the route's status and its errors.
+    pub fn from_api(err: &ApiError) -> Self {
+        Self { status: err.status, errors: FormErrors::from_api(err) }
     }
+}
 
-    /// These choices with `field`'s options, each a value and its label,
-    /// in order.
-    #[must_use]
-    pub fn with<V: Into<String>, L: Into<String>>(
-        mut self,
-        field: impl Into<String>,
-        options: impl IntoIterator<Item = (V, L)>,
-    ) -> Self {
-        let options = options
-            .into_iter()
-            .map(|(value, label)| Choice { value: value.into(), label: label.into() })
-            .collect();
-        self.fields.push((field.into(), options));
-        self
-    }
-
-    /// The options of the control named `name`, else of its `path`.
-    pub fn of(&self, name: &str, path: &str) -> Option<&[Choice]> {
-        self.find(name).or_else(|| self.find(path))
-    }
-
-    fn find(&self, field: &str) -> Option<&[Choice]> {
-        self.fields
-            .iter()
-            .rev()
-            .find(|(name, _)| name == field)
-            .map(|(_, options)| options.as_slice())
+impl From<FormErrors> for Refusal {
+    /// A form `parse` refused: 422.
+    fn from(errors: FormErrors) -> Self {
+        Self { status: StatusCode::UNPROCESSABLE_ENTITY, errors }
     }
 }
 
@@ -760,6 +735,7 @@ fn decode<T: DeserializeOwned>(errors: &mut FormErrors, key: &str, json: Value) 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BillingAddressForm {
     pub line1: Option<String>,
+    pub line2: Option<String>,
     pub city: Option<String>,
     pub postcode: Option<String>,
 }
@@ -771,6 +747,7 @@ impl BillingAddressForm {
     pub fn new() -> Self {
         Self {
             line1: None,
+            line2: None,
             city: None,
             postcode: None,
         }
@@ -780,6 +757,7 @@ impl BillingAddressForm {
     fn from_posted(posted: &Posted) -> Self {
         Self {
             line1: posted.get("line1").text(),
+            line2: posted.get("line2").text(),
             city: posted.get("city").text(),
             postcode: posted.get("postcode").text(),
         }
@@ -790,6 +768,7 @@ impl BillingAddressForm {
     fn write(&self, at: &str, errors: &mut FormErrors) -> Map<String, Value> {
         let mut json = Map::new();
         put(&mut json, errors, "line1", &format!("{at}line1"), text(self.line1.as_deref()));
+        put(&mut json, errors, "line2", &format!("{at}line2"), text(self.line2.as_deref()));
         put(&mut json, errors, "city", &format!("{at}city"), text(self.city.as_deref()));
         put(&mut json, errors, "postcode", &format!("{at}postcode"), text(self.postcode.as_deref()));
         json
@@ -798,7 +777,7 @@ impl BillingAddressForm {
     /// Whether a field was sent: an optional nested object is part of the
     /// input only then.
     fn is_sent(&self) -> bool {
-        self.line1.is_some() || self.city.is_some() || self.postcode.is_some()
+        self.line1.is_some() || self.line2.is_some() || self.city.is_some() || self.postcode.is_some()
     }
 
     /// Whether the component shows the errors at `path`: at a control, a
@@ -808,6 +787,7 @@ impl BillingAddressForm {
             [] => true,
             [Segment::Key(key), rest @ ..] => match key.as_str() {
                 "line1" => rest.is_empty(),
+                "line2" => rest.is_empty(),
                 "city" => rest.is_empty(),
                 "postcode" => rest.is_empty(),
                 _ => false,
@@ -830,6 +810,7 @@ pub struct BookingInputForm {
     pub door_code: Option<String>,
     pub backup_codes: Vec<Option<String>>,
     pub currency: Option<String>,
+    pub requests: Option<String>,
     pub preferences: Option<String>,
     pub labels: Option<String>,
     /// The row button that submitted the form (`_action`), which
@@ -856,6 +837,7 @@ impl BookingInputForm {
             door_code: None,
             backup_codes: Vec::new(),
             currency: Some("GBP".to_owned()),
+            requests: None,
             preferences: None,
             labels: None,
             row_action: None,
@@ -930,6 +912,7 @@ impl BookingInputForm {
             door_code: posted.get("doorCode").text(),
             backup_codes: posted.get("backupCodes").rows(MAX_ROWS).map(Posted::text).collect(),
             currency: posted.get("currency").text(),
+            requests: posted.get("requests").text(),
             preferences: posted.get("preferences").text(),
             labels: posted.get("labels").text(),
             row_action: None,
@@ -967,6 +950,7 @@ impl BookingInputForm {
         within(errors, &format!("{at}backupCodes"), rows.len(), MAX_ROWS);
         put_list(&mut json, "backupCodes", rows, false);
         put(&mut json, errors, "currency", &format!("{at}currency"), text(self.currency.as_deref()));
+        put(&mut json, errors, "requests", &format!("{at}requests"), text(self.requests.as_deref()));
         put(&mut json, errors, "preferences", &format!("{at}preferences"), json_text(self.preferences.as_deref()));
         put(&mut json, errors, "labels", &format!("{at}labels"), json_text(self.labels.as_deref()));
         json
@@ -988,6 +972,7 @@ impl BookingInputForm {
                 "doorCode" => rest.is_empty(),
                 "backupCodes" => shows_row(rest),
                 "currency" => rest.is_empty(),
+                "requests" => rest.is_empty(),
                 "preferences" => shows_all(rest),
                 "labels" => shows_all(rest),
                 _ => false,
@@ -1464,6 +1449,16 @@ pub async fn booking_input_fields(
                 }
             </div>
             <div class="field">
+                <label for="booking-input-billing-line2">"Line 2"</label>
+                match choices.of("billing.line2", "billing.line2") {
+                    Some(options) => choice_select(id: "booking-input-billing-line2", name: "billing.line2", required: false, invalid: errors.invalid("billing.line2"), options: choice_options(options, form.billing.line2.as_deref())),
+                    None => <input id="booking-input-billing-line2" name="billing.line2" type="text" value=(form.billing.line2.clone()) aria-invalid=(errors.invalid("billing.line2"))>,
+                }
+                for message in errors.of("billing.line2") {
+                    <p class="field-error">(message)</p>
+                }
+            </div>
+            <div class="field">
                 <label for="booking-input-billing-city">"City"</label>
                 match choices.of("billing.city", "billing.city") {
                     Some(options) => choice_select(id: "booking-input-billing-city", name: "billing.city", required: false, invalid: errors.invalid("billing.city"), options: choice_options(options, form.billing.city.as_deref())),
@@ -1609,6 +1604,17 @@ pub async fn booking_input_fields(
                 None => <input id="booking-input-currency" name="currency" type="text" pattern="^[A-Z]{3}$" value=(form.currency.clone()) aria-invalid=(errors.invalid("currency"))>,
             }
             for message in errors.of("currency") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="booking-input-requests">"Requests"</label>
+            <p class="field-hint" id="booking-input-requests-hint">"Anything the hotel should know."</p>
+            match choices.of("requests", "requests") {
+                Some(options) => choice_select(id: "booking-input-requests", name: "requests", required: false, invalid: errors.invalid("requests"), options: choice_options(options, form.requests.as_deref())),
+                None => <textarea id="booking-input-requests" name="requests" rows="6" minlength="3" maxlength="500" aria-describedby="booking-input-requests-hint" aria-invalid=(errors.invalid("requests"))>"\n"(form.requests.clone())</textarea>,
+            }
+            for message in errors.of("requests") {
                 <p class="field-error">(message)</p>
             }
         </div>
@@ -1854,12 +1860,13 @@ impl AccountAnnotateArgsForm {
     }
 
     /// Parses the form, then calls the operation in-process
-    /// (`operations::account_annotate`). A refusal, the form's or the
-    /// operation's (`FormErrors::from_api`), is the form's errors, which a
-    /// page renders the form again with.
-    pub async fn submit(&self, cx: &Cx) -> Result<types::AccountView, FormErrors> {
+    /// (`operations::account_annotate`). A refusal is the status a page answers
+    /// with and the errors it renders the form again with: 422 and `parse`'s
+    /// errors, or the route's status (401, 403, 404, 409, ...) and the
+    /// operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::AccountView, Refusal> {
         let args = self.parse()?;
-        operations::account_annotate(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+        operations::account_annotate(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 
     /// Applies the row button that submitted the form to its input's rows

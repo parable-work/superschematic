@@ -32,6 +32,11 @@ type view struct {
 	// records, so its components box their views: a recursive component
 	// needs a view of a known size.
 	Boxed bool
+	// DetailChoices and TableChoices report whether the detail and the
+	// table read the app's choices: a value they label, or a nested
+	// record's component they hand them to.
+	DetailChoices bool
+	TableChoices  bool
 	// LinksTitle reports whether a row's link is on its title's cell,
 	// which the columns hold; else it is on its first.
 	LinksTitle bool
@@ -47,6 +52,8 @@ type viewField struct {
 	Cell  string
 	// value is the markup of the field's value in a cell.
 	value []string
+	// choices reports whether the field's value reads the app's choices.
+	choices bool
 }
 
 // enumLabel is the function that labels the values of an enum a record
@@ -68,11 +75,15 @@ const (
 type valueKind int
 
 const (
-	// textValue is a string or a number, rendered as its text.
+	// textValue is a string, rendered as its text, or the label the app's
+	// choices give it.
 	textValue valueKind = iota
+	// numberValue is a number, rendered as textValue is.
+	numberValue
 	booleanValue
 	enumValue
-	// timeValue is a date, a time or a date-time, rendered as a <time>.
+	// timeValue is a date, a time or a date-time, rendered as a <time>
+	// with its text for a reader.
 	timeValue
 	// jsonValue is a union or any JSON value, held as its JSON text.
 	jsonValue
@@ -87,6 +98,9 @@ type valueShape struct {
 	kind valueKind
 	// enumFunc labels an enum's value.
 	enumFunc string
+	// timeFunc writes a time value's text for a reader: date_text,
+	// time_text or date_time_text.
+	timeFunc string
 	// object is a nested record's components and title.
 	object *objectRef
 	// elem is a list's element, or a map's value.
@@ -101,6 +115,8 @@ type objectRef struct {
 	detail   string
 	table    string
 	title    string
+	// titleOptional reports whether the title field is optional.
+	titleOptional bool
 }
 
 // viewBuilder builds the components of the records the crate writes.
@@ -178,9 +194,11 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		vf := viewField{
 			JSONName: rf.JSONName,
 			Label:    labelOf(field),
+			choices:  shape.readsChoices(),
 		}
-		vf.Entry = indentLines(detailIndent, fieldEntry(vf, shape.render("record."+rf.Name, rf.Optional, false)))
-		vf.value = shape.render("row."+rf.Name, rf.Optional, true)
+		vf.Entry = indentLines(detailIndent, fieldEntry(vf, shape.render("record."+rf.Name, rf.JSONName, rf.Optional, false)))
+		vf.value = shape.render("row."+rf.Name, rf.JSONName, rf.Optional, true)
+		v.DetailChoices = v.DetailChoices || vf.choices
 		v.Fields = append(v.Fields, vf)
 		byJSON[rf.JSONName] = vf
 	}
@@ -229,6 +247,7 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		}
 	}
 	for i, column := range v.Columns {
+		v.TableChoices = v.TableChoices || column.choices
 		// The title's cell heads its row.
 		open, close := "<td data-field=", "</td>"
 		if title != nil && column.JSONName == title.JSONName {
@@ -314,7 +333,7 @@ func (b *viewBuilder) element(name string) valueShape {
 		ref := &objectRef{typeName: name, detail: componentName(name) + "_detail", table: componentName(name) + "_table"}
 		if typeDef := b.schemas.objectType(name); typeDef != nil {
 			if title := titleField(typeDef, *rec); title != nil {
-				ref.title = title.Name
+				ref.title, ref.titleOptional = title.Name, title.Optional
 			}
 		}
 		return valueShape{kind: objectValue, object: ref}
@@ -333,34 +352,32 @@ func (b *viewBuilder) element(name string) valueShape {
 	}
 	switch b.schemas.leafOf(name) {
 	case stringLeaf:
-		if isTimeScalar(b.schemas.scalar(name)) {
-			return valueShape{kind: timeValue}
+		if format := timeFunc(b.schemas.scalar(name)); format != "" {
+			return valueShape{kind: timeValue, timeFunc: format}
 		}
 		return valueShape{kind: textValue}
 	case integerLeaf, numberLeaf:
-		return valueShape{kind: textValue}
+		return valueShape{kind: numberValue}
 	case booleanLeaf:
 		return valueShape{kind: booleanValue}
 	}
 	return valueShape{kind: jsonValue}
 }
 
-// isTimeScalar reports whether a string scalar holds a date, a time or a
-// date-time, which a <time> element's datetime attribute takes as its JSON
-// sends it.
-func isTimeScalar(scalar *ir.ScalarDef) bool {
-	if scalar == nil {
-		return false
+// timeFunc is the views.rs function that writes a value of a string
+// scalar holding a date (date_text), a time (time_text) or a date-time
+// (date_time_text) for a reader, the <time> element's datetime attribute
+// keeping it as its JSON sends it; empty for any other scalar.
+func timeFunc(scalar *ir.ScalarDef) string {
+	switch temporalControl(scalar) {
+	case "date":
+		return "date_text"
+	case "time":
+		return "time_text"
+	case "datetime-local":
+		return "date_time_text"
 	}
-	switch strings.ToLower(scalar.Format) {
-	case "date-time", "date", "time":
-		return true
-	}
-	switch scalar.Name {
-	case ir.CanonicalDateTimeScalarName, ir.LegacyDateTimeScalarName, "Temporal.Date", "Temporal.Time":
-		return true
-	}
-	return false
+	return ""
 }
 
 // collectNests records the record types a value of shape nests under
@@ -396,18 +413,28 @@ func (b *viewBuilder) nestsItself(typeName string) bool {
 	return walk(typeName)
 }
 
+// readsChoices reports whether a value of the shape reads the app's
+// choices: text or a number, which they may label, or a record, whose
+// components they are handed to, or a list or a map of them.
+func (s valueShape) readsChoices() bool {
+	switch s.kind {
+	case textValue, numberValue, objectValue:
+		return true
+	case listValue, mapValue:
+		return s.elem.readsChoices()
+	}
+	return false
+}
+
 // render is the markup of expr, a value of the shape (in an Option when
-// optional) that the view moves: an absent value renders nothing. In a
-// table cell, a record of a type with a title is its title.
-func (s valueShape) render(expr string, optional, cell bool) []string {
+// optional) that the view moves, at path, the field's JSON key, by which
+// the app's choices name it: an absent value renders nothing. In a table
+// cell, a record of a type with a title is its title.
+func (s valueShape) render(expr, path string, optional, cell bool) []string {
 	if !optional {
-		return s.markup(expr, cell, 0)
+		return s.markup(expr, path, cell, 0)
 	}
-	// An Option of text renders its value, or nothing.
-	if s.kind == textValue {
-		return []string{"(" + expr + ")"}
-	}
-	inner := s.markup("value", cell, 0)
+	inner := s.markup("value", path, cell, 0)
 	lines := []string{"match " + expr + " {"}
 	if len(inner) == 1 {
 		lines = append(lines, "    Some(value) => "+inner[0]+",")
@@ -419,35 +446,46 @@ func (s valueShape) render(expr string, optional, cell bool) []string {
 	return append(lines, `    None => "",`, "}")
 }
 
-// markup is the markup of expr, a value of the shape, at depth levels of
-// list or map inside a field, which name the loop bindings.
-func (s valueShape) markup(expr string, cell bool, depth int) []string {
+// markup is the markup of expr, a value of the shape at path, at depth
+// levels of list or map inside a field, which name the loop bindings. Text
+// and numbers show the label the app's choices give them at path, a list's
+// items and a map's values theirs; a nested record's components get the
+// choices under path.
+func (s valueShape) markup(expr, path string, cell bool, depth int) []string {
 	switch s.kind {
+	case textValue:
+		return []string{"(text_of(&choices, " + rustString(path) + ", &" + expr + "))"}
+	case numberValue:
+		return []string{"(number_of(&choices, " + rustString(path) + ", " + expr + "))"}
 	case booleanValue:
 		return []string{"(if " + expr + ` { "Yes" } else { "No" })`}
 	case enumValue:
 		return []string{"<data value=(&" + expr + ")>(" + s.enumFunc + "(&" + expr + "))</data>"}
 	case timeValue:
-		return []string{"<time datetime=(&" + expr + ")>(&" + expr + ")</time>"}
+		return []string{"<time datetime=(&" + expr + ")>(" + s.timeFunc + "(&" + expr + "))</time>"}
 	case jsonValue:
 		return []string{`<pre class="ss-json">(` + expr + ")</pre>"}
 	case objectValue:
 		if cell && s.object.title != "" {
-			return []string{"(" + expr + "." + s.object.title + ")"}
+			title, at := expr+"."+s.object.title, rustString(path+"."+s.object.title)
+			if s.object.titleOptional {
+				return []string{"match " + title + " {", "    Some(title) => (text_of(&choices, " + at + ", &title)),", `    None => "",`, "}"}
+			}
+			return []string{"(text_of(&choices, " + at + ", &" + title + "))"}
 		}
-		return []string{s.object.detail + "(record: " + expr + ")"}
+		return []string{s.object.detail + "(record: " + expr + ", choices: choices.under(" + rustString(path) + "))"}
 	case listValue:
 		if s.elem.kind == objectValue {
-			return []string{s.elem.object.table + "(rows: " + expr + ")"}
+			return []string{s.elem.object.table + "(rows: " + expr + ", choices: choices.under(" + rustString(path) + "))"}
 		}
 		item := binding("item", depth)
 		lines := []string{`<ul class="ss-list">`, "    for " + item + " in " + expr + " {"}
-		lines = append(lines, indentEach(8, wrapLines("<li>", "</li>", s.elem.markup(item, cell, depth+1)))...)
+		lines = append(lines, indentEach(8, wrapLines("<li>", "</li>", s.elem.markup(item, path, cell, depth+1)))...)
 		return append(lines, "    }", "</ul>")
 	case mapValue:
 		key, entry := binding("key", depth), binding("entry", depth)
 		lines := []string{`<dl class="ss-map">`, "    for (" + key + ", " + entry + ") in " + expr + " {", "        <div>", "            <dt>(" + key + ")</dt>"}
-		lines = append(lines, indentEach(12, wrapLines("<dd>", "</dd>", s.elem.markup(entry, cell, depth+1)))...)
+		lines = append(lines, indentEach(12, wrapLines("<dd>", "</dd>", s.elem.markup(entry, path, cell, depth+1)))...)
 		return append(lines, "        </div>", "    }", "</dl>")
 	}
 	return []string{"(" + expr + ")"}
@@ -492,6 +530,26 @@ func indentEach(n int, lines []string) []string {
 
 func indentLines(n int, lines []string) string {
 	return strings.Join(indentEach(n, lines), "\n")
+}
+
+// ViewsUse reports whether a component calls fn, a helper of views.rs:
+// text_of, number_of, date_text, time_text or date_time_text, so views.rs
+// declares it and what it needs.
+func (c *crate) ViewsUse(fn string) bool {
+	call := "(" + fn + "("
+	for _, v := range c.Views {
+		for _, f := range v.Fields {
+			if strings.Contains(f.Entry, call) {
+				return true
+			}
+		}
+		for _, f := range v.Columns {
+			if strings.Contains(f.Cell, call) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ViewsLabel reports whether a detail names itself by its title, so

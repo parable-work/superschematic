@@ -281,6 +281,10 @@ func (c *crate) ProceduresTakeArgs() bool {
 // form or an argument form, so it writes forms.rs.
 func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
 
+// HasChoices reports whether a form or a display component takes the app's
+// choices, so the crate writes choices.rs, which forms.rs re-exports.
+func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
+
 // FormsUse reports whether a form uses item, so forms.rs declares what it
 // needs: a kind of an input form's field ("value", "object", "objectRows",
 // "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
@@ -404,6 +408,9 @@ func (c *crate) write(dir string) error {
 			struct{ template, path string }{"wire.tmpl", filepath.Join("src", "wire.rs")},
 		)
 	}
+	if c.HasChoices() {
+		files = append(files, struct{ template, path string }{"choices.tmpl", filepath.Join("src", "choices.rs")})
+	}
 	if c.HasForms() {
 		files = append(files, struct{ template, path string }{"forms.tmpl", filepath.Join("src", "forms.rs")})
 	}
@@ -432,7 +439,7 @@ func (c *crate) write(dir string) error {
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "pages.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

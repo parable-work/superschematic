@@ -147,7 +147,9 @@ messages:
 `write_review_input_fields` renders the form's fields with the attributes
 the input type's rules give them: `required`, `min` and `max` on the
 rating, `maxlength` on the title. A browser checks them before it sends the
-form, and `parse()` checks every rule again.
+form, and `parse()` checks every rule again. A field is labeled by its
+`@docs` title, else by its name in words, a number at the end of a word
+a word of its own: the shipping address's `line1` reads "Line 1".
 
 ### Nested objects and lists
 
@@ -180,7 +182,7 @@ form keeps the button pressed, and `apply_action()` applies it and says
 whether a row button submitted the form, in which case the page renders
 the form again, 200, without calling the operation. The acme app's
 `POST /orders/new` does that, then places the order and goes to its page,
-or renders the form again, 422, with each error at its control:
+or renders the form again with each error at its control:
 
 <Snippet file="topcoat/src/lib.rs" symbol="place_order" />
 
@@ -188,6 +190,13 @@ A page answers with one view, so the row action and a refusal set the
 status, and both render the same `place_order_page` component. The
 buttons skip the browser's checks (`formnovalidate`), so a row can be
 added before the others are valid, and Enter still submits the form.
+
+The page answers a refusal with its status, through a `Refusal` of
+`forms`, the status and the errors the form renders again with:
+`Refusal::from(errors)` for a form `parse` refused, 422, and
+`Refusal::from_api(&err)` for the operation's refusal, with the route's
+status, so a shopper who is signed out gets 401. An argument form's
+`submit` returns one ([An argument form](#an-argument-form)).
 
 A form reads no more than a browser could send it. It reads one row past
 a list's limit, which `parse` refuses at the list, and at most 5000 names
@@ -214,7 +223,10 @@ input's fields. `parse()` writes each argument as the JSON a request
 carries, decodes it into the `Args` struct and checks it as the router
 checks a request's, so a value the JSON API would refuse with 400 is that
 argument's error. `submit(cx)` parses the form and makes the in-process
-call, and a refusal of either is the form's `FormErrors`.
+call. Its refusal is a `Refusal`: the status the page answers with, 422
+for a form `parse` refused and the route's status for the operation's
+refusal (401, 403, 404, 409, ...), and the errors the form renders again
+with.
 
 `<namespace>_<operation>_args_fields(form, errors)` renders each argument
 with the control an input field of its type gets: a `<select>` for an
@@ -228,9 +240,10 @@ The acme order page renders `order_cancel_order_args_fields` under the
 order's detail while the order is placed. `POST /orders/{id}/cancel`
 takes the id from its route, not from the hidden input, which a reader
 can change, then submits the form. It goes back to the order's page
-(303), or renders the page again, 422, with the form as sent: an
-over-long reason's message at the reason, and the operation's 409, for an
-order no longer placed, as the form's own:
+(303), or renders the page again with the form as sent and the refusal's
+status: 422 for an over-long reason, its message at the reason, and the
+operation's 409, for an order no longer placed, its message the form's
+own:
 
 <Snippet file="topcoat/src/lib.rs" symbol="cancel_order" />
 
@@ -252,11 +265,10 @@ the box of a new form.
 An operation whose input is optional takes it only when one of its fields
 is sent, so a blank form calls it without one.
 
-`submit` turns every refusal into the form's errors, a caller's 401 or
-403 included. The acme orders page keeps the route's status instead: it
-parses the filter and makes the call itself, so a caller the route
-refuses gets its status and the sign-in button, and a refused filter, a
-limit past 100, say, gets 422 and the message at its control:
+The acme orders page answers with the status `submit` keeps, as the JSON
+API would: a caller the route refuses gets its 401 and the sign-in
+button, and a refused filter, a limit past 100, say, gets 422 and the
+message at its control:
 
 <Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
 
@@ -266,12 +278,15 @@ A `Temporal.Date` field or argument is `type="date"` and a
 `Temporal.Time` one `type="time"`. A `Temporal.DateTime` one is
 `type="datetime-local"`, which carries no offset, so the form reads it as
 UTC and its label says so, and a value held with an offset renders in
-UTC. A number field holding a whole number reads any a browser sends,
-`1e1` and `2.0` too. A `@secret` field is `type="password"` and is
-never rendered with its value, so a refused form asks for it again. A
-record leaves the field out, but a form holds what a reader types. A
-value no control holds, a union, any JSON value or a map, is a
-`<textarea>` of its JSON text.
+UTC. Long text, a text field or argument whose `maxLength` is 500 or
+more, such as a cancel's reason or a review's body, is a `<textarea>`
+with the same `minlength` and `maxlength`; its pattern, which a textarea
+does not take, is checked by `parse()`. A number field holding a whole
+number reads any a browser sends, `1e1` and `2.0` too. A `@secret` field
+is `type="password"` and is never rendered with its value, so a refused
+form asks for it again. A record leaves the field out, but a form holds
+what a reader types. A value no control holds, a union, any JSON value
+or a map, is a `<textarea>` of its JSON text.
 
 ### Errors
 
@@ -294,7 +309,10 @@ and in SQLite, supplies each line's:
 <Snippet file="topcoat/src/lib.rs" symbol="product_choices" />
 
 A choice's value is the id as the API sends it, its compact text, which
-is what a record holds and what the select sends back.
+is what a record holds and what the select sends back. The display
+components take the same `Choices` and show a value's label in its place,
+so the order's page names each line's product ([Display
+components](#display-components)).
 
 ## Records
 
@@ -327,7 +345,10 @@ in words. A value renders by its type:
 
 - an enum's value is its member's name in words, in a `<data>` element
   whose `value` is the one the API sends;
-- a date or a time is a `<time>` element;
+- a date, a time or a date-time is a `<time>` element whose `datetime`
+  is the value the API sends and whose text a reader reads, the same for
+  every reader: "9 Oct 2026", "14:30", and a date-time in UTC to the
+  minute, "9 Oct 2026, 14:30 UTC";
 - a boolean is "Yes" or "No";
 - a nested record is its own detail, and in a table cell its title when
   its type declares one;
@@ -346,6 +367,15 @@ heads each row. `plural` captions a table. `ReviewView` declares all four:
 
 `OrderView`'s summary fields are the orders table's columns: the order's
 id, when it was placed, its status and its total.
+
+An API type does not say which record an id names, so an order line's
+`productId` would show as its id. Both components take the `Choices` a
+form takes, and show the label they give a text or number value, else the
+value. The order's page passes the catalog's, so each line shows its
+product's name, "Anvil"; a nested record's component gets the choices
+under its field, `lines.productId` the lines table's `productId`:
+
+<Snippet file="topcoat/src/lib.rs" from="order_view_detail(record" to="order_view_detail(record" />
 
 The markup is plain HTML and ships no styles. A stylesheet or a test finds
 it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
@@ -514,8 +544,8 @@ sent, and a valid form goes to the new order's page. `/orders?statuses=cancelled
 lists the cancelled orders alone, its box checked, and a limit of 500
 comes back 422 at the limit. On an order's page, a reason past 500
 characters is refused at the reason, the route's id is the order
-cancelled whatever the hidden input holds, and cancelling it again shows
-the operation's 409 as the form's message:
+cancelled whatever the hidden input holds, and cancelling it again
+answers the operation's 409, its message the form's:
 
 <Snippet file="topcoat/tests/app.rs" symbol="an_order_is_cancelled_from_its_page" />
 

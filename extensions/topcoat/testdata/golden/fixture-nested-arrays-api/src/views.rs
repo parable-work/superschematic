@@ -9,16 +9,39 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{GridViewRecord, PointRecord, SaveGridInputRecord};
 use topcoat::view::{View, component, view};
+
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
 
 /// Labels a value of `Shade`: its member's name in words. A value the
 /// enum does not declare is its own label.
@@ -31,14 +54,15 @@ pub fn shade_label(value: &str) -> &str {
 }
 
 /// `GridViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl View> {
+pub async fn grid_view_detail(record: GridViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="GridView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="labels">
                     <dt>"Labels"</dt>
@@ -48,7 +72,7 @@ pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl Vi
                                 <li>
                                     <ul class="ss-list">
                                         for item_2 in item {
-                                            <li>(item_2)</li>
+                                            <li>(text_of(&choices, "labels", &item_2))</li>
                                         }
                                     </ul>
                                 </li>
@@ -77,7 +101,7 @@ pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl Vi
                     <dd>
                         <ul class="ss-list">
                             for item in record.polygons {
-                                <li>point_table(rows: item)</li>
+                                <li>point_table(rows: item, choices: choices.under("polygons"))</li>
                             }
                         </ul>
                     </dd>
@@ -92,7 +116,7 @@ pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl Vi
                                         <li>
                                             <ul class="ss-list">
                                                 for item_2 in item {
-                                                    <li>(item_2)</li>
+                                                    <li>(number_of(&choices, "weights", item_2))</li>
                                                 }
                                             </ul>
                                         </li>
@@ -109,10 +133,15 @@ pub async fn grid_view_detail(record: GridViewRecord) -> topcoat::Result<impl Vi
 }
 
 /// `GridViewRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn grid_view_table(
+    rows: Vec<GridViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="GridView">
             <thead>
@@ -130,9 +159,9 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<St
                     <tr>
                         <td data-field="id">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.id)</a>
+                                <a href=(href)>(text_of(&choices, "id", &row.id))</a>
                             } else {
-                                (row.id)
+                                (text_of(&choices, "id", &row.id))
                             }
                         </td>
                         <td data-field="labels">
@@ -141,7 +170,7 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<St
                                     <li>
                                         <ul class="ss-list">
                                             for item_2 in item {
-                                                <li>(item_2)</li>
+                                                <li>(text_of(&choices, "labels", &item_2))</li>
                                             }
                                         </ul>
                                     </li>
@@ -164,7 +193,7 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<St
                         <td data-field="polygons">
                             <ul class="ss-list">
                                 for item in row.polygons {
-                                    <li>point_table(rows: item)</li>
+                                    <li>point_table(rows: item, choices: choices.under("polygons"))</li>
                                 }
                             </ul>
                         </td>
@@ -176,7 +205,7 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<St
                                             <li>
                                                 <ul class="ss-list">
                                                     for item_2 in item {
-                                                        <li>(item_2)</li>
+                                                        <li>(number_of(&choices, "weights", item_2))</li>
                                                     }
                                                 </ul>
                                             </li>
@@ -194,18 +223,19 @@ pub async fn grid_view_table(rows: Vec<GridViewRecord>, #[default] hrefs: Vec<St
 }
 
 /// `PointRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn point_detail(record: PointRecord) -> topcoat::Result<impl View> {
+pub async fn point_detail(record: PointRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Point" role="group">
             <dl>
                 <div data-field="x">
                     <dt>"X"</dt>
-                    <dd>(record.x)</dd>
+                    <dd>(number_of(&choices, "x", record.x))</dd>
                 </div>
                 <div data-field="y">
                     <dt>"Y"</dt>
-                    <dd>(record.y)</dd>
+                    <dd>(number_of(&choices, "y", record.y))</dd>
                 </div>
             </dl>
         </div>
@@ -213,10 +243,15 @@ pub async fn point_detail(record: PointRecord) -> topcoat::Result<impl View> {
 }
 
 /// `PointRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn point_table(rows: Vec<PointRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn point_table(
+    rows: Vec<PointRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Point">
             <thead>
@@ -231,12 +266,12 @@ pub async fn point_table(rows: Vec<PointRecord>, #[default] hrefs: Vec<String>) 
                     <tr>
                         <td data-field="x">
                             if let Some(href) = &href {
-                                <a href=(href)>(row.x)</a>
+                                <a href=(href)>(number_of(&choices, "x", row.x))</a>
                             } else {
-                                (row.x)
+                                (number_of(&choices, "x", row.x))
                             }
                         </td>
-                        <td data-field="y">(row.y)</td>
+                        <td data-field="y">(number_of(&choices, "y", row.y))</td>
                     </tr>
                 }
             </tbody>
@@ -245,8 +280,9 @@ pub async fn point_table(rows: Vec<PointRecord>, #[default] hrefs: Vec<String>) 
 }
 
 /// `SaveGridInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Result<impl View> {
+pub async fn save_grid_input_detail(record: SaveGridInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="SaveGridInput" role="group">
             <dl>
@@ -258,7 +294,7 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Res
                                 <li>
                                     <ul class="ss-list">
                                         for item_2 in item {
-                                            <li>(item_2)</li>
+                                            <li>(text_of(&choices, "labels", &item_2))</li>
                                         }
                                     </ul>
                                 </li>
@@ -287,7 +323,7 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Res
                     <dd>
                         <ul class="ss-list">
                             for item in record.polygons {
-                                <li>point_table(rows: item)</li>
+                                <li>point_table(rows: item, choices: choices.under("polygons"))</li>
                             }
                         </ul>
                     </dd>
@@ -302,7 +338,7 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Res
                                         <li>
                                             <ul class="ss-list">
                                                 for item_2 in item {
-                                                    <li>(item_2)</li>
+                                                    <li>(number_of(&choices, "weights", item_2))</li>
                                                 }
                                             </ul>
                                         </li>
@@ -319,10 +355,15 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord) -> topcoat::Res
 }
 
 /// `SaveGridInputRecord`s as a table: a column per field and a row per record.
-/// `hrefs` links each row to a page: the i-th, unless it is empty, row
-/// i's first cell; a row past its end links nowhere.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hrefs: Vec<String>) -> topcoat::Result<impl View> {
+pub async fn save_grid_input_table(
+    rows: Vec<SaveGridInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="SaveGridInput">
             <thead>
@@ -345,7 +386,7 @@ pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hr
                                             <li>
                                                 <ul class="ss-list">
                                                     for item_2 in item {
-                                                        <li>(item_2)</li>
+                                                        <li>(text_of(&choices, "labels", &item_2))</li>
                                                     }
                                                 </ul>
                                             </li>
@@ -358,7 +399,7 @@ pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hr
                                         <li>
                                             <ul class="ss-list">
                                                 for item_2 in item {
-                                                    <li>(item_2)</li>
+                                                    <li>(text_of(&choices, "labels", &item_2))</li>
                                                 }
                                             </ul>
                                         </li>
@@ -382,7 +423,7 @@ pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hr
                         <td data-field="polygons">
                             <ul class="ss-list">
                                 for item in row.polygons {
-                                    <li>point_table(rows: item)</li>
+                                    <li>point_table(rows: item, choices: choices.under("polygons"))</li>
                                 }
                             </ul>
                         </td>
@@ -394,7 +435,7 @@ pub async fn save_grid_input_table(rows: Vec<SaveGridInputRecord>, #[default] hr
                                             <li>
                                                 <ul class="ss-list">
                                                     for item_2 in item {
-                                                        <li>(item_2)</li>
+                                                        <li>(number_of(&choices, "weights", item_2))</li>
                                                     }
                                                 </ul>
                                             </li>

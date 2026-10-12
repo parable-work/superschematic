@@ -1,0 +1,153 @@
+{{- /*
+The functions of views.rs that write a date, a time or a date-time for a
+reader, which views.tmpl renders after its label helpers: each is written
+when a component shows a value of its kind, with what it needs.
+*/ -}}
+{{- define "viewsTime" }}
+{{- $dateTime := .ViewsUse "date_time_text" }}
+{{- $date := .ViewsUse "date_text" }}
+{{- $time := .ViewsUse "time_text" }}
+{{- if $dateTime }}
+
+/// A date and time as a reader reads it, in UTC to the minute, whatever
+/// offset it was sent with: `2026-10-09T14:30:00Z` is "9 Oct 2026, 14:30
+/// UTC", and `2026-10-09T00:15:00+01:00` "8 Oct 2026, 23:15 UTC". Text
+/// that is no date and time, RFC 3339's, shows as it is. The `<time>`
+/// element's `datetime` keeps the value as sent.
+pub fn date_time_text(value: &str) -> String {
+    let Some((date, rest)) = value.split_once(['T', 't', ' ']) else {
+        return value.to_owned();
+    };
+    let (Some((year, month, day)), Some((hour, minute, east))) = (civil_date(date), clock(rest)) else {
+        return value.to_owned();
+    };
+    // Minutes since 1970-01-01T00:00Z.
+    let minutes = days_from_civil(year, month, day) * 1440 + i64::from(hour * 60 + minute) - east;
+    let (year, month, day) = civil_from_days(minutes.div_euclid(1440));
+    let minute = minutes.rem_euclid(1440);
+    format!("{day} {} {year}, {:02}:{:02} UTC", MONTHS[month as usize - 1], minute / 60, minute % 60)
+}
+
+/// A time, its seconds and their fraction or not, then its offset (`Z`,
+/// `+01:00`, or none for UTC): its hour, its minute and the offset east of
+/// UTC in minutes.
+fn clock(text: &str) -> Option<(u32, u32, i64)> {
+    let (time, offset) = text.split_at(text.find(['Z', 'z', '+', '-']).unwrap_or(text.len()));
+    let (hour, minute) = hour_minute(time)?;
+    let east = match offset.as_bytes() {
+        [] | [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), rest @ ..] if rest.len() == 5 => {
+            let (hours, minutes) = hour_minute(&offset[1..])?;
+            let east = i64::from(hours * 60 + minutes);
+            if *sign == b'-' { -east } else { east }
+        }
+        _ => return None,
+    };
+    Some((hour, minute, east))
+}
+
+/// The days from 1970-01-01 to a date of the proleptic Gregorian calendar.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let (era, year_of_era) = (year.div_euclid(400), year.rem_euclid(400));
+    let day_of_year = (153 * ((i64::from(month) + 9) % 12) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// The date `days` after 1970-01-01: its year, month and day.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let (era, day_of_era) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
+    let month = if shifted < 10 { shifted + 3 } else { shifted - 9 };
+    (year_of_era + era * 400 + i64::from(month <= 2), month as u32, day as u32)
+}
+{{- end }}
+{{- if $date }}
+
+/// A date as a reader reads it: `2026-10-09` is "9 Oct 2026". Text that is
+/// no date, `YYYY-MM-DD`, shows as it is.
+pub fn date_text(value: &str) -> String {
+    match civil_date(value) {
+        Some((year, month, day)) => format!("{day} {} {year}", MONTHS[month as usize - 1]),
+        None => value.to_owned(),
+    }
+}
+{{- end }}
+{{- if $time }}
+
+/// A time of day as a reader reads it, to the minute: `14:30:15` is
+/// "14:30". Text that is no 24-hour time, `HH:MM` with its seconds or
+/// not, shows as it is.
+pub fn time_text(value: &str) -> String {
+    match hour_minute(value) {
+        Some((hour, minute)) => format!("{hour:02}:{minute:02}"),
+        None => value.to_owned(),
+    }
+}
+{{- end }}
+{{- if or $dateTime $date }}
+
+/// The months as a reader reads them, in English and in short.
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// `YYYY-MM-DD`, a date that exists: its year, month and day.
+fn civil_date(text: &str) -> Option<(i64, u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year = digits(&bytes[0..4])?;
+    let month = digits(&bytes[5..7]).filter(|month| (1..=12).contains(month))?;
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let day = digits(&bytes[8..10]).filter(|day| (1..=days).contains(day))?;
+    Some((i64::from(year), month, day))
+}
+{{- end }}
+{{- if or $dateTime $time }}
+
+/// `HH:MM` in 24 hours, with `:SS` and a fraction of a second or not: its
+/// hour and its minute.
+fn hour_minute(text: &str) -> Option<(u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 5 || bytes[2] != b':' {
+        return None;
+    }
+    let hour = digits(&bytes[0..2]).filter(|hour| *hour < 24)?;
+    let minute = digits(&bytes[3..5]).filter(|minute| *minute < 60)?;
+    let seconds = match &bytes[5..] {
+        [] => true,
+        [b':', rest @ ..] if rest.len() >= 2 => {
+            digits(&rest[..2]).is_some_and(|second| second <= 60)
+                && match &rest[2..] {
+                    [] => true,
+                    [b'.', fraction @ ..] => !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit),
+                    _ => false,
+                }
+        }
+        _ => false,
+    };
+    seconds.then_some((hour, minute))
+}
+{{- end }}
+{{- if or $dateTime $date $time }}
+
+/// The number its ASCII digits spell, when they are all digits.
+fn digits(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .iter()
+        .all(u8::is_ascii_digit)
+        .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
+}
+{{- end }}
+{{- end }}
