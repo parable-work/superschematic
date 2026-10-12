@@ -47,6 +47,14 @@ tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"], optional = tr
 # The identity-sqlite feature's client, with the SQLite it bundles, as the
 # version graph's Rust engine binds it.
 rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
+# The postgres feature's pool (D57), over the tokio-postgres above, with the
+# TLS of the http-client feature (native-tls) for a connection string.
+deadpool-postgres = { version = "0.14.2", default-features = false, features = ["rt_tokio_1"], optional = true }
+native-tls = { version = "0.2.18", optional = true }
+postgres-native-tls = { version = "0.5.3", optional = true }
+# The logging feature's subscriber (D57): its registry alone, since the
+# runtime writes the JSON lines itself, in the TypeScript logger's shape.
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"], optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
@@ -62,6 +70,15 @@ identity = ["dep:argon2", "dep:tower-layer", "dep:tower-service", "tokio/rt"]
 identity-postgres = ["identity", "dep:tokio-postgres"]
 # The identity store's SQLite client, over rusqlite.
 identity-sqlite = ["identity", "dep:rusqlite"]
+# A stack server's database (D57): a deadpool-postgres pool over a
+# connection string, or over the Unix socket Cloud Run mounts for a Cloud SQL
+# instance, with an access token from the metadata server, which it asks
+# through the http-client feature. With identity-postgres, the identity
+# store runs over the same pool.
+postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "tokio/rt"]
+# A stack server's log (D57): one JSON object per line on stdout, in the
+# TypeScript logger's shape, as a layer over tracing-subscriber's registry.
+logging = ["dep:tracing-subscriber"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }
@@ -81,6 +98,12 @@ required-features = ["identity-sqlite"]
 [[test]]
 name = "identity_http"
 required-features = ["identity-sqlite"]
+
+# The pool over a connection string and over a Cloud SQL socket, on the
+# Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names.
+[[test]]
+name = "postgres"
+required-features = ["postgres"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

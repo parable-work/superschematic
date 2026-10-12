@@ -31,6 +31,7 @@
 //! - [`Store`], and [`SqlStore`], its implementation for Postgres and
 //!   SQLite built from the schema's identity descriptor, over a SQL
 //!   [`Client`]: [`TokioPostgres`] with the `identity-postgres` feature,
+//!   `PostgresPool`, over the server's pool, with `postgres` too, and
 //!   [`Rusqlite`] with `identity-sqlite`. The store parses logins with the
 //!   scalar catalog the service passes ([`Scalars`]).
 //! - [`Service`], every session and administration operation, its axum
@@ -89,6 +90,8 @@ pub use service::{
     DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ, PERMISSION_ROLES_WRITE,
     PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
 };
+#[cfg(all(feature = "identity-postgres", feature = "postgres"))]
+pub use sql::PostgresPool;
 #[cfg(feature = "identity-sqlite")]
 pub use sql::Rusqlite;
 #[cfg(feature = "identity-postgres")]
