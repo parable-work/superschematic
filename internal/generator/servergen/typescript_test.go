@@ -611,6 +611,11 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	for _, v := range variables(t, "TS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}) {
 		args = append(args, "-e", v)
 	}
+	// ts-shop lists ts-media, on an emulator nothing answers: opening it
+	// makes no request (D54).
+	for _, v := range variables(t, "TS_MEDIA_BUCKET", ir.BucketConnection{Name: "ts-media", Endpoint: "http://127.0.0.1:9"}) {
+		args = append(args, "-e", v)
+	}
 	container := docker(t, append(args, image)...)
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
 	address := docker(t, "port", container, "8080/tcp")
