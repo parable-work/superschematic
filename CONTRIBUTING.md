@@ -70,7 +70,7 @@ By making a contribution to this project, I certify that:
 | Go            | 1.26.4  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
 | golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
-| Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
+| Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
 | Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
@@ -295,8 +295,9 @@ the siblings from their tags; the `replace` lines next to them keep local
 builds on the checkout. A release keeps the `replace` lines, and `go
 install <package>@vX.Y.Z` refuses a module that has any, so the installed
 binary is not `go install`able: users download it from the release or run
-`make build` in a checkout. `superschematic-migrate`, whose module has
-none, installs that way.
+`make build` in a checkout. Nor is the identity runner,
+`superschematic-identity`, whose module `runtime/http/go` has them too.
+`superschematic-migrate`, whose module has none, installs that way.
 
 A generated Go server links superscalar's static archive, and the version
 graph's, through cgo, and no module the module proxy serves carries them.
@@ -351,12 +352,15 @@ A release is three steps, each started by a person. For the first release,
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
    official extensions) for linux and darwin on x64 and arm64, each
    on a runner of that os/arch, linked against the superscalar archive built
-   from the pinned checkout. It cross-compiles the migration runner,
-   `superschematic-migrate`, for the same four on one runner, since it needs
-   no cgo, and stamps the version its `version` command prints with
-   `-X main.version`. It refuses a set not built from the tag's commit,
-   writes `SHA256SUMS` over both binaries' archives
-   (`superschematic_<version>_<platform>.tar.gz` and
+   from the pinned checkout, and the identity runner,
+   `superschematic-identity`, on the same runners, since it needs cgo too.
+   It cross-compiles the migration runner, `superschematic-migrate`, for the
+   same four on one runner, since it needs no cgo. Both runners' `version`
+   commands print the version the build stamps with `-X main.version`. It
+   refuses a set not built from the tag's commit, writes `SHA256SUMS` over
+   the three binaries' archives
+   (`superschematic_<version>_<platform>.tar.gz`,
+   `superschematic-identity_<version>_<platform>.tar.gz` and
    `superschematic-migrate_<version>_<platform>.tar.gz`), and packs the npm
    tarballs and the PyPI sdist and wheel. It creates the GitHub release with
    build provenance, an SBOM and notes generated from the pull requests

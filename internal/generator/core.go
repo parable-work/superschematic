@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/cigen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack/local"
@@ -170,6 +171,20 @@ func RegisterCore(reg *registry.Registry) error {
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.server", r.generateServers)
+			},
+		},
+		{
+			// The Site kind's one output: the typed browser config in the
+			// site's package at the naming file's [implementation_paths]
+			// site template, which it scaffolds once when it is missing
+			// (docs/stack-model.md, section 8.10, D55). It writes nothing
+			// under the output root but the Bun workspace's root.
+			Name:  sitegen.Name,
+			Kinds: []string{string(ir.SchemaKindSite)},
+			Dirs:  func(registry.GenerateContext) []string { return nil },
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.site", r.generateSite)
 			},
 		},
 		{

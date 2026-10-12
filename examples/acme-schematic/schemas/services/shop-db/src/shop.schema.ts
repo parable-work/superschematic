@@ -1,6 +1,6 @@
 import { Contact, Identity, Temporal } from "superscalar";
 import { Default, Nullable } from "@superschematic/schema";
-import { AutoGenerate, Relation, key, unique, versioned } from "@superschematic/db";
+import { AutoGenerate, Relation, key, unique, User as UserTrait, versioned } from "@superschematic/db";
 
 // Audit fields every table carries.
 export abstract class Auditable {
@@ -8,9 +8,13 @@ export abstract class Auditable {
   updatedAt: Nullable<Temporal.DateTime>;
 }
 
-// A person who can call the shop API.
+// A person who can call the shop API. The User trait (D50) makes the table
+// the core user model's: the loader adds the Session and UserCredential
+// tables beside it, and the acme "apikey" provider reads its key and name
+// fields through the trait for its principal store. The User trait is
+// imported as UserTrait, since the table is named User too.
 @versioned
-export abstract class User extends Auditable {
+export abstract class User extends Auditable implements UserTrait<{ login: "email"; name: "name" }> {
   @key
   id: AutoGenerate<Identity.UUID>;
 
@@ -18,22 +22,6 @@ export abstract class User extends Auditable {
   email: Contact.Email;
 
   name: Identity.Name;
-}
-
-// A bearer session the core "session" auth provider looks up by jti. The
-// smoke compiles shop-api against that provider; without this table the
-// generated session store is skipped and the UUID-parse fix is untested.
-@versioned
-export abstract class Session extends Auditable {
-  @key
-  id: AutoGenerate<Identity.UUID>;
-
-  @unique
-  jti: Identity.UUID;
-
-  user: Relation<User, { onDelete: "CASCADE" }>;
-
-  expiresAt: Temporal.DateTime;
 }
 
 // An API key a User presents in the X-API-Key header. The acme "apikey" auth

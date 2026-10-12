@@ -38,11 +38,11 @@ import (
 // with IAM database authentication, as the migrator's IAM database user,
 // which the Cloud SQL platform gives each instance with the
 // cloudsqlsuperuser role, so the tables it creates are its own. After the
-// plan's phase the job gives each server and each job (D52) that connects
-// to the DB service, by its IAM database user, read and write privileges on
-// the DB service's tables, and takes them back from one that no longer
-// connects. A job's IAM database user is its sql edge's, as a server's is
-// (connectSQL). The job is not a node of the graph (D45): it is made from
+// plan's phase the job gives each server, job (D52) and worker (D53) that
+// connects to the DB service, by its IAM database user, read and write
+// privileges on the DB service's tables, and takes them back from one that
+// no longer connects. A job's or a worker's IAM database user is its sql
+// edge's, as a server's is (connectSQL). The job is not a node of the graph (D45): it is made from
 // the release the binary pins, which the graph does not depend on.
 //
 // The runner's image is built from a generated Dockerfile that installs
@@ -302,8 +302,8 @@ func migrationJob(req registry.MigrationRequest, v values) (*migrateJob, map[str
 			target.Plan = "plans/" + plan.Service + "-" + hex.EncodeToString(sum[:]) + ".json"
 			plans[target.Plan] = plan.Plan
 		}
-		// The servers and the jobs that connect (D52), each by the IAM
-		// database user its sql edge made.
+		// The servers, the jobs (D52) and the workers (D53) that connect,
+		// each by the IAM database user its sql edge made.
 		for _, server := range plan.Servers {
 			user, err := nodeString(env, server+".database-user."+req.Database, "name", params)
 			if err != nil {

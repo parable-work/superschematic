@@ -1,6 +1,6 @@
 ---
 title: Pages with Topcoat
-description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms and records built from the schema.
+description: Call a Rust API's operations from the pages of a Topcoat app in the same process, by each route's rules, with forms, records and display components built from the schema.
 sidebar:
   order: 9
 ---
@@ -12,12 +12,19 @@ server-rendered pages. Its pages run in the same process as a service's
 Rust implementations. It leaves validation and authentication to the app,
 and a Rust API already has both, for each route. The Topcoat extension
 writes a crate that lets a page call an operation directly, by the route's
-rules. The crate also has a form per input type and a record per result
-type, and mounts the JSON API beside the pages.
+rules. For the operations a page can call, the crate also has a form per
+input type, nested objects and lists included, and per operation's other
+arguments, a filter for a GET, and a record per result type, with
+components that render each record, and it mounts the JSON API beside the
+pages.
 
-The acme shop's `topcoat/` app is a reviews page over `shop-orders`, on
-the in-memory implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
-serves.
+The acme shop's `topcoat/` app is a small shop over `shop-orders`, on
+the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
+serves, which keep the shop in memory or in a SQLite file, with the
+shop's users in SQLite. A shopper signs in with their password, writes a
+review at `/reviews`, places an order at `/orders/new`, filters their
+orders at `/orders` and cancels one from its page, `/orders/{id}`, each
+page's input taken through a form the crate builds.
 
 ## Build the crate
 
@@ -48,24 +55,48 @@ on. A service whose server is in another language skips the crate and
 says why in the build log, so the same config also builds the Go server.
 The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
 
-The crate's forms, records and procedures, below, are on by default. In
-`outputs.topcoat`, `forms: false` leaves out the forms, `procedures: false`
-the procedures, and `records: false` the records and the procedures,
-which carry their arguments and results as records.
+The crate's forms, records, procedures and display components, below,
+are on by default. In `outputs.topcoat`, `forms: false` leaves out both
+kinds of form, `procedures: false` the procedures, `views: false` the display
+components, and `records: false` the records with the procedures and the
+display components, which are built on records.
 
 ## Mount it
 
 `shop_orders` keeps the API's `Implementations` for the in-process calls
-and mounts the JSON API at `/api`. It also takes a `PageAuthenticator`,
-which establishes a page's caller. Here that caller comes from a Topcoat
-session:
+and mounts the JSON API at `/api`, giving its routes the client's address
+as Topcoat reads it, by which their rate limits count clients. It also
+takes a `PageAuthenticator`, which establishes a page's caller. The shop's
+users are the core user model's, so the crate offers
+`IdentityPageAuthenticator::of(&implementations)`, which reads a page's
+caller from the session cookie or bearer token as the JSON API does. One
+sign-in serves the pages and the JSON API, and a refused cookie is cleared
+on the page's response. An app whose users are its own writes a
+`PageAuthenticator` instead, over a Topcoat session, say.
 
-<Snippet file="topcoat/src/lib.rs" symbol={['app', 'sign_in']} />
+<Snippet file="topcoat/src/lib.rs" symbol={['app', 'SignInForm', 'sign_in']} />
 
-The API's own `Authenticator` still decides whether a caller's permissions
+`shop-orders` serves no login route (`shop-api` does), so the sign-in page
+calls the identity service in process: `login` with a cookie session,
+after the cross-origin check a cookie login passes, then the session
+cookie on the page's response. Where the mounted API serves
+`@userSessions`, the browser can post JSON to `/api/auth/login` with
+`session: "cookie"` instead. The app serves plain HTTP locally, so its
+identity config turns the cookie's `Secure` off. Topcoat's origin policy
+runs before the identity check, so an origin the identity config trusts
+must be one the app's `OriginPolicy` trusts too.
+
+The API's own authenticator still decides whether a caller's permissions
 cover an operation's. A page and the JSON API therefore admit the same
 callers. The app names the crate, so the linker keeps it and `.discover()`
 finds its procedures.
+
+A page whose operation would refuse a caller who is not signed in shows a
+Sign in button. It opens the sign-in page with the page to come back to
+(`next`), which the sign-in form sends along, and a sign-in goes back
+there only when `next` is a path of the app, never another host's:
+
+<Snippet file="topcoat/src/lib.rs" symbol={['sign_in_button', 'is_local']} />
 
 ## Call an operation from a page
 
@@ -82,14 +113,33 @@ shows or hides what the operation does. Both apply the end-user rule
 only: an operation's `@requireService` or `@allowService` clause is not
 checked in-process, since a page is the service's own code
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
+The acme pages ask the guard whether to show the sign-in button above a
+form:
 
-An input type gets a form when each of its fields is a string, a number,
-a boolean or an enum, alone, and the service declares it; the build log
-names any other and why. `forms::WriteReviewInputForm` holds the form's
-fields as the browser sends them, each an `Option<String>`, so a refused
-form renders again as it was sent. `parse()` reads them by
-`WriteReviewInput`'s rules, and `FormErrors::from_api` turns the
-operation's refusal into the same field messages:
+<Snippet file="topcoat/src/lib.rs" symbol="needs_sign_in" />
+
+## Forms
+
+The crate's `forms` module has a form for what a page submits to an
+operation, of two kinds that share their controls, their decoding and
+their errors. An **input form** holds an input type's fields, parsed by
+the type's rules. An **argument form** holds an operation's arguments,
+in its path, its query or its body, parsed by the route's own rules
+(`Args::check`), and embeds the input's form when the operation takes
+one. A form holds each field as the browser sends it, so a refused form
+renders again exactly as it was sent.
+
+### An input form
+
+An input type gets a form when an operation a page can call takes it and
+the service declares it; the build log names any other and why. The user
+model's operations are not among them: the identity runtime serves them,
+so login's input has no form, and a page signs a user in through the
+identity service ([Mount it](#mount-it)).
+`forms::WriteReviewInputForm` holds `WriteReviewInput`'s fields, each an
+`Option<String>`. `parse()` reads them by the type's rules, and
+`FormErrors::from_api` turns the operation's refusal into the same field
+messages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="post_review" />
 
@@ -98,16 +148,209 @@ the input type's rules give them: `required`, `min` and `max` on the
 rating, `maxlength` on the title. A browser checks them before it sends the
 form, and `parse()` checks every rule again.
 
+### Nested objects and lists
+
+A control is named by its field's path in the input, so a form holds an
+input of any shape. `shop-orders`' `PlaceOrderInput` has a nested
+`shippingAddress` and a list of `lines`, each a product and a quantity:
+`place_order_input_fields` renders the address in a `<fieldset>` whose
+controls are `shippingAddress.city` and the rest, and each line in a
+fieldset of its own, `lines[0].productId` and `lines[0].quantity`.
+`PlaceOrderInputForm` holds them as `ShippingAddressForm` and a
+`Vec<PlaceOrderLineForm>`, and `Form<PlaceOrderInputForm>` decodes a post
+into it, a list's rows in the order of their indexes. An error, `parse`'s
+or the operation's, is keyed by the same path, so it renders at its
+control: a quantity over 99 on the second line is shown on
+`lines[1].quantity`.
+
+A new form, `PlaceOrderInputForm::new()` and the component's default,
+holds each field's `@default` and each list's first rows: `listMin`, or
+one for a required list. A list of an enum's members is a group of
+checkboxes, and an optional nested object is sent only when one of its
+fields is, so none of its controls is required.
+
+### Rows without JavaScript
+
+A list's rows are added and removed by submit buttons named `_action`:
+`add:lines` after the rows, until the list holds its `listMax`, or 1000
+rows for a list without one, and `remove:lines[1]` in each row while it
+holds more than its `listMin`. The
+form keeps the button pressed, and `apply_action()` applies it and says
+whether a row button submitted the form, in which case the page renders
+the form again, 200, without calling the operation. The acme app's
+`POST /orders/new` does that, then places the order and goes to its page,
+or renders the form again, 422, with each error at its control:
+
+<Snippet file="topcoat/src/lib.rs" symbol="place_order" />
+
+A page answers with one view, so the row action and a refusal set the
+status, and both render the same `place_order_page` component. The
+buttons skip the browser's checks (`formnovalidate`), so a row can be
+added before the others are valid, and Enter still submits the form.
+
+A form reads no more than a browser could send it. It reads one row past
+a list's limit, which `parse` refuses at the list, and at most 5000 names
+and values, past which it reads none and `parse` refuses the form. A post
+of 20,000 `lines[n]` renders the form again with 51 lines, not 20,000.
+
+The row type's `@display` names the rows and the add button: each row is
+numbered by its `noun` ("Line 1"), else by the list's label, and the add
+button says its `createLabel` ("Add a line"), else "Add". A field's
+`@docs` title is its label, so the line's product reads "Product":
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="PlaceOrderLine" />
+
+### An argument form
+
+An operation a form submits gets `<Namespace><Operation>ArgsForm`, named
+after its `Args` struct: a GET operation with a query argument, whose
+form is a filter, and any other operation with an argument beside its
+input. A GET whose path carries its only arguments, `getOrder(id)`, is a
+link and has none. The form holds each argument, a list's every value,
+and `input`, the input's form, when the operation takes one, so one
+`<form>`, one `parse()` and one component cover the arguments and the
+input's fields. `parse()` writes each argument as the JSON a request
+carries, decodes it into the `Args` struct and checks it as the router
+checks a request's, so a value the JSON API would refuse with 400 is that
+argument's error. `submit(cx)` parses the form and makes the in-process
+call, and a refusal of either is the form's `FormErrors`.
+
+`<namespace>_<operation>_args_fields(form, errors)` renders each argument
+with the control an input field of its type gets: a `<select>` for an
+enum, a group of checkboxes for a list of an enum, an input per value for
+any other list, `min` and `max` on a number, `maxlength` on a string. An
+argument is labeled by its name in words, and its description is a hint
+under the label. A path argument is a hidden input: `new(id)` builds the
+form of one resource, such as the order a cancel button cancels.
+
+The acme order page renders `order_cancel_order_args_fields` under the
+order's detail while the order is placed. `POST /orders/{id}/cancel`
+takes the id from its route, not from the hidden input, which a reader
+can change, then submits the form. It goes back to the order's page
+(303), or renders the page again, 422, with the form as sent: an
+over-long reason's message at the reason, and the operation's 409, for an
+order no longer placed, as the form's own:
+
+<Snippet file="topcoat/src/lib.rs" symbol="cancel_order" />
+
+`path_param!(id: types::IdentityUUID, error = not_found)` declares the
+route's id, so a path that holds no id is a 404.
+
+A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
+reads it from the query with Topcoat's `Form<T>`, which reads the query on
+GET, or with `from_query(cx)`, so the controls show the filters in effect.
+A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
+a comma-separated value is split as the router splits it. A blank field is
+absent, or its declared default. A filter's boolean is a `<select>` of Yes
+and No after a blank option, so a filter can leave a flag out, ask for
+false, or turn off a flag whose default is true; a new form selects the
+default. Any other form's boolean is a checkbox, as an input's is:
+unchecked is false, whatever the argument's default, which only checks
+the box of a new form.
+
+An operation whose input is optional takes it only when one of its fields
+is sent, so a blank form calls it without one.
+
+`submit` turns every refusal into the form's errors, a caller's 401 or
+403 included. The acme orders page keeps the route's status instead: it
+parses the filter and makes the call itself, so a caller the route
+refuses gets its status and the sign-in button, and a refused filter, a
+limit past 100, say, gets 422 and the message at its control:
+
+<Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
+
+### Typed controls
+
+A `Temporal.Date` field or argument is `type="date"` and a
+`Temporal.Time` one `type="time"`. A `Temporal.DateTime` one is
+`type="datetime-local"`, which carries no offset, so the form reads it as
+UTC and its label says so, and a value held with an offset renders in
+UTC. A number field holding a whole number reads any a browser sends,
+`1e1` and `2.0` too. A `@secret` field is `type="password"` and is
+never rendered with its value, so a refused form asks for it again. A
+record leaves the field out, but a form holds what a reader types. A
+value no control holds, a union, any JSON value or a map, is a
+`<textarea>` of its JSON text.
+
+### Errors
+
+A form's errors are keyed by its controls' names, so each renders at its
+control: `parse`'s, and an operation's refusal through
+`FormErrors::from_api`, which also places a refused parameter's error,
+which the router's 400 names, on that argument's control. A message no
+rendered control shows, such as a hidden path argument's, is shown with
+the form's own messages, named by its field.
+
+### Choices the app supplies
+
+An input type does not say which product a `productId` names. The page
+says, with `Choices`, which either kind of component takes and which
+turns the text or number fields it names into a `<select>`:
+`lines.productId` for every line's product, or `lines[0].productId` for
+one line's. The acme app's catalog, which also stocks the shop in memory
+and in SQLite, supplies each line's:
+
+<Snippet file="topcoat/src/lib.rs" symbol="product_choices" />
+
+A choice's value is the id as the API sends it, its compact text, which
+is what a record holds and what the select sends back.
+
 ## Records
 
-`records` mirrors each type an operation returns as a Topcoat record,
-which a page hands the browser, here through a shard:
+`records` mirrors each type a page's call returns, and the types it
+nests, as a Topcoat record, which a page hands the browser, here through a
+shard:
 
 <Snippet file="topcoat/src/lib.rs" symbol="review_card" />
 
 A record holds the type's JSON as the API sends it. UUIDs, timestamps and
-enums are strings, a map is its entries, and an `@uiHidden` field is left
-out, since a record reaches the browser.
+enums are strings, a map is its entries, and an `@uiHidden` or secret
+field is left out, since a record reaches the browser. A webhook's result
+reaches no page, so it has no record ([Procedures](#procedures)), and the
+user model's routes have none, since a page does not call them in-process.
+
+## Display components
+
+`views` renders each record two ways: `<type>_detail(record)` as a
+description list, a label and a value per field, and `<type>_table(rows)`
+as a table with a row per record. The shard above renders a review with
+`review_view_detail`, an order's page renders the order with
+`order_view_detail`, and the orders page renders the shopper's orders
+with `order_view_table`. A table's cells are the records' values, with no
+links, so the page lists a link to each order's page after it:
+
+<Snippet file="topcoat/src/lib.rs" symbol="order_list" />
+
+A field is labeled as its form field is: its `@docs` title, else its name
+in words. A value renders by its type:
+
+- an enum's value is its member's name in words, in a `<data>` element
+  whose `value` is the one the API sends;
+- a date or a time is a `<time>` element;
+- a boolean is "Yes" or "No";
+- a nested record is its own detail, and in a table cell its title when
+  its type declares one;
+- a list of records is their table, any other list a `<ul>`, and a map a
+  `<dl>` of its entries;
+- a union or any JSON value is its JSON text in a `<pre>`;
+- an absent optional value leaves its cell empty.
+
+A type's `@display` ([Display on a type](/superschematic/reference/documentation/#display-on-a-type))
+shapes both components. `summaryFields` chooses and orders a table's
+columns, which are otherwise every field. `titleField` names a detail for
+assistive technology (`aria-label`, the noun when the title is empty) and
+heads each row. `plural` captions a table. `ReviewView` declares all four:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="ReviewView" />
+
+`OrderView`'s summary fields are the orders table's columns: the order's
+id, when it was placed, its status and its total.
+
+The markup is plain HTML and ships no styles. A stylesheet or a test finds
+it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
+`ss-json`), by `data-type`, the type's name, and by `data-field`, each
+field's JSON key. Every value is text, which the view escapes, so a
+review's body never becomes markup.
 
 ## Procedures
 
@@ -120,11 +363,95 @@ browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
 procedure's body as a plain function, for Rust code and tests: Topcoat
 turns the procedure itself into a value Rust cannot call.
 
+A procedure is a second route to its operation, which any browser can
+reach, so an operation gets one only where a browser's request can meet
+its route's rules. A webhook (`@webhook`, `@hmacVerified`) has neither an
+in-process call nor a procedure: a third party calls it, and its route
+checks the signature before anything else. Nor has an operation the
+service mounts itself (`@manualRouteRegistration`). An operation only a
+service may call (`@requireService`) keeps its in-process call but has
+no procedure, since a browser holds no service credential; an
+`@allowService` one keeps both, since its route admits an end user too.
+Each guard's or call's doc says why, and so does the build log. The
+result of an operation without a call reaches no page, so it has no
+record and no display components, and its input has no form.
+
+A procedure keeps its route's traffic controls, in the route's order, and
+refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
+allows a client 60 calls a minute (429 with `Retry-After`), a body of a
+megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
+them on the procedure's path. Its limiter is its own, at the route's
+rate, and counts clients by the IP address Topcoat reads for them; the
+JSON API's route keeps its own, counting by the same address. A page's
+in-process call applies none of them: the page is a route of the app,
+under the controls the app gives it.
+
+## Keep the shop in SQLite
+
+`shop-db` lists `sqlite` beside `postgres`, so its build also writes the
+tables' SQLite DDL, and `migrate plan --dialect sqlite` plans a SQLite
+database ([SQLite](/superschematic/reference/migrations/#sqlite)):
+
+<Snippet file="schemas/services/shop-db/schema.config.ts" from="    // SQLite too" to="dialects" />
+
+The Rust server's `sqlite` feature adds `SqliteShop`, the shop's
+implementations over a file of `shop-db`'s tables, through rusqlite, and
+`users_at`, the identity service over the same file. The app turns it on.
+With `DATABASE_URL` set, the app opens that file, which must hold
+`shop-db`'s tables, its identity tables among them, and its reviews,
+orders, users and sessions outlive the process; without it, the shop and
+its users are in memory. Either way the app stocks the shop from its
+catalog, since an order's lines are priced from it, in SQLite from the
+product's row. `DATABASE_URL` is a `sqlite:`
+URL, a `file:` URI or a path. A URL of another database, such as a
+Postgres one already in the shell, stops the app with an error that names
+its scheme alone, since the URL may hold a password:
+
+<Snippet file="topcoat/src/main.rs" symbol="main" />
+
+Plan the file from an empty database, apply the plan with the migration
+runner, and start the app on it, from `examples/acme-shop`:
+
+```bash
+superschematic migrate plan schemas/services/shop-db --dialect sqlite --out shop-db.sqlite.plan.json
+superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqlite:shop.db
+cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
+```
+
+The runner records the model it applied, so a later version of `shop-db`
+plans `--from` it ([Adopt a database built from
+create.sql](/superschematic/reference/migrations/#adopt-a-database-built-from-createsql)
+shows the commands). `Review`'s search fields give the SQLite table its
+`search_text` column, `VIRTUAL`, without the trigram index Postgres
+builds.
+
 ## Test the app
 
 `Router::handle` drives the app as a browser would. The acme app's tests
-sign in, post a review signed out (422, "Authentication required"), post
-one with a rating out of range (422, the field marked invalid), post a
-valid one, and read it back from the page and from the JSON API:
+keep the shop's users in SQLite in memory. They post a review signed out
+(422, "Authentication required"), sign the shopper in with their
+password, post one with a rating out of range (422, the field marked
+invalid), post a valid one, and read it back from the page and from the
+JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+The orders tests place an order through its form: a row button adds a
+line and renders the form again without placing the order, a quantity of
+0 comes back 422 with the message at `lines[0].quantity` and the form as
+sent, and a valid form goes to the new order's page. `/orders?statuses=cancelled`
+lists the cancelled orders alone, its box checked, and a limit of 500
+comes back 422 at the limit. On an order's page, a reason past 500
+characters is refused at the reason, the route's id is the order
+cancelled whatever the hidden input holds, and cancelling it again shows
+the operation's 409 as the form's message:
+
+<Snippet file="topcoat/tests/app.rs" symbol="an_order_is_cancelled_from_its_page" />
+
+Over SQLite, a test builds a file from `sqlite/create.sql`, or copies the
+one `scripts/check.sh` migrates with the runner, signs the shopper in,
+writes a review, places an order through the JSON API and another through
+the form, cancels the second from its page, then opens a new app on the
+same file, where the shopper's session still holds:
+
+<Snippet file="topcoat/tests/app.rs" symbol="a_sqlite_shop_outlives_the_app" />

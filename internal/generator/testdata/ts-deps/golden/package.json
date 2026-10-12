@@ -6,7 +6,8 @@
     "sdk/typescript/*",
     "api/*",
     "server/*/*",
-    "../../typescript/*"
+    "../../typescript/*",
+    "../../web/*"
   ],
   "dependencies": {
     "superscalar": "*"

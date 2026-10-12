@@ -9,7 +9,8 @@ use {{ .RuntimeCrateIdent }}::OperationInfo;
 {{- range .AllEndpoints }}
 
 /// {{ .Namespace }}.{{ .Name }} (`{{ toUpper .Method }} {{ .Path }}`){{ if .Manual }}, which the service mounts
-/// (@manualRouteRegistration){{ end }}.
+/// (@manualRouteRegistration){{ end }}{{ if .IdentityOperation }}, which the identity
+/// runtime serves (D50){{ end }}.
 pub const {{ .ConstName }}: OperationInfo = OperationInfo {
     namespace: {{ rustString .Namespace }},
     name: {{ rustString .Name }},
@@ -22,7 +23,7 @@ pub const {{ .ConstName }}: OperationInfo = OperationInfo {
 };
 {{- end }}
 
-/// Every operation, mounted and manual.
+/// Every operation, mounted and manual{{ if .IdentityEndpoints }}, the user model's among them{{ end }}.
 pub const ALL: &[OperationInfo] = &[
 {{- range .AllEndpoints }}
     {{ .ConstName }},

@@ -18,7 +18,8 @@
 // Each case builds two databases: one from from.sql, seed.sql and the plan's
 // steps, run as the runner runs them, and one from to.sql. Their schemas
 // must be the same, compared by name: the objects sqlite_schema lists, each
-// table's columns (pragma table_info, with each column's collation), its
+// table's columns (pragma table_xinfo, so a generated column with whether
+// it is VIRTUAL or STORED, and each column's collation), its
 // indexes (pragma index_list and index_xinfo) and its foreign keys (pragma
 // foreign_key_list).
 //
@@ -233,7 +234,7 @@ func catalog(t *testing.T, ctx context.Context, conn *sql.Conn) []string {
 		}
 	}
 	for _, table := range tables {
-		for _, col := range rows(t, ctx, conn, `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?)`, table) {
+		for _, col := range rows(t, ctx, conn, `SELECT name, type, "notnull", dflt_value, pk, hidden FROM pragma_table_xinfo(?)`, table) {
 			name := strings.Fields(col)[0]
 			out = append(out, fmt.Sprintf("column %s.%s collate %s", table, col, collation(t, ctx, conn, table, name)))
 		}

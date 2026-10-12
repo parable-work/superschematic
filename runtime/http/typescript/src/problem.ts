@@ -74,6 +74,8 @@ export interface HttpProblemOptions {
   details?: unknown;
   /** Extra top-level members (RFC 9457 extensions). Standard members win on collision. */
   extensions?: Record<string, unknown>;
+  /** Response headers the refusal carries, such as the Set-Cookie that clears a refused session. The problem's own headers win on collision. */
+  headers?: Record<string, string>;
   /** Underlying failure, kept off the wire. */
   cause?: unknown;
 }
@@ -86,6 +88,7 @@ export class HttpProblem extends Error {
   readonly code: string | undefined;
   readonly details: unknown;
   readonly extensions: Record<string, unknown> | undefined;
+  readonly headers: Record<string, string> | undefined;
 
   constructor(status: number, detail: string, options: HttpProblemOptions = {}) {
     super(detail, options.cause !== undefined ? { cause: options.cause } : undefined);
@@ -95,6 +98,7 @@ export class HttpProblem extends Error {
     this.code = options.code;
     this.details = options.details;
     this.extensions = options.extensions;
+    this.headers = options.headers;
   }
 }
 
@@ -115,6 +119,7 @@ export function problemResponse(problem: HttpProblem, requestId: string): Respon
   return new Response(JSON.stringify(problemBody(problem, requestId)), {
     status: problem.status,
     headers: {
+      ...(problem.headers ?? {}),
       'content-type': 'application/problem+json',
       'cache-control': 'no-store',
       'x-request-id': requestId,

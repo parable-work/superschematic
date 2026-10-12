@@ -204,6 +204,17 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		schema.Jobs = append(schema.Jobs, job)
 	}
 
+	for _, worker := range doc.Workers {
+		if worker == nil {
+			continue
+		}
+		if schema.Worker(worker.Name) != nil {
+			fail("duplicate worker %q", worker.Name)
+			continue
+		}
+		schema.Workers = append(schema.Workers, worker)
+	}
+
 	errs = append(errs, applyDocumentDecorators(doc, schema, owner, reg)...)
 	return errs
 }
@@ -294,6 +305,8 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		len(def.Behaviors) == 0 &&
 		def.Display == nil &&
 		def.RawHeritage == nil &&
+		def.User == nil &&
+		def.UserRole == nil &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&
 		!def.JsonField &&

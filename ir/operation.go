@@ -37,6 +37,17 @@ type OperationSet struct {
 	// payload transport.
 	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
 
+	// UserSessions is @userSessions on a class with no methods (D50): the
+	// loader fills Operations with the user model's session routes. Nil for
+	// every other set. See [UserSessionsConfig].
+	UserSessions *UserSessionsConfig `json:"userSessions,omitempty" yaml:"userSessions,omitempty"`
+
+	// UserAdministration is @userAdministration on a class with no methods
+	// (D50): the loader fills Operations with the routes that manage users,
+	// roles and grants. Nil for every other set. See
+	// [UserAdministrationConfig].
+	UserAdministration *UserAdministrationConfig `json:"userAdministration,omitempty" yaml:"userAdministration,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

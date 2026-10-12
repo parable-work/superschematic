@@ -39,14 +39,20 @@ shares, and the people who use the shop:
   email addresses compare case-insensitively, and `Identity.Name` is
   `VARCHAR(80)`.
 
-A session belongs to a user:
+`implements UserTrait<{ login: "email"; name: "name" }>` gives `User` the
+core `User` trait (imported as `UserTrait`, since the table has its name):
+the shop's users sign in with their email and are shown by their name. A
+role a user is granted is a row of the table with the `UserRole` trait:
 
-<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol="Session" />
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol="Role" />
 
-`Relation<User, { onDelete: "CASCADE" }>` stores a `user_id` column with a
-foreign key to `user`, and deletes the user's sessions with the user. The
-`session` auth provider looks sessions up by `jti` when it authenticates a
-request to the Go API.
+The build adds the tables the core owns beside them: `Session`, one row
+per signed-in session, keeping a hash of its token; `UserCredential`, a
+user's password hash, apart from the user row; and `UserRoleGrant`, the
+roles each user holds. Each has a `user_id` column with a foreign key to
+`user` that deletes them with the user. The APIs over `shop-db` sign users
+in and authenticate them against these tables
+([Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)).
 
 Then the catalog:
 

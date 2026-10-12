@@ -1,0 +1,21 @@
+[package]
+name = "schemas-fixture-user-routes-api-api"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+
+# The identity store's SQL client (D50): a service turns one on, or binds a
+# client of its own (`runtime::identity::Client`).
+[features]
+identity-postgres = ["superschematic-http-runtime/identity-postgres"]
+identity-sqlite = ["superschematic-http-runtime/identity-sqlite"]
+
+[dependencies]
+async-trait = "0.1.89"
+axum = { version = "0.8.9", features = ["json", "matched-path"] }
+http = "1"
+serde_json = "1.0.149"
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["identity"] }
+schemas-fixture-user-routes-api-types = { path = "../../types/rust/fixture-user-routes-api" }
+superscalar = { path = "../../../../third_party/superscalar/crates/core" }

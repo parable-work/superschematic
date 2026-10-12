@@ -21,6 +21,11 @@ verified service that brings no end user stands in for one, as D37's
 - A service and no Authorization header, which the Authenticator does not
   take for an end user: the service stands in (servicePrincipal), with the
   subject `service:<deployable>` and no permissions.
+
+An Authenticator that reads the Authorization header itself
+(readsAuthorization), as the identity service's does (D50), keeps the flag
+through the wrapper, so the runtime leaves the header to it: a malformed
+one is its 401, not hono/bearer-auth's 400.
 */
 
 import { unauthorized, type Authenticator, type RequestContext } from '@superschematic/http-runtime';
@@ -38,7 +43,7 @@ const standIns = new WeakSet<object>();
  * Authorization header, else none (401).
  */
 export function callerAuthenticator(deployed: Authenticator | undefined): Authenticator {
-  return async (ctx) => {
+  const authenticate: Authenticator = async (ctx) => {
     const principal = deployed ? await deployed(ctx) : null;
     if (principal) {
       return principal;
@@ -51,6 +56,7 @@ export function callerAuthenticator(deployed: Authenticator | undefined): Authen
     standIns.add(standIn);
     return standIn;
   };
+  return deployed?.readsAuthorization === true ? Object.assign(authenticate, { readsAuthorization: true }) : authenticate;
 }
 
 /**

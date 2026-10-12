@@ -67,6 +67,20 @@ type ReviewRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// RoleRepositoryInterface defines the contract for Role data access.
+type RoleRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RoleGetOptions) (*types.Role, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Role, error)
+	FindOne(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) (*types.Role, error)
+	FindMany(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) ([]*types.Role, int, error)
+	CreateOne(ctx context.Context, input *types.Role) (*types.Role, error)
+	CreateMany(ctx context.Context, inputs []*types.Role) ([]*types.Role, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RoleUpdate) (*types.Role, error)
+	UpdateMany(ctx context.Context, filter *RoleFilter, update *RoleUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *RoleFilter) (int, error)
+}
+
 // SessionRepositoryInterface defines the contract for Session data access.
 type SessionRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *SessionGetOptions) (*types.Session, error)
@@ -109,6 +123,34 @@ type UserRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *UserFilter) (int, error)
 }
 
+// UserCredentialRepositoryInterface defines the contract for UserCredential data access.
+type UserCredentialRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserCredentialGetOptions) (*types.UserCredential, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserCredential, error)
+	FindOne(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) (*types.UserCredential, error)
+	FindMany(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, int, error)
+	CreateOne(ctx context.Context, input *types.UserCredential) (*types.UserCredential, error)
+	CreateMany(ctx context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserCredentialUpdate) (*types.UserCredential, error)
+	UpdateMany(ctx context.Context, filter *UserCredentialFilter, update *UserCredentialUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *UserCredentialFilter) (int, error)
+}
+
+// UserRoleGrantRepositoryInterface defines the contract for UserRoleGrant data access.
+type UserRoleGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserRoleGrantGetOptions) (*types.UserRoleGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error)
+	FindOne(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) (*types.UserRoleGrant, error)
+	FindMany(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error)
+	CreateOne(ctx context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error)
+	CreateMany(ctx context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserRoleGrantUpdate) (*types.UserRoleGrant, error)
+	UpdateMany(ctx context.Context, filter *UserRoleGrantFilter, update *UserRoleGrantUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *UserRoleGrantFilter) (int, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
@@ -118,9 +160,12 @@ type DatabaseInterface interface {
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
+	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserCredentialRepository() UserCredentialRepositoryInterface
+	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -131,32 +176,41 @@ type TxInterface interface {
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
+	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserCredentialRepository() UserCredentialRepositoryInterface
+	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
-	tx         *NoOpTx
-	Order      *NoOpOrderRepository
-	OrderLine  *NoOpOrderLineRepository
-	Product    *NoOpProductRepository
-	Review     *NoOpReviewRepository
-	Session    *NoOpSessionRepository
-	StockLevel *NoOpStockLevelRepository
-	User       *NoOpUserRepository
+	tx             *NoOpTx
+	Order          *NoOpOrderRepository
+	OrderLine      *NoOpOrderLineRepository
+	Product        *NoOpProductRepository
+	Review         *NoOpReviewRepository
+	Role           *NoOpRoleRepository
+	Session        *NoOpSessionRepository
+	StockLevel     *NoOpStockLevelRepository
+	User           *NoOpUserRepository
+	UserCredential *NoOpUserCredentialRepository
+	UserRoleGrant  *NoOpUserRoleGrantRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
-	Order      *NoOpOrderRepository
-	OrderLine  *NoOpOrderLineRepository
-	Product    *NoOpProductRepository
-	Review     *NoOpReviewRepository
-	Session    *NoOpSessionRepository
-	StockLevel *NoOpStockLevelRepository
-	User       *NoOpUserRepository
+	Order          *NoOpOrderRepository
+	OrderLine      *NoOpOrderLineRepository
+	Product        *NoOpProductRepository
+	Review         *NoOpReviewRepository
+	Role           *NoOpRoleRepository
+	Session        *NoOpSessionRepository
+	StockLevel     *NoOpStockLevelRepository
+	User           *NoOpUserRepository
+	UserCredential *NoOpUserCredentialRepository
+	UserRoleGrant  *NoOpUserRoleGrantRepository
 }
 
 // NewNoOpDatabase creates a no-op database with no-op repositories.
@@ -171,12 +225,18 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.Product = db.Product
 	db.Review = &NoOpReviewRepository{}
 	tx.Review = db.Review
+	db.Role = &NoOpRoleRepository{}
+	tx.Role = db.Role
 	db.Session = &NoOpSessionRepository{}
 	tx.Session = db.Session
 	db.StockLevel = &NoOpStockLevelRepository{}
 	tx.StockLevel = db.StockLevel
 	db.User = &NoOpUserRepository{}
 	tx.User = db.User
+	db.UserCredential = &NoOpUserCredentialRepository{}
+	tx.UserCredential = db.UserCredential
+	db.UserRoleGrant = &NoOpUserRoleGrantRepository{}
+	tx.UserRoleGrant = db.UserRoleGrant
 	return db
 }
 
@@ -433,6 +493,60 @@ func (r *NoOpReviewRepository) HardDeleteOne(_ context.Context, _ types.Identity
 	return nil
 }
 
+func (db *NoOpDatabase) GetRoleRepository() RoleRepositoryInterface {
+	return db.Role
+}
+
+func (tx *NoOpTx) GetRoleRepository() RoleRepositoryInterface {
+	return tx.Role
+}
+
+// NoOpRoleRepository provides deterministic no-op repository behavior.
+type NoOpRoleRepository struct{}
+
+func (r *NoOpRoleRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *RoleGetOptions) (*types.Role, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRoleRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Role, error) {
+	return map[types.IdentityUUID]*types.Role{}, nil
+}
+
+func (r *NoOpRoleRepository) FindOne(_ context.Context, _ *RoleFilter, _ *RoleFindOptions) (*types.Role, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRoleRepository) FindMany(_ context.Context, _ *RoleFilter, _ *RoleFindOptions) ([]*types.Role, int, error) {
+	return []*types.Role{}, 0, nil
+}
+
+func (r *NoOpRoleRepository) CreateOne(_ context.Context, input *types.Role) (*types.Role, error) {
+	return input, nil
+}
+
+func (r *NoOpRoleRepository) CreateMany(_ context.Context, inputs []*types.Role) ([]*types.Role, error) {
+	if inputs == nil {
+		return []*types.Role{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpRoleRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RoleUpdate) (*types.Role, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRoleRepository) UpdateMany(_ context.Context, _ *RoleFilter, _ *RoleUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpRoleRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpRoleRepository) DeleteMany(_ context.Context, _ *RoleFilter) (int, error) {
+	return 0, nil
+}
+
 func (db *NoOpDatabase) GetSessionRepository() SessionRepositoryInterface {
 	return db.Session
 }
@@ -595,23 +709,137 @@ func (r *NoOpUserRepository) DeleteMany(_ context.Context, _ *UserFilter) (int, 
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetUserCredentialRepository() UserCredentialRepositoryInterface {
+	return db.UserCredential
+}
+
+func (tx *NoOpTx) GetUserCredentialRepository() UserCredentialRepositoryInterface {
+	return tx.UserCredential
+}
+
+// NoOpUserCredentialRepository provides deterministic no-op repository behavior.
+type NoOpUserCredentialRepository struct{}
+
+func (r *NoOpUserCredentialRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *UserCredentialGetOptions) (*types.UserCredential, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserCredentialRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.UserCredential, error) {
+	return map[types.IdentityUUID]*types.UserCredential{}, nil
+}
+
+func (r *NoOpUserCredentialRepository) FindOne(_ context.Context, _ *UserCredentialFilter, _ *UserCredentialFindOptions) (*types.UserCredential, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserCredentialRepository) FindMany(_ context.Context, _ *UserCredentialFilter, _ *UserCredentialFindOptions) ([]*types.UserCredential, int, error) {
+	return []*types.UserCredential{}, 0, nil
+}
+
+func (r *NoOpUserCredentialRepository) CreateOne(_ context.Context, input *types.UserCredential) (*types.UserCredential, error) {
+	return input, nil
+}
+
+func (r *NoOpUserCredentialRepository) CreateMany(_ context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error) {
+	if inputs == nil {
+		return []*types.UserCredential{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpUserCredentialRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserCredentialUpdate) (*types.UserCredential, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserCredentialRepository) UpdateMany(_ context.Context, _ *UserCredentialFilter, _ *UserCredentialUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpUserCredentialRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpUserCredentialRepository) DeleteMany(_ context.Context, _ *UserCredentialFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return db.UserRoleGrant
+}
+
+func (tx *NoOpTx) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface {
+	return tx.UserRoleGrant
+}
+
+// NoOpUserRoleGrantRepository provides deterministic no-op repository behavior.
+type NoOpUserRoleGrantRepository struct{}
+
+func (r *NoOpUserRoleGrantRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *UserRoleGrantGetOptions) (*types.UserRoleGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserRoleGrantRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error) {
+	return map[types.IdentityUUID]*types.UserRoleGrant{}, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) FindOne(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantFindOptions) (*types.UserRoleGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserRoleGrantRepository) FindMany(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error) {
+	return []*types.UserRoleGrant{}, 0, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) CreateOne(_ context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error) {
+	return input, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) CreateMany(_ context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error) {
+	if inputs == nil {
+		return []*types.UserRoleGrant{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserRoleGrantUpdate) (*types.UserRoleGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserRoleGrantRepository) UpdateMany(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpUserRoleGrantRepository) DeleteMany(_ context.Context, _ *UserRoleGrantFilter) (int, error) {
+	return 0, nil
+}
+
 var (
-	_ DatabaseInterface             = (*Database)(nil)
-	_ DatabaseInterface             = (*NoOpDatabase)(nil)
-	_ TxInterface                   = (*Tx)(nil)
-	_ TxInterface                   = (*NoOpTx)(nil)
-	_ OrderRepositoryInterface      = (*OrderRepository)(nil)
-	_ OrderRepositoryInterface      = (*NoOpOrderRepository)(nil)
-	_ OrderLineRepositoryInterface  = (*OrderLineRepository)(nil)
-	_ OrderLineRepositoryInterface  = (*NoOpOrderLineRepository)(nil)
-	_ ProductRepositoryInterface    = (*ProductRepository)(nil)
-	_ ProductRepositoryInterface    = (*NoOpProductRepository)(nil)
-	_ ReviewRepositoryInterface     = (*ReviewRepository)(nil)
-	_ ReviewRepositoryInterface     = (*NoOpReviewRepository)(nil)
-	_ SessionRepositoryInterface    = (*SessionRepository)(nil)
-	_ SessionRepositoryInterface    = (*NoOpSessionRepository)(nil)
-	_ StockLevelRepositoryInterface = (*StockLevelRepository)(nil)
-	_ StockLevelRepositoryInterface = (*NoOpStockLevelRepository)(nil)
-	_ UserRepositoryInterface       = (*UserRepository)(nil)
-	_ UserRepositoryInterface       = (*NoOpUserRepository)(nil)
+	_ DatabaseInterface                 = (*Database)(nil)
+	_ DatabaseInterface                 = (*NoOpDatabase)(nil)
+	_ TxInterface                       = (*Tx)(nil)
+	_ TxInterface                       = (*NoOpTx)(nil)
+	_ OrderRepositoryInterface          = (*OrderRepository)(nil)
+	_ OrderRepositoryInterface          = (*NoOpOrderRepository)(nil)
+	_ OrderLineRepositoryInterface      = (*OrderLineRepository)(nil)
+	_ OrderLineRepositoryInterface      = (*NoOpOrderLineRepository)(nil)
+	_ ProductRepositoryInterface        = (*ProductRepository)(nil)
+	_ ProductRepositoryInterface        = (*NoOpProductRepository)(nil)
+	_ ReviewRepositoryInterface         = (*ReviewRepository)(nil)
+	_ ReviewRepositoryInterface         = (*NoOpReviewRepository)(nil)
+	_ RoleRepositoryInterface           = (*RoleRepository)(nil)
+	_ RoleRepositoryInterface           = (*NoOpRoleRepository)(nil)
+	_ SessionRepositoryInterface        = (*SessionRepository)(nil)
+	_ SessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
+	_ StockLevelRepositoryInterface     = (*StockLevelRepository)(nil)
+	_ StockLevelRepositoryInterface     = (*NoOpStockLevelRepository)(nil)
+	_ UserRepositoryInterface           = (*UserRepository)(nil)
+	_ UserRepositoryInterface           = (*NoOpUserRepository)(nil)
+	_ UserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)
+	_ UserCredentialRepositoryInterface = (*NoOpUserCredentialRepository)(nil)
+	_ UserRoleGrantRepositoryInterface  = (*UserRoleGrantRepository)(nil)
+	_ UserRoleGrantRepositoryInterface  = (*NoOpUserRoleGrantRepository)(nil)
 )

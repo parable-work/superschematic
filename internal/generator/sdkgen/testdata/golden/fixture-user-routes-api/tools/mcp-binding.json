@@ -1,0 +1,470 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-user-routes-api",
+  "sdkClassName": "FixtureUserRoutesApiSDK",
+  "tools": [
+    {
+      "toolName": "account.capabilities",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "capabilities",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account.login",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "login",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "login",
+          "required": true,
+          "kind": "input",
+          "target": "input.login"
+        },
+        {
+          "toolParameter": "password",
+          "required": true,
+          "kind": "input",
+          "target": "input.password"
+        },
+        {
+          "toolParameter": "session",
+          "required": false,
+          "kind": "input",
+          "target": "input.session"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["login", "password", "session"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.logout",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "logout",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account.me",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "me",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account.changePassword",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "changePassword",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "current",
+          "required": true,
+          "kind": "input",
+          "target": "input.current"
+        },
+        {
+          "toolParameter": "password",
+          "required": true,
+          "kind": "input",
+          "target": "input.password"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["current", "password"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.register",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "register",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "login",
+          "required": true,
+          "kind": "input",
+          "target": "input.login"
+        },
+        {
+          "toolParameter": "name",
+          "required": false,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "password",
+          "required": true,
+          "kind": "input",
+          "target": "input.password"
+        },
+        {
+          "toolParameter": "session",
+          "required": false,
+          "kind": "input",
+          "target": "input.session"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["login", "name", "password", "session"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.listRoles",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "listRoles",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account-admin.createRole",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "createRole",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "permissions",
+          "required": true,
+          "kind": "input",
+          "target": "input.permissions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["name", "permissions"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.deleteRole",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "deleteRole",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.updateRole",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "updateRole",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "permissions",
+          "required": true,
+          "kind": "input",
+          "target": "input.permissions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["name", "permissions"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.listUsers",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "listUsers",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account-admin.createUser",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "createUser",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "login",
+          "required": true,
+          "kind": "input",
+          "target": "input.login"
+        },
+        {
+          "toolParameter": "name",
+          "required": false,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "password",
+          "required": true,
+          "kind": "input",
+          "target": "input.password"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["login", "name", "password"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.getUser",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "getUser",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.disableUser",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "disableUser",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.enableUser",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "enableUser",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.setUserPassword",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "setUserPassword",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "password",
+          "required": true,
+          "kind": "input",
+          "target": "input.password"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["password"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.revokeRole",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "revokeRole",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "roleId",
+          "required": true,
+          "kind": "path",
+          "target": "path.roleId"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "roleId"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.grantRole",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "grantRole",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "roleId",
+          "required": true,
+          "kind": "path",
+          "target": "path.roleId"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "roleId"]
+        }
+      ]
+    },
+    {
+      "toolName": "greeting.greet",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "greeting",
+      "methodName": "greet",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    }
+  ]
+}

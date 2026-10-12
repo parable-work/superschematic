@@ -134,12 +134,18 @@ const SearchTextColumn = "search_text"
 // search field wrapped in COALESCE with an empty-string fallback, joined by
 // a single space.
 func SearchTextExpr(fields []string) string {
+	return SearchTextExprQuoted(fields, sqlutil.QuoteIdentifier)
+}
+
+// SearchTextExprQuoted is SearchTextExpr with each field quoted by quote,
+// for a dialect whose keywords are not Postgres's.
+func SearchTextExprQuoted(fields []string, quote func(string) string) string {
 	if len(fields) == 0 {
 		return "''"
 	}
 	parts := make([]string, len(fields))
 	for i, field := range fields {
-		parts[i] = fmt.Sprintf("COALESCE(%s, '')", sqlutil.QuoteIdentifier(field))
+		parts[i] = fmt.Sprintf("COALESCE(%s, '')", quote(field))
 	}
 	return strings.Join(parts, " || ' ' || ")
 }

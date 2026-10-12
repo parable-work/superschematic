@@ -12,6 +12,9 @@ mod controls;
 mod error;
 #[cfg(feature = "http-client")]
 mod http_client;
+/// The user model's runtime (D50), with the `identity` feature.
+#[cfg(feature = "identity")]
+pub mod identity;
 mod jws;
 mod jwt;
 mod openapi;
@@ -31,6 +34,8 @@ pub use controls::RouteControls;
 pub use error::ApiError;
 #[cfg(feature = "http-client")]
 pub use http_client::HttpFetcher;
+#[cfg(feature = "identity")]
+pub use identity::IdentityAuthenticator;
 pub use jws::JwsAlgorithm;
 pub use jwt::{JwtServiceAuthenticator, KeyFetcher};
 pub use openapi::{

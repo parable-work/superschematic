@@ -45,7 +45,7 @@ func (r *resolver) lower(out *ir.ResolvedEnvironment) {
 			continue
 		}
 		phase := ir.PhaseInfrastructure
-		if d.res.Kind.HasImage() {
+		if d.res.Kind.RollsOut() {
 			phase = ir.PhaseRollout
 		}
 		r.produce(name, phase, lowered.Resources)

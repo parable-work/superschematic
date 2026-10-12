@@ -1,0 +1,18 @@
+name: users-ts-ping
+kind: API
+types:
+  Pong:
+    name: Pong
+    role: APIView
+    fields:
+      - name: message
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Pings
+    operations:
+      - name: ping
+        typeRef: { name: Pong }
+        required: true
+        httpMethod: GET
+        restPath: ping

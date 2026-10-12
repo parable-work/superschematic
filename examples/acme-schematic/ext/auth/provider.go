@@ -1,6 +1,9 @@
 // Package auth is the acme auth provider for the superschematic api
 // generator: callers identify themselves with an X-API-Key header instead of
-// a bearer session. It is built on the generic session runtime
+// a bearer session. It builds on the core user model (D50): the users are
+// the authDb's table with the User trait, which its principal store reads
+// through the trait, and it authenticates them by key instead of with the
+// identity runtime. It is built on the generic session runtime
 // (runtime/http/go/session): the generated middleware resolves the key to a
 // principal id and puts it on the context with the runtime's own helpers, so
 // RequireAuth and RequirePermissions from that package work unchanged.
@@ -35,8 +38,9 @@ var _ registry.AuthProvider = Provider{}
 
 // Stores is the provider's half of the auth model, AuthModel.Extra. The
 // generated key store adapter is only emitted when the upstream DB schema
-// declares a table of the shape it queries, so the generated middleware
-// always compiles against the upstream ORM.
+// declares a table of the shape it queries, and the principal store only
+// over a user model whose key is an Identity.UUID, so the generated
+// middleware always compiles against the upstream ORM.
 type Stores struct {
 	// HasKeyStore reports an upstream ApiKey(id, secret, user) table.
 	HasKeyStore bool
@@ -45,10 +49,14 @@ type Stores struct {
 // Name implements registry.AuthProvider.
 func (Provider) Name() string { return Name }
 
-// Analyze implements registry.AuthProvider: the core principal probe plus
-// the ApiKey table.
+// Analyze implements registry.AuthProvider: the core user model, which the
+// principal store reads, plus the ApiKey table. API keys authenticate the
+// callers, so the server does not authenticate with the identity runtime
+// (Identity is cleared), and an API on this provider declares no
+// @userSessions or @userAdministration set.
 func (Provider) Analyze(_, upstream *ir.Schema) (registry.AuthModel, error) {
 	model := registry.AnalyzeSessionStores(upstream)
+	model.Identity = false
 	model.Extra = Stores{HasKeyStore: registry.HasTable(upstream, "ApiKey", "id", "secret", "user")}
 	return model, nil
 }

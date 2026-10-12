@@ -20,6 +20,11 @@ type ProductImplementation interface {
 	CreateProduct(ctx context.Context, input *types.CreateProductInput) (*types.ProductView, error)
 	// GetProduct handles GET /api/products/{id}
 	GetProduct(ctx context.Context, id types.IdentityUUID) (*types.ProductView, error)
+	// CreateProductImageUpload handles POST /api/products/{id}/image-upload
+	//
+	// Signs an upload of the product's image to shop-media and records the
+	// object's name on the product.
+	CreateProductImageUpload(ctx context.Context, id types.IdentityUUID, input *types.ProductImageUploadInput) (*types.ProductImageUpload, error)
 }
 
 // Implementations holds all namespace implementation interfaces.

@@ -14,8 +14,9 @@ route mounts on Hono beside the engine's others.
 
 The route goes through the HTTP runtime (D15) like every engine route:
 its rate limit, timeout, body limit, service step and authentication
-gate, with the deployment's Authenticator and, when it passes one, its
-service authenticator (D37). The caller it establishes, an end user, a
+gate, with the deployment's Authenticator, or the identity service of
+the core user model (D50), and, when it passes one, its service
+authenticator (D37). The caller it establishes, an end user, a
 service acting for one, or a service standing in for one
 (http/callers.ts), is the principal every tools/list and tools/call acts
 as, so the engine's access policy answers each call, and the list holds
@@ -32,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import { Server, ProtocolError, ProtocolErrorCode, createMcpHandler, type CallToolResult, type McpRequestContext, type Tool } from '@modelcontextprotocol/server';
 import { internal, problemBody, HttpProblem, type OperationSpec, type RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, mountManualOperation, notFoundHandler, type RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
+import { identityCorsRoutes, identityRouterOptions, type IdentityService } from '@superschematic/http-runtime/identity';
 import { Hono } from 'hono';
 
 import type { Principal } from '../access.js';
@@ -50,6 +52,13 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
   serverInfo?: { name: string; version: string };
   /** Instructions initialize gives the client. */
   instructions?: string;
+  /**
+   * The identity service (D50), engineIdentity's: it authenticates the
+   * endpoint in place of authenticate, which is refused beside it, and its
+   * credentialed CORS answers the trusted origins on the endpoint alone.
+   * The session routes are engineApp's.
+   */
+  identity?: IdentityService;
   /**
    * Narrows the tools each caller is offered, beyond what the access
    * policy hides: asked with the caller's principal and each tool, true
@@ -82,10 +91,14 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
   const deployed = options.onError;
   const mapError = async (error: unknown, ctx: RequestContext): Promise<HttpProblem | Response | undefined> =>
     engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined);
-  const runtime: RouterRuntimeOptions = { ...options, authenticate: callerAuthenticator(options.authenticate), onError: mapError };
+  const authenticate = options.identity ? identityRouterOptions(options, 'engineMcp').authenticate : options.authenticate;
+  const runtime: RouterRuntimeOptions = { ...options, authenticate: callerAuthenticator(authenticate), onError: mapError };
   const serverInfo = options.serverInfo ?? packageInfo();
   const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError, options.tools));
   const app = new Hono();
+  // The trusted origins' CORS on the endpoint alone, as engineApp's on its
+  // routes, so an app mounted beside it gets none of it.
+  const cors = options.identity ? identityCorsRoutes(app, options.identity) : () => {};
 
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
     const spec: OperationSpec = {
@@ -101,6 +114,7 @@ export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono 
       ...(options.rateLimitPerMinute ? { rateLimitPerMinute: options.rateLimitPerMinute } : {}),
       ...(options.timeoutSeconds ? { timeoutSeconds: options.timeoutSeconds } : {}),
     };
+    cors(spec);
     mountManualOperation(
       app,
       spec,

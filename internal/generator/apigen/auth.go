@@ -9,20 +9,21 @@ import (
 )
 
 // AuthProvider supplies the authentication and authorization half of a
-// generated API module: which auth stores the upstream DB schema backs, the
-// per-endpoint auth data, the template snippets the core templates splice in
-// at their hook points, and any whole files of its own. Core registers the
-// generic "session" provider; extensions register their own and
-// superschematic.toml's auth_provider selects one (design:
-// docs/extension-model.md section 8).
+// generated API module: what the upstream DB schema backs (the core's user
+// model, and any store of the provider's own), the per-endpoint auth data,
+// the template snippets the core templates splice in at their hook points,
+// and any whole files of its own. Core registers the generic "session"
+// provider; extensions register their own and superschematic.toml's
+// auth_provider selects one (design: docs/extension-model.md section 8).
 type AuthProvider interface {
 	// Name is the registry key, the value auth_provider selects by:
 	// "session" for the core provider.
 	Name() string
 
 	// Analyze inspects the API schema and the upstream auth DB schema and
-	// reports which stores the upstream tables can back. upstream is nil
-	// when the API is not public.
+	// reports what the upstream tables can back. upstream is a public
+	// API's authDb, or a non-public API's when it declares the user model
+	// (D50), and nil otherwise.
 	Analyze(api, upstream *ir.Schema) (AuthModel, error)
 
 	// Endpoint fills the provider-owned fields of an endpoint from its
@@ -49,27 +50,61 @@ type AuthProvider interface {
 	OpenAPIParameters(output *APIOutput) []map[string]any
 }
 
-// AuthModel is what AuthProvider.Analyze returns. The two core flags gate
-// the session and principal store adapters; Extra is the provider's own
-// (an organization-scoped provider keeps its scope, role and impersonation
-// flags there).
+// AuthModel is what AuthProvider.Analyze returns. User and Identity are
+// the core's half, the user model (D50) the upstream schema declares and
+// whether the server authenticates with it; Extra is the provider's own
+// (an organization-scoped provider keeps its scope, role and
+// impersonation flags there).
 type AuthModel struct {
-	// HasSessionStore reports an upstream Session(id, jti, user, expiresAt)
-	// table.
-	HasSessionStore bool
-	// SessionSoftDelete reports that the Session table is soft-deletable
-	// with a nullable Temporal.DateTime deletedAt. The session store then
-	// finds a revoked (soft-deleted) session with its DeletedAt set; for any
-	// other Session table it leaves soft-deleted rows to the ORM's filter.
-	SessionSoftDelete bool
-	// HasPrincipalStore reports an upstream User(id, name) table.
-	HasPrincipalStore bool
+	// User is the upstream schema's user model: its table with the User
+	// trait, found by the trait whatever the table is named. Nil when the
+	// upstream schema has none, or the API has no upstream schema.
+	User *UserModel
+	// Identity reports that the generated server authenticates with the
+	// identity runtime over the user model: its Config takes the identity
+	// service, its AuthMiddleware defaults to the service's middleware,
+	// and it serves the user model's routes. AnalyzeSessionStores sets it
+	// with User. A provider that authenticates its callers its own way
+	// over the same users clears it, and an API it renders then declares
+	// no @userSessions or @userAdministration set.
+	Identity bool
 	// Extra is provider-owned data the provider's templates read.
 	Extra any
 }
 
+// UserModel is the user model an upstream DB schema declares (D50): the
+// table with the User trait and, beside it, the one with the UserRole
+// trait. A provider's store adapter over the ORM reads the table and its
+// fields from it, so it names them whatever the schema calls them.
+type UserModel struct {
+	// Type is the user table's type name, which the ORM names the
+	// table's repository and filter after.
+	Type string
+	// Key is the key field's name and KeyType its type as the schema
+	// names it ("Identity.UUID").
+	Key     string
+	KeyType string
+	// Login is the login field's name.
+	Login string
+	// Name is the field a principal's display name comes from: the
+	// trait's name, or the login when the trait names none.
+	Name string
+	// RoleType is the UserRole table's type name, empty without one.
+	RoleType string
+}
+
+// KeyIsUUID reports whether the user table's key is an Identity.UUID,
+// whose ORM filter takes the scalar UUID a store parses the principal's
+// id into.
+func (u *UserModel) KeyIsUUID() bool {
+	return u != nil && u.KeyType == "Identity.UUID"
+}
+
 // AuthSnippets names the hook points the core templates render through
-// authSnippet. A provider's Templates must define every one of them (as
+// authSnippet. The core templates wire the identity runtime themselves
+// when the model's Identity is set (D50): Config.Identity, AuthMiddleware
+// defaulting to its middleware, the user model's routes, the route table
+// and the CORS middleware; the provider's snippets render beside that. A provider's Templates must define every one of them (as
 // {{ define "<name>" }} blocks in any of its templates); the snippet's data
 // is the APIOutput except where noted. Each non-empty snippet starts with
 // the newline that separates it from the line before, so an empty snippet
@@ -81,7 +116,9 @@ type AuthModel struct {
 // routes snippet does not reference types. routes.go also imports the
 // package of each raw-body check an endpoint runs (RawBodyCheckImports); a
 // routesImports snippet that needs one of those packages leaves its own
-// import out when ImportsRawBodyCheckPackage reports it.
+// import out when ImportsRawBodyCheckPackage reports it, and one that needs
+// the scalar Go module leaves it out when RoutesNeedScalars reports that
+// routes.go imports it as scalars.
 var AuthSnippets = []string{
 	// context.tmpl
 	"contextImports", // imports the auth context shims need, in the runtime import group
@@ -95,9 +132,9 @@ var AuthSnippets = []string{
 	// routes.tmpl
 	"routesImports",             // imports the per-route permission middleware calls need
 	"routesConfigStores",        // Config fields after DB (public APIs)
-	"routesConfigMiddlewares",   // Config fields after AuthMiddleware (public APIs)
-	"routesConfigValidate",      // Validate checks for those fields (public APIs)
-	"routesConfigExample",       // doc-comment lines after AuthMiddleware in the RegisterRoutes example
+	"routesConfigMiddlewares",   // Config fields after AuthMiddleware (APIs with one: public, or over the user model, Auth.Identity)
+	"routesConfigValidate",      // Validate checks for those fields (the same APIs), after the AuthMiddleware or Identity check
+	"routesConfigExample",       // doc-comment lines after AuthMiddleware, or Identity, in the RegisterRoutes example
 	"routesSetupPre",            // RegisterRoutes setup before LoggerMiddleware (public APIs)
 	"routesSetup",               // RegisterRoutes setup after DatabaseMiddleware (public APIs)
 	"routesProtectedMiddleware", // middlewares after cfg.AuthMiddleware on the protected group, and in the end-user step of a route with a service clause (D37)
@@ -129,27 +166,35 @@ func HasTable(upstream *ir.Schema, name string, fields ...string) bool {
 	return true
 }
 
-// AnalyzeSessionStores is the core half of Analyze: the two tables the
-// generic session model reads. Providers that extend the model call it and
-// fill Extra.
+// AnalyzeSessionStores is the core half of Analyze: the user model the
+// upstream schema declares by the User and UserRole traits (D50), which
+// the identity runtime authenticates with. It finds no table by name: an
+// upstream schema without a User table gives an empty model. Providers
+// that extend the model call it and fill Extra.
 func AnalyzeSessionStores(upstream *ir.Schema) AuthModel {
-	hasSession := HasTable(upstream, "Session", "id", "jti", "user", "expiresAt")
-	return AuthModel{
-		HasSessionStore:   hasSession,
-		SessionSoftDelete: hasSession && hasNullableDeletedAt(upstream.Types["Session"]),
-		HasPrincipalStore: HasTable(upstream, "User", "id", "name"),
-	}
+	user := userModel(upstream)
+	return AuthModel{User: user, Identity: user != nil}
 }
 
-// hasNullableDeletedAt reports whether table has the deletedAt a store can
-// read a soft delete's time from: a nullable Temporal.DateTime, which the
-// generated type holds as a pointer.
-func hasNullableDeletedAt(table *ir.TypeDef) bool {
+// userModel is the user model of upstream, nil without a User table.
+func userModel(upstream *ir.Schema) *UserModel {
+	table := upstream.UserTable()
+	if table == nil || table.User == nil {
+		return nil
+	}
+	model := &UserModel{
+		Type:  table.Name,
+		Login: table.User.Login,
+		Name:  table.User.NameField(),
+	}
 	for _, field := range table.Fields {
-		if field.Name == "deletedAt" {
-			ref := field.TypeRef
-			return !field.Required && ref.Name == "Temporal.DateTime" && !ref.IsArray && !ref.IsMap
+		if field.Key {
+			model.Key, model.KeyType = field.Name, field.TypeRef.Name
+			break
 		}
 	}
-	return false
+	if role := upstream.UserRoleTable(); role != nil {
+		model.RoleType = role.Name
+	}
+	return model
 }

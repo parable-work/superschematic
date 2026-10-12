@@ -43,6 +43,7 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 		{Condition: hasTypes, Template: "types.tmpl", Filename: "types.rs"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.rs"},
 		{Condition: output.Validators != nil, Template: "validators.tmpl", Filename: "validators.rs"},
+		{Condition: output.IdentityDescriptor != "", Template: "identity.tmpl", Filename: "identity.rs"},
 	}
 	if err := codegen.WriteConditionalFiles(srcFiles, srcDir, func(templateName, outputPath string) error {
 		return generateFile(templateName, outputPath, output)

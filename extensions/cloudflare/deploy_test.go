@@ -69,7 +69,10 @@ func TestBootstrapAndDeployReadTheToken(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("1", 64)
 	_, err = stack.Deploy(ctx, stack.DeployOptions{
 		Options: options,
-		Images:  map[string]string{"shop-api": "shop-api@" + digest, "Orders": "orders@" + digest, stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest},
+		Images: map[string]string{
+			"shop-api": "shop-api@" + digest, "Orders": "orders@" + digest,
+			stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest, stacktest.FulfilOrdersWorker: stacktest.FulfilOrdersWorker + "@" + digest,
+		},
 		Planner: func(service, dialect string, _ json.RawMessage) (*stack.DatabasePlan, error) {
 			return &stack.DatabasePlan{
 				Service: service, Dialect: dialect,

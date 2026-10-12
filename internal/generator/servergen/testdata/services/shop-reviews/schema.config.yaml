@@ -1,10 +1,13 @@
 # Served with shop-orders by Storefront, on the same database, which it
-# takes from its one DB-kind dependency. It has no @envVars type, so its
-# config holds only the database's field.
+# takes from its one DB-kind dependency, and with the same bucket,
+# shop-media (D54). It has no @envVars type, so its config holds only the
+# fields its edges derive.
 name: shop-reviews
 kind: API
 dependencies:
   - { name: shop-db, kind: DB }
+buckets:
+  - { name: shop-media, kind: Bucket }
 outputs:
   types:
     go: { enabled: true }

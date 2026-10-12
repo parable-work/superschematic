@@ -3,6 +3,7 @@ package sqlmigrate
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	ir "github.com/parable-work/superschematic/ir"
@@ -11,10 +12,12 @@ import (
 // model resolves the schema as sqlgen does for Postgres and stores each
 // table in SQLite's types, with its defaults in SQLite's forms. A unique
 // constraint keeps the name Postgres gives it and becomes a unique index of
-// that name. SQLite keeps no comments, so the model has none. The model
-// refuses what SQLite has no form of (D27), naming the feature:
-// @versioned, @optimistic, @searchField, projections, GIN and GIST
-// indexes, and types it has no storage for.
+// that name. A @searchField's search_text column keeps its expression,
+// with each field quoted as SQLite quotes it, and loses the trigram index,
+// which SQLite has no operator class for (D27, amended). SQLite keeps no
+// comments, so the model has none. The model refuses what SQLite has no
+// form of (D27), naming the feature: @versioned, @optimistic, projections,
+// GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -38,6 +41,13 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		table, err := entityTable(&out.Tables[i], ns)
 		if err != nil {
 			return nil, err
+		}
+		if fields := out.Tables[i].SearchFields; len(fields) > 0 {
+			table.Indexes = slices.DeleteFunc(table.Indexes, func(idx *Index) bool {
+				return idx.Name == sqlgen.SearchIndexName(table.Name)
+			})
+			// SQLite's keywords are not Postgres's, so every field is quoted.
+			columnNamed(table, sqlgen.SearchTextColumn).Generated = sqlgen.SearchTextExprQuoted(fields, qs)
 		}
 		errs = append(errs, sqliteTable(table))
 		m.Tables = append(m.Tables, table)
@@ -68,15 +78,6 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 		errs = append(errs, fmt.Errorf("sqlmigrate: "+format+", which the sqlite dialect does not support", args...))
 	}
 	for _, t := range out.Tables {
-		for _, column := range t.SearchFields {
-			field := t.OriginalName + "." + column
-			for _, col := range t.Columns {
-				if col.Name == column && col.Origin != "" {
-					field = col.Origin
-				}
-			}
-			refuse("%s is a @searchField", field)
-		}
 		for _, idx := range t.Indexes {
 			if idx.Type == "GIN" || idx.Type == "GIST" {
 				refuse("the index %s of %s is a %s index", idx.Name, t.OriginalName, idx.Type)

@@ -133,6 +133,23 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a service clause on a set and an operation", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "require", "from": ["orders-api"]}, "operations": [
 		{"name": "release", "typeRef": {"name": "Order"}, "auth": true, "serviceCallers": {"mode": "allow", "from": []}}]}`},
 	{"a service clause mode outside the enum", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "sometimes"}, "operations": []}`},
+	// The user model's traits (D50): User's config and UserRole's empty
+	// object, which a pointer keeps.
+	{"the user model's traits", "core", `{"kind": "DB", "name": "accounts", "types": {
+		"Account": {"name": "Account", "role": "DBTable", "user": {"login": "email", "name": "displayName"}},
+		"Admin": {"name": "Admin", "role": "DBTable", "user": {"login": "handle", "name": ""}},
+		"Role": {"name": "Role", "role": "DBTable", "userRole": {}}}}`},
+	{"a user trait without its login", "core", `{"name": "Account", "role": "DBTable", "user": {"name": "displayName"}}`},
+	{"an unknown key on a user trait", "core", `{"name": "Account", "role": "DBTable", "user": {"login": "email", "password": "secret"}}`},
+	{"a key on a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": {"permissions": "permissions"}}`},
+	{"null for a userRole trait", "core", `{"name": "Role", "role": "DBTable", "userRole": null}`},
+	// The user model's route sets (D50): each config, whose zero values the
+	// decoder drops, and an empty one a pointer keeps.
+	{"the user model's route sets", "core", `{"kind": "API", "name": "accounts-api", "operationSets": [
+		{"name": "Account", "operations": [], "userSessions": {"path": "account", "noLogin": false, "register": true}},
+		{"name": "AccountAdmin", "operations": [], "userAdministration": {}}]}`},
+	{"an unknown key on a route set's config", "core", `{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": {"login": false}}`},
+	{"a route set's path that is not a string", "core", `{"kind": "OperationSet", "name": "AccountAdmin", "operations": [], "userAdministration": {"path": 1}}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

@@ -19,6 +19,9 @@ pub mod unions;
 {{if .Validators -}}
 pub mod validators;
 {{end -}}
+{{if .IdentityDescriptor -}}
+pub mod identity;
+{{end -}}
 {{range .VersionGraphs -}}
 pub mod versiongraph_{{.FileName}};
 {{end}}
@@ -33,6 +36,9 @@ pub use types::*;
 {{end -}}
 {{if gt (len .Unions) 0 -}}
 pub use unions::*;
+{{end -}}
+{{if .IdentityDescriptor -}}
+pub use identity::*;
 {{end -}}
 {{range .VersionGraphs -}}
 pub use versiongraph_{{.FileName}}::*;

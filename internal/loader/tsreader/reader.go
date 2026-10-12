@@ -184,6 +184,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *Sch
 		for _, file := range sp.schemaFiles {
 			w.walkFile(file)
 		}
+		w.finishIdentityTraits()
 		w.finishImports()
 		return nil
 	}); err != nil {

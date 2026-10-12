@@ -57,11 +57,16 @@ func shop() *ir.Stack {
 				{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"port": float64(8080)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "debug"}}},
 				{Of: orders, Values: map[string]any{"port": float64(8081)}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "eu"}}},
 				{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Schedule: "* * * * *"},
+				{Of: stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders"), Concurrency: &pinnedConcurrency},
 			},
 		},
 	}
 	return s
 }
+
+// pinnedConcurrency is the concurrency Pinned gives shop-orders' worker,
+// which its process reads from WORKER_CONCURRENCY (D53).
+var pinnedConcurrency = 2
 
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
@@ -227,7 +232,7 @@ func TestWiring(t *testing.T) {
 		t.Errorf("the job's SHOP_API_SERVICE = %v, want %v", got, wantAPI)
 	}
 
-	clause := resolve(t, reg, shop(), stacktest.WithoutJobs(stacktest.RequireServiceShop()), "Dev")
+	clause := resolve(t, reg, stacktest.WithoutWorkerSettings(shop()), stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.RequireServiceShop())), "Dev")
 	var callers *ir.Binding
 	for _, b := range clause.Deployable("shop-api").Bindings {
 		if b.Field == "SHOP_API_CALLERS" {
@@ -317,7 +322,24 @@ func TestRefusals(t *testing.T) {
 	t.Run("a server on the Postgres port", func(t *testing.T) {
 		s := shop()
 		s.Environments[1].Settings[1].Values["port"] = float64(55432)
-		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and the Postgres container listen on one port, 55432")
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and container superschematic-shop-stack-pinned-postgres listen on one port, 55432")
+	})
+	t.Run("the storage emulator on the Postgres port", func(t *testing.T) {
+		s := shop()
+		s.Environments[1].Values["storagePort"] = float64(55432)
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "container superschematic-shop-stack-pinned-postgres and container superschematic-shop-stack-pinned-storage listen on one port, 55432")
+	})
+	t.Run("a bucket whose name GCS refuses", func(t *testing.T) {
+		services := stacktest.AcmeShop()
+		for i := range services {
+			switch services[i].Name {
+			case "shop-media":
+				services[i].Name = "m"
+			case "shop-api":
+				services[i].Buckets = []ir.ServiceRef{{Name: "m", Kind: ir.SchemaKindBucket}}
+			}
+		}
+		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
 	})
 	t.Run("a Rust server", func(t *testing.T) {
 		services := stacktest.AcmeShop()

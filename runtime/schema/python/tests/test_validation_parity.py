@@ -36,5 +36,10 @@ def _flatten(errors, prefix: str = "", out: dict | None = None) -> dict:
 
 @pytest.mark.parametrize("vector", _CORPUS["vectors"], ids=lambda v: v["name"])
 def test_validation_parity(vector):
+    # A path in "core" fails only the scalar core's check, which the Python
+    # runtime's registry names "custom" (D14).
+    want = dict(vector["want"])
+    for path in vector.get("core", []):
+        want[path] = ["custom"]
     got = _flatten(validate_type(_SCHEMA, vector["type"], vector["payload"]))
-    assert got == vector["want"]
+    assert got == want

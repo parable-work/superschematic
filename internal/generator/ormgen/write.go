@@ -77,6 +77,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	if err := cleanStaleRepositoryFiles(outputDir, output.Repositories); err != nil {
 		return fmt.Errorf("failed to clean stale repository files: %w", err)
 	}
+	// queues.go enqueues and claims the schema's queues' messages (D53); a
+	// schema without one has none, so a file an earlier build wrote goes.
+	queuesFile := filepath.Join(outputDir, "queues.go")
+	if len(output.Queues) > 0 {
+		if err := generateFile(generator, "queues.tmpl", queuesFile, output); err != nil {
+			return fmt.Errorf("failed to write queues.go: %w", err)
+		}
+	} else if err := os.Remove(queuesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queues.go: %w", err)
+	}
 	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
 	}

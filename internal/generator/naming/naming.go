@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -141,6 +142,13 @@ type Naming struct {
 	// the schemas' readers expect.
 	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
 
+	// IdentityPermissionPrefix prefixes the permissions the user model's
+	// administration routes need (D50): <prefix>.users.read,
+	// <prefix>.users.write, <prefix>.roles.read and <prefix>.roles.write.
+	// It takes a permission's form, dotted segments of letters, digits, _
+	// and -, so each of the four is a permission a role can hold.
+	IdentityPermissionPrefix string `toml:"identity_permission_prefix"`
+
 	// HistoryActorSetting names the transaction-local Postgres setting the
 	// history trigger of a versioned table reads a hard delete's actor from:
 	// the tombstone's image carries it in deleted_by (or updated_by), and
@@ -206,20 +214,23 @@ type Naming struct {
 
 // DerivedFieldsConfig is the [derived_fields] table of superschematic.toml:
 // a template per edge kind that names the config field the edge derives
-// (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB or
-// called API service's name in upper snake case, and the rest of a
-// template holds upper-case letters, digits and underscores. The envgen
+// (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB,
+// called API or Bucket service's name in upper snake case, and the rest of
+// a template holds upper-case letters, digits and underscores. The envgen
 // loaders and the stack resolver name the fields by it.
 type DerivedFieldsConfig struct {
 	// Database names an API's database field: "{SERVICE}_DATABASE".
 	Database string `toml:"database"`
 	// Service names the field of an API it calls: "{SERVICE}_SERVICE".
 	Service string `toml:"service"`
+	// Bucket names the field of a bucket it lists: "{SERVICE}_BUCKET"
+	// (D54).
+	Bucket string `toml:"bucket"`
 }
 
 // FieldNames returns the templates as the IR's rule takes them.
 func (d DerivedFieldsConfig) FieldNames() ir.DerivedFieldNames {
-	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service}
+	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service, Bucket: d.Bucket}
 }
 
 // ImplementationPathsConfig is the [implementation_paths] table of
@@ -235,6 +246,12 @@ type ImplementationPathsConfig struct {
 	// TypeScript is the TypeScript implementation's package directory:
 	// "typescript/{service}" (D51).
 	TypeScript string `toml:"typescript"`
+
+	// Site is a Site service's package directory, its code: "web/{service}"
+	// (D55). It is a member of the Bun workspace, as a TypeScript
+	// implementation is, and the build writes the site's typed browser
+	// config into it.
+	Site string `toml:"site"`
 }
 
 // ServicePathPlaceholder is what an implementation path template replaces
@@ -272,11 +289,38 @@ func (n Naming) typeScriptImplementationTemplate() string {
 	return Default().ImplementationPaths.TypeScript
 }
 
+// SiteImplementationDir resolves the package directory of the Site service
+// named service against repoRoot (D55).
+func (n Naming) SiteImplementationDir(repoRoot, service string) string {
+	return filepath.Join(repoRoot, filepath.FromSlash(n.SiteImplementationPath(service)))
+}
+
+// SiteImplementationPath is the package directory of the Site service
+// named service relative to the repository root, slash-separated: the
+// [implementation_paths] site template with the service's name (D55).
+func (n Naming) SiteImplementationPath(service string) string {
+	return path.Clean(strings.ReplaceAll(n.siteImplementationTemplate(), ServicePathPlaceholder, service))
+}
+
+// SiteImplementationGlob is the [implementation_paths] site template with
+// `*` for the service, slash-separated and relative to the repository
+// root: the Bun workspace's pattern for every site (D55).
+func (n Naming) SiteImplementationGlob() string {
+	return strings.ReplaceAll(n.siteImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+func (n Naming) siteImplementationTemplate() string {
+	if n.ImplementationPaths.Site != "" {
+		return n.ImplementationPaths.Site
+	}
+	return Default().ImplementationPaths.Site
+}
+
 // check refuses an absolute template, which the ImplementationDir
 // functions would join under the root, and one without the service,
 // which would put every service's implementation in one package.
 func (c ImplementationPathsConfig) check() error {
-	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}} {
+	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}, {"site", c.Site}} {
 		if t.template == "" {
 			continue
 		}
@@ -614,15 +658,18 @@ func Default() Naming {
 		PackageAuthor:            "superschematic",
 		MetaSchemaURLPrefix:      "superschematic://",
 		MetadataKeyPrefix:        "superschematic.",
+		IdentityPermissionPrefix: ir.DefaultIdentityPermissionPrefix,
 		HistoryActorSetting:      "superschematic.history_actor_id",
 		AuthProvider:             "session",
 		DerivedFields: DerivedFieldsConfig{
 			Database: ir.DefaultDatabaseField,
 			Service:  ir.DefaultServiceField,
+			Bucket:   ir.DefaultBucketField,
 		},
 		ImplementationPaths: ImplementationPathsConfig{
 			Go:         "go/" + ServicePathPlaceholder,
 			TypeScript: "typescript/" + ServicePathPlaceholder,
+			Site:       "web/" + ServicePathPlaceholder,
 		},
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -672,12 +719,15 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
 	fill(&n.MetadataKeyPrefix, d.MetadataKeyPrefix)
+	fill(&n.IdentityPermissionPrefix, d.IdentityPermissionPrefix)
 	fill(&n.HistoryActorSetting, d.HistoryActorSetting)
 	fill(&n.AuthProvider, d.AuthProvider)
 	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
 	fill(&n.DerivedFields.Service, d.DerivedFields.Service)
+	fill(&n.DerivedFields.Bucket, d.DerivedFields.Bucket)
 	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
 	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
+	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -988,8 +1038,16 @@ func Parse(data []byte, name string) (Naming, error) {
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {
 		return Naming{}, fmt.Errorf("naming: %s: history_actor_setting %q is not a custom Postgres setting name: use two or more identifiers (letters, digits and _, not starting with a digit) joined by dots", name, n.HistoryActorSetting)
 	}
+	if !identityPermissionPrefixRE.MatchString(n.IdentityPermissionPrefix) {
+		return Naming{}, fmt.Errorf("naming: %s: identity_permission_prefix %q is not a permission's form: use segments of letters, digits, _ and - joined by dots", name, n.IdentityPermissionPrefix)
+	}
 	return n, nil
 }
+
+// identityPermissionPrefixRE is the prefixes identity_permission_prefix
+// accepts: the form of a permission (D50), so the prefix and the suffix the
+// routes add make one.
+var identityPermissionPrefixRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 
 // historyActorSettingRE is the setting names history_actor_setting accepts:
 // dotted identifiers, the form Postgres takes for a custom setting, so the

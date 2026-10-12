@@ -36,8 +36,13 @@ const (
 	// platforms.
 	CodeNoConnector Code = "no-connector"
 
-	// CodeExposeNotServer is an exposed deployable that is not a server.
+	// CodeExposeNotServer is an exposed deployable that is not a server
+	// or a site.
 	CodeExposeNotServer Code = "expose-not-server"
+
+	// CodeSiteCallsUnexposed is a site that calls an API whose server is
+	// not exposed, which no browser reaches (D55).
+	CodeSiteCallsUnexposed Code = "site-calls-unexposed"
 
 	// CodePolicy is a violation of a target's policy rule.
 	CodePolicy Code = "policy"

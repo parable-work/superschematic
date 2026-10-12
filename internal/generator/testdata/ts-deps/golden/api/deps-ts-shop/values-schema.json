@@ -21,6 +21,14 @@
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
     },
+    "DEPS_MEDIA_BUCKET_ENDPOINT": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
+    },
+    "DEPS_MEDIA_BUCKET_NAME": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
+    },
     "DEPS_TS_PRICING_SERVICE_CREDENTIAL_AUDIENCE": {
       "type": "string",
       "description": "Derived: a member of DEPS_TS_PRICING_SERVICE, the service endpoint of deps-ts-pricing, which the platform sets."
@@ -72,6 +80,20 @@
           "DEPS_DB_DATABASE_CLOUD_SQL_INSTANCE",
           "DEPS_DB_DATABASE_CLOUD_SQL_DATABASE",
           "DEPS_DB_DATABASE_CLOUD_SQL_USER"
+        ]
+      },
+      {
+        "name": "DEPS_MEDIA_BUCKET",
+        "irType": "BucketConnection",
+        "primitive": "object",
+        "required": true,
+        "hasDefault": false,
+        "description": "The bucket connection of deps-media (buckets), one variable per member.",
+        "derived": "bucket",
+        "service": "deps-media",
+        "variables": [
+          "DEPS_MEDIA_BUCKET_NAME",
+          "DEPS_MEDIA_BUCKET_ENDPOINT"
         ]
       },
       {

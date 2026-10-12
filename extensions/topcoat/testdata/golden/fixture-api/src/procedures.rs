@@ -9,16 +9,33 @@
 //! `call_<operation>` is the procedure's body as a plain function: the
 //! record decoded into the operation's arguments, then the operation called
 //! in-process by its route's rules.
+//!
+//! An operation without an in-process call has no procedure, and neither
+//! has one whose route admits only a service caller (@requireService): a
+//! browser holds no service credential. `operations` says why on each.
+//!
+//! A procedure meets its route's traffic controls (@rateLimit, @bodyLimit,
+//! @timeout) as the route's request does, each refusal answered as a
+//! `ProblemRecord`: `ProcedureControls`, a layer on the procedure's path,
+//! which `fixture_api` adds.
 
 #![allow(unused_imports)]
 
 use crate::api::runtime::ApiError;
+use crate::api::runtime::RateLimiter;
 use crate::operations;
 use crate::records::*;
 use crate::wire;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::time::Duration;
 use topcoat::context::Cx;
+use topcoat::router::content::Json;
+use topcoat::router::error::ContentTooLargeError;
+use topcoat::router::request::{client_ip, headers};
+use topcoat::router::response::{IntoResponse, Response};
+use topcoat::router::{Body, BodyLimit, Layer, LayerFuture, Next, Path, RouterBuilder, header, to_bytes};
+use topcoat::runtime::Surrogated;
 use topcoat::runtime::{procedure, record};
 
 /// A refusal as the browser reads it: the route's status, code and detail,
@@ -94,6 +111,138 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
                 .with_errors(serde_json::json!({ argument: [{"validator": "type", "message": "does not match the declared type"}] })),
         )
     })
+}
+
+/// Adds a `ProcedureControls` layer on the path of each procedure whose
+/// route has a traffic control. `fixture_api` calls it.
+pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
+    router
+        .layer(
+            ProcedureControls::new("/_superschematic/fixture-api/tenant/list-tenants", refusal::<Vec<TenantViewRecord>>)
+                .rate_limit(60)
+                .body_limit_megabytes(1),
+        )
+        .layer(
+            ProcedureControls::new("/_superschematic/fixture-api/tenant/get-tenant", refusal::<TenantViewRecord>)
+                .rate_limit(60)
+                .body_limit_megabytes(1)
+                .timeout_seconds(5),
+        )
+}
+
+/// The traffic controls of a procedure's route, which a call meets as the
+/// route's request meets them (`RouteControls`, D35): the rate limit, the
+/// body limit, then the timeout around the procedure, the decoding of its
+/// arguments included. Each refusal is the route's (429 with
+/// `Retry-After`, 413, 504), answered as the procedure answers one, as a
+/// `ProblemRecord`. The route's caller checks run in the in-process call.
+struct ProcedureControls {
+    path: &'static Path,
+    answer: Refusal,
+    /// The procedure's own limiter, at its route's rate, which counts each
+    /// client by its IP address as Topcoat reads it (`client_ip`: the
+    /// peer's, or the client's a trusted proxy names). The JSON API's route
+    /// keeps its own: like two replicas, the two share no budget.
+    rate_limit: Option<RateLimiter>,
+    /// The limit in bytes, and the Topcoat layer that lets the procedure
+    /// read its arguments up to it.
+    body_limit: Option<(usize, BodyLimit)>,
+    timeout: Option<Duration>,
+}
+
+/// How a procedure answers a refusal: `refusal::<Output>`.
+type Refusal = fn(&Cx, ProblemRecord) -> topcoat::Result<Response>;
+
+impl ProcedureControls {
+    fn new(path: &'static str, answer: Refusal) -> Self {
+        Self { path: Path::new(path), answer, rate_limit: None, body_limit: None, timeout: None }
+    }
+
+    /// `@rateLimit({ requestsPerMinute })`.
+    fn rate_limit(mut self, requests_per_minute: u32) -> Self {
+        self.rate_limit = Some(RateLimiter::per_minute(requests_per_minute));
+        self
+    }
+
+    /// `@bodyLimit({ megabytes })`, in mebibytes as the route counts them.
+    fn body_limit_megabytes(mut self, megabytes: usize) -> Self {
+        let bytes = megabytes.saturating_mul(1024 * 1024);
+        self.body_limit = Some((bytes, BodyLimit::max(bytes)));
+        self
+    }
+
+    /// `@timeout({ seconds })`.
+    fn timeout_seconds(mut self, seconds: u64) -> Self {
+        self.timeout = Some(Duration::from_secs(seconds));
+        self
+    }
+
+    /// The route's refusal `err`, as the procedure answers it.
+    fn refuse(&self, cx: &Cx, err: ApiError) -> topcoat::Result<Response> {
+        (self.answer)(cx, ProblemRecord::from(err))
+    }
+}
+
+impl Layer for ProcedureControls {
+    fn path(&self) -> Option<&Path> {
+        Some(self.path)
+    }
+
+    fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
+        Box::pin(async move {
+            if let Some(limiter) = &self.rate_limit {
+                let client = client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
+                if let Err(retry_after) = limiter.take(&client) {
+                    let mut response = self.refuse(cx, ApiError::too_many_requests("Too Many Requests"))?;
+                    response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
+                    return Ok(response);
+                }
+            }
+            // The body is read up to the limit before the procedure decodes
+            // it: one that declares more, or sends more, is refused.
+            let (body, extractor_limit) = match &self.body_limit {
+                Some((limit, extractor_limit)) => {
+                    let too_large = || ApiError::payload_too_large("Request body exceeds the accepted size");
+                    let declared = headers(cx)
+                        .get(header::CONTENT_LENGTH)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok());
+                    if declared.is_some_and(|length| length > *limit as u64) {
+                        return self.refuse(cx, too_large());
+                    }
+                    match to_bytes(body, *limit).await {
+                        Ok(bytes) => (Body::from(bytes), Some(extractor_limit)),
+                        Err(err) if err.is::<ContentTooLargeError>() => return self.refuse(cx, too_large()),
+                        Err(_) => return self.refuse(cx, ApiError::bad_request("The request body could not be read")),
+                    }
+                }
+                None => (body, None),
+            };
+            let procedure = async move {
+                match extractor_limit {
+                    Some(layer) => layer.handle(cx, body, next).await,
+                    None => next.run(cx, body).await,
+                }
+            };
+            match self.timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, procedure).await {
+                    Ok(response) => response,
+                    Err(_) => self.refuse(cx, ApiError::gateway_timeout("Gateway Timeout")),
+                },
+                None => procedure.await,
+            }
+        })
+    }
+}
+
+/// A refusal as a procedure that answers `Result<T, ProblemRecord>` sends
+/// it: its `Err`, in the response a call reads.
+fn refusal<T>(cx: &Cx, problem: ProblemRecord) -> topcoat::Result<Response>
+where
+    Result<T, ProblemRecord>: Surrogated,
+    <Result<T, ProblemRecord> as Surrogated>::Surrogate: serde::Serialize,
+{
+    Json(Err::<T, ProblemRecord>(problem).into_surrogate()).into_response(cx)
 }
 
 /// session.currentTenant, called from the browser.

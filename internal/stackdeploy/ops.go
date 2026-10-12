@@ -15,8 +15,9 @@ import (
 type PlanOptions struct {
 	Options
 
-	// Images, Planner and Gate are a deploy's (DeployOptions).
+	// Images, Sites, Planner and Gate are a deploy's (DeployOptions).
 	Images  map[string]string
+	Sites   map[string]string
 	Planner Planner
 	Gate    Gate
 }
@@ -43,6 +44,10 @@ type PlanResult struct {
 	// Unpinned are the servers and jobs with no image yet, planned at their
 	// repository with no digest.
 	Unpinned []string `json:"unpinned,omitempty"`
+
+	// Unpublished are the sites with no files yet, planned with no digest
+	// where their platform serves their files from (D55).
+	Unpublished []string `json:"unpublished,omitempty"`
 
 	// MissingSecrets are the secrets with no value.
 	MissingSecrets []string `json:"missingSecrets,omitempty"`
@@ -104,11 +109,18 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	sites, err := s.planSites(ctx, prev, o.Sites, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if pinned, err = PinSites(pinned, sites.digests); err != nil {
+		return nil, err
+	}
 	plans, pending, err := planMigrations(s.env, prev, o.Planner)
 	if err != nil {
 		return nil, err
 	}
-	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unallowed: o.Gate.unallowed(plans)}
+	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unallowed: o.Gate.unallowed(plans)}
 	for _, database := range sortedKeys(pending) {
 		for _, p := range pending[database] {
 			out.Pending = append(out.Pending, PendingNote{Database: database, Service: p.Plan.Service, Phase: p.Phase, Plan: p.Plan.Hash})
@@ -233,8 +245,8 @@ func RunJob(ctx context.Context, o RunJobOptions) error {
 }
 
 // deployedRequest is the provisioner's request over the environment with
-// the images the manifest records pinned, so the program it renders is
-// the one the last deploy applied.
+// the images and the sites' files the manifest records pinned, so the
+// program it renders is the one the last deploy applied.
 func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionRequest, error) {
 	prev, err := readManifest(ctx, s.target.State, s.run)
 	if err != nil {
@@ -249,6 +261,15 @@ func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionReques
 			}
 		}
 		if env, err = PinImages(s.env, images); err != nil {
+			return registry.ProvisionRequest{}, err
+		}
+		sites := map[string]string{}
+		for site, digest := range prev.Sites {
+			if d := s.env.Deployable(site); d != nil && d.Kind == ir.DeployableSite {
+				sites[site] = digest
+			}
+		}
+		if env, err = PinSites(env, sites); err != nil {
 			return registry.ProvisionRequest{}, err
 		}
 	}

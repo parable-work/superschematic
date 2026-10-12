@@ -1,0 +1,1024 @@
+{
+  "name": "fixture-user-routes-api",
+  "kind": "API",
+  "authDb": "fixture-user-model-db",
+  "scalars": {
+    "Auth.Password": {
+      "name": "Auth.Password",
+      "description": "User password (minimum 8 characters)",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "AuthPassword",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(128)",
+        "typescript": "string"
+      },
+      "maxLength": 128,
+      "minLength": 8
+    },
+    "Contact.Email": {
+      "name": "Contact.Email",
+      "description": "An email address",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "ContactEmail",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "CITEXT",
+        "typescript": "string"
+      },
+      "maxLength": 255,
+      "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+      "caseInsensitive": true,
+      "hasCustomNormalize": true,
+      "hasCustomValidate": true
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "description": "An objects name",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityName",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(80)",
+        "typescript": "string"
+      },
+      "maxLength": 80,
+      "minLength": 2
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
+      },
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "Capabilities": {
+      "name": "Capabilities",
+      "owner": "fixture-user-routes-api",
+      "comment": "What the caller may call.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "operations",
+          "comment": "Whether each operation's route admits the caller, keyed by its OpenAPI operation id.",
+          "typeRef": {
+            "name": "boolean",
+            "isMap": true
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "ChangePasswordInput": {
+      "name": "ChangePasswordInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What changePassword takes: the caller's current password and the new one.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "current",
+          "comment": "The caller's current password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        },
+        {
+          "name": "password",
+          "comment": "The new password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "CreateUserInput": {
+      "name": "CreateUserInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What createUser takes: the new user's login, name and password.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "login",
+          "comment": "The user's login, as their User row holds it.",
+          "typeRef": {
+            "name": "Contact.Email"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "The user's display name; the login when absent.",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "password",
+          "comment": "The new user's password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "CurrentUser": {
+      "name": "CurrentUser",
+      "owner": "fixture-user-routes-api",
+      "comment": "The caller: their user, the roles they hold and the permissions those roles grant.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "user",
+          "typeRef": {
+            "name": "SessionUser"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "roles",
+          "comment": "The roles the user holds.",
+          "typeRef": {
+            "name": "RoleRef",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the roles grant, each once.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "Greeting": {
+      "name": "Greeting",
+      "owner": "src/account.schema.ts",
+      "comment": "A greeting for the signed-in user.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "message",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ]
+    },
+    "IdentityRole": {
+      "name": "IdentityRole",
+      "owner": "fixture-user-routes-api",
+      "comment": "A role and the permissions it grants.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the role grants.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "IdentityUser": {
+      "name": "IdentityUser",
+      "owner": "fixture-user-routes-api",
+      "comment": "A user as the administration routes show it.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "login",
+          "comment": "The user's login, as their User row holds it.",
+          "typeRef": {
+            "name": "Contact.Email"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "The user's display name.",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "disabled",
+          "comment": "Whether the user is disabled, and so cannot sign in.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "roles",
+          "comment": "The roles the user holds.",
+          "typeRef": {
+            "name": "RoleRef",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "LoginInput": {
+      "name": "LoginInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What login takes: the user's login and password, and how the session travels.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "login",
+          "comment": "The user's login, as their User row holds it.",
+          "typeRef": {
+            "name": "Contact.Email"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "password",
+          "comment": "The user's password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        },
+        {
+          "name": "session",
+          "comment": "How the session travels; bearer when absent.",
+          "typeRef": {
+            "name": "SessionTransport"
+          },
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "LoginResult": {
+      "name": "LoginResult",
+      "owner": "fixture-user-routes-api",
+      "comment": "A session login or register started.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "user",
+          "comment": "The signed-in user.",
+          "typeRef": {
+            "name": "SessionUser"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "expiresAt",
+          "comment": "When the session ends.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "token",
+          "comment": "The session's bearer token; absent for a cookie session.",
+          "typeRef": {
+            "name": "string"
+          },
+          "secret": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "RegisterInput": {
+      "name": "RegisterInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What register takes: the new user's login, name and password, and how the session travels.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "login",
+          "comment": "The user's login, as their User row holds it.",
+          "typeRef": {
+            "name": "Contact.Email"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "The user's display name; the login when absent.",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "password",
+          "comment": "The new user's password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        },
+        {
+          "name": "session",
+          "comment": "How the session travels; bearer when absent.",
+          "typeRef": {
+            "name": "SessionTransport"
+          },
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "RoleInput": {
+      "name": "RoleInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What createRole and updateRole take: the role's name and the permissions it grants.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the role grants.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "RoleRef": {
+      "name": "RoleRef",
+      "owner": "fixture-user-routes-api",
+      "comment": "A role a user holds.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "SessionUser": {
+      "name": "SessionUser",
+      "owner": "fixture-user-routes-api",
+      "comment": "A signed-in user: their key, login and display name.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "login",
+          "comment": "The user's login, as their User row holds it.",
+          "typeRef": {
+            "name": "Contact.Email"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "The user's display name.",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "SetPasswordInput": {
+      "name": "SetPasswordInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What setUserPassword takes: the user's new password.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "password",
+          "comment": "The new password.",
+          "typeRef": {
+            "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    }
+  },
+  "enums": {
+    "SessionTransport": {
+      "name": "SessionTransport",
+      "owner": "fixture-user-routes-api",
+      "comment": "How a session travels: bearer answers its token for the Authorization header; cookie sets the session cookie and answers no token.",
+      "values": [
+        {
+          "name": "Bearer",
+          "serializedAs": "bearer"
+        },
+        {
+          "name": "Cookie",
+          "serializedAs": "cookie"
+        }
+      ],
+      "origin": "identity"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Account",
+      "comment": "Signs users in and out, and lets anyone register.",
+      "operations": [
+        {
+          "name": "login",
+          "comment": "Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It carries a password, which an agent does not hold."
+          },
+          "typeRef": {
+            "name": "LoginResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "LoginInput"
+              },
+              "required": true
+            }
+          ],
+          "public": true,
+          "identityOperation": "login",
+          "httpMethod": "POST",
+          "restPath": "auth/login",
+          "middleware": {
+            "rateLimit": 10
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "logout",
+          "comment": "Ends the caller's session and clears the session cookie. It answers true.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "auth": true,
+          "identityOperation": "logout",
+          "httpMethod": "POST",
+          "restPath": "auth/logout",
+          "origin": "identity"
+        },
+        {
+          "name": "me",
+          "comment": "The caller's user, the roles they hold and the permissions those roles grant.",
+          "typeRef": {
+            "name": "CurrentUser"
+          },
+          "required": true,
+          "auth": true,
+          "identityOperation": "me",
+          "httpMethod": "GET",
+          "restPath": "auth/me",
+          "origin": "identity"
+        },
+        {
+          "name": "capabilities",
+          "comment": "For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.",
+          "typeRef": {
+            "name": "Capabilities"
+          },
+          "required": true,
+          "auth": true,
+          "identityOperation": "capabilities",
+          "httpMethod": "GET",
+          "restPath": "auth/capabilities",
+          "origin": "identity"
+        },
+        {
+          "name": "changePassword",
+          "comment": "Changes the caller's password, given their current one, and ends their other sessions. It answers true.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It carries a password, which an agent does not hold."
+          },
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ChangePasswordInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "identityOperation": "changePassword",
+          "httpMethod": "POST",
+          "restPath": "auth/password",
+          "middleware": {
+            "rateLimit": 10
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "register",
+          "comment": "Creates a user with the login, name and password given and signs them in, as login does.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It carries a password, which an agent does not hold."
+          },
+          "typeRef": {
+            "name": "LoginResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "RegisterInput"
+              },
+              "required": true
+            }
+          ],
+          "public": true,
+          "identityOperation": "register",
+          "httpMethod": "POST",
+          "restPath": "auth/register",
+          "middleware": {
+            "rateLimit": 5
+          },
+          "origin": "identity"
+        }
+      ],
+      "userSessions": {
+        "register": true
+      }
+    },
+    {
+      "name": "AccountAdmin",
+      "comment": "Manages users, roles and the grants between them.",
+      "operations": [
+        {
+          "name": "createUser",
+          "comment": "Creates a user with the login, name and password given.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It carries a password, which an agent does not hold."
+          },
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateUserInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "createUser",
+          "httpMethod": "POST",
+          "restPath": "auth/admin/users",
+          "origin": "identity"
+        },
+        {
+          "name": "listUsers",
+          "comment": "Lists the users and the roles each holds.",
+          "typeRef": {
+            "name": "IdentityUser",
+            "isArray": true
+          },
+          "required": true,
+          "permissions": [
+            "identity.users.read"
+          ],
+          "identityOperation": "listUsers",
+          "httpMethod": "GET",
+          "restPath": "auth/admin/users",
+          "origin": "identity"
+        },
+        {
+          "name": "getUser",
+          "comment": "One user and the roles they hold.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.read"
+          ],
+          "identityOperation": "getUser",
+          "httpMethod": "GET",
+          "restPath": "auth/admin/users/{id}",
+          "origin": "identity"
+        },
+        {
+          "name": "disableUser",
+          "comment": "Disables a user, who can no longer sign in, and ends their sessions.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "disableUser",
+          "httpMethod": "POST",
+          "restPath": "auth/admin/users/{id}/disable",
+          "origin": "identity"
+        },
+        {
+          "name": "enableUser",
+          "comment": "Enables a disabled user.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "enableUser",
+          "httpMethod": "POST",
+          "restPath": "auth/admin/users/{id}/enable",
+          "origin": "identity"
+        },
+        {
+          "name": "setUserPassword",
+          "comment": "Sets a user's password and ends their sessions. It answers true.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It carries a password, which an agent does not hold."
+          },
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "SetPasswordInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "setUserPassword",
+          "httpMethod": "PUT",
+          "restPath": "auth/admin/users/{id}/password",
+          "origin": "identity"
+        },
+        {
+          "name": "listRoles",
+          "comment": "Lists the roles and the permissions each grants.",
+          "typeRef": {
+            "name": "IdentityRole",
+            "isArray": true
+          },
+          "required": true,
+          "permissions": [
+            "identity.roles.read"
+          ],
+          "identityOperation": "listRoles",
+          "httpMethod": "GET",
+          "restPath": "auth/admin/roles",
+          "origin": "identity"
+        },
+        {
+          "name": "createRole",
+          "comment": "Creates a role. The caller's own permissions must cover each permission it grants.",
+          "typeRef": {
+            "name": "IdentityRole"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "RoleInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.roles.write"
+          ],
+          "identityOperation": "createRole",
+          "httpMethod": "POST",
+          "restPath": "auth/admin/roles",
+          "origin": "identity"
+        },
+        {
+          "name": "updateRole",
+          "comment": "Renames a role or replaces its permissions. The caller's own permissions must cover each permission given.",
+          "typeRef": {
+            "name": "IdentityRole"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "RoleInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.roles.write"
+          ],
+          "identityOperation": "updateRole",
+          "httpMethod": "PUT",
+          "restPath": "auth/admin/roles/{id}",
+          "origin": "identity"
+        },
+        {
+          "name": "deleteRole",
+          "comment": "Deletes a role and every grant of it. It answers true.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.roles.write"
+          ],
+          "identityOperation": "deleteRole",
+          "httpMethod": "DELETE",
+          "restPath": "auth/admin/roles/{id}",
+          "origin": "identity"
+        },
+        {
+          "name": "grantRole",
+          "comment": "Grants a user a role. The caller's own permissions must cover the role's.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "roleId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.roles.write"
+          ],
+          "identityOperation": "grantRole",
+          "httpMethod": "PUT",
+          "restPath": "auth/admin/users/{id}/roles/{roleId}",
+          "origin": "identity"
+        },
+        {
+          "name": "revokeRole",
+          "comment": "Revokes a role from a user.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "roleId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.roles.write"
+          ],
+          "identityOperation": "revokeRole",
+          "httpMethod": "DELETE",
+          "restPath": "auth/admin/users/{id}/roles/{roleId}",
+          "origin": "identity"
+        }
+      ],
+      "userAdministration": {}
+    },
+    {
+      "name": "GreetingQueries",
+      "comment": "An operation the project implements, beside the routes the identity\nruntime serves.",
+      "operations": [
+        {
+          "name": "greet",
+          "typeRef": {
+            "name": "Greeting"
+          },
+          "required": true,
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "greeting"
+        }
+      ]
+    }
+  ]
+}

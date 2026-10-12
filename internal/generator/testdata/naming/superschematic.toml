@@ -31,6 +31,7 @@ schema_language = "Acme Schema"
 package_author = "Acme Corp"
 meta_schema_url_prefix = "acme://"
 metadata_key_prefix = "acme."
+identity_permission_prefix = "acme.iam"
 history_actor_setting = "acme.history_actor_id"
 scalar_jsdoc_tag = "acmeScalar"
 

@@ -13,6 +13,7 @@ from .._generated_default_registry import (
     DEFAULT_NORMALIZE_FUNCTIONS,
     DEFAULT_PARSE_FUNCTIONS,
 )
+from ..validation.registry import _registry_key
 from ..validation.types import Schema
 
 
@@ -36,22 +37,27 @@ def _wrap_parse(fn: Callable[[str], str], label: str) -> ScalarParseFunc:
 
 
 class ScalarParseRegistry:
-    """Registry of scalar parse functions keyed by canonical name."""
+    """Registry of scalar parse functions keyed by canonical name.
+
+    A name may be given canonical (``Geo.Location``) or flat
+    (``Geo_Location``, as the schema JSON form keys a scalar); both reach the
+    same entry, as in the validator registry.
+    """
 
     def __init__(self) -> None:
         self._fns: dict[str, ScalarParseFunc] = {}
 
     def register(self, name: str, fn: ScalarParseFunc) -> None:
-        self._fns[name] = fn
+        self._fns[_registry_key(name)] = fn
 
     def unregister(self, name: str) -> bool:
-        return self._fns.pop(name, None) is not None
+        return self._fns.pop(_registry_key(name), None) is not None
 
     def get(self, name: str) -> ScalarParseFunc | None:
-        return self._fns.get(name)
+        return self._fns.get(_registry_key(name))
 
     def has(self, name: str) -> bool:
-        return name in self._fns
+        return _registry_key(name) in self._fns
 
     def names(self) -> list[str]:
         return sorted(self._fns)
@@ -65,22 +71,23 @@ class ScalarParseRegistry:
 
 
 class ScalarNormalizeRegistry:
-    """Registry of scalar normalize functions keyed by canonical name."""
+    """Registry of scalar normalize functions keyed by canonical name, in
+    either spelling (see :class:`ScalarParseRegistry`)."""
 
     def __init__(self) -> None:
         self._fns: dict[str, ScalarNormalizeFunc] = {}
 
     def register(self, name: str, fn: ScalarNormalizeFunc) -> None:
-        self._fns[name] = fn
+        self._fns[_registry_key(name)] = fn
 
     def unregister(self, name: str) -> bool:
-        return self._fns.pop(name, None) is not None
+        return self._fns.pop(_registry_key(name), None) is not None
 
     def get(self, name: str) -> ScalarNormalizeFunc | None:
-        return self._fns.get(name)
+        return self._fns.get(_registry_key(name))
 
     def has(self, name: str) -> bool:
-        return name in self._fns
+        return _registry_key(name) in self._fns
 
     def names(self) -> list[str]:
         return sorted(self._fns)

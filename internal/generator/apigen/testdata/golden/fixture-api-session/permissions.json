@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "api": "fixture-api",
+  "authDb": "fixture-db",
+  "permissions": [
+    {
+      "name": "tenants.read",
+      "identity": false,
+      "operations": [
+        "TenantGetTenantHandler",
+        "TenantListTenantsHandler"
+      ]
+    },
+    {
+      "name": "tenants.write",
+      "identity": false,
+      "operations": [
+        "TenantCreateTenantHandler",
+        "TenantUpdateSecretHandler"
+      ]
+    }
+  ]
+}

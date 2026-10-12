@@ -111,9 +111,9 @@ func ownerBase(owner string) (string, bool) {
 // Owner fields are cleared on the emitted copies: a definition's location is
 // implicit in the file it is written to and is re-stamped at read time.
 //
-// What the loader added by expanding declarations (ir.OriginVersionGraph)
-// is left out: the declarations are written, and reading them back expands
-// them again.
+// What the loader added by expanding declarations (ir.OriginVersionGraph,
+// and ir.OriginIdentity for the user model's tables) is left out: the
+// declarations are written, and reading them back expands them again.
 func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	schema = withoutExpansion(schema)
 	docs := make(map[string]*schemafile.Document)
@@ -199,6 +199,10 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	if len(schema.Jobs) > 0 {
 		doc := first()
 		doc.Jobs = append(doc.Jobs, schema.Jobs...)
+	}
+	if len(schema.Workers) > 0 {
+		doc := first()
+		doc.Workers = append(doc.Workers, schema.Workers...)
 	}
 
 	// Imports are service-level in the IR; restate them on every document so

@@ -1,0 +1,5 @@
+# The bucket ts-shop lists (D54), which its TypeScript server opens on GCS
+# through the HTTP runtime's ./gcs entry.
+name: ts-media
+kind: Bucket
+outputs: {}

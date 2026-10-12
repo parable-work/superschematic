@@ -6,8 +6,12 @@
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if .Namespaces }}
 	"context"
+{{- end }}
+{{- if or .Namespaces .HasWebhookHMACEndpoints }}
 	"fmt"
+{{- end }}
 {{- if .HasWebhookHMACEndpoints }}
 	gohttp "net/http"
 {{- end }}

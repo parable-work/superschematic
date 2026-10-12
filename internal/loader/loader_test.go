@@ -137,8 +137,9 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 
 // The TypeScript, Python and Rust types of a catalog scalar become its
 // typescript, python and rust mappings, over whatever the schema file
-// declared. A Rust type that is a declaration (Geo.Location's
-// `struct Location { ... }`) is not a type expression and is skipped.
+// declared, Geo.Location's struct path among them. A Rust type that is a
+// declaration (`struct Point { ... }`) is not a type expression and is
+// skipped.
 func TestHydrateTakesLanguageTypesFromCatalog(t *testing.T) {
 	headers := &scalars.ScalarMetadata{
 		CanonicalName:  "Acme.Headers",
@@ -149,7 +150,15 @@ func TestHydrateTakesLanguageTypesFromCatalog(t *testing.T) {
 		JSONSchemaType: "object",
 		HasCustomParse: true,
 	}
-	rows := map[string]*scalars.ScalarMetadata{"Acme.Headers": headers}
+	point := &scalars.ScalarMetadata{
+		CanonicalName:  "Acme.Point",
+		Primitive:      "String",
+		TypeScriptType: "{ x: number; y: number }",
+		PythonType:     "dict",
+		RustType:       "struct Point { x: f64, y: f64 }",
+		JSONSchemaType: "object",
+	}
+	rows := map[string]*scalars.ScalarMetadata{"Acme.Headers": headers, "Acme.Point": point}
 	for _, name := range []string{"Generic.StringMap", "Generic.JSON", "Contact.Email", "Geo.Location"} {
 		row := scalars.ScalarMetadataByCanonical[name]
 		if row == nil || row.TypeScriptType == "" || row.PythonType == "" || row.RustType == "" {
@@ -173,7 +182,7 @@ func TestHydrateTakesLanguageTypesFromCatalog(t *testing.T) {
 			t.Errorf("%s: typescript = %q, python = %q; want %q, %q", name, got["typescript"], got["python"], want.TypeScriptType, want.PythonType)
 		}
 		wantRust := want.RustType
-		if name == "Geo.Location" {
+		if name == "Acme.Point" {
 			wantRust = ""
 		}
 		if got["rust"] != wantRust {

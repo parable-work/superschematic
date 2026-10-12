@@ -28,7 +28,8 @@ const (
 )
 
 // DepsInfo is what Deps holds beside the config and the logger: a pg Pool
-// for the API's database, and an SDK client per API it calls.
+// for the API's database, an SDK client per API it calls, and a Bucket per
+// bucket it lists (D54).
 type DepsInfo struct {
 	// Database is the DB service whose pool Deps.db is: the API's authDb,
 	// or its one DB-kind dependency. Empty when the API has neither.
@@ -36,6 +37,19 @@ type DepsInfo struct {
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
+
+	// Buckets are the API's buckets entries, in order (D54).
+	Buckets []DepsBucket
+}
+
+// DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
+// Bucket, which the entrypoint opens on the bucket's provider (D54).
+type DepsBucket struct {
+	// Service is the Bucket service.
+	Service string
+
+	// Field is the Deps member that holds the bucket.
+	Field string
 }
 
 // DepsCall is an SDK client in Deps.
@@ -54,11 +68,12 @@ type DepsCall struct {
 	Client string
 }
 
-// depsFields are the members every Deps may hold beside its clients.
+// depsFields are the members every Deps may hold beside its clients and
+// its buckets.
 var depsFields = []string{"config", "db", "logger"}
 
-// SetDeps sets what Deps holds, refusing a client whose member would take
-// the name of another of its members.
+// SetDeps sets what Deps holds, refusing a client or a bucket whose member
+// would take the name of another of its members.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
 	for _, name := range depsFields {
@@ -70,6 +85,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[call.Field] = call.Service
 	}
+	for _, b := range deps.Buckets {
+		if prev, clash := seen[b.Field]; clash {
+			return fmt.Errorf("tsrestgen: %s lists bucket %s, which would be Deps.%s, the member of %s", o.SchemaName, b.Service, b.Field, prev)
+		}
+		seen[b.Field] = b.Service
+	}
 	o.Deps = deps
 	return nil
 }
@@ -77,7 +98,13 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 // ChecksEndUsers reports whether an operation requires an authenticated
 // end user, which the router establishes with RouterOptions.authenticate:
 // the implementation then exports authenticate, an AuthenticatorFactory.
+// An API whose authDb has a User table has the identity service establish
+// every end user (D50), so its implementation exports none, as a Go
+// implementation of such an API writes no AuthMiddleware.
 func (o *APIOutput) ChecksEndUsers() bool {
+	if o.Identity != nil {
+		return false
+	}
 	for _, ep := range o.Endpoints {
 		if ep.RequiresAuth && !ep.PublicRoute {
 			return true

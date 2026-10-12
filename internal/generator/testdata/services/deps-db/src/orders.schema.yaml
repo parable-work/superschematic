@@ -17,3 +17,12 @@ types:
       - name: sku
         typeRef: { name: string }
         required: true
+  # A queue of the database (D53), which deps-orders' worker handles.
+  OrderPlaced:
+    name: OrderPlaced
+    role: EmbeddedStruct
+    queue: {}
+    fields:
+      - name: orderId
+        typeRef: { name: Identity.UUID }
+        required: true

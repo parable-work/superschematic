@@ -98,6 +98,7 @@ func checkFixtureAPIGolden(t *testing.T, provider apigen.AuthProvider, golden st
 		"middleware.go",
 		"openapi.go",
 		"openapi.json",
+		"permissions.json",
 		"index.go",
 		"rapidoc.go",
 		"errors.go",

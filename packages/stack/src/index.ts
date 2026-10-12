@@ -28,24 +28,30 @@ export interface Targets {
 /**
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
- * port of the environment's Postgres container, a server's settings its
- * port, and a database and a job take no settings. A port left out is
- * derived from the stack, the environment and the server.
+ * port of the environment's Postgres container and of its storage emulator
+ * (D54), a server's and a site's settings its port, and a database, a job,
+ * a worker and a bucket take no settings. A port left out is derived from
+ * the stack, the environment and the deployable.
  */
 export interface LocalTarget {
-  values: { postgresImage?: string; postgresPort?: number };
+  values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
   server: { port?: number };
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   database: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   job: {};
+  site: { port?: number };
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  bucket: {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  worker: {};
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -108,9 +114,13 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
   ? { readonly env?: EnvOf<C> } & SettingsOf<T, "server">
   : Of extends ServiceHandle<"DB">
     ? SettingsOf<T, "database">
-    : Of extends DeployableClass
-      ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
-      : never);
+    : Of extends ServiceHandle<"Site">
+      ? SettingsOf<T, "site">
+      : Of extends ServiceHandle<"Bucket">
+        ? SettingsOf<T, "bucket">
+        : Of extends DeployableClass
+          ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
+          : never);
 
 /**
  * A job's schedule as an environment changes it (D52): a five-field cron
@@ -138,6 +148,32 @@ type JobElementOf<T, Of> =
         SettingsOf<T, "job">
     : never;
 
+/**
+ * How a worker runs in an environment (D53): how many instances, each
+ * handling how many messages at a time, and whether it runs at all. A
+ * worker that is off runs no instance, and its queue's messages wait.
+ */
+export type WorkerRun = {
+  /** How many instances run; one unless set. */
+  readonly instances?: number;
+  /** How many messages an instance handles at a time; the `@worker` concurrency unless set. */
+  readonly concurrency?: number;
+  /** Turns the worker on or off. */
+  readonly enabled?: boolean;
+};
+
+/**
+ * What a worker's settings element is: its API's handle in `of` and the
+ * worker's class name in `worker`, which the handle's workers type, how it
+ * runs, the target's worker settings, and an env of the API's config, over
+ * what the API's server is given.
+ */
+type WorkerElementOf<T, Of> =
+  Of extends ServiceHandle<"API", infer C, string, infer W>
+    ? { readonly of: Of; readonly worker: W; readonly platform?: string; readonly env?: EnvOf<C> } & WorkerRun &
+        SettingsOf<T, "worker">
+    : never;
+
 /** Every key of W, or of any member when W is a union. */
 type KeysOf<W> = W extends unknown ? keyof W : never;
 
@@ -149,20 +185,23 @@ type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<un
 
 /**
  * One settings element checked: its `of` picks the settings type, and a
- * `job` beside an API's handle makes it the element of that job; its env is
- * the config's fields, and a key neither takes is refused. An element that
- * names a platform, which may be another target's, takes any settings key;
- * the loader checks it against that platform.
+ * `job` or a `worker` beside an API's handle makes it the element of that
+ * job or worker; its env is the config's fields, and a key neither takes is
+ * refused. An element that names a platform, which may be another
+ * target's, takes any settings key; the loader checks it against that
+ * platform.
  */
 export type SettingsElement<T, E> = E extends { readonly of: infer Of }
   ? Exact<
       E extends { readonly job: unknown }
         ? JobElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-        : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+        : E extends { readonly worker: unknown }
+          ? WorkerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+          : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
-  : { readonly of: ServiceHandle<"API" | "DB"> | DeployableClass };
+  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket"> | DeployableClass };
 
 /** The argument of `@environment`. */
 export type EnvironmentOptions<T extends TargetName | undefined, S extends readonly unknown[]> = {
@@ -172,7 +211,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle or a declared deployable's class. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
@@ -180,10 +219,14 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
 
 const noop: ClassDecorator = () => {};
 
-/** Declares the stack: its entry points and what is reachable from outside. */
+/**
+ * Declares the stack: its entry points and what is reachable from outside.
+ * A site (a Site service's handle) is always exposed, named in `expose` or
+ * not, and each API it calls must be exposed (D55).
+ */
 export function stack(_options: {
-  readonly deploy?: readonly ServiceHandle<"API" | "DB">[];
-  readonly expose?: readonly (ServiceHandle<"API"> | DeployableClass)[];
+  readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
+  readonly expose?: readonly (ServiceHandle<"API" | "Site"> | DeployableClass)[];
 }): ClassDecorator {
   return noop;
 }

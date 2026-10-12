@@ -10,11 +10,13 @@ import (
 	"fmt"
 	gohttp "net/http"
 	"strconv"
+	"time"
 
 	orm "example.com/acme/orm/shop-db"
 	types "example.com/acme/types/go/shop-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -42,7 +44,16 @@ type Config struct {
 	// OpenAPIBaseURL is injected into the served OpenAPI document servers list.
 	// Optional: defaults to "http://localhost:8080" if empty.
 	OpenAPIBaseURL string
-	// AuthMiddleware is the authentication middleware to apply to protected routes.
+
+	// Identity is the user model's runtime (D50): it authenticates the caller
+	// of every protected route and serves the user model's routes. Build it
+	// with NewIdentity, which gives it this API's route table.
+	Identity *identity.Service
+
+	// AuthMiddleware authenticates the caller of every protected route.
+	// Optional: nil runs Identity.Middleware. A middleware set here replaces
+	// it and authenticates the caller itself, usually by wrapping
+	// Identity.Middleware.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 
 	// Implementations contains all namespace implementation instances
@@ -58,8 +69,11 @@ func (c *Config) Validate() error {
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
 	}
-	if c.AuthMiddleware == nil {
-		return fmt.Errorf("Config.AuthMiddleware is required")
+	if c.Identity == nil {
+		return fmt.Errorf("Config.Identity is required: the user model's runtime authenticates the callers of shop-api")
+	}
+	if err := checkIdentity(c.Identity); err != nil {
+		return err
 	}
 	if err := c.Implementations.ValidateImplementations(); err != nil {
 		return err
@@ -80,7 +94,7 @@ func (c *Config) Validate() error {
 //	shopapi.RegisterRoutes(r, shopapi.Config{
 //		DB:                          db,
 //		Logger:                      logger,
-//		AuthMiddleware:              authMiddleware,
+//		Identity:                    identityService,
 //		Implementations: shopapi.Implementations{
 //			Product: &myProductImpl{},
 //		},
@@ -100,6 +114,16 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	if openAPIBaseURL == "" {
 		openAPIBaseURL = defaultOpenAPIBaseURL
 	}
+
+	// The identity runtime authenticates the protected routes' callers
+	// unless the Config replaces its middleware.
+	if cfg.AuthMiddleware == nil {
+		cfg.AuthMiddleware = cfg.Identity.Middleware
+	}
+
+	// The credentialed CORS middleware runs first, so it answers the
+	// preflights of the identity config's trusted origins.
+	r.Use(cfg.Identity.CORS())
 
 	// Add logger middleware for request-scoped logging
 	r.Use(LoggerMiddleware(cfg.Logger))
@@ -137,11 +161,156 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 }
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
-	return []runtimerouting.Route{}
+	return []runtimerouting.Route{
+		// Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
+		{
+			Method:  "POST",
+			Path:    "/auth/login",
+			Handler: identityHandler(cfg.Identity, "login"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+			},
+		},
+	}
 }
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		// Lists the roles and the permissions each grants.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/roles",
+			Handler: identityHandler(cfg.Identity, "listRoles"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.read"),
+			},
+		},
+		// Creates a role. The caller's own permissions must cover each permission it grants.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/roles",
+			Handler: identityHandler(cfg.Identity, "createRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Deletes a role and every grant of it. It answers true.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/admin/roles/{id}",
+			Handler: identityHandler(cfg.Identity, "deleteRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Renames a role or replaces its permissions. The caller's own permissions must cover each permission given.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/roles/{id}",
+			Handler: identityHandler(cfg.Identity, "updateRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Lists the users and the roles each holds.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/users",
+			Handler: identityHandler(cfg.Identity, "listUsers"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Creates a user with the login, name and password given.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users",
+			Handler: identityHandler(cfg.Identity, "createUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// One user and the roles they hold.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/users/{id}",
+			Handler: identityHandler(cfg.Identity, "getUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Disables a user, who can no longer sign in, and ends their sessions.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/disable",
+			Handler: identityHandler(cfg.Identity, "disableUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Enables a disabled user.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/enable",
+			Handler: identityHandler(cfg.Identity, "enableUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Sets a user's password and ends their sessions. It answers true.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/users/{id}/password",
+			Handler: identityHandler(cfg.Identity, "setUserPassword"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
+		// Revokes a role from a user.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/admin/users/{id}/roles/{roleId}",
+			Handler: identityHandler(cfg.Identity, "revokeRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// Grants a user a role. The caller's own permissions must cover the role's.
+		{
+			Method:  "PUT",
+			Path:    "/auth/admin/users/{id}/roles/{roleId}",
+			Handler: identityHandler(cfg.Identity, "grantRole"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.roles.write"),
+			},
+		},
+		// For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.
+		{
+			Method:  "GET",
+			Path:    "/auth/capabilities",
+			Handler: identityHandler(cfg.Identity, "capabilities"),
+		},
+		// Ends the caller's session and clears the session cookie. It answers true.
+		{
+			Method:  "POST",
+			Path:    "/auth/logout",
+			Handler: identityHandler(cfg.Identity, "logout"),
+		},
+		// The caller's user, the roles they hold and the permissions those roles grant.
+		{
+			Method:  "GET",
+			Path:    "/auth/me",
+			Handler: identityHandler(cfg.Identity, "me"),
+		},
+		// Changes the caller's password, given their current one, and ends their other sessions. It answers true.
+		{
+			Method:  "POST",
+			Path:    "/auth/password",
+			Handler: identityHandler(cfg.Identity, "changePassword"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+			},
+		},
 		{
 			Method:  "GET",
 			Path:    "/products",
@@ -164,6 +333,16 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Handler: createProductGetProductHandler(cfg.Implementations.Product),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("products.read"),
+			},
+		},
+		// Signs an upload of the product's image to shop-media and records the
+		// object's name on the product.
+		{
+			Method:  "POST",
+			Path:    "/products/{id}/image-upload",
+			Handler: createProductCreateProductImageUploadHandler(cfg.Implementations.Product),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("products.write"),
 			},
 		},
 	}
@@ -274,6 +453,68 @@ func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFu
 
 		// Call implementation
 		result, err := impl.GetProduct(r.Context(), Id)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createProductCreateProductImageUploadHandler creates a handler for POST /api/products/{id}/image-upload
+//
+// Signs an upload of the product's image to shop-media and records the
+// object's name on the product.
+func createProductCreateProductImageUploadHandler(impl ProductImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.ProductImageUploadInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.CreateProductImageUpload(r.Context(), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

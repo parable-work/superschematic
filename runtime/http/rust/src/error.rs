@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -23,6 +23,11 @@ pub struct ApiError {
     /// server and the TypeScript SDK use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub errors: Option<Box<Value>>,
+    /// Headers the problem's response carries, such as the `Set-Cookie`
+    /// that clears a refused session cookie with its 401. Never part of the
+    /// body.
+    #[serde(skip)]
+    pub headers: Option<Box<HeaderMap>>,
 }
 
 impl ApiError {
@@ -33,6 +38,7 @@ impl ApiError {
             status,
             details: None,
             errors: None,
+            headers: None,
         }
     }
 
@@ -48,6 +54,16 @@ impl ApiError {
     #[must_use]
     pub fn with_errors(mut self, errors: Value) -> Self {
         self.errors = Some(Box::new(errors));
+        self
+    }
+
+    /// The error with a header its problem's response carries, appended to
+    /// any of the same name.
+    #[must_use]
+    pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers
+            .get_or_insert_with(Box::default)
+            .append(name, value);
         self
     }
 

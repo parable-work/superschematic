@@ -9,6 +9,8 @@ declare module "@superschematic/stack" {
       server: { minInstances?: number; public?: boolean };
       database: { tier?: "small" | "large"; highAvailability?: boolean };
       job: { cpu?: string };
+      bucket: { versioning?: boolean };
+      worker: { memory?: string };
     };
   }
 }

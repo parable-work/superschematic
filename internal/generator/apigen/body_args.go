@@ -39,6 +39,16 @@ type BodyArg struct {
 	StructuredJSON string
 }
 
+// ChecksJSON reports whether the route checks each value of the argument
+// on its own JSON text with superscalar's check of its scalar, before the
+// value is decoded: the argument is of a JSON-object scalar
+// (Generic.StringMap, Geo.Location), whose Go value loses an unknown or
+// duplicate key and reads a missing one as zero, so the route checks it as
+// the generated types' UnmarshalJSON does.
+func (a BodyArg) ChecksJSON() bool {
+	return a.Kind == "Object" && a.StructuredJSON == ir.JSONSchemaObjectType
+}
+
 // Decoder is the bodyargs function that decodes the argument: Value, List,
 // ListOfLists, Map or MapOfLists.
 func (a BodyArg) Decoder() string {
@@ -175,12 +185,18 @@ func (m *typeMapper) isEnum(name string) bool {
 }
 
 // scalarRuleOptions are the scalar's own constraints that fit kind: its
-// lengths and pattern for a string, its range for a number. The runtime
-// checks them before the argument's own and names a failure by its rule
-// (D14).
+// lengths and pattern for a string, its range for a number, and for a
+// JSON-object scalar superscalar's check of each value's JSON text
+// (BodyArg.ChecksJSON), which routes.go reads from the scalar Go module.
+// The runtime checks them before the argument's own and names a failure by
+// its rule, or a superscalar failure by its kind (D14).
 func scalarRuleOptions(scalarDef *ir.ScalarDef, kind string) []string {
 	var options []string
 	switch kind {
+	case "Object":
+		if scalarDef.StructuredJSONType() == ir.JSONSchemaObjectType {
+			options = append(options, "bodyargs.CheckJSON(scalars.ValidatorFor("+strconv.Quote(scalarDef.Name)+"))")
+		}
 	case "String":
 		if scalarDef.MinLength > 0 {
 			options = append(options, fmt.Sprintf("bodyargs.MinLength(%d)", scalarDef.MinLength))

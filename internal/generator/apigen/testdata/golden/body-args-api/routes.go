@@ -13,6 +13,7 @@ import (
 
 	types "example.com/schemas/types/go/body-args-api"
 	"github.com/go-chi/chi/v5"
+	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
@@ -306,9 +307,9 @@ func createTagReviseDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 func createTagStoreEmbeddingHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// Body arguments: the JSON type of each value, then its rules in the
 	// order they are checked (the scalar type's own, then the argument's).
-	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.Object, bodyargs.Required())
+	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.Object, bodyargs.Required(), bodyargs.CheckJSON(scalars.ValidatorFor("Generic.StringMap")))
 	bodyVectorArg := bodyargs.NewArg("vector", bodyargs.Array)
-	bodyLabelSetsArg := bodyargs.NewArg("labelSets", bodyargs.Object)
+	bodyLabelSetsArg := bodyargs.NewArg("labelSets", bodyargs.Object, bodyargs.CheckJSON(scalars.ValidatorFor("Generic.StringMap")))
 	bodyVectorGridArg := bodyargs.NewArg("vectorGrid", bodyargs.Array)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Parse body arguments (non-GET endpoints). The body is one JSON

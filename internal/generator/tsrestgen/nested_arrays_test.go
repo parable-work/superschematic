@@ -77,7 +77,7 @@ func nestedArraysFixture(t *testing.T, withPaint bool) apiFixture {
 
 func generateFixture(t *testing.T, fixture apiFixture) *APIOutput {
 	t.Helper()
-	output, err := Generate(fixture.schema, fixture.endpoints, Options{SchemaName: fixture.name, Clock: fixedClock})
+	output, err := Generate(fixture.schema, fixture.endpoints, Options{SchemaName: fixture.name, Clock: fixedClock, AuthDB: fixture.authDB})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}

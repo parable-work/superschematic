@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Nullable, Validate } from "@superschematic/schema";
+import { Nullable, Validate, display, docs } from "@superschematic/schema";
 import {
   Authenticated,
   HttpMethod,
@@ -30,6 +30,7 @@ export abstract class OrderLineView {
 
 // An order as a caller sees it.
 @source(Order)
+@display({ noun: "Order", plural: "Orders", summaryFields: ["id", "placedAt", "status", "totalCents"] })
 export abstract class OrderView {
   id: Identity.UUID;
   status: OrderStatus;
@@ -47,7 +48,10 @@ export abstract class OrderView {
   totalCents: Generic.Int64;
 }
 
+// One line of an order a shopper places: a product and how many.
+@display({ noun: "Line", createLabel: "Add a line" })
 export abstract class PlaceOrderLine {
+  @docs({ title: "Product" })
   productId: Identity.UUID;
   quantity: Validate<number, { min: 1; max: 99 }>;
 }
@@ -59,6 +63,7 @@ export abstract class PlaceOrderInput {
 
 // A review as anyone sees it.
 @source(Review)
+@display({ noun: "Review", plural: "Reviews", titleField: "title", summaryFields: ["title", "rating", "createdAt"] })
 export abstract class ReviewView {
   id: Identity.UUID;
   rating: number;

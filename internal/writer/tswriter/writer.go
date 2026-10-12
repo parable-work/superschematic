@@ -4,8 +4,8 @@
 // The writer emits exactly the authoring surface the tsreader walks: import
 // statements grouped by source package, decorator syntax with arguments,
 // generic wrapper forms (Nullable, Default, Validate, AutoGenerate, ...),
-// heritage clauses reconstructed from RawHeritage, and IR Comment metadata
-// as '//' comments above each node.
+// heritage clauses reconstructed from RawHeritage and the user model's
+// traits, and IR Comment metadata as '//' comments above each node.
 //
 // TypeScript is the only format that cannot carry the full IR: schema-level
 // comments, extension data and documents, descriptions on the schema and on
@@ -124,11 +124,12 @@ var symbolPackages = map[string]string{
 	// @superschematic/db
 	"index": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
-	"versioned": "@superschematic/db", "optimistic": "@superschematic/db",
+	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
+	"User": "@superschematic/db", "UserRole": "@superschematic/db",
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
 	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
@@ -137,7 +138,8 @@ var symbolPackages = map[string]string{
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
-	"mcp": "@superschematic/api", "job": "@superschematic/api",
+	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
+	"job": "@superschematic/api", "worker": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 	// @superschematic/stack
@@ -217,6 +219,58 @@ func (e *emitter) emitDocument() {
 	for _, job := range e.doc.Jobs {
 		e.emitJob(job)
 	}
+	for _, worker := range e.doc.Workers {
+		e.emitWorker(worker)
+	}
+}
+
+// emitWorker renders a worker as the class the reader reads it from (D53):
+// `@worker({ queue: <class>, ... })` on an abstract class with no members.
+// The queue is a class the schema imports, which the document's imports
+// name.
+func (e *emitter) emitWorker(worker *ir.Worker) {
+	if worker == nil {
+		return
+	}
+	imported := false
+	for _, imp := range e.doc.Imports {
+		if slices.Contains(imp.Types, worker.Queue) {
+			e.importSymbol(imp.Package, worker.Queue)
+			imported = true
+			break
+		}
+	}
+	if !imported {
+		e.failf("worker %s: queue %s is not covered by the document's imports", worker.Name, worker.Queue)
+	}
+	parts := []string{"queue: " + e.ident(worker.Queue, "queue")}
+	if worker.Concurrency != 0 {
+		parts = append(parts, fmt.Sprintf("concurrency: %d", worker.Concurrency))
+	}
+	if worker.Grace != "" {
+		parts = append(parts, "grace: "+quote(worker.Grace))
+	}
+	e.body.WriteString("\n")
+	e.comment("", worker.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("worker"), objectLiteral(parts), e.ident(worker.Name, "worker"))
+}
+
+// queueArgs renders @queue's argument (D53): the options it sets, or none.
+func queueArgs(def *ir.QueueDef) string {
+	var parts []string
+	if def.Retries != nil {
+		parts = append(parts, fmt.Sprintf("retries: %d", *def.Retries))
+	}
+	if def.Backoff != "" {
+		parts = append(parts, "backoff: "+quote(def.Backoff))
+	}
+	if def.Lease != "" {
+		parts = append(parts, "lease: "+quote(def.Lease))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return objectLiteral(parts)
 }
 
 // emitJob renders a job as the class the reader reads it from (D52):
@@ -309,6 +363,18 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef, catalog regi
 	}
 	if def.Format == metadata.Format {
 		def.Format = ""
+	}
+	if def.CaseInsensitive == metadata.CaseInsensitive {
+		def.CaseInsensitive = false
+	}
+	if slices.Equal(def.ReservedWords, metadata.ReservedWords) || len(def.ReservedWords) == 0 && len(metadata.ReservedWords) == 0 {
+		def.ReservedWords = nil
+	}
+	if def.ReservedWordsCaseInsensitive == metadata.ReservedWordsCaseInsensitive {
+		def.ReservedWordsCaseInsensitive = false
+	}
+	if def.ReservedWordsMatchPartial == metadata.ReservedWordsMatchPartial {
+		def.ReservedWordsMatchPartial = false
 	}
 	def.HasCustomNormalize = false
 	def.HasCustomParse = false

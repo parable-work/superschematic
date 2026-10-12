@@ -472,6 +472,12 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			},
 		}
 
+		// A user model operation declares the errors the identity runtime
+		// answers it with (D50), beside the 400 and 500 of every route.
+		if endpoint.IdentityOperation != "" {
+			addIdentityErrorResponses(operation["responses"].(map[string]interface{}), endpoint.IdentityOperation)
+		}
+
 		if security := operationSecurity(endpoint); security != nil {
 			operation["security"] = security
 		}

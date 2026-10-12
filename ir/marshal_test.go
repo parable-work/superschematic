@@ -279,3 +279,45 @@ func TestVersionGraphIRRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestUserTraitsIRRoundTrip: the user model's traits (D50) survive a JSON
+// and a YAML round trip, UserRole's empty object included, and a type
+// without them marshals exactly as before they existed.
+func TestUserTraitsIRRoundTrip(t *testing.T) {
+	account := &TypeDef{Name: "Account", Role: RoleDBTable, User: &UserTrait{Login: "email", Name: "displayName"}}
+	admin := &TypeDef{Name: "Admin", Role: RoleDBTable, User: &UserTrait{Login: "handle"}}
+	role := &TypeDef{Name: "Role", Role: RoleDBTable, UserRole: &UserRoleTrait{}}
+	for _, td := range []*TypeDef{account, admin, role} {
+		data, err := json.Marshal(td)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fromJSON TypeDef
+		if err := json.Unmarshal(data, &fromJSON); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(td, &fromJSON) {
+			t.Errorf("JSON round trip of %s:\n%+v\n%+v", td.Name, td, &fromJSON)
+		}
+		out, err := yaml.Marshal(td)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fromYAML TypeDef
+		if err := yaml.Unmarshal(out, &fromYAML); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(td, &fromYAML) {
+			t.Errorf("YAML round trip of %s:\n%+v\n%+v", td.Name, td, &fromYAML)
+		}
+	}
+	if data, _ := json.Marshal(admin); string(data) != `{"name":"Admin","role":"DBTable","user":{"login":"handle"}}` {
+		t.Errorf("Admin JSON = %s", data)
+	}
+	if data, _ := json.Marshal(role); string(data) != `{"name":"Role","role":"DBTable","userRole":{}}` {
+		t.Errorf("Role JSON = %s", data)
+	}
+	if data, _ := json.Marshal(&TypeDef{Name: "Account", Role: RoleDBTable}); string(data) != `{"name":"Account","role":"DBTable"}` {
+		t.Errorf("a type without the traits marshals as %s", data)
+	}
+}

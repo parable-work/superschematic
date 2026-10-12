@@ -19,6 +19,11 @@ import (
 {{- end }}
 	"strings"
 	"sync"
+{{- if .GeoPointListTypes }}
+
+	"github.com/jackc/pgx/v5/pgtype"
+	types "{{ .TypesModule }}"
+{{- end }}
 )
 
 // Relation hydration is recursive, and the guard below is what stops it running
@@ -405,6 +410,62 @@ func copyListElements[T any](field string, values []*T, dst *[]T) error {
 	}
 	*dst = list
 	return nil
+}
+{{- end }}
+{{- range .GeoPointListTypes }}
+
+// {{ lowerFirst .Symbol }}Points converts a list of locations to the POINTs of a
+// POINT[] column: x is the longitude and y the latitude. A nil list stays nil,
+// which pgx writes as NULL.
+func {{ lowerFirst .Symbol }}Points(locations []{{ .GoType }}) []pgtype.Point {
+	if locations == nil {
+		return nil
+	}
+	points := make([]pgtype.Point, len(locations))
+	for i, location := range locations {
+		points[i] = pgtype.Point{P: pgtype.Vec2{X: location.Lon, Y: location.Lat}, Valid: true}
+	}
+	return points
+}
+
+// copy{{ .Symbol }}Points sets *dst to the locations of the POINTs scanned from
+// a POINT[] column, and returns an error that names the first NULL element at
+// field[i]: a list element is never null. A nil points, a NULL column, sets
+// *dst to nil.
+func copy{{ .Symbol }}Points(field string, points []pgtype.Point, dst *[]{{ .GoType }}) error {
+	if points == nil {
+		*dst = nil
+		return nil
+	}
+	locations := make([]{{ .GoType }}, len(points))
+	for i, point := range points {
+		if !point.Valid {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		locations[i] = {{ .GoType }}{Lat: point.P.Y, Lon: point.P.X}
+	}
+	*dst = locations
+	return nil
+}
+
+// unmarshal{{ .Symbol }}Points decodes a POINT[] column of a history row into
+// *dst. to_jsonb writes the column as a JSON list of "(x,y)" texts, and a
+// NULL element as null, which the decoder refuses at field[i].
+func unmarshal{{ .Symbol }}Points(raw []byte, dst *[]{{ .GoType }}, field string) error {
+	var texts []*string
+	if err := json.Unmarshal(raw, &texts); err != nil {
+		return err
+	}
+	points := make([]pgtype.Point, len(texts))
+	for i, text := range texts {
+		if text == nil {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		if err := points[i].Scan(*text); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
+		}
+	}
+	return copy{{ .Symbol }}Points(field, points, dst)
 }
 {{- end }}
 {{- if .HasGenericJSONLists }}

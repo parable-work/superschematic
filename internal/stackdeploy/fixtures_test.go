@@ -45,10 +45,23 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{reg: reg, ext: ext, log: &bytes.Buffer{}}
 }
 
-// env resolves an environment of the shop stack.
+// env resolves an environment of the shop stack, without shop-orders'
+// worker, which workerEnv keeps.
 func (f *fixture) env(t *testing.T, name string) *ir.ResolvedEnvironment {
 	t.Helper()
-	env, err := stack.Resolve(f.reg, stack.Input{Stack: stacktest.Shop(), Services: stacktest.AcmeShop(), Environment: name})
+	return f.resolve(t, stacktest.WithoutWorkerSettings(stacktest.Shop()), stacktest.WithoutWorkers(stacktest.AcmeShop()), name)
+}
+
+// workerEnv resolves an environment of the shop stack with shop-orders'
+// worker, FulfilOrders (D53).
+func (f *fixture) workerEnv(t *testing.T, name string) *ir.ResolvedEnvironment {
+	t.Helper()
+	return f.resolve(t, stacktest.Shop(), stacktest.AcmeShop(), name)
+}
+
+func (f *fixture) resolve(t *testing.T, s *ir.Stack, services []stack.Service, name string) *ir.ResolvedEnvironment {
+	t.Helper()
+	env, err := stack.Resolve(f.reg, stack.Input{Stack: s, Services: services, Environment: name})
 	if err != nil {
 		t.Fatal(err)
 	}

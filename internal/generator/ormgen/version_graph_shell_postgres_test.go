@@ -34,7 +34,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph shell against Postgres")
 	}
-	ormDir := generateVersionGraphModule(t)
+	ormDir := generateORMModule(t, versionGraphFixture)
 	if err := os.WriteFile(filepath.Join(ormDir, "graph_shell_test.go"), []byte(versionGraphShellTest), 0o644); err != nil {
 		t.Fatalf("write graph shell test: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ormDir, "graph_release_test.go"), []byte(versionGraphReleaseTest), 0o644); err != nil {
 		t.Fatalf("write graph release test: %v", err)
 	}
-	out := runVersionGraphModule(t, ormDir)
+	out := runORMModule(t, ormDir)
 	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)

@@ -34,16 +34,53 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # The http-client feature's HTTP client, with the TLS the generated Rust
 # SDKs use, so a service that also calls other APIs builds one stack.
 reqwest = { version = "0.13.2", default-features = false, features = ["native-tls"], optional = true }
+# The identity feature's password hash (D50): argon2id alone, without the
+# password-hash crate's PHC reader, since the runtime reads a PHC string in
+# the one form every identity runtime writes.
+argon2 = { version = "0.5.3", default-features = false, optional = true }
+# The identity feature's CORS layer. Already in axum's tree.
+tower-layer = { version = "0.3.3", optional = true }
+tower-service = { version = "0.3.3", optional = true }
+# The identity-postgres feature's client, reading and writing Postgres UUIDs
+# as the uuid crate's.
+tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"], optional = true }
+# The identity-sqlite feature's client, with the SQLite it bundles, as the
+# version graph's Rust engine binds it.
+rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
 # default metadata client of GoogleIdTokenSource. Without it, a service
 # passes its own KeyFetcher or HttpGetter.
 http-client = ["dep:reqwest"]
+# The user model's runtime (D50): passwords, sessions, roles and the
+# session and administration routes, over an identity store. The store runs
+# its SQL through a client the service binds; the two features below add
+# the default bindings. A password hash runs on tokio's blocking pool.
+identity = ["dep:argon2", "dep:tower-layer", "dep:tower-service", "tokio/rt"]
+# The identity store's Postgres client, over tokio-postgres.
+identity-postgres = ["identity", "dep:tokio-postgres"]
+# The identity store's SQLite client, over rusqlite.
+identity-sqlite = ["identity", "dep:rusqlite"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tower = { version = "0.5", features = ["util"] }
+
+# The identity vectors, and the store and route tests over the SQLite
+# client; the store tests also run on Postgres with identity-postgres and a
+# database URL.
+[[test]]
+name = "identity_parity"
+required-features = ["identity"]
+
+[[test]]
+name = "identity_store"
+required-features = ["identity-sqlite"]
+
+[[test]]
+name = "identity_http"
+required-features = ["identity-sqlite"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

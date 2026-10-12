@@ -1,5 +1,8 @@
 name: deps-orders
 kind: API
+imports:
+  - package: "@schemas/deps-db"
+    types: [OrderPlaced]
 types:
   OrdersConfig:
     name: OrdersConfig
@@ -39,3 +42,8 @@ jobs:
     timeout: 5m
     retries: 1
   - name: ReindexOrders
+workers:
+  - name: FulfilOrders
+    comment: Fulfils each order placed.
+    queue: OrderPlaced
+    concurrency: 4

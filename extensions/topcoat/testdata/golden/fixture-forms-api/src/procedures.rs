@@ -9,6 +9,10 @@
 //! `call_<operation>` is the procedure's body as a plain function: the
 //! record decoded into the operation's arguments, then the operation called
 //! in-process by its route's rules.
+//!
+//! An operation without an in-process call has no procedure, and neither
+//! has one whose route admits only a service caller (@requireService): a
+//! browser holds no service credential. `operations` says why on each.
 
 #![allow(unused_imports)]
 
@@ -158,4 +162,35 @@ pub async fn call_account_annotate(cx: &Cx, args: AccountAnnotateArgsRecord) -> 
     let value = operations::account_annotate(cx, args).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(AccountViewRecord::from_wire(&json))
+}
+
+/// The arguments of booking.book, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookingBookArgsRecord {
+    pub input: BookingInputRecord,
+}
+
+impl BookingBookArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::BookingBookArgs, ProblemRecord> {
+        Ok(crate::api::BookingBookArgs {
+            input: decode("input", BookingInputRecord::to_wire(&self.input))?,
+        })
+    }
+}
+
+/// booking.book, called from the browser.
+#[procedure("/_superschematic/fixture-forms-api/booking/book")]
+pub async fn booking_book(cx: &Cx, args: BookingBookArgsRecord) -> topcoat::Result<Result<BookingViewRecord, ProblemRecord>> {
+    Ok(call_booking_book(cx, args).await)
+}
+
+/// The body of the booking_book procedure.
+pub async fn call_booking_book(cx: &Cx, args: BookingBookArgsRecord) -> Result<BookingViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::booking_book(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(BookingViewRecord::from_wire(&json))
 }

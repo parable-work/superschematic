@@ -18,8 +18,9 @@ import (
 )
 
 // DepsInfo is what the generated Deps holds beside the config and the
-// logger (docs/stack-model.md, section 8.5): the ORM of the API's database
-// and a Go SDK client per API it calls.
+// logger (docs/stack-model.md, section 8.5): the ORM of the API's
+// database, a Go SDK client per API it calls, and a bucket per bucket it
+// lists (D54).
 type DepsInfo struct {
 	// Database is the DB service whose ORM Deps.DB is: the API's authDb,
 	// or its one DB-kind dependency. Empty when the API has neither.
@@ -35,6 +36,26 @@ type DepsInfo struct {
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
+
+	// DatabaseTypes is Database's Go types module, which declares the
+	// messages of its queues, and DatabaseTypesAlias the name deps.go and
+	// the scaffold import it as. Set for an API with workers (D53).
+	DatabaseTypes      string
+	DatabaseTypesAlias string
+
+	// Buckets are the API's buckets entries, in order (D54).
+	Buckets []DepsBucket
+}
+
+// DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
+// bucket.Bucket, which the entrypoint opens on the bucket's provider
+// (D54).
+type DepsBucket struct {
+	// Service is the Bucket service.
+	Service string
+
+	// Field is the Deps field that holds the bucket.
+	Field string
 }
 
 // DepsCall is a Go SDK client in Deps.
@@ -53,7 +74,8 @@ type DepsCall struct {
 	Client string
 }
 
-// depsFields are the fields every Deps may hold beside its clients.
+// depsFields are the fields every Deps may hold beside its clients and its
+// buckets.
 var depsFields = []string{"Config", "DB", "Logger"}
 
 // JobInfo is a job of the API (D52): a method of the generated Jobs
@@ -86,8 +108,52 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
-// SetDeps sets what Deps holds, refusing a client whose field would take
-// the name of another of its fields.
+// WorkerInfo is a worker of the API (D53): a method of the generated
+// Workers interface, which handles one message of its queue.
+type WorkerInfo struct {
+	// Name is the worker's `@worker` class.
+	Name string
+
+	// Method is the Workers method that handles a message.
+	Method string
+
+	// Queue is the `@queue` class of the API's database whose messages the
+	// worker handles: the message's type in the database's Go types.
+	Queue string
+
+	// Concurrency is the decorator's concurrency, for the method's
+	// comment: how many messages an instance handles at a time unless an
+	// environment changes it.
+	Concurrency int
+}
+
+// workersOf reads the API's workers, sorted by name.
+func workersOf(schema *ir.Schema) []WorkerInfo {
+	var workers []WorkerInfo
+	for _, worker := range schema.Workers {
+		if worker == nil {
+			continue
+		}
+		concurrency := worker.Concurrency
+		if concurrency <= 0 {
+			concurrency = ir.DefaultWorkerConcurrency
+		}
+		workers = append(workers, WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency})
+	}
+	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
+	return workers
+}
+
+// HasWorkers reports whether the API declares a worker, for which deps.go
+// declares Workers and WorkersConstructor.
+func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+
+// HasBackgroundWork reports whether deps.go declares Jobs or Workers, which
+// take a context.
+func (o *APIOutput) HasBackgroundWork() bool { return o.HasJobs() || o.HasWorkers() }
+
+// SetDeps sets what Deps holds, refusing a client or a bucket whose field
+// would take the name of another of its fields.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
 	for _, name := range depsFields {
@@ -98,6 +164,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("apigen: %s calls %s, whose client would be Deps.%s, the field of %s", o.SchemaName, call.Service, call.Field, prev)
 		}
 		seen[call.Field] = call.Service
+	}
+	for _, b := range deps.Buckets {
+		if prev, clash := seen[b.Field]; clash {
+			return fmt.Errorf("apigen: %s lists bucket %s, which would be Deps.%s, the field of %s", o.SchemaName, b.Service, b.Field, prev)
+		}
+		seen[b.Field] = b.Service
 	}
 	o.Deps = deps
 	return nil
@@ -135,6 +207,12 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false, fmt.Errorf("create implementation package %s: %w", dir, err)
 	}
+	// The implementation has no method for a user model operation, which
+	// the identity runtime serves (D50).
+	output, err = ImplementedOutput(output)
+	if err != nil {
+		return false, err
+	}
 	funcs, err := templateFuncs(output.Provider)
 	if err != nil {
 		return false, err
@@ -149,6 +227,10 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 // JobsFunc is the function an implementation of an API with jobs
 // declares, of the generated JobsConstructor's signature.
 const JobsFunc = "NewJobs"
+
+// WorkersFunc is the function an implementation of an API with workers
+// declares, of the generated WorkersConstructor's signature (D53).
+const WorkersFunc = "NewWorkers"
 
 // DeclaresFunc reports whether the Go package at dir declares a function
 // named name, in a file that is not a test.

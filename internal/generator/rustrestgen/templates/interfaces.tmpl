@@ -14,7 +14,7 @@ use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 {{- end }}
-use {{ .RuntimeCrateIdent }}::{ {{- if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
+use {{ .RuntimeCrateIdent }}::{ {{- if .Identity }}ApiError, IdentityAuthenticator, RequestContext{{ else if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
 use std::collections::HashMap;
 use std::sync::Arc;
 {{- range .Endpoints }}
@@ -79,7 +79,15 @@ pub struct Implementations {
 {{- range .Namespaces }}
     pub {{ toSnakeCase . }}: Arc<dyn {{ toPascalCase . }}Implementation>,
 {{- end }}
-{{- if .HasAuth }}
+{{- if .Identity }}
+    /// The identity runtime's authenticator (D50): the caller of each route
+    /// that needs one (@auth, @requirePermission, @requireOwnership, an
+    /// Authenticated set) is the user whose session the request carries,
+    /// holding their roles' permissions. Build it over the API's identity
+    /// service (`identity::service`), whose session and administration
+    /// routes `build_router` mounts.
+    pub authenticator: Arc<IdentityAuthenticator>,
+{{- else if .HasAuth }}
     /// Establishes the caller of each route that needs one (@auth,
     /// @requirePermission, @requireOwnership, an Authenticated set), and
     /// decides whether its permissions satisfy a @requirePermission list.

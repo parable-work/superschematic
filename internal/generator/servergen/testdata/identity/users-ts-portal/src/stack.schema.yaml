@@ -1,0 +1,29 @@
+# One TypeScript server, Web, serves users-ts-api and users-ts-notes, both
+# over users-db, and users-ts-ping, over nothing. Each identity API's CORS
+# answers its own routes alone. Its one environment, Local, runs on the
+# local target.
+kind: Stack
+types:
+  Portal:
+    name: Portal
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-ts-api, kind: API }
+        - { name: users-ts-notes, kind: API }
+        - { name: users-ts-ping, kind: API }
+      expose:
+        - deployable: Web
+  Web:
+    name: Web
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: users-ts-api, kind: API }
+        - { name: users-ts-notes, kind: API }
+        - { name: users-ts-ping, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

@@ -1,0 +1,54 @@
+{
+  "name": "fixture-user-routes-api",
+  "kind": "API",
+  "authDb": "fixture-user-model-db",
+  "types": {
+    "Greeting": {
+      "name": "Greeting",
+      "owner": "src/account.schema.ts",
+      "comment": "A greeting for the signed-in user.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "message",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Account",
+      "comment": "Signs users in and out, and lets anyone register.",
+      "operations": [],
+      "userSessions": {
+        "register": true
+      }
+    },
+    {
+      "name": "AccountAdmin",
+      "comment": "Manages users, roles and the grants between them.",
+      "operations": [],
+      "userAdministration": {}
+    },
+    {
+      "name": "GreetingQueries",
+      "comment": "An operation the project implements, beside the routes the identity\nruntime serves.",
+      "operations": [
+        {
+          "name": "greet",
+          "typeRef": {
+            "name": "Greeting"
+          },
+          "required": true,
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "greeting"
+        }
+      ]
+    }
+  ]
+}

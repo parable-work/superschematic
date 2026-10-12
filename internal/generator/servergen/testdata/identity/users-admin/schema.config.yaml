@@ -1,0 +1,9 @@
+# An API over the same users that is not public: users-db's user model
+# alone turns its auth wiring on. It serves the administration routes.
+name: users-admin
+kind: API
+authDb: users-db
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

@@ -1,0 +1,6 @@
+# The product images shop-orders and shop-reviews list (D54). Both run on
+# the declared server Storefront, which opens the bucket once for the two,
+# and shop-orders' job opens it again in its own process.
+name: shop-media
+kind: Bucket
+outputs: {}

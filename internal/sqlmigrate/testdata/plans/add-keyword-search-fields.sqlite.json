@@ -1,0 +1,41 @@
+{
+  "dialect": "sqlite",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "59179141a7b0df6aaaf044e449fa40dca7fa84cfbf1e57cd55e2dc1532a41885",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"escape\" TEXT"
+      ],
+      "subject": "table/customer/column/escape",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"exists\" TEXT"
+      ],
+      "subject": "table/customer/column/exists",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" ADD COLUMN \"search_text\" TEXT GENERATED ALWAYS AS (COALESCE(\"escape\", '') || ' ' || COALESCE(\"exists\", '')) VIRTUAL"
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "630e2951053c73952c84b8c314832dc4d19c8b2b3c0988b5a927a308450318a4",
+  "toModel": null,
+  "version": 1
+}

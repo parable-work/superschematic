@@ -172,8 +172,8 @@ func TestHTTPConnectorGrants(t *testing.T) {
 	if _, ok := node(t, env, "shop-api.service").Properties["template"].(map[string]any)["vpcAccess"]; ok {
 		t.Error("shop-api calls no other server, yet has VPC egress")
 	}
-	if got := strings.Join(node(t, env, "network.nat").Owners, ", "); got != "Orders, shop-orders-ship-orders" {
-		t.Errorf("the network's owners are %s, want the one calling server, Orders, and shop-orders' job, which calls what its API calls", got)
+	if got := strings.Join(node(t, env, "network.nat").Owners, ", "); got != "Orders, shop-orders-fulfil-orders, shop-orders-ship-orders" {
+		t.Errorf("the network's owners are %s, want the one calling server, Orders, and shop-orders' job and worker, which call what their API calls", got)
 	}
 }
 
@@ -181,26 +181,28 @@ func TestHTTPConnectorGrants(t *testing.T) {
 // gives a callee with a service clause: SHOP_API_CALLERS holds Google's
 // issuer and keys, shop-api's custom audience, which Orders's token is
 // for, and Orders's service account by the email claim, as the deployable
-// Orders that serves shop-orders; and shop-orders' job by its own
-// account's email, as the deployable shop-orders-ship-orders, which
-// serves shop-orders too (D52). On the server, the field is one variable
-// per member, the lists of objects counted and indexed.
+// Orders that serves shop-orders; and shop-orders' job and worker each by
+// its own account's email, as the deployables shop-orders-ship-orders
+// (D52) and shop-orders-fulfil-orders (D53), which serve shop-orders too.
+// On the server, the field is one variable per member, the lists of
+// objects counted and indexed.
 func TestHTTPConnectorGivesTheCalleeItsCaller(t *testing.T) {
 	env := resolve(t, assemble(t), shop(), stacktest.RequireServiceShop(), "Staging")
 	callers := binding(t, env, "shop-api", "SHOP_API_CALLERS")
 	if callers.Source != ir.BindingDerived || callers.CallersOf != "shop-api" ||
-		strings.Join(callers.Edges, ",") != "http:Orders->shop-api,http:shop-orders-ship-orders->shop-api" {
-		t.Errorf("SHOP_API_CALLERS = %+v, want the derived callers of shop-api from Orders's edge and the job's", callers)
+		strings.Join(callers.Edges, ",") != "http:Orders->shop-api,http:shop-orders-fulfil-orders->shop-api,http:shop-orders-ship-orders->shop-api" {
+		t.Errorf("SHOP_API_CALLERS = %+v, want the derived callers of shop-api from Orders's edge, the worker's and the job's", callers)
 	}
 	wantJSON(t, "SHOP_API_CALLERS", callers.Value,
 		`{"issuers":[{"algorithms":["RS256"],"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api","callers":[`+
 			`{"deployable":"Orders","serves":["shop-orders"],"subject":"orders@acme-staging.iam.gserviceaccount.com"},`+
+			`{"deployable":"shop-orders-fulfil-orders","serves":["shop-orders"],"subject":"shop-orders-fulfil-orders@acme-staging.iam.gserviceaccount.com"},`+
 			`{"deployable":"shop-orders-ship-orders","serves":["shop-orders"],"subject":"shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com"}],`+
 			`"issuer":"https://accounts.google.com","issuerAliases":["accounts.google.com"],"jwksUrl":"https://www.googleapis.com/oauth2/v3/certs","subjectClaim":"email"}]}`)
 	if err := ir.CheckServiceAuth(callers.Value); err != nil {
 		t.Error(err)
 	}
-	for _, caller := range []string{"Orders", "shop-orders-ship-orders"} {
+	for _, caller := range []string{"Orders", "shop-orders-fulfil-orders", "shop-orders-ship-orders"} {
 		token := binding(t, env, caller, "SHOP_API_SERVICE").Value.(map[string]any)["credential"].(map[string]any)["audience"]
 		if token != callers.Value.(map[string]any)["issuers"].([]any)[0].(map[string]any)["audience"] {
 			t.Errorf("%s's token is for %v, which shop-api does not accept", caller, token)
@@ -220,13 +222,16 @@ func TestHTTPConnectorGivesTheCalleeItsCaller(t *testing.T) {
 		"SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS":           "RS256",
 		"SHOP_API_CALLERS_ISSUERS_0_JWKS_URL":             "https://www.googleapis.com/oauth2/v3/certs",
 		"SHOP_API_CALLERS_ISSUERS_0_SUBJECT_CLAIM":        "email",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "2",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "3",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT":    "orders@acme-staging.iam.gserviceaccount.com",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES":     "shop-orders",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT":    "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT":    "shop-orders-fulfil-orders@acme-staging.iam.gserviceaccount.com",
 		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SERVES":     "shop-orders",
-		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE": "shop-orders-ship-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE": "shop-orders-fulfil-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_SUBJECT":    "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_SERVES":     "shop-orders",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_2_DEPLOYABLE": "shop-orders-ship-orders",
 	} {
 		if got := vars[name]; got != want {
 			t.Errorf("shop-api's service sets %s to %v, want %v", name, got, want)
@@ -313,8 +318,8 @@ func TestHTTPConnectorSelfCall(t *testing.T) {
 	if ids := ownedBy(env, "http:Backend->shop-api"); len(ids) > 0 {
 		t.Errorf("the self edge produces %v", ids)
 	}
-	if got := strings.Join(node(t, env, "network").Owners, ", "); got != "shop-orders-ship-orders" {
-		t.Errorf("the network's owners are %s, want the job alone: a server that calls only itself has no VPC", got)
+	if got := strings.Join(node(t, env, "network").Owners, ", "); got != "shop-orders-fulfil-orders, shop-orders-ship-orders" {
+		t.Errorf("the network's owners are %s, want the job and the worker alone: a server that calls only itself has no VPC", got)
 	}
 	wantJSON(t, "the job's endpoint", binding(t, env, "shop-orders-ship-orders", "SHOP_API_SERVICE").Value,
 		`{"credential":{"audience":"//run.googleapis.com/projects/acme-staging/locations/us-east1/services/backend","headers":["Service-Authorization","X-Serverless-Authorization"],"source":"google-id-token"},"url":{"$output":{"resource":"Backend.service","name":"uri"}}}`)

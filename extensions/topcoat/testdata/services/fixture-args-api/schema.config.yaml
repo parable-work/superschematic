@@ -1,0 +1,6 @@
+# The Topcoat extension's fixture of operations whose arguments a form
+# holds: path, query and body arguments, and an input beside a path
+# argument.
+name: fixture-args-api
+kind: API
+outputs: {}

@@ -11,7 +11,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'DB' | 'General' | 'Stack' | (string & {});
+export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -80,11 +80,14 @@ export interface DeployableRef {
   deployable?: string;
   job?: string;
   service?: ServiceRef;
+  worker?: string;
 }
 
 export interface DeployableSettings {
+  concurrency?: number;
   enabled?: boolean;
   env?: { [key: string]: EnvValue };
+  instances?: number;
   of: DeployableRef;
   platform?: string;
   schedule?: string;
@@ -118,6 +121,7 @@ export interface Document {
   scalars?: { [key: string]: ScalarDef };
   types?: { [key: string]: TypeDef };
   unions?: { [key: string]: UnionDef };
+  workers?: Worker[];
 }
 
 export interface EnumDef {
@@ -334,6 +338,8 @@ export interface OperationSet {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface OperationSetFile {
@@ -346,6 +352,8 @@ export interface OperationSetFile {
   name: string;
   operations: FieldDef[];
   serviceCallers?: ServiceCallers;
+  userAdministration?: UserAdministrationConfig;
+  userSessions?: UserSessionsConfig;
 }
 
 export interface ProjectionCollapse {
@@ -416,6 +424,12 @@ export interface PruneReference {
   keyColumn: string;
   table: string;
   versionColumn: string;
+}
+
+export interface QueueDef {
+  backoff?: string;
+  lease?: string;
+  retries?: number;
 }
 
 export interface RawHeritage {
@@ -490,7 +504,7 @@ export interface ServiceCallers {
 }
 
 export interface ServiceRef {
-  kind: 'API' | 'DB' | 'General' | 'Stack';
+  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack';
   name: string;
 }
 
@@ -541,6 +555,7 @@ export interface TypeDef {
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
+  queue?: QueueDef;
   rawHeritage?: RawHeritage;
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
   server?: ServerDecl;
@@ -548,6 +563,8 @@ export interface TypeDef {
   stack?: StackDecl;
   strictJSON?: boolean;
   traitConfig?: TraitConfigSchema;
+  user?: UserTrait;
+  userRole?: UserRoleTrait;
   versionGraph?: VersionGraphConfig;
   versioned?: boolean;
   versionedConfig?: VersionedConfig;
@@ -592,6 +609,24 @@ export interface UnionFile {
   types: string[];
 }
 
+export interface UserAdministrationConfig {
+  path?: string;
+}
+
+export interface UserRoleTrait {
+}
+
+export interface UserSessionsConfig {
+  noLogin?: boolean;
+  path?: string;
+  register?: boolean;
+}
+
+export interface UserTrait {
+  login: string;
+  name?: string;
+}
+
 export interface VersionGraphConfig {
   name?: string;
   schemaEpoch?: number;
@@ -603,4 +638,12 @@ export interface VersionedConfig {
   partitionBy?: string;
   pruneKeepReferencedBy?: PruneReference[];
   retentionDays?: number;
+}
+
+export interface Worker {
+  comment?: string;
+  concurrency?: number;
+  grace?: string;
+  name: string;
+  queue: string;
 }

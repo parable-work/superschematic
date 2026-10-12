@@ -1,7 +1,11 @@
 package pygen
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -15,15 +19,17 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	enumLookup := buildEnumLookup(output)
 	holdsModels := buildModelFieldLookup(output)
 	return template.FuncMap{
-		"snakeCase":          codegen.ToSnakeCase,
-		"pythonFieldName":    toPythonFieldName,
-		"pythonString":       pythonString,
-		"pythonRawString":    pythonRawString,
-		"pythonComment":      pythonComment,
-		"pythonScalarType":   pythonScalarType,
-		"pythonScalarSymbol": pythonScalarSymbol,
-		"pythonScalarModule": pythonScalarModule,
-		"pythonParsesJSON":   pythonParsesJSON,
+		"snakeCase":           codegen.ToSnakeCase,
+		"pythonFieldName":     toPythonFieldName,
+		"pythonString":        pythonString,
+		"pythonRawString":     pythonRawString,
+		"pythonComment":       pythonComment,
+		"pythonScalarType":    pythonScalarType,
+		"pythonScalarSymbol":  pythonScalarSymbol,
+		"pythonScalarModule":  pythonScalarModule,
+		"pythonParsesJSON":    pythonParsesJSON,
+		"pythonScalarLibType": pythonScalarLibType,
+		"pythonExample":       pythonExample,
 		"scalarDoc": func(s codegen.ScalarInfo) string {
 			return codegen.DocText(s.Description, s.Comment)
 		},
@@ -83,6 +89,94 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 // the model holds a native value rather than JSON text.
 func pythonParsesJSON(scalar codegen.ScalarInfo) bool {
 	return scalar.Traits.StructuredJSON != "" || (scalar.HasCustomParse && scalar.Traits.IsJSONLike)
+}
+
+// superscalarPythonModule is the module superscalar's catalog names its own
+// Python types in, whatever the generated packages import the scalar library
+// as (Naming.ScalarPythonModule).
+const superscalarPythonModule = "superscalar"
+
+// pythonScalarLibType is the name of the type a scalar's Python mapping
+// names in the scalar library (Geo.Location's superscalar.GeoLocation), or
+// "" for any other mapping. The generated module imports it from the
+// configured scalar Python module, so a renamed module still provides it.
+func pythonScalarLibType(scalar codegen.ScalarInfo) string {
+	name, ok := strings.CutPrefix(strings.TrimSpace(scalar.TargetType), superscalarPythonModule+".")
+	if !ok || name == "" || strings.ContainsAny(name, ".[ ") {
+		return ""
+	}
+	return name
+}
+
+// pythonExample is a scalar's example as a Python literal: the decoded
+// value for a scalar whose wrapper parses JSON (Geo.Location's {"lat": ...,
+// "lon": ...} dict), since that is the value the model holds, and the
+// example text as a string otherwise.
+func pythonExample(scalar codegen.ScalarInfo) string {
+	if pythonParsesJSON(scalar) {
+		if literal, err := pythonJSONLiteral(scalar.Example); err == nil {
+			return literal
+		}
+	}
+	return `"` + pythonString(scalar.Example) + `"`
+}
+
+// pythonJSONLiteral writes JSON text as the Python literal of its value,
+// keeping object member order.
+func pythonJSONLiteral(text string) (string, error) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var literal strings.Builder
+	if err := writePythonJSONValue(decoder, &literal); err != nil {
+		return "", err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("trailing data after the JSON value")
+	}
+	return literal.String(), nil
+}
+
+func writePythonJSONValue(decoder *json.Decoder, literal *strings.Builder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	switch value := token.(type) {
+	case json.Delim:
+		closing := "]"
+		if value == '{' {
+			closing = "}"
+		}
+		literal.WriteString(value.String())
+		for first := true; decoder.More(); first = false {
+			if !first {
+				literal.WriteString(", ")
+			}
+			if value == '{' {
+				key, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				literal.WriteString(strconv.Quote(key.(string)) + ": ")
+			}
+			if err := writePythonJSONValue(decoder, literal); err != nil {
+				return err
+			}
+		}
+		if _, err := decoder.Token(); err != nil {
+			return err
+		}
+		literal.WriteString(closing)
+	case string:
+		literal.WriteString(strconv.Quote(value))
+	case json.Number:
+		literal.WriteString(value.String())
+	case bool:
+		literal.WriteString(map[bool]string{true: "True", false: "False"}[value])
+	case nil:
+		literal.WriteString("None")
+	}
+	return nil
 }
 
 // buildEnumLookup reports whether a type name refers to a local or imported enum.

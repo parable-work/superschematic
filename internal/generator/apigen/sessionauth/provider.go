@@ -1,8 +1,12 @@
-// Package sessionauth is the core auth provider for the superschematic api generator:
-// bearer sessions over an upstream Session table, an optional principal
-// (User) table, plain-string permissions, and no tenancy. Its generated code
-// depends only on the generic http-runtime session package
-// (docs/extension-model.md section 8.2).
+// Package sessionauth is the core auth provider for the superschematic api
+// generator: the core user model (D50). An upstream DB schema with a User
+// table, found by its trait, makes the generated server authenticate with
+// the identity runtime (runtime/http/go/identity), which signs users in,
+// resolves their sessions and roles, and serves the user model's routes;
+// the core templates wire it in (apigen.AuthModel.Identity). Permissions are
+// plain strings and there is no tenancy. Its own snippets depend only on
+// the generic http-runtime session package (docs/extension-model.md
+// section 8.2).
 package sessionauth
 
 import (
@@ -28,8 +32,8 @@ var _ apigen.AuthProvider = Provider{}
 // Name implements apigen.AuthProvider.
 func (Provider) Name() string { return Name }
 
-// Analyze implements apigen.AuthProvider: the core session and principal
-// table probes, nothing else.
+// Analyze implements apigen.AuthProvider: the user model the upstream
+// schema declares by its traits, nothing else.
 func (Provider) Analyze(_, upstream *ir.Schema) (apigen.AuthModel, error) {
 	return apigen.AnalyzeSessionStores(upstream), nil
 }

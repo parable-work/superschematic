@@ -2,13 +2,19 @@
  * The kinds the core compiler registers. Closed: an extension adds a kind by
  * registering it with superschematic, not by extending this enum. A Stack
  * service declares what runs where over the others (`@superschematic/stack`)
- * and is named by none, so it has no sentinel.
+ * and is named by none, so it has no sentinel. A Site service is a static
+ * site: its config names the APIs it calls and how it builds, and its code
+ * sits at its implementation path (D55). A Bucket service is private object
+ * storage that APIs list in their `buckets` (D54): its config is all it
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
  */
 export enum SchemaKind {
   DB = "DB",
   API = "API",
   General = "General",
-  Stack = "Stack"
+  Stack = "Stack",
+  Site = "Site",
+  Bucket = "Bucket"
 }
 
 /**
@@ -34,15 +40,21 @@ export enum TargetLanguage {
 /**
  * A handle to a service: what service() returns and a generated sentinel
  * exports. K is the service's kind, as a string ("API"), C the type of its
- * @envVars class, and J the names of its @job classes. All three are
- * phantom: the sentinel generator writes them
- * (`service<"API", ShopApiConfig, "ExpireCarts">({...})`), and
- * superschematic reads only name and kind. A DB or General handle has no
- * config type and no jobs, nor has an API without an @envVars class or a
- * @job class, or a handle written by hand, so C and J keep their defaults:
- * any config, and any job name.
+ * @envVars class, J the names of its @job classes and W the names of its
+ * @worker classes. All four are phantom: the sentinel generator writes
+ * them (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
+ * and superschematic reads only name and kind. A DB or General handle has
+ * no config type, no jobs and no workers, nor has an API without an
+ * @envVars class, a @job class or a @worker class, or a handle written by
+ * hand, so C, J and W keep their defaults: any config, and any job or
+ * worker name. An API with workers and no jobs has the jobs `never`.
  */
-export type ServiceHandle<K extends SchemaKindName = SchemaKindName, C = unknown, J extends string = string> = {
+export type ServiceHandle<
+  K extends SchemaKindName = SchemaKindName,
+  C = unknown,
+  J extends string = string,
+  W extends string = string
+> = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
   readonly kind: K;
@@ -50,6 +62,8 @@ export type ServiceHandle<K extends SchemaKindName = SchemaKindName, C = unknown
   readonly __config?: C;
   /** Phantom: carries J for the type checker and is never set. */
   readonly __jobs?: J;
+  /** Phantom: carries W for the type checker and is never set. */
+  readonly __workers?: W;
 };
 
 export type TargetOutputConfig = {
@@ -144,6 +158,24 @@ export type SchemaOutputsDocument = SchemaOutputs & {
   readonly [outputKey: string]: unknown;
 };
 
+/**
+ * How a Site service builds and what it serves (D55). Its code is the package at the naming file's [implementation_paths] site template, web/{service} unless set, a member of the Bun workspace.
+ */
+export type SiteConfig = {
+  /**
+   * The script of the site's package.json that builds it, which a deploy runs with bun run after a frozen install of the workspace. Unset is "build".
+   */
+  readonly build?: string;
+  /**
+   * The directory the build writes, relative to the site's directory and inside it. Unset is "dist".
+   */
+  readonly output?: string;
+  /**
+   * The file, relative to output, served for a path that names no file: "index.html" for a single-page application, whose router reads the path. Unset answers such a path 404.
+   */
+  readonly fallback?: string;
+};
+
 export type SchemaConfig = {
   readonly name: string;
   readonly kind: SchemaKindName;
@@ -151,15 +183,26 @@ export type SchemaConfig = {
   readonly authDb?: ServiceHandle;
   readonly dependencies?: readonly ServiceHandle[];
   /**
-   * The API services this API's implementation calls. Only an API service sets it, and each entry is an API service's handle. Each callee is built before its caller.
+   * The API services this API's implementation calls, or this site's code calls from the browser. Only an API or a Site service sets it, and each entry is an API service's handle. Each callee is built before its caller. An API a site calls must be exposed in each stack that deploys the site.
    */
   readonly calls?: readonly ServiceHandle<"API">[];
-  readonly outputs: SchemaOutputs;
+  /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry is a Bucket service's handle.
+   */
+  readonly buckets?: readonly ServiceHandle<"Bucket">[];
+  /**
+   * How a Site service builds and what it serves. Only a Site service sets it.
+   */
+  readonly site?: SiteConfig;
+  /**
+   * The generated outputs. A Site service has none, and may leave it out.
+   */
+  readonly outputs?: SchemaOutputs;
 };
 
 /**
- * A service reference in the JSON/YAML config forms, in dependencies and
- * calls. The TypeScript form builds ServiceHandle sentinels with the
+ * A service reference in the JSON/YAML config forms, in dependencies,
+ * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -185,10 +228,21 @@ export type SchemaConfigDocument = {
   readonly authDb?: string;
   readonly dependencies?: readonly ServiceDependencyRef[];
   /**
-   * The API services this API's implementation calls. Only an API service sets it, and each entry names an API service. Each callee is built before its caller.
+   * The API services this API's implementation calls, or this site's code calls from the browser. Only an API or a Site service sets it, and each entry names an API service. Each callee is built before its caller.
    */
   readonly calls?: readonly ServiceDependencyRef[];
-  readonly outputs: SchemaOutputsDocument;
+  /**
+   * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry names a Bucket service.
+   */
+  readonly buckets?: readonly ServiceDependencyRef[];
+  /**
+   * How a Site service builds and what it serves. Only a Site service sets it.
+   */
+  readonly site?: SiteConfig;
+  /**
+   * The generated outputs. A Site service has none, and may leave it out.
+   */
+  readonly outputs?: SchemaOutputsDocument;
 };
 
 export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfig {
@@ -200,10 +254,10 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
  * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
  * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
  */
-export function service<K extends SchemaKindName, C = unknown, J extends string = string>(cfg: {
+export function service<K extends SchemaKindName, C = unknown, J extends string = string, W extends string = string>(cfg: {
   readonly name: string;
   readonly kind: K;
-}): ServiceHandle<`${K}`, C, J> {
+}): ServiceHandle<`${K}`, C, J, W> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,

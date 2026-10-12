@@ -73,7 +73,7 @@ type ConfigOutput struct {
 	EnvConfig bool
 	// Derived are the config fields the API's edges derive in a stack
 	// (docs/stack-model.md, section 3.4): its database's, then one per
-	// calls entry. Set by Options.Derived.
+	// calls entry, then one per buckets entry. Set by Options.Derived.
 	Derived []DerivedField
 	// CallersField is the name of the API's callers field
 	// (ir.CallersField) when an operation of the API has a service clause
@@ -87,21 +87,24 @@ type ConfigOutput struct {
 // fields its edges derive.
 const EnvConfigTypeName = "EnvConfig"
 
-// DerivedField is a config field an edge derives: a database connection
-// or a service endpoint, which the platform sets and the loader reads from
-// one environment variable per member of the value.
+// DerivedField is a config field an edge derives: a database connection,
+// a service endpoint or a bucket connection (D54), which the platform sets
+// and the loader reads from one environment variable per member of the
+// value.
 type DerivedField struct {
 	// Key is the field's name, which prefixes its variables
 	// (SHOP_DB_DATABASE).
 	Key string
 	// GoName is the EnvConfig field's name (ShopDbDatabase).
 	GoName string
-	// Kind is the edge's kind: sql for the database, http for a call.
+	// Kind is the edge's kind: sql for the database, http for a call,
+	// bucket for a bucket the API lists.
 	Kind ir.EdgeKind
-	// Service is the DB service or the called API service.
+	// Service is the DB service, the called API service or the Bucket
+	// service.
 	Service string
-	// From is the config key the edge comes from: authDb, dependencies or
-	// calls.
+	// From is the config key the edge comes from: authDb, dependencies,
+	// calls or buckets.
 	From string
 	// Variables are the environment variables the field may be read from,
 	// one per member of its value.
@@ -114,6 +117,9 @@ func (f DerivedField) RuntimeType() string {
 	if f.Kind == ir.EdgeSQL {
 		return "Database"
 	}
+	if f.Kind == ir.EdgeBucket {
+		return "Bucket"
+	}
 	return "Service"
 }
 
@@ -121,6 +127,9 @@ func (f DerivedField) RuntimeType() string {
 func (f DerivedField) ContractType() string {
 	if f.Kind == ir.EdgeSQL {
 		return "DatabaseConnection"
+	}
+	if f.Kind == ir.EdgeBucket {
+		return "BucketConnection"
 	}
 	return "ServiceEndpoint"
 }

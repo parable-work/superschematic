@@ -17,7 +17,8 @@ import (
 )
 
 // The output root's package.json is the Bun workspace root of every
-// generated TypeScript package and the implementations (D51).
+// generated TypeScript package, the implementations (D51) and the sites,
+// at their own template (D55).
 func TestWorkspaceRootManifest(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Dir(root)
@@ -43,7 +44,8 @@ func TestWorkspaceRootManifest(t *testing.T) {
     "sdk/typescript/*",
     "api/*",
     "server/*/*",
-    "../../services/*/ts"
+    "../../services/*/ts",
+    "../../web/*"
   ],
   "dependencies": {
     "superscalar": "file:../../third_party/superscalar/bindings/typescript"

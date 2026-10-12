@@ -4674,8 +4674,291 @@ script with no lockfile, a current one and a stale one.
 `TestLocalTypeScriptServerRuns` brings a stale lockfile up to date under
 `CI=true`. No generated workflow has run on GitHub Actions.
 
+### D27, amended: SQLite builds a `@searchField` as a VIRTUAL column, without the trigram index
+
+D27 refused `@searchField` on SQLite, so a DB service whose tables any
+shopper searches could not list `sqlite`. The acme shop's `Review` is one,
+and a Topcoat app that keeps the shop in a SQLite file needs `shop-db`
+built for it. A human decided on 2026-10-07 that SQLite builds the column
+and leaves the index out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| SQLite gives a table with search fields the `search_text` column Postgres gives it, with the same expression (`COALESCE(field, '')`, joined by `' '`), each field quoted as SQLite quotes every identifier: a field named as a keyword of SQLite's that Postgres does not reserve, such as `escape` or `exists`, still parses. The model keeps the column, so plans diff it as they diff Postgres's. | Refusing it, as D27 did; leaving the column out on SQLite, so a query written for `search_text` fails there; Postgres's expression as written, quoted by Postgres's reserved words |
+| The column is `VIRTUAL`: SQLite computes it when a row is read. `ADD COLUMN` can add a `VIRTUAL` column and not a `STORED` one, so adding a search field is a statement, not a rebuild; changing the search fields drops the column and adds it again, and dropping it rewrites no rows. A rebuild leaves it out of the copy. | `STORED`, as on Postgres, which costs a rebuild for every change of the search fields and gives a read nothing without an index |
+| No index: SQLite has no trigram operator class, so a search on SQLite reads every row of the table. | An FTS5 table with the `trigram` tokenizer, kept in step by triggers or by the writer: a virtual table the model, the diff and the runner do not know, and triggers, which D27 keeps out of SQLite; left for when a SQLite reader needs search to be fast |
+| In both dialects a generated column is added after the plain columns its phase adds, and dropped before the plain columns its phase drops: its expression may read them, and neither Postgres nor SQLite adds a generated column before a column it reads or drops a column a generated column reads. Ordered by subject alone, a table's first search field added as a new column whose name sorts after `search_text`, or its only one dropped with a name that sorts before, failed on both. | Ordering a generated column after exactly the columns its expression reads, which parses the expression for the order the simpler rule already gives; `DROP COLUMN ... CASCADE` on Postgres, which SQLite has no form of |
+
+Status: built. `internal/sqlmigrate`'s SQLite model keeps `search_text`
+and drops the trigram index, the shop's SQLite plan cases keep their
+search field, and the `@searchField` cases and `rename-search-field`
+plan and converge on SQLite; the SQLite convergence check compares columns
+through `pragma table_xinfo`, so a generated column, and whether it is
+`VIRTUAL`, is compared too. Two plan cases, which failed to apply on both
+dialects before the order above, plan and converge on both:
+`add-search-field-column` gives `Customer` its first search field as a new
+column, `tagline`, and `drop-search-field-column` drops its only one,
+`bio`. `add-keyword-search-fields`, on SQLite, adds search fields named
+`escape` and `exists`, which failed to parse unquoted.
+
 The rule is reversible until the first release.
 
+### D44, amended: a procedure keeps its route's rules, and an operation whose route a browser cannot meet has none
+
+D44's procedures gave every mounted operation a `#[procedure]` that
+`.discover()` registers without the app asking: a second route to the
+operation, which any browser reaches. Its body ran the operation
+in-process (D43), which applies the route's end-user step and argument
+checks and nothing else. A review found three gaps. A `@webhook`
+operation's route runs the provider's signature check (`@hmacVerified`)
+before anything else; its in-process call and its procedure skipped it,
+so anyone could run the handler unsigned. A `@requireService` route
+admits only a service caller (D37), but its procedure admitted an end
+user's session, or anyone when the operation has no user clause. And a
+procedure skipped its route's `@rateLimit`, `@bodyLimit` and `@timeout`,
+so `placeOrder` had an unlimited twin. Fixing them found a fourth: the
+JSON API the crate mounts keyed its rate limits by addresses a request
+through Topcoat does not carry, so every client of a route shared one
+budget.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An operation has an in-process call unless a reason says it has none, and every such case is one reason, a clause the guard's doc gives on a line of its own ("It has no in-process call: …") and the build log repeats. The reasons are `@manualRouteRegistration` (the service mounts it) and `@webhook` or `@hmacVerified` (a third party calls it, and its route checks the signature first). The guard stays. Without a call there is no procedure, the result of such an operation gets no record, and its input no form, since a form submits through the call: forms are built from the operations with a call, as records are. | A flag per case in the templates, as `@manualRouteRegistration` had; checking the signature in-process, where there is no signed request to check; forms over the input of every mounted operation, which gave a webhook's input a form no page could submit through a call |
+| An operation with a call has a procedure unless a second reason says otherwise, which the call's doc and the build log give. The one reason is a `@requireService` route, since a browser holds no service credential. An `@allowService` route admits an end user too, so its procedure stays. The `@requireService` operation's in-process call is unchanged and applies the end-user step alone; its doc and its guard's say so, and whether it should refuse stays open, as D37, amended, left it. | Keeping the procedure and refusing every call to it, a route that can never succeed |
+| A procedure meets its route's traffic controls in the route's order (D35) through `ProcedureControls`, a Topcoat layer on the procedure's path that `<service>(...)` adds: the rate limit, then the body limit, read before the procedure decodes its arguments with Topcoat's own limit raised to it, then the timeout around the decoding and the call. Each refusal is the route's 429 (with `Retry-After`), 413 or 504, answered as the procedure answers one, as a `ProblemRecord`. | Topcoat's `BodyLimit` alone, whose refusal is a bare 413 the browser cannot read; the timeout inside `call_<operation>`, which would leave the decoding outside it and time a page's own call |
+| The procedure's rate limit is a limiter of its own at the route's rate, built with each router as `build_router` builds the route's, and keyed by the client's IP address as Topcoat reads it (`client_ip`: the peer's, or the one a proxy the app trusts names). The JSON API's route keeps its limiter, so a client gets the rate on each, as on two replicas. | Sharing the route's limiter, which `RouteControls` keeps private, at the cost of a change to every Rust server; no limit on the procedure |
+| `<service>(...)` gives each request to the mounted JSON API the same address, as the runtime's `ClientIp`, through `ClientAddress`, a Topcoat layer on `/api` that puts it on the request `TowerRoute` hands the API. A route's rate limit and its procedure's then count the same clients, and the app's trusted proxies apply to both. An address Topcoat does not know is left out, and the runtime's fallback stands. | A tower layer around the API reading Topcoat's `RemoteAddr`, the peer's address, which ignores the app's trusted proxies; a route of the crate's own in place of `TowerRoute` |
+| A control a procedure cannot apply as its route does leaves the procedure out with the reason, rather than being skipped; all three apply today. A page's in-process call applies none of them: the page is a route of the app, under the controls the app gives it. | Applying a route's controls to in-process calls, which would spend an operation's budget on the pages that call it |
+
+Status: built. The extension's YAML fixture `fixture-controls-api` has a
+signed webhook whose input a form would hold, a `@requireService` and an
+`@allowService` operation, and an order whose route has all three
+controls. `TestWhatHasNoProcedure` reads its crate and build log: the
+webhook's input has no form, so the crate has no `forms` module. Its cargo
+test drives a Topcoat app through `Router::handle`: the webhook's and the
+`@requireService` operation's procedure paths are 404, the webhook's JSON
+route still refuses an unsigned request, the `@allowService` procedure is
+registered, and the webhook's guard and the `@requireService` call still
+answer a page. The order's procedure answers its third call in a minute, a
+body past the route's three megabytes, sent or declared, and a call past
+its second as the 429, 413 and 504 `ProblemRecord`s, and reads a body past
+Topcoat's own two. On the order's procedure and on its JSON route alike,
+two client addresses get a budget each: the second is admitted after the
+first is refused 429, and on the route requests without an address share
+the fallback's. acme-shop's `placeOrder` and `cancelOrder` procedures
+carry their routes' controls.
+
+The rule is reversible until the first release.
+
+### D44, amended: a detail and a table component per record, shaped by `@display`
+
+A page that showed a record wrote its markup by hand: acme's reviews shard
+printed a review's title and rating, and its orders page each order's id
+and status. Each restated what the schema already says: a field's label
+(its `@docs` title), an enum's member names, and since D48 a type's
+`@display`, which names its title, its summary fields, its noun and its
+plural. No generator read `@display` (D48).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The crate's `views` module has two Topcoat components per record it writes: `<type>_detail(record)`, a description list with a `<dt>` label and a `<dd>` value per field, and `<type>_table(rows)`, a table with a header row of labels and a row per record. The records are those the amendment above leaves: what a page's in-process call returns, the types it nests, and the types a remaining procedure names, so a webhook's result has no components and a procedure's argument record has both. `outputs.topcoat.views` turns them off. They render records, so `records: false` leaves them out too, and `[extension.topcoat]` turns them on with every other default. | A trait every record implements that lists its fields at run time, which loses each field's kind; components for result types only, where a procedure's input records are records too; a page per operation, which would take routing from the app |
+| A field is labeled as a form labels it, by one helper: its `@docs` title, else its name in words. An enum's value shows its member's name in words, in a `<data>` element whose `value` is the serialized value, from `<enum>_label`, which a value the enum does not declare passes through. | The serialized value as its own label; a second label rule for display |
+| A value renders by its field's type: text and numbers as they are; a date, a time or a date-time scalar as `<time datetime>` with the text the API sends; a boolean "Yes" or "No"; a nested record as its detail; a list of records as their table; any other list as `<ul>`; a map as a `<dl>` of its entries; a union or any JSON value as its JSON text in `<pre>`. | Formatting a timestamp on the server, which knows neither the reader's locale nor their time zone; a tree of the JSON value's members |
+| `@display` shapes them: `summaryFields` chooses and orders a table's columns, otherwise every field; `titleField` names a detail (`aria-label`, the `noun` when the title is empty), heads its row (`<th scope="row">`) and is a nested record's cell in a table, which is otherwise its detail; `plural` captions a table. `createLabel`, `states`, `transitions` and a field's `@icon` are not read. | A visible heading for the title, whose level depends on where a page places the detail; the noun as a table's caption |
+| An absent optional value leaves its `<dd>` or `<td>` empty, which a stylesheet can fill with `:empty`. | A placeholder such as "None", which each app would word its own way and a screen reader would read |
+| The markup is semantic HTML with `ss-` classes, `data-type` (the type's name) and `data-field` (the field's JSON key), and no styles. Every value is text that `view!` escapes, in a node or an attribute. A type that nests itself, at any depth, boxes its components' views, as Topcoat requires of a recursive component. | Inline styles or a stylesheet the crate ships; boxing every view |
+
+Status: built. The goldens cover a fifth fixture, the extension's own
+`fixture-views-api`, whose `OrderView` has a field of every kind, a hidden
+one and a `@display`, and whose `Comment` nests itself.
+`TestViewsRenderRecords` renders its detail and table through
+`Router::handle` and checks the HTML: each kind of field, the empty cells
+of absent values, the summary columns under their caption, a `<script>`
+in a value escaped, an undeclared enum value escaped in its attribute, and
+three levels of comments. `TestDisplayShapesTheComponents` and
+`TestViewsOff` check the generated module, and `TestWhatHasNoProcedure`
+that `fixture-controls-api`'s webhook result has no components while its
+`@requireService` result, which a page still calls, has them. acme's
+`ReviewView` and `OrderView` declare a `@display`, its reviews shard
+renders `review_view_detail`, and its orders page `order_view_table`.
+
+The rule is reversible until the first release.
+
+### D14, amended: Geo.Location is a {lat, lon} object
+
+The amendment that made a JSON object or array scalar hold that object or
+array left `Geo.Location` as it was: its row declared an object but also
+a `"lat,lon"` pattern, so every validator checked it as a string, and the
+generated types disagreed on its wire form. superscalar#55 settles the row,
+and this repository moves to it: `superscalar.pin`, and the nine `go.mod`
+files that require `github.com/parable-work/superscalar/go`, are at
+`8bb3cbb31da512b9252d4d4f856b4648ff7c9ec6`, which also carries
+superscalar#56's `Contact.PhoneNumber` example. The catalogs are
+regenerated from it.
+
+`Geo.Location` is now a point, the JSON object `{"lat": <number>, "lon":
+<number>}` in decimal degrees: `lat` in [-90, 90] and `lon` in [-180, 180],
+and no other key. superscalar refuses the `"lat,lon"` string, an unknown
+or duplicate key, a missing one, a member that is not a number and a
+degree out of range, and writes each number of its canonical text as
+`JSON.stringify` does. Its row has the `String` primitive, `json_schema`
+`object`, no pattern, the parse hook, and the object as its example; Go
+types it as a struct tagged `json:"lat"` and `json:"lon"`, TypeScript as
+`{ lat: number; lon: number }`, Python as `superscalar.GeoLocation`, Rust as
+`superscalar::metadata::geo_location::Location`, and SQL as `POINT`. With
+no pattern, `StructuredJSONType` reads it as an object, so every validator
+already gives it `Generic.StringMap`'s path. The rows below are where the
+generators, the runtimes and the ORM still fell short of the object.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `{"lat": 0, "lon": 0}` is a location, and the generated Go types tell it from an absent or null value. A JSON-object scalar (`Generic.StringMap`, `Geo.Location`) is a validatable field, so `Validate` hands every value, required, optional, in a list, a list of lists, a map, a map of lists or an `InputField`, to the scalar package's `Validate` or `ValidateRequired`, which treats a zero `GeoLocation` as a value; a map of lists of any validatable scalar, which did not compile, now checks each element. A type with such fields checks each value's own JSON with superscalar in `UnmarshalJSON`, under the key `encoding/json` reads (exact, else without regard to case, the last one winning), and records, in an unexported pointer that is nil for a valid payload, what the decoded value cannot show: a failure only the JSON has (an unknown, missing or duplicate key, which `encoding/json` drops, zero-fills or overwrites), a required struct value the JSON left absent or null and that decoded to the zero value, and a null value of a required map of them. `Validate` reports the record under the core's name, or `required`, while the field still holds the value decoded; a field set afterwards is checked as set. | `jsonValueMissing`, which read the zero struct as missing. A pointer for a required location, which changes the Go type of every required field. Refusing an absent or null one in `UnmarshalJSON`, which a type without `@strictJSON` leaves to `Validate`. A defined type with an `UnmarshalJSON` of its own in each types package, which ends the zero-cast interoperability the scalar aliases give between packages. Refusing a failing value at decode, which the parity matrix would see as a decode refusal rather than a named failure. |
+| rustgen keeps the catalog's type path and rewrites the `superscalar::` prefix to the scalar crate's name, as it does for `Uuid` and `DateTime`, so a generated crate aliases the struct and a renamed scalar crate still names it. | `serde_json::Value`, which the loader gave it while the row declared a struct instead of naming a type |
+| pygen gives the scalar the type its Python mapping names in the scalar library, imported from the configured scalar Python module inside a `try`, with `Dict[str, Any]` for an object scalar when the library is absent; a JSON-parsed scalar skips the name-based location branch and is parsed by superscalar; its example is the decoded object. | The `Dict[str, float]` that read `"lat,lon"` strings by the scalar's name and never called the parser it defined |
+| The parity matrix holds `Geo.Location` (`LocationMatrix`), core-only failures included. A vector lists the paths only the scalar core fails in `core`, and `want` names them as the core does (`parse`, `custom`, `range`), which the generated Go, TypeScript and Rust validators and the TypeScript runtime report. The harness renames them for the others, as D14 recorded: the generated Python validator says `invalid`, once at the field for a list it checks whole; the Go runtime `pattern` and the Python runtime `custom`, which their suites read from the corpus's `core`. The generated Python driver runs in `runtime/schema/python`'s environment, which has superscalar. | Leaving core-only failures out of the matrix, which is how `Geo.Location`'s old row went unnoticed |
+| The Python runtime's validator, parse and normalize registries read a flat name (`Geo_Location`, as the schema JSON form keys a scalar) as its canonical one, as the TypeScript registries do, so validation and parsing reach the core; an empty string, no JSON text, is a missing value it does not ask the core about. | Keeping the gap D14 recorded, under which the Python runtime never checked what a JSON-object scalar holds, nor parsed one to its canonical form |
+| The Go ORM reads and writes a `Geo.Location` column through a `pgtype.Point`, as a date goes through a `pgtype.Date`: a `POINT` is `(x, y)`, x the longitude and y the latitude, and the versioned history decoder reads the `"(x,y)"` text `to_jsonb` writes. sqlgen no longer requires PostGIS for `POINT`, a type of Postgres's own; `geography` and `geometry` still do. | Handing pgx the struct, which sent its JSON text to the column and refused every write; storing the location as `JSONB`, a column type change |
+| A version graph still cannot hold a `Geo.Location`: no value class reads `POINT`. graphdesc's refusal now names what the value holds, `Geo.Location holds a JSON object but is stored as POINT`, where it named a JSON string. | A value class for `POINT`, which needs a canonical form for the version graph's rows first |
+| A Go API route checks a body argument of a JSON-object scalar (`Generic.StringMap`, `Geo.Location`), alone, in a list, a list of lists, a map or a map of lists, on its own JSON. `bodyargs.CheckJSON` takes a `func(raw string) error`, which the route passes in from the scalar Go module (`scalars.ValidatorFor("Geo.Location")`), and runs it on each value's JSON text once the value is a JSON object, before any other rule and before decoding. Its failure is the value's one error, named by the core's kind (`parse`, `custom`, `range`) as the generated types name one. `routes.go` imports the scalar module as `scalars` only for such an argument, and a raw-body check may no longer import its package under that name. | `runtime/http/go` importing superscalar, a direct dependency it has not had; checking after decoding, so the decoded value's failure came first, which names a member that is not a number `type` where every validator says `custom`; checking only `Geo.Location`, which leaves a `Generic.StringMap` value that is not a string `type` in a route and `custom` in every validator |
+
+`TestCatalogRustTypes` builds a crate against superscalar's struct, and
+`TestRemapScalarLibTypeFollowsTheScalarCrate` renames the crate.
+`TestGeneratedGeoLocationIsAnObject` (tsgen) and
+`TestGeneratedGeoLocationIsATypedObject` (pygen, with and without
+superscalar importable) run the generated packages.
+`TestGeneratedJSONObjectScalarsCheckTheirJSON` builds a Go types module
+with `Geo.Location` in every field shape and pins each verdict.
+`LocationMatrix`'s vectors run through the four generated validators and
+the three runtimes. `TestGeoLocationColumnsOnPostgres` writes and reads
+locations through the generated ORM against Postgres, `{0, 0}` among them,
+checks the stored point's coordinates with SQL and reads the history.
+`TestLocationArgsRoutesCheckTheirJSON` (apigen) runs a generated API
+module whose route takes `Geo.Location` in every body-argument shape, and
+`TestWriteAPIGoldenLocationArgs` pins its `routes.go`;
+`TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded` pins where
+`bodyargs` runs the check.
+
+Not built: the ORM does not read or write a list of locations (`POINT[]`),
+and a `POINT` column's generated filter is the string filter, whose
+equality Postgres cannot evaluate for a point.
+
+The rule is reversible until the first release.
+
+### D14, amended: the Go ORM reads and writes a list of locations, and a location filters on IS NULL
+
+The amendment that made `Geo.Location` a {lat, lon} object left two gaps
+in the Go ORM. A list of locations, which sqlgen stores as `POINT[]`, was
+handed to pgx and scanned as a `[]GeoLocation`, which fails, and its
+history decoder read the column's JSON list of `"(x,y)"` texts as
+locations. A single location's filter was `StringFilter`, whose `Eq`, `In`
+and `ILike` Postgres cannot evaluate: a point has no `=` and no `ILIKE`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A list of a scalar stored as `POINT` (`Field.IsGeoPointList`) goes through a `[]pgtype.Point` as a single one goes through a `pgtype.Point`. CreateOne, CreateMany, UpdateOne and UpdateMany write each location as `(lon, lat)`; every scan path reads a `[]pgtype.Point` and converts it, refusing a NULL element at `field[i]` as any native list does; the versioned history decoder reads the JSON list of `"(x,y)"` texts `to_jsonb` writes and refuses a null element. A nil list stays nil, which pgx writes as NULL, and an empty one is an empty `POINT[]`. `utils.go` holds the three conversions once per element type, named after it (`geoLocationPoints`, `copyGeoLocationPoints`, `unmarshalGeoLocationPoints`). | Scanning through `[]*pgtype.Point` and `copyListElements`, which still needs a conversion per element. Inlining the loops at each write and scan site, about ten copies per field. |
+| A single location's filter is `GeoPointFilter`, which has `IsNull` only: `IS NULL` or `IS NOT NULL`. It is the one predicate on a point that needs no choice of geometry, and it is what an optional location is filtered on. Every ORM declares the type, as it does the other filter types. A caller that set `Eq`, `In` or `ILike` on a location no longer compiles; the query it built failed in Postgres. | No filter, which leaves an optional location unfilterable on presence. `Eq` and `In` through `~=`, which Postgres evaluates within 1e-6 on a plane in raw degrees: an exact-coordinate match is rarely what a caller of a location wants, and it would commit the API to that equality before a distance or bounding-box filter, which needs a geodesic choice, exists. |
+
+`TestGeoLocationColumnsOnPostgres` now has a required and an optional list
+of locations. It writes them through CreateOne, CreateMany,
+UpdateOneIfVersion and UpdateMany, a nil list, an empty one and `{0, 0}`
+among them, checks the stored points with SQL, writes points with SQL and
+reads them all back through GetOne, FindMany, ListVersions and GetAsOf. A
+NULL element written with SQL is refused by GetOne and by ListVersions. It
+filters on a location's `IS NULL` and `IS NOT NULL`, and UpdateMany writes a
+list where that filter matches. `TestGenerateGeoLocationColumns` checks the
+generated filter and list conversions without a database, so the quick tier
+covers them too.
+
+Not built: a list of locations keeps `ArrayStringFilter`, which, as for
+every list, adds no condition.
+
+The rule is reversible until the first release.
+
+## D50. A project's users are an opt-in core model: `User` and `UserRole` traits on tables, sessions the core owns, and session routes every server and the engine serve
+
+The routes say what they need (`@auth`, `@requirePermission`, an
+`Authenticated` set), and every server enforces it, but who the caller is
+was the project's to build. The core `session` provider found tables
+named `User(id, name)` and `Session(id, jti, user, expiresAt)` in the
+`authDb` schema, and a table named otherwise was silently not read. It
+had no roles: `session.RoleStore` was the project's, and acme-shop's
+gives every user one fixed role. Nothing signed a user in or out:
+acme-shop's bearer token is its session's jti, stored as written. Only
+the Go server read the tables; the TypeScript and Rust servers and the
+engine take an authenticator the project writes. This entry makes a
+simple user model a core feature a project turns on in its schemas.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A project turns the model on by giving one DB table the core `User` trait, `implements User<{ login: "email" }>` (with `name` beside `login` when the display name is another field), and, for roles, one the `UserRole` trait, `implements UserRole`, both from `@superschematic/db`. A class implements several traits and still extends a base class, so a user table keeps `extends Auditable`. The reader knows the two by their import and records them as `TypeDef.User` (`ir.UserTrait`) and `TypeDef.UserRole`, core IR on D18's and D48's rule, not as `TraitRef`s: the traits are the core's, not types of the schema. Both are omitted when absent, so a schema without them is the same bytes and every output is unchanged. | Class decorators, `@user({ login })` and `@userRole`: a type takes on a shared concept through `implements`, and a decorator would be a second way. A base class, `extends User`: a TypeScript class has one, and tables already extend `Auditable`. The tables found by name, as now, which ignores a table named otherwise. An `extensions` slot, for a concept every server and the engine read. |
+| A DB schema has at most one `User` table. `login` names one of its `@unique` fields typed by a scalar superscalar declares case-insensitive: `Contact.Email` or `Identity.Slug` in most projects. A `string`, or a scalar superscalar does not declare so, is refused. The loader reads the declaration from the scalar catalog, which does not carry it yet: superscalar's Go binding exports no such member in its metadata, so `ScalarDef.CaseInsensitive` is unset for every scalar. The first step needs superscalar to export it, then a pin bump and the catalog regenerated. `name` names a text field (a string, or a scalar whose values are strings, as D48's `titleField`), the login when absent. A `UserRole` table needs a `User` table in the same schema, a `@unique` text `name` and a `permissions` list of strings, and a schema has at most one. The loader refuses each in every form, naming the table and the field. | Several user tables, one per kind of person: the model has one principal, and another kind is a different provider's. A `string` login compared as written, so `Alice@example.com` and `alice@example.com` are two accounts. A list of login scalars in the core, which a scalar superscalar declares later would not join. |
+| The model adds no case handling of its own: the scalar carries it. Its normalize step, in superscalar's one Rust core that every binding calls, puts a value in one case (`Contact.Email`'s trims and lowercases; `Identity.Slug`'s pattern admits lowercase alone). The Go types alias superscalar's, whose `UnmarshalJSON` normalizes, and the schema runtimes' parsers run a scalar's normalize step. The scalar's SQL type is `CITEXT`, `TEXT COLLATE NOCASE` on SQLite, so the column's `@unique` and an equality lookup ignore case even for a row written around the decoders. The identity runtime parses the login it is given with the same scalar, through the binding of its language, and looks the result up by equality. | A `lower(<login>)` index and lookup, which restate what `CITEXT` does. Folding case in the identity runtime, a second rule beside the scalar's that could drift from it. |
+| The core owns the tables that hold secrets and links, and the loader adds them to the schema as it adds a version graph's (D17): `Session` (`id`, `user`, `tokenHash` a unique `Crypto.SHA256`, `createdAt`, `expiresAt`, `lastSeenAt` and `revokedAt` nullable, indexed on `user`), `UserCredential` (`id`, `user` unique, `passwordHash` a `Secret` string holding the PHC string, `passwordChangedAt`, `disabledAt` nullable) and, with a `UserRole` table, `UserRoleGrant` (`id`, `user`, `role`, `grantedAt`, unique on `user` and `role`). Each key is an `AutoGenerate<Identity.UUID>`, each relation cascades from the user and the role, and each added type, field and index has `Origin` `identity` (`ir.OriginIdentity`), so the schema writer writes the traits instead. `ir/identity.go` names every table and field. They are ordinary tables to the DDL, the ORM, the types and migrations (D27). A table the author names `Session`, `UserCredential` or `UserRoleGrant` beside a `User` table is refused. | Tables the author declares with traits of their own (`@session`, `@credential`), which restate in every schema the shape each runtime's queries need. The hash on the user row, where a `@source` view or a select of every column exposes it. Revocation as a soft delete (`deletedAt`), which the ORM's filter hides, the bug D33 fixed. |
+| The DB build writes the identity descriptor, the JSON naming the tables and their columns, and the scalars of the user's key, login and name and of the role's key, as `identity/<schema>.json` beside the Go types and as a constant in the Go, TypeScript and Rust types, as `graphdesc` writes a version graph's (D19, D32). `internal/generator/identitydesc/README.md` is its contract. Each runtime's store reads it: it parses a login with its scalar before looking it up, and a display name before writing it, so a name outside its column's bounds is a 400 on `name`, not a failed write. The Rust server embeds its authDb's descriptor in the API's own crate, whose types have no User table. | Each server generator writing its own queries, three renderings of one shape. |
+| Each server runtime has an identity package: Go `runtime/http/go/identity`, the TypeScript HTTP runtime's `./identity` entry point (which its main entry point does not import), and the Rust runtime crate's `identity` feature. It holds the password hashing, the tokens, the sessions, the cookie, the cross-origin check, the roles and the session routes' handlers, over a store with a Postgres and a SQLite adapter in each: Go over `database/sql` (a server passes pgx's pool through `stdlib.OpenDBFromPool`), TypeScript over `pg` and `node:sqlite` or `bun:sqlite`, and Rust behind `identity-postgres` (tokio-postgres) and `identity-sqlite` (rusqlite). Generated code wires it in and adds no logic. `runtime/http/testdata/identity_parity.json` holds vectors every runtime passes, as D37's do, and its README states the rules they cannot hold. All three read the config, the descriptor and every request body by exact member names, and refuse a config that is not an object, though Go's `encoding/json` matches a name without regard to case and reads `null` into a struct as no change. | ORM store adapters generated per server, the Go path before this entry, for which the TypeScript and Rust servers have no ORM. Login written by each service, where hashing and session handling go wrong one service at a time. |
+| A session's token is 32 random bytes, base64url, and the database keeps the SHA-256 of that 43-character text. A bearer token is exactly 43 base64url characters after `Bearer`, in any case; anything else in `Authorization` is 401. A session ends at `expiresAt`, 14 days after login by default, or when `revokedAt` is set, which logout does. `lastSeenAt` is written at most once a minute, and an optional idle timeout ends a session not seen for that long. The settings are an identity config the three runtimes read as the same JSON, as D37's service auth config is. | Signed JWT access tokens with refresh tokens: keys to rotate, and revocation that waits for expiry or needs the lookup that every request already makes (D33). The token itself in the table, as acme-shop's jti, so a read of the table holds every live session. |
+| Passwords are hashed with argon2id, written as PHC strings (`$argon2id$v=19$m=…,t=…,p=…$salt$hash`) so every runtime verifies every other's: `golang.org/x/crypto/argon2`, `node:crypto`'s `argon2` (Node 24 and Bun) and the `argon2` crate. The default cost is 19 MiB, 2 passes, 1 lane; a login whose hash differs from the config's cost in any parameter writes it again. A salt or hash holding anything outside base64's alphabet is malformed, though Go's strict decoder skips a line break. A password is an `Auth.Password`, the catalog's (8 to 128 characters), so every server and SDK checks one rule, with no composition rule of the model's own; password fields are `Secret` too, so logs mask them. An unknown login runs a verify against a fixed hash, so its timing does not tell it from a wrong password, and every failed login, a disabled user's too, is 401 `invalid_credentials`. | A length rule of the model's own, beside the scalar the catalog has. bcrypt, which reads only the first 72 bytes. scrypt, which every runtime has too, where argon2id is the current recommendation. A hasher a deployment passes: the PHC string names its algorithm, so another can join later. |
+| A session travels as `Authorization: Bearer <token>` or in a cookie, and the client chooses per login: `login`'s input has `session`, `bearer` (the default) or `cookie`. A cookie login sets the cookie and returns no token, so no script reads it. The cookie is `__Host-session`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, with the session's `Max-Age`; with the config's `cookie.domain` it is `__Secure-session` with that `Domain`, so APIs on sibling hosts share it. The `local` target, served over plain HTTP, writes `session` without `Secure`. A server reads `Authorization` first and the cookie only without one; an `Authorization` that fails is 401 and does not fall back. A refused cookie's 401 carries a `Set-Cookie` that clears it. | The server's config choosing the transport, where one API serves a browser app and a CLI. The token in a cookie login's body too, readable by any script on the page. `SameSite=Strict`, which signs out a user who follows a link to the app. |
+| A request the cookie authenticates, and a cookie login, with a method other than `GET`, `HEAD` or `OPTIONS`, passes the check Go's `net/http.CrossOriginProtection` makes: an `Origin` the config's `trustedOrigins` lists passes; otherwise `Sec-Fetch-Site` must be `same-origin` or `none`, and without that header `Origin`'s host must be the request's; a request with neither header passes, since no browser sent it. A refusal is 403 `cross_origin`, before any read of the database. Go runs the standard library's, and TypeScript and Rust the same rule against the parity vectors. A server answers preflights, and adds `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials`, for the trusted origins alone; a server with several APIs routes a preflight by its requested method, and each API's CORS answers its own routes alone. A TypeScript server merges the routers it mounts into one Hono app, so the generated router, `engineApp` and `engineMcp` register their CORS on each of their routes (`identityCorsRoutes`) rather than on a path pattern, under which it would answer another router's requests. A bearer request skips the check. | A CSRF token every form and SDK carries. `SameSite` alone, which a sibling subdomain and an older browser get past. The check on every request, which refuses a cross-origin bearer caller the trusted origins list. |
+| An API serves the session routes with `@userSessions({ path?, login?, register? })` on a class with no methods, and the administration routes with `@userAdministration({ path? })`, both from `@superschematic/api`. The loader reads the API's `authDb` schema, through the build's dependency loader or else the sibling directory, and expands each class into operations and types with `Origin` `identity`, each operation with `FieldDef.IdentityOperation` set (`ir/identity_routes.go` is the contract). So the OpenAPI document, every SDK, the docs and the tool manifest have them as any other, and the OpenAPI document declares each route's refusals (`ir.IdentityOperationErrors`). `login`, `register`, `changePassword`, `createUser` and `setUserPassword` publish no tool, since an agent holds no password. `logout`, `changePassword`, `setUserPassword` and `deleteRole` answer `true` with 200: the schema language has no empty result, and every SDK reads the envelope. The `authDb` must name a schema with a `User` table, and with `@userAdministration` a `UserRole` table too; an API takes one class of each, and the contract's type names are reserved in it. `register: true` and `@userAdministration` create a user row with its key, login and name alone, so the build refuses a User table with another required field that has no default. The routes' implementation is the runtime's: the implementation the project writes has no method for them. | A base class, `extends UserSessions`, which takes no options. The methods written out with a marker decorator each, a shape the core owns restated and refused when it drifts. Routes the runtime mounts beside the schema, which no SDK, OpenAPI document or tool has. A 204 for a route that answers nothing, which the Python and Rust SDKs refuse and no generated server answers. |
+| Every server of an API whose `authDb` has a `User` table authenticates with the identity package, whether or not it serves the session routes and whatever `public` says, so an API verifies the sessions another's login made, and its auth wiring is on when any route needs a caller, the session routes included. Go: the generated `Config` takes `Identity *identity.Service`, which `Validate` requires; `AuthMiddleware` defaults to the service's middleware, and a project's own must authenticate the caller itself, usually by wrapping it; the generated `NewIdentity` gives the service the route table and the permission prefix; and `RegisterRoutes` adds the service's CORS first. TypeScript: `buildRouter` requires `identity` and refuses `authenticate` beside it, and the generated `identityService()` gives the service the route table, so the API's `Deps` declares no `AuthenticatorFactory` and its scaffold no `authenticate` (D51). Rust: `Implementations.authenticator` is an `Arc<IdentityAuthenticator>`, so another authenticator does not compile (D29), and the crate's `identity` module builds the store and the service. The principal is the user's id and name, and its permissions are those of the user's roles. `@requirePermission`, the matcher and `@requireOwnership` do not change; an administration route's permission is the identity service's to check, so it answers the contract's problems. Topcoat's `IdentityPageAuthenticator` reads the same cookie, so pages and the JSON API sign in once. A stack's Go and TypeScript entrypoints build a store per database and a service per API, with the config's JSON from `<API>_IDENTITY`, which the `local` platform defaults to a cookie without `Secure`. A job of such an API (D52) builds neither and reads no `<API>_IDENTITY`: it serves no request, so it verifies no session, and its `Deps` reach the tables through the ORM as they reach any other; a job platform declares no identity config. | The identity package only in the server that serves the routes, which leaves every other server to verify sessions itself. |
+| Roles are rows, and a user holds any number through `UserRoleGrant`. The runtime resolves a session's roles, so the project writes no `RoleStore`. A permission is checked for its form when a role is written (dotted segments of letters, digits, `_` and `-`). `@userAdministration()`, on a class with no methods, adds the routes that create, list, disable and enable users and set a password; create, list, update and delete roles; and grant and revoke them. Disabling a user or setting their password revokes their sessions. The routes need `identity.users.read` or `.write` and `identity.roles.read` or `.write`; the prefix is the naming key `identity_permission_prefix`, `identity` by default, a name on D10's rule. Granting and revoking are idempotent, and revoking needs `roles.write` alone; a user's roles and the role list are ordered by name. | Roles declared in the schema, so a deploy changes who may do what. One role per user. A superuser permission: the matcher has no root permission (D15), and the model adds none. |
+| No one grants what they do not hold: writing a role's permissions, and granting a role, needs the caller's permissions to cover each permission given. | Trusting any holder of `identity.roles.write`, who could grant themselves every permission. |
+| `me` answers the caller's user (`id`, `login`, `name`), roles (`id`, `name`) and permissions, the roles' own without repeats. `capabilities` answers, for each operation of its API an end user may call, keyed by the OpenAPI operation id (`<Namespace><Operation>Handler`), whether the route admits the caller, by the router's own rule (the route requirements in Go, the operation table in TypeScript, `admit` in Rust, D43). An `@requireOwnership` operation answers whether a caller is admitted; whether they own a resource is still the implementation's. An `@requireService` operation is left out. `@userSessions({ login: false })` gives another API `me` and `capabilities` alone. | Each SDK computing capabilities from the permissions, a matcher in four SDKs that is wrong where a project replaces it. Permissions alone, so a UI restates every route's rule. |
+| The engine (D16) uses the model when the project's schemas declare it. `engineApp` and `engineMcp` take `identity`, the TypeScript identity package over the project's descriptor and a store, in place of `authenticate`, and refuse both; `engineIdentity` and `engineIdentityStore` build them over the engine's own storage. `engineApp` serves the session routes under `/auth`, through the router's pipeline so login keeps its rate limit, and `engineMcp` serves none. Its `capabilities` answers `{ operations: { "<namespace>/<schema>.<action>": boolean } }` for `read`, `write`, `define` and `publish` on each live schema the caller may read, from the access policy, with the three writes false in an archived namespace, which refuses them. A behavior's permission, such as a Workflow transition's, is a role's like any other. The runner's principal is not a user and does not change. `permissionPolicy()`, opt-in, allows an action to a caller holding `<schema>.<action>` by the engine's matcher, and refuses a question that names no schema, a namespace's own `manage` and a listing question, which the deployment's own policy answers; the engine keeps no default policy. The identity tables may live in the engine's SQLite file (its own tables are prefixed `engine_` and `bhv_`), a file of their own, or the APIs' Postgres database. | Users as engine instances with a `User` behavior, a second store of users the API servers cannot read. Leaving the engine's authenticator to the deployment, so an engine and an API in one project sign users in twice. |
+| The TypeScript SDK of an API whose authDb has a `User` table takes `credentials`, which it passes to `fetch`, for a cookie session; with it and no `auth`, it sends no token, though one is stored. Every SDK's `login` result feeds its token config for a bearer session. A Go, Python or Rust client keeps no cookies, so its session is bearer. A session has no refresh, so an SDK's refresh after a 401 is the project's (a new login). | |
+| The build writes `permissions.json` beside each API's OpenAPI document (`internal/generator/permcatalog/README.md`): each permission its operations name, sorted, with the operation ids that need it and whether the user model's routes do. An API that names none gets no file. A role editor reads it, and bootstrap warns on a permission no catalog of its authDb's APIs covers. A role is not refused for a permission it does not list, since an engine publishes schemas, and the permissions their behaviors name, at run time. | Refusing an unlisted permission, which refuses every engine permission. |
+| `superschematic-identity bootstrap`, a runner in the HTTP runtime's Go module, given the built descriptor, a database URL, a login and the permissions, creates a role with them, a user with the password it reads from standard input, and the grant, in one transaction, and refuses when a grant exists; on Postgres it locks the grant table, so two runs at once make one administrator. `superschematic identity bootstrap <db-service>` builds the descriptor and runs the runner, found as `$SUPERSCHEMATIC_IDENTITY` or on `PATH`, as `stack dev` finds `superschematic-migrate`. So no database driver enters the compiler's module graph (D27), and a deploy job runs the runner with the descriptor the build wrote and the password on standard input, without the compiler. | Seed rows in the schema, which put a password in the source. The first user to register becoming an admin, a race on every new deployment. The command in the compiler, which puts the drivers in its module graph and the compiler in every job image (D27). |
+| The core model has no organizations or tenancy, single sign-on, second factor or passkeys, email verification, password reset (which needs a channel to send through) or lockout (which lets anyone lock any account; login's rate limit and the hash's cost bound guessing). A later credential kind, such as an OIDC subject, gets a table of its own joined to the user, beside `UserCredential`. A distribution's identity model stays its own `AuthProvider`, which may build on this model or replace it: `AuthModel.User` names the user table, and `AuthModel.Identity` says whether its servers authenticate with the identity package, which acme-schematic's API-key provider clears. | |
+| The `session` provider finds no table by name. `AnalyzeSessionStores` reads the traits, an `authDb` without a `User` table gives no store, and the jti session and principal store adapters go. acme-shop and acme-schematic move to the traits. The `session` package keeps its context helpers, `RequireAuth`, the matchers and the store interfaces an extension's provider uses. | Reading `User` and `Session` by name beside the traits, two spellings of one thing, as D36 refused for `@publicRoute`. |
+
+The session routes, under the class's `path`, `auth` by default:
+
+| Operation | Route | Rule |
+| --- | --- | --- |
+| `login` | `POST auth/login`, `{ login, password, session? }`, answers `{ user, expiresAt, token? }` | `@publicRoute`, rate-limited |
+| `logout` | `POST auth/logout`, revokes the caller's session and clears the cookie | `@auth` |
+| `me` | `GET auth/me` | `@auth` |
+| `capabilities` | `GET auth/capabilities` | `@auth` |
+| `changePassword` | `POST auth/password`, `{ current, password }`, revokes the user's other sessions | `@auth`, rate-limited |
+| `register`, with `register: true` | `POST auth/register`, `{ login, name?, password, session? }` (`name` when the trait names a name field), answers as `login` | `@publicRoute`, rate-limited |
+
+The administration routes, under `auth/admin` by default, and the rate limits are in `ir/identity_routes.go`.
+
+Status: built. The traits, the tables the loader adds and the
+descriptor; the session and administration routes in the IR, the
+OpenAPI document, every SDK and the tool manifest; the identity package
+in Go, TypeScript and Rust, which pass one set of parity vectors; the Go,
+TypeScript and Rust servers, the stack's Go and TypeScript entrypoints,
+the engine, Topcoat's page authenticator and the TypeScript SDK's cookie
+session; the permission catalog; and the bootstrap runner. A job's
+entrypoint builds no identity service (`TestIdentityEntrypointGolden`).
+Each server's generator tests drive the routes end to end through its
+own SDK on SQLite, and on Postgres when
+`SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set. A schema without the
+traits builds the same bytes.
+
+acme-shop's users are the model's. `shop-db`'s `User` and `Role` take
+the traits; `shop-api` serves the session and administration routes;
+and both Go servers, the Rust server and the Topcoat app authenticate
+with the identity package, the app with a sign-in form that starts a
+cookie session in process. The storefront's API names no `authDb`, so
+it keeps its own `authenticate`, which its TypeScript entrypoint in
+`shop-stack` calls (D51).
+
+A TypeScript entrypoint builds the store with `postgresIdentityStore`
+over the pool `Deps.db` holds, from the `identityDescriptor` the authDb's
+TypeScript types export, which its `package.json` depends on, so the
+authDb enables TypeScript types. servergen's
+`TestTypeScriptIdentityEntrypointServes` runs one under Bun with no
+database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
+on Postgres.
+
+Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
+the Go and TypeScript ones do; and a check of an `@envVars` field that
+collides with it outside a stack.
+
+The design is reversible until the first release.
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
 
 The gcp target's Cloud Run platform sets every service's resource limits,
@@ -4701,6 +4984,224 @@ non-boolean, and a job's task, which has no `cpuIdle`; the gcp goldens and
 the Pulumi render goldens hold `cpuIdle: true` on every service. None of
 it has run against Google Cloud, where the next plan of a deployed
 environment updates each service.
+
+## D53. A queue is a table a DB service declares, in its dialect, and a worker is a deployable an API declares to handle it
+
+Milestone 7 of `docs/stack-model.md` left queues and workers after jobs
+(D52). The engine's work queue (D16) is TypeScript only, and its single
+SQLite writer cannot run on Cloud Run. The maintainer chose queues built
+on the DB layer the stack already places, so the schema author picks the
+backing by picking the database.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A DB service declares a queue with `@queue` on a message class: `retries`, `backoff`, and the claim's lease, all optional. sqlgen writes its table in the service's dialect, and the migration plan (D27) carries it. The database the stack places the service on (the local Postgres container, Cloud SQL, SQLite, D1 when a target offers it) is the queue's backing. | Pub/Sub or Cloud Tasks per target, a deployable with edges of its own and an emulator locally, whose push delivery puts Google's token in `Authorization` (D37). The engine's Queue and Lease behaviors, TypeScript only and not deployable to Cloud Run. A queue declared on an API naming its DB, which ties enqueue to one API. |
+| The DB's ORM gains a typed `Enqueue` per queue that takes the caller's transaction, so a message commits with the writes that caused it. Each dialect claims its own way: `FOR UPDATE SKIP LOCKED` on Postgres, a write transaction on SQLite and D1. An expired claim returns the message to ready. Delivery is at least once; a handler that fails retries after the backoff, up to the retries, and then the message is dead. | A separate outbox table and relay. Exactly-once delivery, which no backing offers across a crash. |
+| An API declares `@worker({ queue, concurrency })`. Its implementation implements a typed handler per worker with the API's `Deps`, through a generated `Workers` interface and scaffold. Each worker is a deployable of kind `worker` by default, named after its API and its class, with its API's edges and identity, as a job (D52). The queue's DB must be the API's `authDb` or one of its DB dependencies. | A worker declared in the stack, whose code would get no `Deps`. A long-running `Run(ctx)` the engineer loops in, which each worker would write again. |
+| A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
+| On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+## D54. A bucket is a service of the core kind Bucket that APIs list in their config, private, reached through a provider-neutral interface
+
+Milestone 7 left buckets for later. An API that stores files needs a
+bucket in `Deps`, so the API must declare the need where its generator
+can see it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A bucket is a service of the core kind `Bucket`, with a sentinel, and an API lists the buckets it uses in its config, `buckets: [ShopMedia]`, as it lists `calls`. Several APIs may share one. Each Bucket service in a stack is a deployable of kind `bucket`, and the API's server, jobs and workers each get a `bucket` edge to it. | `@bucket` on an API, which other APIs could reach only by calling the owner. A bucket declared in the stack, which no API's generator sees. |
+| A bucket edge derives a field holding the bucket's name and how to reach it: on gcp the name alone, since the workload's account reaches it; locally the emulator's endpoint as well. The Go and TypeScript runtimes read it, held to one encoding by the shared vectors (D51). | Credentials in the field, which a workload identity makes unnecessary on gcp. |
+| `Deps` gains a `Bucket` per listed bucket: a provider-neutral interface in each runtime to put, get, delete and list objects and to sign a URL for one. The GCS implementation is linked only into a workload some environment places on gcp, as the Cloud SQL connector is (D30, amended), and reads `STORAGE_EMULATOR_HOST`. | A configured provider client in `Deps`, whose type would fix one provider for every environment. The provider's client in the runtime modules, which every generated module requires. |
+| Buckets are private. A browser reaches an object through a signed URL, signed on gcp by IAM's `signBlob` as the workload's own account, which also avoids Cloud Run's 32 MiB request limit. | Public-read buckets, which need an exception to the no-public-grants rule and overlap static sites (D55). |
+| `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
+| On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+## D55. A static site is a service of the core kind Site, built once, configured per environment when it loads, and served on gcp from a bucket behind the load balancer
+
+Milestone 7 left static sites for later. A site is a directory a
+front-end build writes, served as files; a front end rendered on a server
+is a TypeScript or Rust server, not a site.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A site is a service of the core kind `Site`. Its config names the APIs it `calls`, its build script, its output directory and its single-page fallback. Its code sits at its implementation path in the Bun workspace (D51), so it imports the SDKs of the APIs it calls, and the build writes a typed browser config there that returns a client per API. | `@site` in the stack, whose code would get no generated config and whose edges the stack would restate. |
+| A site gets a `site` edge to each API it calls, which must be exposed. The edge derives the API's public address and nothing else, since the browser carries its end user's token. Platforms gain a public address beside their internal one, which the generic connector will also need. | A site edge to an unexposed API, which no browser can reach. |
+| One build serves every environment. The site reads `/__superschematic/config.json` when it loads, which the deploy writes per environment with each API's public address and never caches. | Environment variables at build time, which need a build per environment and per preview member, and an image promoted from Staging could not carry. |
+| Each API answers CORS for the origins of the sites that call it, derived into a field of the API as its callers are (D37), and checked by the Go and TypeScript runtimes. | One load balancer per environment routing `/` to the site and API paths to servers, which needs an environment-wide exposure lowering and an end to every API mounting at `/api`. CORS on the load balancer, which `stack dev` would not have. |
+| The deploy builds the site after a frozen install, digests its output as it digests a build context (D46), and uploads through a new target seam beside `Builder` when the digest changes. The manifest records the digest, so a rollback points back to it. | Files as resources of the graph, whose digests D46 keeps out of it. |
+| On gcp the output goes to a bucket under a prefix per digest, served by a backend bucket with Cloud CDN behind the HTTPS load balancer exposure builds, with the fallback on the URL map. The deploy uploads, then points the URL map at the new prefix, so the switch is atomic. A site is always exposed. | A Cloud Run container serving the files, with cold starts and an image per change. Firebase Hosting, with a second certificate path and a project onboarded to Firebase. |
+| `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
+| superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
+
+Status: not built.
+
+The rule is reversible until the first release.
+
+### D55, amended: the typed browser config hands out each API's base URL and a client factory, and imports no SDK, until superscalar bundles for the browser
+
+D55 made superscalar's browser build a prerequisite of a site's SDKs.
+Building the sites found what a browser bundle of a generated SDK needs
+from superscalar, at the commit `superscalar.pin` names:
+
+- The SDK imports its types package, whose validators import
+  `superscalar/scalars` and `superscalar/validation`. `superscalar/scalars`,
+  and the package's root, import their scalar backend by a relative path
+  (`./backend`), so the `browser` export condition superscalar declares on
+  `superscalar/backend` never reaches them: a bundle takes the Node
+  backend, with `node:module`, `node:url` and the napi addon, and `bun
+  build --target=browser` refuses it.
+- The browser backend (`backend.browser.mts`) imports wasm-pack's
+  `bundler` target, which a bundler with WebAssembly ESM integration
+  instantiates (webpack's `asyncWebAssembly`, a Vite plugin). Bun's
+  bundler takes a `.wasm` import as a file and hands back its path, so
+  `wasm.__wbindgen_start` is undefined.
+- The checkout (`scripts/superscalar-dep.sh`) builds neither
+  `wasm-bundler/` nor the browser ESM, and the WebAssembly module is about
+  2.5 MB.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The build writes `config.generated.ts` into the site's package: `loadApis()` returns each API the site calls with its public `baseUrl` and `client(create)`, a factory that hands the base URL to the site's own constructor, its SDK's or any other. It imports no SDK, so a site bundles today and calls its APIs with `fetch`; once superscalar bundles for the browser, the site builds its SDK through the factory, and the config does not change. | A config that imports each API's SDK, which no site's bundle builds today. A Bun build plugin from superschematic that redirects superscalar's backend import to a shim of its own, which would hold another repository's internals. Building superscalar's `bundler` target in `scripts/superscalar-dep.sh`, which Bun's bundler still cannot load. |
+| What superscalar needs, in its own repository: a `browser` condition on `.` and `./scalars` that takes a build importing the browser backend (or a package `browser` map from `./dist/esm/backend.js` to `./dist/esm/backend.browser.mjs`); and a browser backend that instantiates its module without a bundler's integration, such as wasm-pack's `web` target initialized with top-level `await`, or the bytes inlined and `initSync`. superschematic then builds that target in `scripts/superscalar-dep.sh` and pins the commit. | |
+
+Status: built with the rest of D55's first half. The acme shop's
+`web/shop-web` calls shop-api with `fetch` through `loadApis()`.
+
+The rule is reversible until the first release.
+
+### D55, amended: on gcp a site's bucket is public, its fallback needs a backend service on its load balancer, and a site with no domain is served over HTTP
+
+D55 put a site on gcp in a bucket under a prefix per digest, behind a
+backend bucket with Cloud CDN and the HTTPS load balancer exposure builds,
+with the fallback on the URL map. Building it found three things the
+design did not say. A backend bucket reads only objects the public can
+read: Cloud CDN's own account reads a private bucket, but only to fill
+the cache for a signed request, and a browser's requests are not signed.
+A URL map's custom error response, which serves the fallback, does not
+work on a load balancer whose backends are all backend buckets, as
+Google's documentation of custom error responses says. And a certificate
+needs a host, which an environment with no domain does not give a site.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site's bucket grants `roles/storage.objectViewer` to `allUsers`, with uniform access and public access prevention inherited. `nothing-public-unless-exposed` allows it, since a site is always exposed. A project whose organization policy forbids public buckets cannot serve a site. | A private bucket read by Cloud CDN's service account, which serves only signed URLs or cookies. A backend service with an internet network endpoint group in front of `storage.googleapis.com`, whose requests the bucket would still see as anonymous. |
+| A site with a fallback gets an anchor: a backend service with no backends, to which the URL map sends one reserved path, `/__superschematic/none`, so the load balancer has a backend service besides its backend bucket and serves the fallback for a 404, with 200, from the build's prefix. | The bucket's `website.notFoundPage`, one object for the whole bucket, which the bucket node would have to change in the infrastructure step, before the files of the build it names are there, and which answers 404. Routing the paths with no file extension to `index.html`, which a URL map cannot match. |
+| With no domain, the site is served over HTTP on port 80 at its load balancer's address, `http://<address>`, which is its origin in each API's CORS field; the address applies in the infrastructure step, so it is there before the APIs that list it roll out. | No site without a domain. A self-signed certificate, which a browser refuses. |
+| Every file is served `Cache-Control: no-cache`, and the config `no-store`; the backend bucket's CDN takes the objects' headers (`USE_ORIGIN_HEADERS`). Cloud CDN keeps a file and checks with the bucket before it serves it again, so the switch to a new build shows at once whether its cache key holds the path before or after the URL map's rewrite, which Google's documentation does not say. | A long `max-age` for every file but the HTML, which serves a stale file whose name holds no hash of its content. Telling content-hashed files by their names, which a site's own build decides. |
+| The publisher writes a marker object under a build's prefix after its last file, and puts no file of a prefix that holds one. | Listing the prefix, which a partial upload also fills. |
+
+Status: built in `extensions/gcp` (`gcp.site`, `gcp.site-cloudrun`, the
+publisher, `deployer`'s Storage admin role). The gcp, Pulumi render and
+Cloudflare goldens hold the acme shop's site. None of it has run against
+Google Cloud, where the anchor and the rewrite of the root path are the
+first things to check.
+
+The rule is reversible until the first release.
+
+### D44, amended: a form for every input type and every operation a form submits, its controls named by path
+
+The first forms amendment gave a form only to an input type whose fields
+were each a string, a number, a boolean or an enum, since Topcoat's
+`Form<T>` decodes flat names and not `lines[0].quantity`. Every other
+input got none, with its reason in the build log: acme's
+`PlaceOrderInput`, whose `lines` are a list of one to fifty products with
+their quantities and whose `shippingAddress` is a nested object, got
+"field lines is a list or a map". And an operation's arguments beside its
+input, in its path, its query or its body, had no form at all, so a page
+that cancels an order by its id and a reason, or lists orders by a set of
+statuses and a limit, wrote its controls, their rules, their names,
+their parsing and their errors by hand. The router already decodes and
+checks each argument (`ParamSpec`), and `Args::check` runs those rules
+in-process (D43).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `forms` has two kinds of form, which share their controls, their decoding and their errors. An input form, `<Input>Form`, per input type an in-process call takes and the service declares; the user model's operations have no in-process call, since the identity runtime serves them (D50), so login's input and the administration routes' arguments get no form, and a page signs a user in through the identity service. An argument form, `<Ns><Op>ArgsForm`, named after its `Args` struct, per operation a form submits: a GET operation with a query argument, whose form is a filter, and any other operation with an argument beside its input. A GET whose path carries its only arguments, `getOrder(id)`, is a link, and an operation whose only argument is its input uses the input's form. An argument form embeds its input's form as `input`, so one `<form>`, one `parse()` and one component cover every argument. `outputs.topcoat.forms` turns both off. | A module per kind, which split one feature and its helpers; a switch of its own for argument forms; an argument form for a GET by id, a form with nothing to fill; an argument form wrapping an input form alone |
+| A control is named by its field's path, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`; an argument by its name, beside its input's fields. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, a list of an enum's members `Vec<String>`; an argument is an `Option<String>`, a list argument's values a `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
+| Every form implements `Deserialize` from the pairs a browser sends, which Topcoat's `Form` hands it as `Vec<(String, String)>` for a post's body or a GET's query, so `Form<T>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs; `from_query(cx)` reads a filter outside an extractor. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up; a name no control has, one that is not a path, or one deeper than 32 steps is ignored. An input field takes the last value sent (a checkbox row sends a hidden input of its name first), and an argument the first, as the router reads a parameter sent twice; a list argument's values are every value sent, a query list's split on commas as the router splits it; a blank value is none. An argument form reads its input's fields from the same tree. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize`, which reads no nested name and refuses a repeated key; re-encoding an argument form's other pairs for the input's form to decode again |
+| A form reads what a browser could send it and little more, since a page decodes a post before it asks who sent it. It reads at most 5000 pairs (`MAX_PAIRS`) and none after them, and sets its `overflow`, which `parse` refuses with the form's own message. Of a list's rows it reads one past the list's limit, its `listMax`, or 1000 (`MAX_ROWS`) for a list without one or with one above it, and `parse` refuses a list past the limit at the list, "must contain at most 3 items", as its listMax rule would; the add button shows while the list holds fewer. So a post's cost is a form's, whatever it sent: acme's `POST /orders/new`, which anyone may send, with 20,000 empty lines, 269 KB, rendered every line's errors in 6.5 s and 30.7 MB in release, and now renders 51 lines and the form's message in 5 ms and 40 KB; 4,000 lines render 51 and the list's message. | Reading every row sent, whose errors and answer grew with the rows sent, quadratically; Topcoat's body limit alone, whose 2 MB default holds 160,000 rows; dropping rows past the limit unsaid, which would accept a list cut short; refusing the request in `Deserialize`, which renders no form |
+| An input form's `parse()` writes the struct as the input's JSON and runs `parse_<type>` with undeclared keys refused. An argument form's writes each argument as the JSON a request carries (a blank optional one absent, one with a declared default the default), decodes it into the `Args` struct, parses the input by its form, then runs `Args::check`, which refuses the first argument that breaks a rule; an optional input is parsed only when one of its fields was sent, and is absent when none was, as the API takes no input; `submit(cx)` parses the form and makes the in-process call. | Restating each `ParamSpec`'s rules in the form, which would drift from the router's; making the router's specs public, a change to every Rust server |
+| `FormErrors` keys each message by its control's name, in a map, so a control finds its own messages, and those of the names under it, in a range of names rather than a scan of every message. `parse`'s errors are the validators' paths, flattened (`lines[0].productId`); `from_api` walks the API's nested `errors` as a procedure's `field_errors` does and places a refused parameter's error, which the router's 400 names in `details.parameter`, on that argument's control; `errors.under(name)` gathers a JSON value's or a list's with the place of each. Each form has a `shows` that says which paths its component renders a control for, and a message at any other place (an `@uiHidden` field, a hidden path argument, an undeclared key) renders with the form's own messages, after its name. A value a control cannot hold, a number that is not one, JSON that does not parse, a date-time that does not exist, is refused at the control before the rules run. | Dropping an error no control shows, which would refuse a form with nothing on it; a list of rendered names per component, which a row's names cannot be; a list of names and messages, which each control scanned, quadratic in a form's messages |
+| A control is typed by its field's or argument's type, by one renderer for both kinds, with the attributes its rules give it (`required`, `min`/`max`, lengths, a pattern a browser reads as the server does): a select for an enum; `Temporal.Date` `type="date"` and `Temporal.Time` `type="time"`; `Temporal.DateTime` `type="datetime-local"`, which carries no offset, so the form reads it as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in "(UTC)", a value with an offset sent as it is, and a held value shown in UTC as the control holds it (`2026-10-09T14:30+01:00` as `2026-10-09T13:30`), with its seconds and up to three digits of their fraction, the control taking `step="any"` so a held value with seconds is not refused; an integer reads any whole number a number input sends in an i64's range, `1e1` and `2.0` too; a `@secret` field `type="password"`, a list of them a password per row, never rendered with its value, since a form holds what a reader types, though a record, which reaches the browser, leaves the field out; and a `<textarea>` of JSON text, "(JSON)" in its label, for a value no control holds: a union, any JSON value, a map, a list of lists, an argument's object or list of booleans, or a type that nests the type holding it. A description is a hint under the label (`aria-describedby`); an argument is labeled by its name in words. | Text holding the canonical RFC 3339 form, which a reader would type by hand; reading the local time in the server's zone; showing a held value as sent, which a browser blanks when it has an offset; a map as key and value rows, whose errors (`labels.vip`) name a key a row may have changed; leaving an operation or an input without a form for one such value |
+| A nested object is a `<fieldset>` with its label as `<legend>`. An optional one is part of the input only when one of its values was sent: its controls are never `required`, its select has a blank option, and a new form starts it empty, its `@default`s left to the API. A list of objects is a fieldset of rows, each numbered by the row type's `@display` noun, else the list's label, after a hidden input of the row's name that keeps a row whose controls send nothing; an input's list of values is a control per row, and a blank row is null, which the rules refuse at the row; a list of an enum's members is a group of checkboxes in the enum's order; an argument's list of values is an input per value sent and a blank one for another. `new()` is a new form, each value's `@default` filled in and each list's first rows, its `listMin` or one when the input requires it, and the component's default; an argument form's `new(<path arguments>)` fills its hidden path inputs, each argument's default and the input's new form. `Default` is the empty form. | A checkbox that includes an optional object, one more control to tick; prefilling an optional object's defaults, which would send the object a reader left blank; rows for a list of an enum's members, which would let a reader pick a member twice |
+| A row is added and removed without JavaScript, by submit buttons named `_action`: `add:lines` after a list's rows, with the row type's `@display` createLabel as its text, until the list holds its limit, `listMax` or `MAX_ROWS`, and `remove:lines[1]` in each row while it holds more than its `listMin`. They carry `formnovalidate`, so a row can be added before the others are valid, and the component renders a hidden submit button ahead of them, which Enter presses. The form holds the button in `row_action`; `apply_action()`, on the input's form and on an argument form that embeds it, applies it within the bounds, numbering the rows after a removed one again with their values as sent, and is true when a row button submitted the form, in which case the page renders the form again, 200, without calling the operation. A form keeps its names: an input field named `overflow`, or in a form with rows `row_action` or the JSON name `_action`, fails the build, and an argument so named gets no argument form. | Script that clones a row; a route per action; a row count field, which a reader could set past the bounds |
+| A filter's boolean is a select of Yes (`true`) and No (`false`), after a blank option when the filter may leave it out, which reads the argument's declared default or filters nothing; a new form selects the default. Any other boolean argument is a checkbox, as an input's field is: unchecked is false whatever the default, which only checks a new form's box when it is true. A path's boolean reads `true` or `false`. | A filter's checkbox, whose unchecked box sends nothing, as a flag left out does: false could not be filtered on, and a flag whose default is true read true checked or not; reading an action's unchecked box as its default, which a default of true made impossible to turn off |
+| The app supplies choices: `Choices` maps a field's path without its rows' indexes (`lines.productId`, every line's) or a control's name (`lines[0].productId`, one line's, which wins) to value and label pairs, and either kind of component renders each text or number control it names as a `<select>` (`choice_select`, one call per control), a blank option first, keeping the value held as an option when no choice is it. The generator infers no picker. | Inferring a table from an id's name or type, which an input type does not declare (`productId` is a plain `Identity.UUID`); an inline select per control, which doubled the generated view |
+| A flat input form keeps its public shape: `WriteReviewInputForm`, `Form<WriteReviewInputForm>`, `parse()`, `write_review_input_fields(form, errors)`, `FormErrors::from_api` and `FormErrors::of`, and it renders the same HTML. Each component also takes `choices`, and each prop is optional; each form gains `overflow`, and `FormErrors::fields` is a map of names. | |
+
+Status: built. The goldens cover a seventh fixture, the extension's own
+`fixture-args-api`: a filter of a list of enums, a list of strings, a
+limit, an integer page, a flag and two flags with defaults, true and
+false, in the query; an order fetched by its id alone, which has no
+argument form; a cancel by a path UUID, an enum and an optional reason
+with `maxLength` and a description in the body; a hold by a path UUID
+and two flags with defaults in the body; a note by a path UUID and an
+optional input; a review written by a path id and an input; and a tag
+map, which its form holds as JSON text. `fixture-forms-api` gains
+`BookingInput`: a required nested `Guest` with an optional field, an
+optional nested `BillingAddress`, `rooms` of one to three
+`RoomRequest`s, each with an id, a bounded integer and a list of
+`Amenity` members, a list of `Amenity` members, a date, a time, a
+date-time, a secret, a list of secrets without a listMax, a default, any
+JSON value and a map; `NoteInput`'s `tags` are rows of at most three.
+`TestFormsServeATopcoatApp` drives a Topcoat app through
+`Router::handle`: the booking form renders its controls at their names
+with their attributes; a valid nested post books with the input's JSON,
+the date-time in UTC, the blank billing address left out and the default
+filled in; a refused field, nested or in a row, renders 422 at its
+control with the values as sent and the secrets blank, a list of them
+too, as does a value no control holds and the operation's refusal of a
+row's field; a held date-time renders in UTC, its seconds and fraction
+kept; an integer reads `1e1` and `2.0` and refuses `2.5` and `1e19`; row
+buttons add and remove rooms within one and three without calling the
+operation; choices render a select, a row's own winning; and 50,000
+posted rooms render 4 rows and the form's message in under 64 KB, 4,000
+the list's, while a list without a listMax holds 1001 rows.
+`TestArgumentFormsServeATopcoatApp` does the same for fixture-args-api:
+the cancel form renders its id hidden, its select required and its
+reason's `maxlength` and hint; a valid post calls the operation, a blank
+reason absent; an over-long reason re-renders with 422 and the router's
+message at its control, a forged id with the form's message naming it,
+and the operation's refusal as the form's; the GET filter reads repeated
+statuses, a comma-separated tag list, a limit, a page and its flags from
+the query and renders them checked, filled and selected, a blank flag
+absent or its default, `false` read as false, `on` refused, and a limit
+out of range at its control; the hold form's unchecked boxes are false
+whatever their defaults; the note form calls without its optional input
+when none of its fields is sent; the review form, its input embedded,
+parses both; the tag map is JSON text, refused at its control when it
+does not parse; choices make the reason a select; and a query of 5001
+pairs is the form's error. `TestEveryInputHasAForm`,
+`TestWhatHasNoArgumentForm`, `TestHowAFormHoldsAField`,
+`TestArgumentControls`, `TestBooleanArguments`,
+`TestAFormHoldsBoundedRows`, `TestASecretRowReadsNoValue`,
+`TestReservedNames`, `TestArgumentsTheFormKeeps` and `TestControlNames`
+check the generator, and `TestIdentityOperationsHaveNoForm` that
+fixture-user-routes-api, whose other operation takes nothing, writes no
+forms. acme-shop's crate gains `PlaceOrderInputForm` and argument forms
+for `cancelOrder`, `listOrders`, `listReviews` and `writeReview`. Its app
+places an order through the first at `/orders/new`, a row per line and
+each line's product a select of the app's catalog (`PlaceOrderLine`'s
+`@display` numbers the rows and labels the add button), filters
+`/orders` through the `listOrders` form, keeping the route's 401 and 403,
+and cancels an order from its page through the `cancelOrder` form, with
+the route's id in place of the hidden input's. A page whose operation
+refuses a signed-out shopper shows a Sign in button, which opens the
+app's sign-in page, over the identity service, and comes back to the
+page after it, a path of the app only. Its tests drive each page through
+`Router::handle`, in memory and over SQLite: a row added without placing
+the order, a quantity refused at `lines[0].quantity`, a limit refused at
+`limit`, a reason past its 500 characters refused at `reason`, a second
+cancel's 409 as the form's message, and a signed-out post of 4,000 or
+50,000 lines rendered with 51.
 
 The rule is reversible until the first release.
 

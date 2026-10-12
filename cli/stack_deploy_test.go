@@ -362,7 +362,7 @@ func TestStackBuild(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Equal(t, map[string]string{"demo-api": image}, result.Images)
 	_, err = run("build", "Staging", "--server", "demo-db")
-	require.ErrorContains(t, err, "has no server or job demo-db")
+	require.ErrorContains(t, err, "has no server, job or site demo-db")
 
 	// --no-build with no image anywhere is refused; a deploy builds.
 	_, err = run("deploy", "Staging", "--no-build")

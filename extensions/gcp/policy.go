@@ -37,7 +37,9 @@ func checkHighAvailability(env *ir.ResolvedEnvironment) []string {
 var publicMembers = []string{"allUsers", "allAuthenticatedUsers"}
 
 // checkNothingPublic refuses anything that admits the public on behalf of
-// a deployable that is not exposed, or of no deployable at all:
+// a deployable that is not exposed, or of no deployable at all. A site is
+// always exposed (D55), so its load balancer and its bucket's grant to
+// allUsers pass:
 //
 //   - a Cloud Run service of an internal server that takes traffic from
 //     outside, or whose invoker check is off;

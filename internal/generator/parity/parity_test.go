@@ -127,6 +127,16 @@ const schemaConfigJSON = `{
 // array holds is the scalar core's check, whose name differs by validator,
 // so no vector breaks it.
 //
+// LocationMatrix holds Geo.Location, a JSON object of exactly two numbers,
+// {"lat": ..., "lon": ...} (D14, amended): the object is a value, and so is
+// its JSON text where StructuredMatrix's are; {"lat":0,"lon":0} is a value;
+// null, absence and an empty string are a missing value; any other JSON
+// type is "type". What the object holds is the scalar core's check: the
+// "lat,lon" string is "parse", an unknown, missing or duplicate key or a
+// member that is not a number is "custom", and a degree out of range is
+// "range". Those failures are core-only (D14): a vector lists their paths
+// in core, and each validator names them its own way (coreFailureName).
+//
 // ScalarRuleMatrix holds scalar fields with rules of their own
 // (Validate<Generic.Int64, { min: 0 }>): the scalar's validation runs
 // first, and the field's minLength, maxLength, pattern, min and max follow
@@ -182,6 +192,10 @@ const parityMatrixSchemaJSON = `{
     },
     "Temporal.DateTime": {
       "name": "Temporal.DateTime",
+      "languagePrimitive": "string"
+    },
+    "Geo.Location": {
+      "name": "Geo.Location",
       "languagePrimitive": "string"
     }
   },
@@ -436,6 +450,25 @@ const parityMatrixSchemaJSON = `{
         }
       ]
     },
+    "LocationMatrix": {
+      "name": "LocationMatrix",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "reqLoc",
+          "typeRef": { "name": "Geo.Location" },
+          "required": true
+        },
+        {
+          "name": "optLoc",
+          "typeRef": { "name": "Geo.Location" }
+        },
+        {
+          "name": "locList",
+          "typeRef": { "name": "Geo.Location", "isArray": true }
+        }
+      ]
+    },
     "ScalarRuleMatrix": {
       "name": "ScalarRuleMatrix",
       "role": "EmbeddedStruct",
@@ -546,7 +579,26 @@ type parityVector struct {
 	// the expected answer for those languages, not a pin: see the package
 	// comment.
 	decodeRejects []string
+	// core lists the paths in want whose failure only the scalar core finds
+	// (D14). want names each as the core's binding does; a validator that
+	// names such a failure its own way reports coreFailureName's name there
+	// instead.
+	core []string
 }
+
+// coreFailureName is the name a generated validator gives a failure only
+// the scalar core finds, when it does not use the core's own (D14): the
+// generated Python validator says "invalid". The generated Go, TypeScript
+// and Rust validators use the core's name. Of the schema runtimes, which
+// read the corpus's core list in their own suites, the TypeScript one uses
+// the core's name, the Go one says "pattern" and the Python one "custom".
+var coreFailureName = map[string]string{"python": "invalid"}
+
+// coreFailureAtField lists the validators that check a list field's values
+// together and so name a core-only failure in it once, at the field: the
+// generated Python validator hands an optional list to the list's
+// TypeAdapter (D14).
+var coreFailureAtField = map[string]bool{"python": true}
 
 // decodeRejected is the verdict a driver reports for a payload its typed
 // decoder refused.
@@ -1510,6 +1562,123 @@ var vectors = []parityVector{
 		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "url": "https://caf\u00e9.test"}`,
 		want:    map[string][]string{"url": {"pattern"}},
 	},
+
+	// Geo.Location holds {"lat": ..., "lon": ...} (D14, amended). The object
+	// is a value, and so is its JSON text where StructuredMatrix's is; the
+	// zero location {0, 0} is one. What the object holds is superscalar's
+	// check, a core-only failure (core): the "lat,lon" string is "parse", an
+	// unknown or missing key and a member that is not a number "custom", a
+	// degree out of range "range". The Go decoder refuses a member or value
+	// of the wrong JSON type, and Python's strict parse refuses a required
+	// location superscalar refuses; its validate_all checks an optional one.
+	{
+		name:     "location_value",
+		typeName: "LocationMatrix",
+		payload:  `{"reqLoc": {"lat": 37.7749, "lon": -122.4194}, "optLoc": {"lat": 0, "lon": 0}, "locList": [{"lat": 90, "lon": -180}, {"lon": 180, "lat": -90}]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:          "location_text",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": "{\"lat\": 37.7749, \"lon\": -122.4194}", "optLoc": "{\"lat\": 0, \"lon\": 0}", "locList": ["{\"lon\": 2, \"lat\": 1}"]}`,
+		want:          map[string][]string{},
+		decodeRejects: []string{"go", "rust"},
+	},
+	{
+		name:          "location_required_out_of_range",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": 91, "lon": 0}}`,
+		want:          map[string][]string{"reqLoc": {"range"}},
+		core:          []string{"reqLoc"},
+		decodeRejects: []string{"python"},
+	},
+	{
+		name:          "location_required_unknown_key",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": 1, "lon": 2, "alt": 3}}`,
+		want:          map[string][]string{"reqLoc": {"custom"}},
+		core:          []string{"reqLoc"},
+		decodeRejects: []string{"python"},
+	},
+	{
+		name:          "location_required_missing_key",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": 1}}`,
+		want:          map[string][]string{"reqLoc": {"custom"}},
+		core:          []string{"reqLoc"},
+		decodeRejects: []string{"python"},
+	},
+	{
+		name:          "location_required_lat_lon_string",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": "37.7749,-122.4194"}`,
+		want:          map[string][]string{"reqLoc": {"parse"}},
+		core:          []string{"reqLoc"},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "location_required_member_not_a_number",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": "37.7749", "lon": -122.4194}}`,
+		want:          map[string][]string{"reqLoc": {"custom"}},
+		core:          []string{"reqLoc"},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:     "location_optional_core_failures",
+		typeName: "LocationMatrix",
+		payload:  `{"reqLoc": {"lat": 0, "lon": 0}, "optLoc": {"lat": 0, "lon": -180.5}, "locList": [{"lat": 0, "lon": 0}, {"lat": 1, "lon": 2, "alt": 3}, {"lon": 5}, {"lat": -91, "lon": 0}]}`,
+		want:     map[string][]string{"optLoc": {"range"}, "locList[1]": {"custom"}, "locList[2]": {"custom"}, "locList[3]": {"range"}},
+		core:     []string{"optLoc", "locList[1]", "locList[2]", "locList[3]"},
+	},
+	{
+		name:          "location_optional_lat_lon_string",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": 0, "lon": 0}, "optLoc": "37.7749,-122.4194", "locList": ["1,2"]}`,
+		want:          map[string][]string{"optLoc": {"parse"}, "locList[0]": {"parse"}},
+		core:          []string{"optLoc", "locList[0]"},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:          "location_optional_member_not_a_number",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": {"lat": 0, "lon": 0}, "optLoc": {"lat": "1", "lon": 2}}`,
+		want:          map[string][]string{"optLoc": {"custom"}},
+		core:          []string{"optLoc"},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:          "location_wrong_type",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": [37.7749, -122.4194], "optLoc": 42, "locList": [{"lat": 0, "lon": 0}, true]}`,
+		want:          map[string][]string{"reqLoc": {"type"}, "optLoc": {"type"}, "locList[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:     "location_required_null",
+		typeName: "LocationMatrix",
+		payload:  `{"reqLoc": null}`,
+		want:     map[string][]string{"reqLoc": {"required"}},
+	},
+	{
+		name:     "location_required_absent",
+		typeName: "LocationMatrix",
+		payload:  `{"optLoc": {"lat": 1, "lon": 2}}`,
+		want:     map[string][]string{"reqLoc": {"required"}},
+	},
+	{
+		name:     "location_optional_null",
+		typeName: "LocationMatrix",
+		payload:  `{"reqLoc": {"lat": 0, "lon": 0}, "optLoc": null, "locList": null}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:          "location_empty_text",
+		typeName:      "LocationMatrix",
+		payload:       `{"reqLoc": "", "optLoc": "", "locList": [""]}`,
+		want:          map[string][]string{"reqLoc": {"required"}},
+		decodeRejects: []string{"go"},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with
@@ -1601,7 +1770,28 @@ func expectedVerdicts(lang string, v parityVector) map[string][]string {
 			return decodeRejected
 		}
 	}
-	return v.want
+	return withCoreFailureNames(lang, v)
+}
+
+// withCoreFailureNames is v.want with each core path renamed as lang names
+// a core-only failure (coreFailureName).
+func withCoreFailureNames(lang string, v parityVector) map[string][]string {
+	name, ok := coreFailureName[lang]
+	if !ok || len(v.core) == 0 {
+		return v.want
+	}
+	want := make(map[string][]string, len(v.want))
+	for path, validators := range v.want {
+		want[path] = validators
+	}
+	for _, path := range v.core {
+		if coreFailureAtField[lang] {
+			delete(want, path)
+			path, _, _ = strings.Cut(path, "[")
+		}
+		want[path] = []string{name}
+	}
+	return want
 }
 
 // assertVerdicts compares one language's results against the expected column,
@@ -1653,6 +1843,13 @@ func TestParityTableIsConsistent(t *testing.T) {
 		}
 		byName[v.name] = v
 	}
+	for _, v := range vectors {
+		for _, path := range v.core {
+			if len(v.want[path]) != 1 {
+				t.Errorf("%s: core path %s must fail with exactly one validator in want, got %v", v.name, path, v.want[path])
+			}
+		}
+	}
 	for lang, pins := range knownDivergences {
 		for name, pinned := range pins {
 			v, ok := byName[name]
@@ -1690,6 +1887,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &JsonMatrix{}
 	case "StructuredMatrix":
 		return &StructuredMatrix{}
+	case "LocationMatrix":
+		return &LocationMatrix{}
 	case "ScalarRuleMatrix":
 		return &ScalarRuleMatrix{}
 	case "PatternMatrix":
@@ -1763,6 +1962,7 @@ const tsDriver = `import { readFileSync, writeFileSync } from 'node:fs';
 import {
   validateJsonMatrix,
   validateListMatrix,
+  validateLocationMatrix,
   validateParityMatrix,
   validatePatternMatrix,
   validateScalarRuleMatrix,
@@ -1788,6 +1988,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   ListMatrix: validateListMatrix as never,
   JsonMatrix: validateJsonMatrix as never,
   StructuredMatrix: validateStructuredMatrix as never,
+  LocationMatrix: validateLocationMatrix as never,
   ScalarRuleMatrix: validateScalarRuleMatrix as never,
   PatternMatrix: validatePatternMatrix as never,
 };
@@ -1843,6 +2044,7 @@ fn check(type_name: &str, payload: Value) -> Verdicts {
         "ListMatrix" => verdicts(validators::parse_list_matrix(payload, Allow)),
         "JsonMatrix" => verdicts(validators::parse_json_matrix(payload, Allow)),
         "StructuredMatrix" => verdicts(validators::parse_structured_matrix(payload, Allow)),
+        "LocationMatrix" => verdicts(validators::parse_location_matrix(payload, Allow)),
         "ScalarRuleMatrix" => verdicts(validators::parse_scalar_rule_matrix(payload, Allow)),
         "PatternMatrix" => verdicts(validators::parse_pattern_matrix(payload, Allow)),
         other => panic!("unknown type {other}"),
@@ -2083,13 +2285,17 @@ func TestGeneratedValidatorParity(t *testing.T) {
 	})
 
 	t.Run("python", func(t *testing.T) {
-		pythonPath, err := exec.LookPath("python3")
+		// The generated package calls superscalar when it can import it, so
+		// the driver runs in runtime/schema/python's environment, which has
+		// superscalar and pydantic; the system python3 may have neither.
+		uvPath, err := exec.LookPath("uv")
 		if err != nil {
-			t.Skip("python3 not available; skipping Python parity check")
+			t.Skip("uv not available; skipping Python parity check")
 		}
-		probe := exec.Command(pythonPath, "-c", "import pydantic")
-		if err := probe.Run(); err != nil {
-			t.Skip("pydantic not available; skipping Python parity check")
+		project := filepath.Join(testpaths.RepoRoot(t), "runtime", "schema", "python")
+		probe := exec.Command(uvPath, "run", "--project", project, "python", "-c", "import pydantic, superscalar")
+		if out, err := probe.CombinedOutput(); err != nil {
+			t.Skipf("runtime/schema/python's environment lacks pydantic or superscalar; skipping Python parity check: %v\n%s", err, out)
 		}
 
 		output, err := pygen.Generate(schema, pygen.Options{
@@ -2105,7 +2311,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 		}
 
 		resultsPath := filepath.Join(sharedDir, "results-py.json")
-		run := exec.Command(pythonPath, "-c", pyDriver(outDir, output.PythonModuleName))
+		run := exec.Command(uvPath, "run", "--project", project, "python", "-c", pyDriver(outDir, output.PythonModuleName))
 		run.Env = append(os.Environ(), "PARITY_VECTORS="+vectorsPath, "PARITY_RESULTS="+resultsPath)
 		if out, err := run.CombinedOutput(); err != nil {
 			t.Fatalf("python driver failed: %v\n%s", err, out)

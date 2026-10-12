@@ -15,144 +15,101 @@ func TestProviderDefinesEverySnippet(t *testing.T) {
 	}
 }
 
-func TestAnalyzeReportsOnlyTheCoreStores(t *testing.T) {
+// userModelSchema is an upstream schema whose user and role tables carry the
+// traits under names of their own, beside tables named User and Session
+// that carry none.
+func userModelSchema() *ir.Schema {
 	upstream := ir.NewSchema("fixture-db", ir.SchemaKindDB)
-	session := &ir.TypeDef{Name: "Session", Role: ir.RoleDBTable}
-	for _, f := range []string{"id", "jti", "user", "expiresAt"} {
-		session.Fields = append(session.Fields, &ir.FieldDef{Name: f})
+	table := func(name string, fields ...*ir.FieldDef) *ir.TypeDef {
+		td := &ir.TypeDef{Name: name, Role: ir.RoleDBTable, Fields: fields}
+		upstream.Types[name] = td
+		return td
 	}
-	upstream.Types["Session"] = session
-	upstream.Types["Tenant"] = &ir.TypeDef{Name: "Tenant", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{{Name: "id"}, {Name: "name"}, {Name: "slug"}}}
+	key := func() *ir.FieldDef {
+		return &ir.FieldDef{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true, Required: true}
+	}
+	account := table("Account", key(), &ir.FieldDef{Name: "email"}, &ir.FieldDef{Name: "displayName"})
+	account.User = &ir.UserTrait{Login: "email", Name: "displayName"}
+	table("Grade", key(), &ir.FieldDef{Name: "name"}, &ir.FieldDef{Name: "permissions"}).UserRole = &ir.UserRoleTrait{}
+	table("User", key(), &ir.FieldDef{Name: "name"})
+	table("Session", key(), &ir.FieldDef{Name: "jti"}, &ir.FieldDef{Name: "user"}, &ir.FieldDef{Name: "expiresAt"})
+	return upstream
+}
 
-	model, err := sessionauth.Provider{}.Analyze(nil, upstream)
+// TestAnalyzeReadsTheUserTrait: the user model is the table with the User
+// trait and the one with the UserRole trait, whatever they are named, and
+// the server then authenticates with the identity runtime (D50).
+func TestAnalyzeReadsTheUserTrait(t *testing.T) {
+	model, err := sessionauth.Provider{}.Analyze(nil, userModelSchema())
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if !model.HasSessionStore || model.HasPrincipalStore {
-		t.Fatalf("model = %+v, want session store only (no User table)", model)
+	want := apigen.UserModel{Type: "Account", Key: "id", KeyType: "Identity.UUID", Login: "email", Name: "displayName", RoleType: "Grade"}
+	if model.User == nil || *model.User != want || !model.Identity {
+		t.Fatalf("model = %+v (user %+v), want %+v with Identity", model, model.User, want)
+	}
+	if !model.User.KeyIsUUID() {
+		t.Error("KeyIsUUID = false for an Identity.UUID key")
 	}
 	if model.Extra != nil {
 		t.Fatalf("Extra = %v, want nil: the session model has no provider data", model.Extra)
 	}
 }
 
-// The ORM filters take the scalar UUID type, so the stores must parse the
-// string ids the runtime hands them instead of taking their address. Found
-// by examples/acme-schematic, whose upstream DB has a User table.
-func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
+// TestAnalyzeFindsNoTableByName: tables named User and Session without the
+// traits are no user model, and neither is a missing upstream schema.
+func TestAnalyzeFindsNoTableByName(t *testing.T) {
+	upstream := userModelSchema()
+	delete(upstream.Types, "Account")
+	delete(upstream.Types, "Grade")
+	for name, schema := range map[string]*ir.Schema{"named tables": upstream, "no upstream": nil} {
+		model, err := sessionauth.Provider{}.Analyze(nil, schema)
+		if err != nil {
+			t.Fatalf("%s: Analyze: %v", name, err)
+		}
+		if model.User != nil || model.Identity {
+			t.Errorf("%s: model = %+v, want no user model", name, model)
+		}
+	}
+}
+
+// TestNoStoreAdapters: the session provider writes no ORM store adapter. A
+// server over the user model authenticates with the identity runtime and
+// gets no store banner and no store aliases; one without keeps the file's
+// bytes.
+func TestNoStoreAdapters(t *testing.T) {
 	snippet, err := apigen.AuthSnippetFunc(sessionauth.Provider{})
 	if err != nil {
 		t.Fatalf("AuthSnippetFunc: %v", err)
 	}
-	data := map[string]any{
-		"Auth":   &apigen.AuthModel{HasSessionStore: true, HasPrincipalStore: true},
-		"Naming": map[string]string{"HTTPRuntimeGoModule": "example.com/http", "ScalarGoModule": "example.com/scalars"},
-	}
-	stores, err := snippet("middlewareStores", data)
-	if err != nil {
-		t.Fatalf("render middlewareStores: %v", err)
-	}
-	for _, want := range []string{
-		"scalars.ParseUUID(jti)",
-		"scalars.ParseUUID(id)",
-		"Eq: &jtiUUID",
-		"Eq: &idUUID",
-		"return runtimesession.Record{}, runtimesession.ErrNotFound",
-		"return runtimesession.Principal{}, runtimesession.ErrNotFound",
-		"ExpiresAt:   time.Time(session.ExpiresAt)",
-	} {
-		if !strings.Contains(stores, want) {
-			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
-		}
-	}
-	// Without SessionSoftDelete the store leaves soft-deleted rows to the
-	// ORM's filter: it could not report their DeletedAt.
-	for _, reject := range []string{"Eq: &jti}", "Eq: &id}", "session.DeletedAt", "IncludeDeleted"} {
-		if strings.Contains(stores, reject) {
-			t.Fatalf("middlewareStores still has %q:\n%s", reject, stores)
-		}
-	}
-	imports, err := snippet("middlewareImports", data)
-	if err != nil {
-		t.Fatalf("render middlewareImports: %v", err)
-	}
-	if !strings.Contains(imports, `scalars "example.com/scalars"`) {
-		t.Fatalf("middlewareImports = %q, want the scalar import the stores use", imports)
-	}
-	std, err := snippet("middlewareStdImports", data)
-	if err != nil {
-		t.Fatalf("render middlewareStdImports: %v", err)
-	}
-	// middleware.go imports "time" for every provider; a second import
-	// from the snippet would not compile without go/format removing it.
-	if !strings.Contains(std, `"errors"`) || strings.Contains(std, `"time"`) {
-		t.Fatalf("middlewareStdImports = %q, want errors and not time", std)
-	}
-	none, err := snippet("middlewareImports", map[string]any{"Auth": &apigen.AuthModel{}, "Naming": data["Naming"]})
-	if err != nil {
-		t.Fatalf("render middlewareImports without stores: %v", err)
-	}
-	if strings.Contains(none, "scalars") {
-		t.Fatalf("middlewareImports = %q, must not import scalars when no store uses them", none)
-	}
-}
-
-// A store that reads soft-deleted sessions must report their DeletedAt, or
-// a revoked session authenticates; so it reads them only when the Session
-// table's deletedAt is the nullable Temporal.DateTime it can report.
-func TestAnalyzeReportsSessionSoftDeleteForANullableDateTime(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		deletedAt *ir.FieldDef
-		want      bool
-	}{
-		{name: "no deletedAt"},
-		{name: "nullable DateTime", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}}, want: true},
-		{name: "required DateTime", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true}},
-		{name: "nullable string", deletedAt: &ir.FieldDef{TypeRef: ir.TypeRef{Name: "string"}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			upstream := ir.NewSchema("fixture-db", ir.SchemaKindDB)
-			session := &ir.TypeDef{Name: "Session", Role: ir.RoleDBTable}
-			for _, f := range []string{"id", "jti", "user", "expiresAt"} {
-				session.Fields = append(session.Fields, &ir.FieldDef{Name: f})
-			}
-			if tc.deletedAt != nil {
-				tc.deletedAt.Name = "deletedAt"
-				session.Fields = append(session.Fields, tc.deletedAt)
-			}
-			upstream.Types["Session"] = session
-
-			model, err := sessionauth.Provider{}.Analyze(nil, upstream)
+	naming := map[string]string{"HTTPRuntimeGoModule": "example.com/http", "ScalarGoModule": "example.com/scalars"}
+	for _, identity := range []bool{false, true} {
+		data := map[string]any{"Auth": &apigen.AuthModel{Identity: identity}, "Naming": naming}
+		render := func(name string) string {
+			t.Helper()
+			out, err := snippet(name, data)
 			if err != nil {
-				t.Fatalf("Analyze: %v", err)
+				t.Fatalf("render %s: %v", name, err)
 			}
-			if !model.HasSessionStore || model.SessionSoftDelete != tc.want {
-				t.Fatalf("model = %+v, want a session store with SessionSoftDelete %v", model, tc.want)
+			return out
+		}
+		if std := render("middlewareStdImports"); std != "" {
+			t.Errorf("identity %v: middlewareStdImports = %q, want none", identity, std)
+		}
+		if imports := render("middlewareImports"); strings.Contains(imports, "scalars") || !strings.Contains(imports, "runtimesession") {
+			t.Errorf("identity %v: middlewareImports = %q", identity, imports)
+		}
+		stores, aliases := render("middlewareStores"), render("middlewareAliases")
+		for _, absent := range []string{"FindByJTI", "GetByID", "NewSessionStore", "NewPrincipalStore"} {
+			if strings.Contains(stores, absent) {
+				t.Errorf("identity %v: middlewareStores has %s:\n%s", identity, absent, stores)
 			}
-		})
-	}
-}
-
-func TestSessionStoreReportsDeletedAtOnASoftDeletableSessionTable(t *testing.T) {
-	snippet, err := apigen.AuthSnippetFunc(sessionauth.Provider{})
-	if err != nil {
-		t.Fatalf("AuthSnippetFunc: %v", err)
-	}
-	stores, err := snippet("middlewareStores", map[string]any{
-		"Auth":   &apigen.AuthModel{HasSessionStore: true, SessionSoftDelete: true},
-		"Naming": map[string]string{"HTTPRuntimeGoModule": "example.com/http", "ScalarGoModule": "example.com/scalars"},
-	})
-	if err != nil {
-		t.Fatalf("render middlewareStores: %v", err)
-	}
-	for _, want := range []string{
-		"IncludeDeleted: true",
-		"deletedAt := time.Time(*session.DeletedAt)",
-		"record.DeletedAt = &deletedAt",
-	} {
-		if !strings.Contains(stores, want) {
-			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
+		}
+		if got := strings.Contains(stores, "ORM Store Adapters") || strings.Contains(aliases, "SessionRecord"); got == identity {
+			t.Errorf("identity %v: the store banner and aliases are there: %v\n%s%s", identity, got, stores, aliases)
+		}
+		if !strings.Contains(aliases, "type Role = runtimesession.Role") {
+			t.Errorf("identity %v: middlewareAliases lacks Role:\n%s", identity, aliases)
 		}
 	}
 }

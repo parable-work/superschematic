@@ -33,7 +33,7 @@
 # Bun release tools.env pins, as a non-root user.
 
 ARG RUST_VERSION=1.99.0
-ARG BUN_VERSION=1.4.0
+ARG BUN_VERSION=1.4.2
 
 FROM rust:${RUST_VERSION}-trixie AS addon
 WORKDIR /superscalar

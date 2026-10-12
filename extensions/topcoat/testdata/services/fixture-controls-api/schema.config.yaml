@@ -1,0 +1,5 @@
+# The Topcoat extension's fixture of routes that do more than admit an end
+# user: a webhook, service clauses and traffic controls.
+name: fixture-controls-api
+kind: API
+outputs: {}

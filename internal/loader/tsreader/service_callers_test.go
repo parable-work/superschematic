@@ -216,7 +216,7 @@ export class ThingOperations {
 }
 `})
 	_, _, err := LoadService(dir)
-	if want := `a.schema.ts:5:28: Type 'ServiceHandle<"DB", unknown, string>' is not assignable to type 'ServiceHandleRef'.`; err == nil || !strings.Contains(err.Error(), want) {
+	if want := `a.schema.ts:5:28: Type 'ServiceHandle<"DB", unknown, string, string>' is not assignable to type 'ServiceHandleRef'.`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("LoadService error = %v, want one containing %q", err, want)
 	}
 }

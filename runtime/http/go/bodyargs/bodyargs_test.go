@@ -525,6 +525,171 @@ func (ts *timestamp) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// location is a JSON-object scalar as the scalar package writes
+// Geo.Location: a struct encoding/json decodes without regard to unknown or
+// missing keys, whose Validate checks only its degrees.
+type location struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+func (l location) Validate() (bool, []validate.ValidationError) {
+	if l.Lat < -90 || l.Lat > 90 || l.Lon < -180 || l.Lon > 180 {
+		return false, []validate.ValidationError{{Validator: "range", Message: "range: degree out of range"}}
+	}
+	return true, nil
+}
+
+// checkLocation stands in for superscalar's check of Geo.Location's JSON
+// text, with its error kinds: exactly "lat" and "lon", once each, numbers
+// in range.
+func checkLocation(raw string) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return errors.New("parse: expected a JSON object")
+	}
+	members := map[string]any{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return errors.New("parse: expected JSON")
+		}
+		key, _ := token.(string)
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return errors.New("parse: expected JSON")
+		}
+		if key != "lat" && key != "lon" {
+			return errors.New(`custom: unknown key "` + key + `"`)
+		}
+		if _, seen := members[key]; seen {
+			return errors.New(`custom: duplicate key "` + key + `"`)
+		}
+		members[key] = value
+	}
+	for _, key := range []string{"lat", "lon"} {
+		value, ok := members[key]
+		if !ok {
+			return errors.New(`custom: missing key "` + key + `"`)
+		}
+		if _, isNumber := value.(float64); !isNumber {
+			return errors.New(`custom: "` + key + `" must be a JSON number`)
+		}
+	}
+	if lat, lon := members["lat"].(float64), members["lon"].(float64); lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return errors.New("range: degree out of range")
+	}
+	return nil
+}
+
+// TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded: an argument built
+// with CheckJSON checks each value's JSON text once it is an object, alone,
+// in a list, a list of lists, a map and a map of lists, so what
+// encoding/json would drop, overwrite or zero-fill is refused, under the
+// kind the failure's message starts with. A member of the wrong JSON type
+// is the check's failure, not a decode error; a value of the wrong JSON
+// type is "type" and never reaches the check; {"lat": 0, "lon": 0} is a
+// value.
+func TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded(t *testing.T) {
+	var checked []string
+	check := CheckJSON(func(raw string) error {
+		checked = append(checked, raw)
+		return checkLocation(raw)
+	})
+	at := NewArg("at", Object, Required(), check)
+	route := NewArg("route", Object, check)
+	grid := NewArg("grid", Object, check)
+	named := NewArg("named", Object, check)
+	legs := NewArg("legs", Object, check)
+	run := func(errs validate.ValidationErrors, b Body) {
+		Value[location](errs, b, at)
+		List[location](errs, b, route)
+		ListOfLists[location](errs, b, grid)
+		Map[location](errs, b, named)
+		MapOfLists[location](errs, b, legs)
+	}
+	for _, tc := range []struct {
+		body string
+		want map[string]string
+	}{
+		{`{"at": {"lat": 0, "lon": 0}, "route": [{"lon": 180, "lat": -90}], "grid": [[{"lat": 1, "lon": 2}], []], "named": {"home": {"lat": 0, "lon": 0}}, "legs": {"out": [{"lat": 0, "lon": 0}]}}`, map[string]string{}},
+		{`{"at": {"lat": 1, "lon": 2, "alt": 3}}`, map[string]string{"at": `custom: custom: unknown key "alt"`}},
+		{`{"at": {"lat": 1}}`, map[string]string{"at": `custom: custom: missing key "lon"`}},
+		{`{"at": {"LAT": 1, "lon": 2}}`, map[string]string{"at": `custom: custom: unknown key "LAT"`}},
+		{`{"at": {"lat": 1, "lat": 2, "lon": 3}}`, map[string]string{"at": `custom: custom: duplicate key "lat"`}},
+		{`{"at": {"lat": 91, "lon": 0}}`, map[string]string{"at": "range: range: degree out of range"}},
+		{`{"at": {"lat": "1", "lon": 2}}`, map[string]string{"at": `custom: custom: "lat" must be a JSON number`}},
+		{`{"at": "1,2"}`, map[string]string{"at": "type: expected an object"}},
+		{`{"at": null}`, map[string]string{"at": "required: required field"}},
+		{`{"at": {"lat": 0, "lon": 0}, "route": [{"lat": 0, "lon": 0}, {"lat": 1, "lon": 2, "alt": 3}, {"lon": 5}, {"lat": -91, "lon": 0}, null, [1, 2]]}`, map[string]string{
+			"route[1]": `custom: custom: unknown key "alt"`,
+			"route[2]": `custom: custom: missing key "lat"`,
+			"route[3]": "range: range: degree out of range",
+			"route[4]": "required: required field",
+			"route[5]": "type: expected an object",
+		}},
+		{`{"at": {"lat": 0, "lon": 0}, "grid": [[{"lat": 0}]], "named": {"home": {"lat": 0, "lon": 0, "alt": 1}, "work": {"lat": 0, "lon": 181}}, "legs": {"out": [{"lon": 0}]}}`, map[string]string{
+			"grid[0][0]":   `custom: custom: missing key "lon"`,
+			"named[home]":  `custom: custom: unknown key "alt"`,
+			"named[work]":  "range: range: degree out of range",
+			"legs[out][0]": `custom: custom: missing key "lat"`,
+		}},
+	} {
+		if got := errorsOf(t, tc.body, run); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: errors = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+
+	// The check reads the value's JSON text without the space around it,
+	// and the value it accepts is decoded.
+	checked = nil
+	errorsOf(t, `{"at":  { "lon": -122.4194 , "lat": 37.7749 } , "named": {"zero": {"lat": 0, "lon": 0}}}`, func(errs validate.ValidationErrors, b Body) {
+		if got, want := Value[location](errs, b, at), (location{Lat: 37.7749, Lon: -122.4194}); got != want {
+			t.Errorf("at = %+v, want %+v", got, want)
+		}
+		if got, want := Map[location](errs, b, named), map[string]location{"zero": {}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("named = %#v, want %#v", got, want)
+		}
+		if errs.HasErrors() {
+			t.Errorf("errors = %v, want none", flatten("", errs))
+		}
+	})
+	if want := []string{`{ "lon": -122.4194 , "lat": 37.7749 }`, `{"lat": 0, "lon": 0}`}; !reflect.DeepEqual(checked, want) {
+		t.Errorf("checked %q, want %q", checked, want)
+	}
+
+	// A nil check is none: the value is checked as its Go value, which
+	// has lost the unknown key.
+	got := errorsOf(t, `{"at": {"lat": 1, "lon": 2, "alt": 3}, "route": [{"lat": 91, "lon": 0}]}`, func(errs validate.ValidationErrors, b Body) {
+		Value[location](errs, b, NewArg("at", Object, CheckJSON(nil)))
+		List[location](errs, b, NewArg("route", Object, CheckJSON(nil)))
+	})
+	if want := map[string]string{"route[0]": "range: range: degree out of range"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("errors with a nil check = %v, want %v", got, want)
+	}
+}
+
+// TestScalarErrorValidatorNamesTheCoresKind: a check's failure is named by
+// the kind its message starts with, as the scalar package's Validate
+// methods name a superscalar error.
+func TestScalarErrorValidatorNamesTheCoresKind(t *testing.T) {
+	for message, want := range map[string]string{
+		`custom: unknown key "alt"`:           "custom",
+		`range: "lat" must be from -90 to 90`: "range",
+		"parse: expected JSON":                "parse",
+		"pattern: invalid format":             "pattern",
+		"length: too long":                    "length",
+		"enum: not a member":                  "enum",
+		"empty: no value":                     "required",
+		"custom: contains a reserved word":    "reservedWord",
+		"no kind at all":                      "scalar",
+	} {
+		if got := scalarErrorValidator(errors.New(message)); got != want {
+			t.Errorf("scalarErrorValidator(%q) = %q, want %q", message, got, want)
+		}
+	}
+}
+
 func TestFormatBound(t *testing.T) {
 	for v, want := range map[float64]string{1: "1", 0.5: "0.5", -2: "-2", 9007199254740991: "9007199254740991", 1e300: "1e+300"} {
 		if got := formatBound(v); got != want {

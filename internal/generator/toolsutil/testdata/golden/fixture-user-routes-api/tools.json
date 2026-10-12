@@ -1,0 +1,513 @@
+[
+  {
+    "name": "account-admin.listRoles",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of IdentityRole",
+      "items": {
+        "type": "object",
+        "description": "IdentityRole object"
+      }
+    }
+  },
+  {
+    "name": "account-admin.createRole",
+    "inputSchemaDigest": "sha256:6aa2e838b5f294ac3216f15cf531c881ba0d8f6fb036fc2ca0dbbe4daad8ff8e",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "A string value"
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Array of string values",
+          "items": {
+            "type": "string",
+            "description": "A string value"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "permissions"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityRole object"
+    }
+  },
+  {
+    "name": "account-admin.deleteRole",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
+    }
+  },
+  {
+    "name": "account-admin.updateRole",
+    "inputSchemaDigest": "sha256:83795bd760cbabd100d62cc73a04fbd1e734a81a51d1d8c8f46fd86847a6249c",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value"
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Array of string values",
+          "items": {
+            "type": "string",
+            "description": "A string value"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "permissions"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityRole object"
+    }
+  },
+  {
+    "name": "account-admin.listUsers",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of IdentityUser",
+      "items": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    }
+  },
+  {
+    "name": "account-admin.createUser",
+    "inputSchemaDigest": "sha256:5e31acd1328f88f0f1f8eebe0f18d830fc5313aa100a1db989c11843269082e5",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "login": {
+          "x-superschematic-scalar": "Contact.Email",
+          "type": "string",
+          "format": "email",
+          "description": "An email address",
+          "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "maxLength": 255
+        },
+        "name": {
+          "x-superschematic-scalar": "Identity.Name",
+          "description": "An objects name",
+          "minLength": 2,
+          "maxLength": 80,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "login",
+        "password"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.getUser",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.disableUser",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.enableUser",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.setUserPassword",
+    "inputSchemaDigest": "sha256:7cd2c492d5fb2a70dcf1a61d9cb47f7a9bb6a1ac4faa4c00994e89fa9f0ce7af",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "password": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "password"
+      ]
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
+    }
+  },
+  {
+    "name": "account-admin.revokeRole",
+    "inputSchemaDigest": "sha256:ad1c69aab1e27698cf2ad062120044b78ae2d7e0897e57e6c6e7f34877a94390",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "roleId": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "roleId parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id",
+        "roleId"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.grantRole",
+    "inputSchemaDigest": "sha256:ad1c69aab1e27698cf2ad062120044b78ae2d7e0897e57e6c6e7f34877a94390",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "roleId": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "roleId parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id",
+        "roleId"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account.capabilities",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "object",
+      "description": "Capabilities object"
+    }
+  },
+  {
+    "name": "account.login",
+    "inputSchemaDigest": "sha256:0fddb64e199626cba1c03297716f9ad37b4d4bd15585e214fbedaa973c9f2405",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "login": {
+          "x-superschematic-scalar": "Contact.Email",
+          "type": "string",
+          "format": "email",
+          "description": "An email address",
+          "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "maxLength": 255
+        },
+        "password": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "session": {
+          "description": "A SessionTransport value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "bearer",
+            "cookie",
+            null
+          ]
+        }
+      },
+      "required": [
+        "login",
+        "password"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "LoginResult object"
+    }
+  },
+  {
+    "name": "account.logout",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
+    }
+  },
+  {
+    "name": "account.me",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "object",
+      "description": "CurrentUser object"
+    }
+  },
+  {
+    "name": "account.changePassword",
+    "inputSchemaDigest": "sha256:a441fcf2c75873b5f0aba80576a07ab531b13a775a0ddf218552bcf5e349383e",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "current": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "password": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "current",
+        "password"
+      ]
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
+    }
+  },
+  {
+    "name": "account.register",
+    "inputSchemaDigest": "sha256:0e4dbd541200dcd6c5e308ce1cb229a43b7798747ba6e54fe137a4b7dd3bbf76",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "login": {
+          "x-superschematic-scalar": "Contact.Email",
+          "type": "string",
+          "format": "email",
+          "description": "An email address",
+          "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "maxLength": 255
+        },
+        "name": {
+          "x-superschematic-scalar": "Identity.Name",
+          "description": "An objects name",
+          "minLength": 2,
+          "maxLength": 80,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "x-superschematic-scalar": "Auth.Password",
+          "type": "string",
+          "description": "User password (minimum 8 characters)",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "session": {
+          "description": "A SessionTransport value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "bearer",
+            "cookie",
+            null
+          ]
+        }
+      },
+      "required": [
+        "login",
+        "password"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "LoginResult object"
+    }
+  },
+  {
+    "name": "greeting.greet",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "object",
+      "description": "Greeting object"
+    }
+  }
+]

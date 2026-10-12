@@ -23,6 +23,9 @@ type parityCorpus struct {
 		Type    string              `json:"type"`
 		Payload map[string]any      `json:"payload"`
 		Want    map[string][]string `json:"want"`
+		// Core lists the paths of Want that fail only the scalar core's
+		// check, which the Go runtime's registry names "pattern" (D14).
+		Core []string `json:"core"`
 	} `json:"vectors"`
 }
 
@@ -61,9 +64,16 @@ func TestValidationParityCorpus(t *testing.T) {
 	rt := New(corpus.Schema)
 	for _, vector := range corpus.Vectors {
 		t.Run(vector.Name, func(t *testing.T) {
+			want := map[string][]string{}
+			for path, validators := range vector.Want {
+				want[path] = validators
+			}
+			for _, path := range vector.Core {
+				want[path] = []string{"pattern"}
+			}
 			got := map[string][]string{}
 			flattenVerdicts(rt.ValidateType(vector.Type, vector.Payload), "", got)
-			assert.Equal(t, vector.Want, got)
+			assert.Equal(t, want, got)
 		})
 	}
 }

@@ -368,7 +368,7 @@ type LoadContext struct {
 // GeneratorSpec describes one generator a kind's pipeline can name.
 type GeneratorSpec struct {
 	// Name is the pipeline identifier. Core: "types", "sql", "orm", "api",
-	// "sdks", "envConfig", "stack".
+	// "sdks", "envConfig", "stack", "site".
 	Name      string
 	Extension string
 	// Kinds lists kinds whose pipeline may include this generator, and
@@ -409,15 +409,17 @@ type GeneratorSpec struct {
 	compiledOutput *validator.Schema
 }
 
-// AuthProvider and AuthModel are declared in apigen (which this package
-// imports for APIOutput) and aliased here so extensions register providers
-// through the registry vocabulary. See docs/extension-model.md section 8.
+// AuthProvider, AuthModel and UserModel are declared in apigen (which this
+// package imports for APIOutput) and aliased here so extensions register
+// providers through the registry vocabulary. See docs/extension-model.md
+// section 8.
 // OpenAPIHook and ToolHook are declared there for the same reason: apigen
 // runs them. ToolInvocationPolicy too: apigen resolves every visible tool
 // against it.
 type (
 	AuthProvider         = apigen.AuthProvider
 	AuthModel            = apigen.AuthModel
+	UserModel            = apigen.UserModel
 	OpenAPIHook          = apigen.OpenAPIHook
 	ToolHook             = apigen.ToolHook
 	ToolInvocationPolicy = apigen.ToolInvocationPolicy

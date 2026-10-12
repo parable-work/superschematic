@@ -12,74 +12,70 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestMiddlewareImportsEachPackageOnceWithStores: with the session
-// provider's stores (an upstream Session and User table), middleware.go
-// imports every package once. The check runs on unformatted output
-// (--skip-format), since go/format drops a duplicate import and would hide
-// one the templates write.
-func TestMiddlewareImportsEachPackageOnceWithStores(t *testing.T) {
-	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
+// TestFilesImportEachPackageOnceWithTheUserModel: a public API over the
+// user model (D50) imports every package once in middleware.go, routes.go
+// and identity.go, the files the identity wiring adds imports to. The
+// check runs on unformatted output (--skip-format), since go/format drops
+// a duplicate import and would hide one the templates write.
+func TestFilesImportEachPackageOnceWithTheUserModel(t *testing.T) {
+	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, userRoutesAPI))
 	if err != nil {
-		t.Fatalf("load fixture-api: %v", err)
+		t.Fatalf("load %s: %v", userRoutesAPI, err)
 	}
-	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, userModelDB))
 	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
+		t.Fatalf("load %s: %v", userModelDB, err)
 	}
-	table := func(name string, fields ...string) *ir.TypeDef {
-		typeDef := &ir.TypeDef{Name: name, Role: ir.RoleDBTable}
-		for _, field := range fields {
-			typeDef.Fields = append(typeDef.Fields, &ir.FieldDef{Name: field})
-		}
-		return typeDef
-	}
-	dbSchema.Types["Session"] = table("Session", "id", "jti", "user", "expiresAt")
-	dbSchema.Types["User"] = table("User", "id", "name")
 
 	output, err := apigen.Generate(apiSchema, apigen.Options{
 		Provider:       sessionauth.Provider{},
-		SchemaName:     "fixture-api",
-		ModulePath:     "example.com/schemas/api/fixture-api",
-		TypesModule:    "example.com/schemas/types/go/fixture-api",
+		SchemaName:     userRoutesAPI,
+		ModulePath:     "example.com/schemas/api/" + userRoutesAPI,
+		TypesModule:    "example.com/schemas/types/go/" + userRoutesAPI,
 		IsPublic:       true,
-		UpstreamSchema: "fixture-db",
+		UpstreamSchema: userModelDB,
 		UpstreamIR:     dbSchema,
 		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !output.Auth.HasSessionStore || !output.Auth.HasPrincipalStore {
-		t.Fatalf("Auth = %+v, want both stores", output.Auth)
+	if output.Auth.User == nil || !output.Auth.Identity {
+		t.Fatalf("Auth = %+v, want the user model", output.Auth)
 	}
 
 	outDir := t.TempDir()
 	if err := apigen.WriteAPIWithProfile(output, outDir, nil, true); err != nil {
 		t.Fatalf("write api: %v", err)
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(outDir, "middleware.go"), nil, parser.ImportsOnly)
-	if err != nil {
-		t.Fatalf("parse middleware.go: %v", err)
-	}
-	seen := map[string]int{}
-	for _, spec := range file.Imports {
-		path, err := strconv.Unquote(spec.Path.Value)
+	for file, wants := range map[string][]string{
+		"middleware.go": {"time"},
+		"routes.go":     {"time", "github.com/parable-work/superschematic/runtime/http/go/identity"},
+		"identity.go":   {"fmt", "github.com/parable-work/superschematic/runtime/http/go/identity"},
+	} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(outDir, file), nil, parser.ImportsOnly)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parse %s: %v", file, err)
 		}
-		seen[path]++
-	}
-	for _, want := range []string{"time", "errors"} {
-		if seen[want] == 0 {
-			t.Errorf("middleware.go does not import %q", want)
+		seen := map[string]int{}
+		for _, spec := range parsed.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen[path]++
 		}
-	}
-	for path, count := range seen {
-		if count > 1 {
-			t.Errorf("middleware.go imports %q %d times", path, count)
+		for _, want := range wants {
+			if seen[want] == 0 {
+				t.Errorf("%s does not import %q", file, want)
+			}
+		}
+		for path, count := range seen {
+			if count > 1 {
+				t.Errorf("%s imports %q %d times", file, path, count)
+			}
 		}
 	}
 }

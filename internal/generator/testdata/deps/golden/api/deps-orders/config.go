@@ -142,6 +142,10 @@ type EnvConfig struct {
 	// DepsCatalogService is the endpoint of deps-catalog, which the API calls.
 	// It is read from DEPS_CATALOG_SERVICE_*.
 	DepsCatalogService stackconfig.Service
+
+	// DepsMediaBucket is how the server reaches deps-media, a bucket the API
+	// lists. It is read from DEPS_MEDIA_BUCKET_*.
+	DepsMediaBucket stackconfig.Bucket
 }
 
 // LoadEnvConfig loads the API's configuration from environment variables.
@@ -163,6 +167,11 @@ func LoadEnvConfig() (*EnvConfig, error) {
 		errs = append(errs, err)
 	} else {
 		cfg.DepsCatalogService = v
+	}
+	if v, err := stackconfig.LoadBucket("DEPS_MEDIA_BUCKET"); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.DepsMediaBucket = v
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)

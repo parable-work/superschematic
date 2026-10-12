@@ -9,6 +9,9 @@ export default defineConfig({
       [TargetLanguage.TypeScript]: { enabled: true },
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }
-    }
+    },
+    // SQLite too: the Topcoat app in topcoat/ can keep the shop in a
+    // SQLite file, migrated from the SQLite plan.
+    sql: { dialects: ["postgres", "sqlite"] }
   }
 });

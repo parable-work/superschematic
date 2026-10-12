@@ -6,7 +6,9 @@
 // API's implementation from its Deps and mounts every API's routes on one
 // handler beside /healthz and /readyz. cloudsql.go beside it connects a
 // database through the Cloud SQL connector, on a server that some
-// environment places on Cloud SQL. A TypeScript server's is a package at
+// environment places on Cloud SQL, and buckets.go opens each bucket on GCS,
+// or on an emulator that serves its API, on a server whose APIs list one
+// (D54). A TypeScript server's is a package at
 // the same place, whose main.ts does the same on Bun (typescript.go). The
 // generator package plans what each server serves from the stack and the
 // APIs' server outputs; this package turns that plan into files.
@@ -53,6 +55,7 @@ const RustVersion = "1.99.0"
 const (
 	MainFile         = "main.go"
 	CloudSQLFile     = "cloudsql.go"
+	BucketsFile      = "buckets.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
@@ -70,6 +73,16 @@ const (
 
 // cloudSQLConnModule is the Cloud SQL Go connector's module.
 const cloudSQLConnModule = "cloud.google.com/go/cloudsqlconn"
+
+// The GCS Go client buckets.go imports, and the version of
+// google.golang.org/api it requires, whose iterator and option packages
+// buckets.go imports too (D54).
+const (
+	storageModule    = "cloud.google.com/go/storage"
+	storageVersion   = "v1.69.0"
+	googleAPIModule  = "google.golang.org/api"
+	googleAPIVersion = "v0.288.0"
+)
 
 // ZeroVersion is the version a go.mod requires a module at that a replace
 // points at a directory, as the generated modules require one another.
@@ -121,6 +134,10 @@ type APIInput struct {
 
 	// Implementation is where its implementation lives.
 	Implementation Implementation
+
+	// CORS is true when a site of the stack calls the API: its server then
+	// answers CORS for the origins its CORS field lists (D55).
+	CORS bool
 }
 
 // Input is what a server's entrypoint is planned from.
@@ -178,12 +195,25 @@ type Input struct {
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
+	// Worker, when set, plans the entrypoint of a worker of the one API in
+	// APIs (D53): Server is then the worker's deployable.
+	Worker *WorkerInput
 }
 
 // JobInput is the job a job's entrypoint runs.
 type JobInput struct {
 	// Name is the job's @job class.
 	Name string
+}
+
+// WorkerInput is the worker a worker's entrypoint runs.
+type WorkerInput struct {
+	// Name is the worker's @worker class.
+	Name string
+
+	// GraceSeconds is how long the worker lets its running handlers finish
+	// once it is told to stop.
+	GraceSeconds int
 }
 
 // ServerDir is where the entrypoint of server in stack is written; a job's
@@ -218,6 +248,10 @@ type Server struct {
 	// Job is what a job's entrypoint runs, nil for a server.
 	Job *Job
 
+	// Worker is what a worker's entrypoint runs, nil for a server and a
+	// job (D53).
+	Worker *Worker
+
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
 	RustVersion string
@@ -225,6 +259,12 @@ type Server struct {
 	APIs      []*API
 	Databases []*Database
 	Clients   []*Client
+
+	// Buckets are the buckets the server opens once, for every API that
+	// lists it. With one, buckets.go opens each on GCS, or on an emulator
+	// that serves its API, and go.mod requires GCS's Go client; with none
+	// the server does not link it (D54).
+	Buckets []*Bucket
 
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. When there is one, cloudsql.go
@@ -258,6 +298,26 @@ type Job struct {
 	Method string
 }
 
+// Worker is the worker a worker's entrypoint runs (D53): its @worker class,
+// the method of the API's Workers interface that handles a message, the
+// queue it claims from, a class of Database, the API's database, its
+// concurrency unless the environment sets one, and its grace.
+type Worker struct {
+	Name         string
+	Method       string
+	Queue        string
+	Database     *Database
+	Concurrency  int
+	GraceSeconds int
+}
+
+// Background reports whether the entrypoint is a job's or a worker's,
+// which serves no request: it mounts no routes, listens on no port,
+// verifies no end user or caller, and decrypts no payload.
+func (s *Server) Background() bool {
+	return s.Job != nil || s.Worker != nil
+}
+
 // Require is a go.mod require line.
 type Require struct {
 	Path    string
@@ -287,17 +347,30 @@ type API struct {
 	// Public when its Config takes the database and the auth middleware;
 	// Encrypted when it takes a payload decryptor; ServiceAuth when it
 	// takes a service authenticator, which an operation's service clause
-	// needs (D37).
+	// needs (D37); Identity when it authenticates with the identity
+	// runtime over the user model (D50), so its Config takes the identity
+	// service, built over its database's identity store, in place of an
+	// auth middleware.
 	Config      bool
 	Public      bool
 	Encrypted   bool
 	ServiceAuth bool
+	Identity    bool
+
+	// CORS is true when a site of the stack calls the API, whose server
+	// then answers CORS for the origins its CORS field lists, with
+	// CORSMethods, the methods of its operations, sorted (D55).
+	CORS        bool
+	CORSMethods []string
 
 	// Database is the ORM Deps.DB holds, nil without one.
 	Database *Database
 
 	// Calls are Deps' clients.
 	Calls []Call
+
+	// Buckets are Deps' buckets (D54).
+	Buckets []BucketUse
 }
 
 // Call is a client in an API's Deps.
@@ -306,12 +379,39 @@ type Call struct {
 	Client *Client
 }
 
+// BucketUse is a bucket in an API's Deps.
+type BucketUse struct {
+	Field  string
+	Bucket *Bucket
+}
+
+// Bucket is a bucket the server opens once, for every API that lists it
+// (D54).
+type Bucket struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the bucket's connection is read
+	// from, and From the expression that reads it from the first listing
+	// API's config.
+	Field string
+	From  string
+}
+
 // Database is a database the server connects to once, for every API on it.
 type Database struct {
 	Service string
 	Var     string
 	Package string
 	Module  string
+
+	// Identity is true when an API on the database authenticates with
+	// the identity runtime: the server builds one identity store over
+	// the database's pool, from the descriptor constant of its Go types,
+	// whose import name and module are Types and TypesModule.
+	Identity    bool
+	Types       string
+	TypesModule string
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -392,7 +492,12 @@ var reserved = []string{
 	"signal", "stackconfig", "stop", "atomic", "syscall", "time", "writeJSON", "zap", "connect", "ctx", "api", "apis",
 	"serviceauth", "serviceAuthenticator", "endpoint", "cfg", "token", "headers",
 	"connectCloudSQL", "cloudSQLDialer", "cloudSQLDial", "cloudSQLConfig",
+	"identity", "identityConfig", "stdlib", "method", "requested",
 	"jobs", "started",
+	"openBucket", "closeBuckets", "gcsBucket", "gcsClient", "gcsClients", "emulatorEndpoint", "emulatorSigner",
+	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
+	"x509", "pem", "strings", "sync", "url",
+	"workers", "worker", "queue", "concurrency",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -468,6 +573,24 @@ func Plan(in Input) (*Server, error) {
 		}
 		s.Kind, s.Binary = "job", "job"
 		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method}
+	case in.Worker != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: worker %s runs a worker of %d APIs; a worker belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		i := slices.IndexFunc(o.Workers, func(w apigen.WorkerInfo) bool { return w.Name == in.Worker.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, which declares no such worker", in.Stack, in.Server, in.Worker.Name, o.SchemaName)
+		}
+		if o.Deps.Database == "" {
+			return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s, and %s connects to no database", in.Stack, in.Server, o.SchemaName, o.Workers[i].Queue, o.SchemaName)
+		}
+		grace := in.Worker.GraceSeconds
+		if grace <= 0 {
+			grace = ir.DefaultWorkerGraceSeconds
+		}
+		s.Kind, s.Binary = "worker", "worker"
+		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -490,24 +613,33 @@ func Plan(in Input) (*Server, error) {
 			Import:  a.Implementation.Import,
 			Config:  o.HasEnvConfig(),
 		}
-		if s.Job == nil {
-			// A job serves no request: it mounts no routes, verifies no end
-			// user or caller, and decrypts no payload.
+		if !s.Background() {
+			// A job or a worker serves no request: it mounts no routes,
+			// verifies no end user or caller, and decrypts no payload. So it
+			// builds no identity service either, though its API's authDb
+			// holds the user model (D50): its Deps reach the tables through
+			// the ORM.
 			apis[i].Public = o.IsPublic
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
+			apis[i].Identity = o.Auth.Identity
+			if a.CORS {
+				apis[i].CORS = true
+				apis[i].CORSMethods = endpointMethods(o)
+			}
 		}
 	}
 	databases := map[string]*Database{}
 	clients := map[string]*Client{}
+	buckets := map[string]*Bucket{}
 	for i, a := range in.APIs {
 		o, api := a.Output, apis[i]
 		derived := map[string]string{}
 		if o.EnvConfig != nil {
 			for _, f := range o.EnvConfig.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.GoName
-				if f.Kind == ir.EdgeSQL {
-					derived["field "+f.Service] = f.Key
+				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket {
+					derived[string(f.Kind)+" field "+f.Service] = f.Key
 				}
 			}
 		}
@@ -527,7 +659,7 @@ func Plan(in Input) (*Server, error) {
 					Var:     stem,
 					Package: taken.take(packageName(db) + "orm"),
 					Module:  o.Deps.ORMModule,
-					Field:   derived["field "+db],
+					Field:   derived[string(ir.EdgeSQL)+" field "+db],
 					From:    api.Var + "Config." + goName,
 				}
 				databases[db] = d
@@ -537,6 +669,17 @@ func Plan(in Input) (*Server, error) {
 				}
 			}
 			api.Database = d
+		}
+		if api.Identity {
+			d := api.Database
+			if d == nil {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime and has no database to build its identity store over", in.Stack, in.Server, o.SchemaName)
+			}
+			if !d.Identity {
+				d.Identity = true
+				d.Types = taken.take(packageName(d.Service) + "types")
+				d.TypesModule = in.Naming.OrDefault().GoTypesModule(d.Service)
+			}
 		}
 		for _, call := range o.Deps.Calls {
 			c := clients[call.Service]
@@ -559,8 +702,29 @@ func Plan(in Input) (*Server, error) {
 			}
 			api.Calls = append(api.Calls, Call{Field: call.Field, Client: c})
 		}
+		for _, b := range o.Deps.Buckets {
+			h := buckets[b.Service]
+			if h == nil {
+				goName, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
+				if !ok || !api.Config {
+					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, in.Server, o.SchemaName, b.Service)
+				}
+				h = &Bucket{
+					Service: b.Service,
+					Var:     taken.take(varStem(b.Service) + "Bucket"),
+					Field:   derived[string(ir.EdgeBucket)+" field "+b.Service],
+					From:    api.Var + "Config." + goName,
+				}
+				buckets[b.Service] = h
+				s.Buckets = append(s.Buckets, h)
+			}
+			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
+		}
 	}
 	s.APIs = apis
+	if s.Worker != nil {
+		s.Worker.Database = apis[0].Database
+	}
 	slices.Sort(s.CloudSQL)
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
@@ -576,11 +740,11 @@ func Plan(in Input) (*Server, error) {
 	return s, nil
 }
 
-// planModule plans go.mod: the third-party modules main.go and
-// cloudsql.go import, then in.Modules, each replaced by its directory.
+// planModule plans go.mod: the third-party modules main.go, cloudsql.go
+// and buckets.go import, then in.Modules, each replaced by its directory.
 func (s *Server) planModule(in Input, dir string) error {
 	direct := []Require{{"go.uber.org/zap", zapVersion}}
-	if s.Job == nil {
+	if !s.Background() {
 		direct = append(direct, Require{"github.com/go-chi/chi/v5", chiVersion})
 	}
 	if len(s.Databases) > 0 {
@@ -588,6 +752,9 @@ func (s *Server) planModule(in Input, dir string) error {
 	}
 	if len(s.CloudSQL) > 0 {
 		direct = append(direct, Require{cloudSQLConnModule, cloudSQLConnVersion})
+	}
+	if len(s.Buckets) > 0 {
+		direct = append(direct, Require{storageModule, storageVersion}, Require{googleAPIModule, googleAPIVersion})
 	}
 	seen := map[string]bool{}
 	for _, r := range direct {
@@ -771,19 +938,23 @@ func checkRoutes(in Input) error {
 
 // Write writes the entrypoint module into dir: main.go, go.mod,
 // cloudsql.go when some environment places a database of the server on
-// Cloud SQL, and the Dockerfile with its ignore file when s.Docker is
-// planned.
+// Cloud SQL, buckets.go when its APIs list a bucket (D54), and the
+// Dockerfile with its ignore file when s.Docker is planned.
 //
-// A job's module holds the same files but serviceauth.go, and its main.go
-// runs the job (job.go.tmpl). Both main.go templates take the wiring they
-// share from wiring.tmpl.
+// A job's module holds the same files but serviceauth.go and identity.go,
+// and its main.go runs the job (job.go.tmpl); a worker's runs the worker's
+// claim loop (worker.go.tmpl, D53). Every main.go template takes the wiring
+// they share from wiring.tmpl.
 func Write(s *Server, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
 	}
 	main := "main.go.tmpl"
-	if s.Job != nil {
+	switch {
+	case s.Job != nil:
 		main = "job.go.tmpl"
+	case s.Worker != nil:
+		main = "worker.go.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, MainFile},
@@ -791,6 +962,9 @@ func Write(s *Server, dir string) error {
 	}
 	if len(s.CloudSQL) > 0 {
 		files = append(files, struct{ template, name string }{"cloudsql.go.tmpl", CloudSQLFile})
+	}
+	if len(s.Buckets) > 0 {
+		files = append(files, struct{ template, name string }{"buckets.go.tmpl", BucketsFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})
@@ -800,7 +974,13 @@ func Write(s *Server, dir string) error {
 			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 		}
 	}
-	return writeServiceAuth(s, dir)
+	if err := writeServiceAuth(s, dir); err != nil {
+		return err
+	}
+	if err := writeIdentity(s, dir); err != nil {
+		return err
+	}
+	return writeCORS(s, dir)
 }
 
 // templates is every template of the package parsed into one set, so that
@@ -965,6 +1145,12 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyServiceAuth": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.ServiceAuth })
+		},
+		"anyIdentity": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.Identity })
+		},
+		"anyCORS": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })
 		},
 		"tsQuote": func(s string) string {
 			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"

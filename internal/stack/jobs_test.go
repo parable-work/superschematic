@@ -228,7 +228,7 @@ func TestJobRefusals(t *testing.T) {
 		s, services := jobShop()
 		s.Expose = append(s.Expose, ship)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-ship-orders, a job; only a server is exposed")
+		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-ship-orders, a job; only a server or a site is exposed")
 	})
 	t.Run("a target with no job platform", func(t *testing.T) {
 		s, services := jobShop()

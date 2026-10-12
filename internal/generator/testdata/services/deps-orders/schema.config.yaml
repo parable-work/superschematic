@@ -1,12 +1,14 @@
-# Takes its database from its one DB-kind dependency and calls deps-catalog,
-# which calls it back. Its @envVars type holds one setting beside the
-# fields the two edges derive.
+# Takes its database from its one DB-kind dependency, calls deps-catalog,
+# which calls it back, and lists the bucket deps-media (D54). Its @envVars
+# type holds one setting beside the fields the three edges derive.
 name: deps-orders
 kind: API
 dependencies:
   - { name: deps-db, kind: DB }
 calls:
   - { name: deps-catalog, kind: API }
+buckets:
+  - { name: deps-media, kind: Bucket }
 outputs:
   types:
     go: { enabled: true }

@@ -18,10 +18,11 @@
 //   - ts-shop: @schemas/ts-shop-implementation, at typescript/ts-shop
 
 import { Hono } from 'hono';
-import { createLogger, serviceCredentialFor, type Database, type Service } from '@superschematic/http-runtime';
+import { createLogger, serviceCredentialFor, corsHandler, corsMethods, loadCors, matchOperations, type Database, type Service } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { connectPostgres, ping } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
+import { openBucket } from '@superschematic/http-runtime/gcs';
 import * as tsShopApi from '@schemas/ts-shop-api';
 import * as tsShopImpl from '@schemas/ts-shop-implementation';
 import * as tsPricingSdk from '@schemas/ts-pricing-sdk';
@@ -67,6 +68,8 @@ const exitCodes: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 
 async function main(): Promise<void> {
   const port = listenPort();
   const tsShopConfig = configure('ts-shop', () => tsShopApi.loadEnvConfig());
+  // The origins of the sites that call ts-shop, which its CORS field lists (section 8.10).
+  const tsShopOrigins = configure('ts-shop', () => loadCors('TS_SHOP_CORS'));
 
   // One pool per database, shared by every API on it. A pool connects when
   // it is first used, so the server starts while its database is not up yet
@@ -78,6 +81,10 @@ async function main(): Promise<void> {
 
   // One client per API called, shared by every API that calls it.
   const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE);
+
+  // One handle per bucket, shared by every API that lists it, on GCS or on
+  // the emulator its connection names (D54).
+  const tsMediaBucket = openBucket(tsShopConfig.TS_MEDIA_BUCKET);
 
   const app = new Hono();
   let draining = false;
@@ -105,6 +112,7 @@ async function main(): Promise<void> {
     config: tsShopConfig,
     db: tsDbPool,
     tsPricing: tsPricingClient,
+    tsMedia: tsMediaBucket,
     logger: logger.child({ api: 'ts-shop' }),
   };
   const tsShopImplementations = await construct('ts-shop', 'implementation', () => tsShopImpl.create(tsShopDeps));
@@ -113,12 +121,25 @@ async function main(): Promise<void> {
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 
+  // A site's browser calls an API here from the site's origin: each API a
+  // site calls answers CORS for the origins its CORS field lists, and no
+  // other, the API a request is by the operations that take it.
+  const handle = corsHandler(
+    [
+      {
+        policy: { origins: tsShopOrigins, methods: corsMethods(Object.values(tsShopApi.operationSpecs)) },
+        match: matchOperations(Object.values(tsShopApi.operationSpecs)),
+      },
+    ],
+    (request: Request, srv: BunServer) => app.fetch(request, srv)
+  );
+
   const bun = (globalThis as unknown as { Bun: BunRuntime }).Bun;
   let server: BunServer;
   try {
     // Hono hands Bun's server to the routes as their bindings, from which
     // the runtime reads the peer's address.
-    server = bun.serve({ port, development: false, fetch: (request, srv) => app.fetch(request, srv) });
+    server = bun.serve({ port, development: false, fetch: (request, srv) => handle(request, srv) });
   } catch (error) {
     throw new Error(`listen on :${port}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }

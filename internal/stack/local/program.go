@@ -35,8 +35,9 @@ const MigrationsDir = "migrations"
 const binDir = "bin"
 
 // Program is what the local provisioner runs for one environment: the
-// environment's resource graph read into the containers, databases and
-// processes it starts, in deploy order. Render writes it as ProgramFile.
+// environment's resource graph read into the containers, databases,
+// buckets and processes it starts, in deploy order. Render writes it as
+// ProgramFile.
 type Program struct {
 	Version     int    `json:"version"`
 	Stack       string `json:"stack"`
@@ -47,6 +48,10 @@ type Program struct {
 
 	// Databases are the databases on the containers, sorted by ID.
 	Databases []*Database `json:"databases,omitempty"`
+
+	// Buckets are the buckets on the storage emulator's container, sorted
+	// by ID (D54).
+	Buckets []*Bucket `json:"buckets,omitempty"`
 
 	// KeyPairs are the http edges' key pairs, sorted by ID.
 	KeyPairs []*KeyPair `json:"keyPairs,omitempty"`
@@ -60,9 +65,16 @@ type Program struct {
 
 	// Jobs are the jobs, in deploy order: each after its callees (D52).
 	Jobs []*Job `json:"jobs,omitempty"`
+
+	// Sites are the sites, in deploy order: each after the servers it
+	// calls (D55).
+	Sites []*Site `json:"sites,omitempty"`
 }
 
-// Container is a Docker container node.
+// Container is a Docker container node. Command, when set, replaces the
+// image's entrypoint, and Args follow the image as its command's
+// arguments. Readiness says how the provisioner knows the container is
+// ready, beside the published port taking connections.
 type Container struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
@@ -70,8 +82,29 @@ type Container struct {
 	Host          string            `json:"host"`
 	HostPort      int               `json:"hostPort"`
 	ContainerPort int               `json:"containerPort"`
+	Command       []string          `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
 	Env           []EnvVar          `json:"env,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
+	Readiness     *Readiness        `json:"readiness,omitempty"`
+}
+
+// Readiness is how the provisioner knows a container is ready: Exec, a
+// command `docker exec` runs inside it, succeeds; or HTTP, a path the
+// container answers 200 on its published port. Exactly one is set.
+type Readiness struct {
+	Exec []string `json:"exec,omitempty"`
+	HTTP string   `json:"http,omitempty"`
+}
+
+// Bucket is a bucket node: a bucket on the storage emulator's container,
+// reached at Endpoint (D54).
+type Bucket struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Service   string `json:"service"`
+	Container string `json:"container"`
+	Endpoint  string `json:"endpoint"`
 }
 
 // Database is a database node: a database on a container.
@@ -107,19 +140,29 @@ type Migration struct {
 // Server is a process node: the server's entrypoint, started with its
 // environment, then probed until it is ready. A Go server's module is
 // built into Binary first; a TypeScript server's main.ts runs on Bun, with
-// no binary.
+// no binary. A worker's process (Kind "worker", D53) has no port and no
+// URL, and is ready once it starts (ReadinessStarted).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
 	Name       string   `json:"name"`
+	Kind       string   `json:"kind,omitempty"`
 	Wave       int      `json:"wave"`
 	Language   string   `json:"language"`
 	Module     string   `json:"module"`
 	Binary     string   `json:"binary,omitempty"`
-	Port       int      `json:"port"`
-	URL        string   `json:"url"`
+	Port       int      `json:"port,omitempty"`
+	URL        string   `json:"url,omitempty"`
 	Readiness  string   `json:"readiness"`
 	Env        []EnvVar `json:"env,omitempty"`
+}
+
+// what names the process's kind in messages: a server or a worker.
+func (s *Server) what() string {
+	if s.Kind == "" {
+		return "server"
+	}
+	return s.Kind
 }
 
 // Job is a job node (D52): the job's entrypoint module, built with the
@@ -178,6 +221,7 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 	prog := &Program{Version: ProgramVersion, Stack: env.Stack, Environment: env.Environment}
 	servers := map[string]*Server{}
 	jobs := map[string]*Job{}
+	sites := map[string]*Site{}
 	containers := map[string]*Container{}
 	for _, res := range env.Resources.Resources {
 		if res.Inherited {
@@ -196,6 +240,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			if d, err = databaseOf(res); err == nil {
 				prog.Databases = append(prog.Databases, d)
 			}
+		case TypeBucket:
+			var b *Bucket
+			if b, err = bucketOf(res); err == nil {
+				prog.Buckets = append(prog.Buckets, b)
+			}
 		case TypeKeyPair:
 			var k *KeyPair
 			if k, err = keyPairOf(res); err == nil {
@@ -211,6 +260,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			if j, err = jobOf(res); err == nil {
 				jobs[j.ID] = j
 			}
+		case TypeSite:
+			var s *Site
+			if s, err = siteOf(res); err == nil {
+				sites[s.ID] = s
+			}
 		default:
 			err = fmt.Errorf("it has type %s, which is not the local provider's", res.Type)
 		}
@@ -224,6 +278,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			return nil, fmt.Errorf("local: database %s is on container %s, which the environment does not hold", db.ID, db.Container)
 		}
 		db.Container = c.ID
+	}
+	for _, b := range prog.Buckets {
+		if _, ok := containers[b.Container]; !ok {
+			return nil, fmt.Errorf("local: bucket %s is on container %s, which the environment does not hold", b.ID, b.Container)
+		}
 	}
 	for _, step := range env.DeployOrder {
 		switch step.Step {
@@ -261,7 +320,16 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 					j.Wave = step.Wave
 					prog.Jobs = append(prog.Jobs, j)
 				}
+				if s, ok := sites[id]; ok {
+					s.Wave = step.Wave
+					prog.Sites = append(prog.Sites, s)
+				}
 			}
+		}
+	}
+	for id := range sites {
+		if !slices.ContainsFunc(prog.Sites, func(s *Site) bool { return s.ID == id }) {
+			return nil, fmt.Errorf("local: site %s is in no rollout step", id)
 		}
 	}
 	for id := range servers {
@@ -292,6 +360,15 @@ func (p *Program) JobOf(name string) *Job {
 	for _, j := range p.Jobs {
 		if j.Deployable == name {
 			return j
+		}
+	}
+	return nil
+}
+
+func (p *Program) bucket(id string) *Bucket {
+	for _, b := range p.Buckets {
+		if b.ID == id {
+			return b
 		}
 	}
 	return nil
@@ -404,6 +481,22 @@ func containerOf(res *ir.Resource) (*Container, error) {
 		}
 	}
 	c.Env = env
+	if c.Command, err = stringsOf(res.Properties["command"]); err != nil {
+		return nil, fmt.Errorf("its command: %w", err)
+	}
+	if c.Args, err = stringsOf(res.Properties["args"]); err != nil {
+		return nil, fmt.Errorf("its args: %w", err)
+	}
+	if readiness, ok := res.Properties["readiness"].(map[string]any); ok {
+		c.Readiness = &Readiness{}
+		if c.Readiness.Exec, err = stringsOf(readiness["exec"]); err != nil {
+			return nil, fmt.Errorf("its readiness command: %w", err)
+		}
+		c.Readiness.HTTP, _ = readiness["http"].(string)
+		if (len(c.Readiness.Exec) == 0) == (c.Readiness.HTTP == "") {
+			return nil, fmt.Errorf("its readiness is a command or a path, not both or neither")
+		}
+	}
 	if labels, ok := res.Properties["labels"].(map[string]any); ok && len(labels) > 0 {
 		c.Labels = map[string]string{}
 		for key, value := range labels {
@@ -435,6 +528,44 @@ func databaseOf(res *ir.Resource) (*Database, error) {
 	}
 	d.Container = container.Resource
 	return d, nil
+}
+
+func bucketOf(res *ir.Resource) (*Bucket, error) {
+	b := &Bucket{ID: res.ID}
+	var ok bool
+	if b.Name, ok = res.Properties["name"].(string); !ok || !bucketNamePattern.MatchString(b.Name) {
+		return nil, fmt.Errorf("its name is not a bucket's name")
+	}
+	if b.Service, ok = res.Properties["service"].(string); !ok || b.Service == "" {
+		return nil, fmt.Errorf("its service is not a string")
+	}
+	if b.Endpoint, ok = res.Properties["endpoint"].(string); !ok || b.Endpoint == "" {
+		return nil, fmt.Errorf("its endpoint is not a string")
+	}
+	container, ok := res.Properties["container"].(ir.Output)
+	if !ok {
+		return nil, fmt.Errorf("its container is not a container's output")
+	}
+	b.Container = container.Resource
+	return b, nil
+}
+
+// stringsOf reads a list of strings from a node's properties; nil is none.
+func stringsOf(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("not a list")
+	}
+	out := make([]string, len(list))
+	for i, item := range list {
+		if out[i], ok = item.(string); !ok {
+			return nil, fmt.Errorf("[%d] is not a string", i)
+		}
+	}
+	return out, nil
 }
 
 func keyPairOf(res *ir.Resource) (*KeyPair, error) {
@@ -471,13 +602,27 @@ func serverOf(res *ir.Resource) (*Server, error) {
 	default:
 		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s servers", s.Language, LanguageGo, LanguageTypeScript)
 	}
-	if s.Port, ok = intValue(res.Properties["port"]); !ok {
-		return nil, fmt.Errorf("its port is not a number")
+	if kind, set := res.Properties["kind"]; set {
+		if s.Kind, ok = kind.(string); !ok || s.Kind != "worker" {
+			return nil, fmt.Errorf("its kind is %v; a process is a server's, or a worker's", kind)
+		}
 	}
-	if s.Readiness, ok = res.Properties["readiness"].(string); !ok || !strings.HasPrefix(s.Readiness, "/") {
-		return nil, fmt.Errorf("its readiness path is not a path")
+	s.Readiness, _ = res.Properties["readiness"].(string)
+	switch port, set := res.Properties["port"]; {
+	case !set:
+		// A process with no port, a worker's, is ready once it starts.
+		if s.Readiness != ReadinessStarted {
+			return nil, fmt.Errorf("it has no port, and its readiness is %q; a process with no port is ready once %s", s.Readiness, ReadinessStarted)
+		}
+	default:
+		if s.Port, ok = intValue(port); !ok {
+			return nil, fmt.Errorf("its port is not a number")
+		}
+		if !strings.HasPrefix(s.Readiness, "/") {
+			return nil, fmt.Errorf("its readiness path is not a path")
+		}
+		s.URL = ServerURL(s.Port)
 	}
-	s.URL = ServerURL(s.Port)
 	env, err := envOf(res.Properties["env"])
 	if err != nil {
 		return nil, err

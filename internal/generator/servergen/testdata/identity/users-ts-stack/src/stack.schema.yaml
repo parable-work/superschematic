@@ -1,0 +1,18 @@
+# users-ts-api on its default TypeScript server, over users-db. Its one
+# environment, Local, runs on the local target, whose platform gives the
+# API's identity config a cookie without Secure.
+kind: Stack
+types:
+  Users:
+    name: Users
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-ts-api, kind: API }
+      expose:
+        - service: { name: users-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

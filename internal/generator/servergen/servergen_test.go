@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
+	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 	publicregistry "github.com/parable-work/superschematic/registry"
@@ -58,6 +60,11 @@ const (
 	// servers, whose Staging environment places shop-db on Cloud SQL.
 	cloudStack = "shop-cloud-stack"
 
+	// site is the fixture's site, which shop-stack deploys and which calls
+	// shop-orders: Storefront answers CORS for it on shop-orders' routes
+	// (D55). It is loaded, not built: its build writes no entrypoint.
+	site = "shop-web"
+
 	// goldenRoot holds the entrypoints as the output root lays them out,
 	// under server, and the scaffolds as the repository root does, under
 	// go.
@@ -66,8 +73,9 @@ const (
 
 // order is the order a build-all builds the fixture in, cloudStack left
 // out: shop-orders calls shop-api, so its server builds after shop-api's
-// SDK.
-var order = []string{"shop-db", "shop-api", "shop-orders", "shop-reviews", "shop-stack"}
+// SDK. shop-media, the bucket shop-orders and shop-reviews list, builds
+// nothing (D54).
+var order = []string{"shop-db", "shop-media", "shop-api", "shop-orders", "shop-reviews", "shop-stack"}
 
 // apis are the services of order the stacks serve, in order.
 var apis = order[:len(order)-1]
@@ -75,6 +83,10 @@ var apis = order[:len(order)-1]
 // expireOrders is the deployable of shop-orders' job ExpireOrders, whose
 // entrypoint each stack's build writes beside the servers' (D52).
 const expireOrders = "shop-orders-expire-orders"
+
+// fulfilOrders is the deployable of shop-orders' worker FulfilOrders, whose
+// entrypoint each stack's build writes beside the servers' too (D53).
+const fulfilOrders = "shop-orders-fulfil-orders"
 
 // fixture is the loaded fixture services.
 type fixture struct {
@@ -93,7 +105,7 @@ func loadFixture(t *testing.T, root string) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(order), cloudStack) {
+	for _, name := range append(slices.Clone(order), cloudStack, site) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -165,13 +177,14 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 // generated lists the files the build of each of stacks writes, by their
 // path under goldenRoot: an entrypoint's from the output root, a
 // scaffold's from the repository root. It lists every server's
-// cloudsql.go, which only a server on Cloud SQL has.
+// cloudsql.go, which only a server on Cloud SQL has, and buckets.go, which
+// only one whose APIs list a bucket has (D54).
 func generated(repoRoot string, stacks ...string) map[string]string {
 	files := map[string]string{}
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
-		for _, server := range []string{"Storefront", "shop-api", expireOrders} {
-			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+		for _, server := range []string{"Storefront", "shop-api", expireOrders, fulfilOrders} {
+			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.CORSFile, servergen.BucketsFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
 		}
@@ -189,8 +202,9 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 // server, Storefront serving two APIs on one database and calling
 // shop-api, and shop-api's default server, and one per job, shop-orders'
 // ExpireOrders, which builds shop-orders' Deps as Storefront does and runs
-// the job (D52); and scaffolds each API's implementation with a module of
-// its own. shop-stack's entrypoints never run on Cloud SQL and link no
+// the job (D52), and one per worker, shop-orders' FulfilOrders, which
+// builds the same Deps and claims shop-db's queue OrderPlaced (D53); and
+// scaffolds each API's implementation with a module of its own. shop-stack's entrypoints never run on Cloud SQL and link no
 // Cloud SQL connector; cloudStack's, whose Staging places shop-db on Cloud
 // SQL, do. Regenerate with:
 //
@@ -216,8 +230,8 @@ func TestEntrypointGolden(t *testing.T) {
 		for _, e := range entries {
 			servers = append(servers, e.Name())
 		}
-		if got := strings.Join(servers, " "); got != "Storefront shop-api "+expireOrders {
-			t.Errorf("%s: entrypoints = %s, want Storefront, shop-api and %s", stack, got, expireOrders)
+		if got := strings.Join(servers, " "); got != "Storefront shop-api "+expireOrders+" "+fulfilOrders {
+			t.Errorf("%s: entrypoints = %s, want Storefront, shop-api, %s and %s", stack, got, expireOrders, fulfilOrders)
 		}
 	}
 }
@@ -368,8 +382,8 @@ func TestOnlyAServerOnCloudSQLLinksTheConnector(t *testing.T) {
 		if _, ok := read("shop-stack", server, servergen.CloudSQLFile); ok {
 			t.Errorf("shop-stack's %s, never on Cloud SQL, has cloudsql.go", server)
 		}
-		if mod, _ := read("shop-stack", server, servergen.ModFile); strings.Contains(mod, "cloud.google.com") {
-			t.Errorf("shop-stack's %s, never on Cloud SQL, requires a Google module:\n%s", server, mod)
+		if mod, _ := read("shop-stack", server, servergen.ModFile); strings.Contains(mod, "cloud.google.com/go/cloudsqlconn") {
+			t.Errorf("shop-stack's %s, never on Cloud SQL, requires the Cloud SQL connector:\n%s", server, mod)
 		}
 		main, _ := read("shop-stack", server, servergen.MainFile)
 		if want := "which server " + server + " does not link: no environment of stack shop-stack placed its databases on Cloud SQL"; !strings.Contains(main, want) || strings.Contains(main, "connectCloudSQL") {
@@ -388,6 +402,46 @@ func TestOnlyAServerOnCloudSQLLinksTheConnector(t *testing.T) {
 	}
 }
 
+// TestOnlyAServerWithABucketLinksGCS: Storefront, whose two APIs list
+// shop-media, and shop-orders' job, whose API lists it, get buckets.go and
+// require GCS's Go client; Storefront opens the bucket once for the two
+// APIs. shop-api, whose API lists none, requires no Google module at all
+// (D54).
+func TestOnlyAServerWithABucketLinksGCS(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	read := func(server, file string) (string, bool) {
+		data, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, "shop-stack", server), file))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		return string(data), err == nil
+	}
+	for _, server := range []string{"Storefront", expireOrders} {
+		if _, ok := read(server, servergen.BucketsFile); !ok {
+			t.Errorf("%s, whose APIs list a bucket, has no buckets.go", server)
+		}
+		if mod, _ := read(server, servergen.ModFile); !strings.Contains(mod, "\tcloud.google.com/go/storage v1.69.0\n") {
+			t.Errorf("%s does not require GCS's Go client:\n%s", server, mod)
+		}
+	}
+	main, _ := read("Storefront", servergen.MainFile)
+	if got := strings.Count(main, "openBucket(ctx, \"SHOP_MEDIA_BUCKET\""); got != 1 {
+		t.Errorf("Storefront opens shop-media %d times, want once for its two APIs:\n%s", got, main)
+	}
+	if got := strings.Count(main, "ShopMedia: shopMediaBucket,"); got != 2 {
+		t.Errorf("Storefront hands shop-media to %d APIs' Deps, want 2:\n%s", got, main)
+	}
+	if _, ok := read("shop-api", servergen.BucketsFile); ok {
+		t.Error("shop-api, whose API lists no bucket, has buckets.go")
+	}
+	if mod, _ := read("shop-api", servergen.ModFile); strings.Contains(mod, "cloud.google.com") || strings.Contains(mod, "google.golang.org/api") {
+		t.Errorf("shop-api, with no bucket and never on Cloud SQL, requires a Google module:\n%s", mod)
+	}
+}
+
 // TestTheScaffoldNeverOverwrites: the stack's build writes an
 // implementation only while its package is missing, never rewrites the
 // one it wrote or the module beside it, and never writes into a package
@@ -399,7 +453,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' constructor.\nfunc NewJobs() {}\n")
+	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' and the workers' constructors.\nfunc NewJobs() {}\n\nfunc NewWorkers() {}\n")
 	if err := os.WriteFile(file, edited, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -454,6 +508,36 @@ func TestAnImplementationThatPredatesItsJobsFails(t *testing.T) {
 		"func NewJobs(deps api.Deps) (api.Jobs, error)",
 		"ExpireOrders(ctx context.Context) error",
 		"where api is example.com/schemas/api/shop-orders",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
+		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
+	}
+}
+
+// TestAnImplementationThatPredatesItsWorkersFails: shop-orders declares a
+// worker, and its implementation, which exists and so is the engineer's,
+// declares NewJobs and no NewWorkers. The build writes nothing into it and
+// fails, saying what to add, the message's type included (D53).
+func TestAnImplementationThatPredatesItsWorkersFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
+	file := filepath.Join(dir, apigen.ImplementationFile)
+	before := []byte("package shoporders\n\n// The engineer's code, from before the worker.\nfunc New() {}\n\nfunc NewJobs() {}\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack shop-stack: shop-orders declares workers, and its implementation at " + dir + ", which the build no longer writes into, declares no NewWorkers",
+		"func NewWorkers(deps api.Deps) (api.Workers, error)",
+		"FulfilOrders(ctx context.Context, msg shopdb.OrderPlaced) error",
+		"and shopdb is example.com/schemas/types/go/shop-db",
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build = %v, want it to say %q", err, want)
@@ -712,6 +796,36 @@ func (s *started) send(t *testing.T, method, path, body string, status int, cont
 	}
 }
 
+// checkCORS sends method to path from origin, a preflight asking for ask
+// when method is OPTIONS, and checks the status, unless status is 0, and
+// the Access-Control-Allow-Origin the answer carries, or none when
+// allowed is empty (D55).
+func checkCORS(t *testing.T, base, method, path, origin, ask string, status int, allowed string) {
+	t.Helper()
+	req, err := http.NewRequest(method, base+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", origin)
+	if ask != "" {
+		req.Header.Set("Access-Control-Request-Method", ask)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if status != 0 && resp.StatusCode != status {
+		t.Errorf("%s %s from %s = %d, want %d", method, path, origin, resp.StatusCode, status)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != allowed {
+		t.Errorf("%s %s from %s allows origin %q, want %q", method, path, origin, got, allowed)
+	}
+	if allowed != "" && resp.Header.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Errorf("%s %s from %s does not allow credentials", method, path, origin)
+	}
+}
+
 // stop sends SIGTERM and checks the server drains and exits cleanly.
 func (s *started) stop(t *testing.T) {
 	t.Helper()
@@ -768,8 +882,19 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	// Port 9 discards; nothing answers a database there. The client of
 	// shop-api signs its service credential with an edge key, as the local
 	// target's connector derives it, which the server reads at startup.
+	// Opening shop-media makes no request, so its emulator is nowhere too.
 	unreachable := "postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"
-	storefront := start(t, binaries["Storefront"], append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+	// The site shop-web calls shop-orders from its origin, which
+	// shop-orders' CORS field lists (D55).
+	const siteOrigin = "https://shop-web.acme.dev"
+	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
+	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
+	// A preflight to shop-orders from the site is answered; one from
+	// another origin is not, nor one to shop-reviews, which no site calls.
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/products/p-1/reviews", siteOrigin, http.MethodGet, 0, "")
+	checkCORS(t, storefront.base, http.MethodGet, "/api/orders/o-1", siteOrigin, "", http.StatusNotImplemented, siteOrigin)
 	storefront.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	storefront.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
@@ -785,7 +910,7 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	shopAPI.stop(t)
 
 	cmd := exec.Command(binaries["Storefront"])
-	cmd.Env = append(os.Environ(), append(append(cloudSQLVariables(t, "SHOP_DB_DATABASE"), edgeVariables(t, "SHOP_API_SERVICE")...), "PORT="+freePort(t))...)
+	cmd.Env = append(os.Environ(), append(append(append(cloudSQLVariables(t, "SHOP_DB_DATABASE"), edgeVariables(t, "SHOP_API_SERVICE")...), media...), "PORT="+freePort(t))...)
 	refused, err := cmd.CombinedOutput()
 	if want := "SHOP_DB_DATABASE is a Cloud SQL connector configuration, which server Storefront does not link"; err == nil || !strings.Contains(string(refused), want) {
 		t.Errorf("Storefront on a Cloud SQL configuration = %v, want it to stop saying %q:\n%s", err, want, refused)
@@ -802,7 +927,7 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	goCommand(t, jobDir, "build", "-o", jobBinary, ".")
 	runJob := func() (string, error) {
 		cmd := exec.Command(jobBinary)
-		cmd.Env = append(os.Environ(), append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+		cmd.Env = append(os.Environ(), append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
 		output, err := cmd.CombinedOutput()
 		return string(output), err
 	}
@@ -827,6 +952,140 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	goCommand(t, jobDir, "build", "-o", jobBinary, ".")
 	if output, err := runJob(); err != nil || !strings.Contains(output, `"msg":"expired no order"`) || !strings.Contains(output, `"msg":"job done"`) {
 		t.Errorf("the implemented job = %v, want exit 0 after the method's log:\n%s", err, output)
+	}
+
+	// shop-orders' worker builds the same Deps and claims shop-db's queue
+	// with the concurrency WORKER_CONCURRENCY sets (D53). With the database
+	// down its claims fail, which it logs and retries; SIGTERM stops it,
+	// and it exits 0 saying so.
+	workerDir := servergen.ServerDir(out, "shop-stack", fulfilOrders)
+	goCommand(t, workerDir, "mod", "tidy")
+	goCommand(t, workerDir, "vet", ".")
+	workerBinary := filepath.Join(t.TempDir(), fulfilOrders)
+	goCommand(t, workerDir, "build", "-o", workerBinary, ".")
+	cmd = exec.Command(workerBinary)
+	cmd.Env = append(os.Environ(), append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "WORKER_CONCURRENCY=3"}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+	workerOutput := &syncBuffer{}
+	cmd.Stdout, cmd.Stderr = workerOutput, workerOutput
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(workerOutput.String(), `"msg":"claim failed"`) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	err = cmd.Wait()
+	for _, want := range []string{`"msg":"worker started"`, `"concurrency":3`, `"queue":"OrderPlaced"`, `"msg":"claim failed"`, `"msg":"worker stopped"`} {
+		if !strings.Contains(workerOutput.String(), want) {
+			t.Errorf("the worker printed no %s:\n%s", want, workerOutput.String())
+		}
+	}
+	if err != nil {
+		t.Errorf("the worker stopped with %v, want exit 0:\n%s", err, workerOutput.String())
+	}
+}
+
+// syncBuffer is a buffer a process writes while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// bucketVariables are the variables of the bucket field named field
+// holding the bucket shop-media on the emulator at endpoint, as
+// ir.DerivedVariables encodes a resolved environment's value (D54).
+func bucketVariables(t *testing.T, field, endpoint string) []string {
+	t.Helper()
+	vars, err := ir.DerivedVariables(field, ir.BucketConnection{Name: "shop-media", Endpoint: endpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := make([]string, len(vars))
+	for i, v := range vars {
+		env[i] = fmt.Sprintf("%s=%v", v.Name, v.Value)
+	}
+	return env
+}
+
+// TestBucketsReachTheEmulator: the buckets.go a server whose APIs list a
+// bucket gets builds with GCS's Go client and reaches fake-gcs-server,
+// which a container runs, through the derived variables of a bucket
+// connection to it: it puts, gets, lists and deletes objects and signs
+// URLs the emulator takes (testdata/buckets_test.go, run in Storefront's
+// module). It needs Docker and the module proxy, and skips without them.
+func TestBucketsReachTheEmulator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("Docker is not available: %v", err)
+	}
+	paths := testpaths.Local(t)
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, paths)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "Storefront")
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
+	}
+	goCommand(t, dir, "vet", ".")
+	unit, err := os.ReadFile(filepath.Join("testdata", "buckets_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "buckets_test.go"), unit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port := freePort(t)
+	name := "servergen-buckets-" + port
+	run := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "--publish", "127.0.0.1:"+port+":4443",
+		local.DefaultStorageImage, "-scheme", "http", "-port", "4443", "-backend", "memory",
+		"-public-host", "127.0.0.1:"+port, "-external-url", "http://127.0.0.1:"+port)
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Skipf("run %s: %v\n%s", local.DefaultStorageImage, err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", name).Run() })
+	endpoint := "http://127.0.0.1:" + port
+	deadline := time.Now().Add(time.Minute)
+	for {
+		resp, err := http.Get(endpoint + "/storage/v1/b")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the emulator did not answer in a minute: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	test := exec.Command("go", "test", "-v", "-count=1", "-run", "^TestBucketOnTheEmulator$", ".")
+	test.Dir = dir
+	// PWD keeps go in dir as the build saw it, through a symlinked
+	// temporary directory, which the replaces' relative paths count from.
+	test.Env = append(os.Environ(), append(bucketVariables(t, "SHOP_MEDIA_BUCKET", endpoint), "PWD="+dir)...)
+	if out, err := test.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestBucketOnTheEmulator") {
+		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
 	}
 }
 
@@ -929,11 +1188,13 @@ func TestCloudSQLEntrypointConnectsBothWays(t *testing.T) {
 		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
 	}
 
-	shopAPI := edgeVariables(t, "SHOP_API_SERVICE")
-	local := start(t, binary, append([]string{"SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"}, shopAPI...)...)
-	local.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
-	local.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
-	local.stop(t)
+	// Storefront's APIs list shop-media too, which opening reaches nothing
+	// of (D54).
+	shopAPI := append(edgeVariables(t, "SHOP_API_SERVICE"), bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")...)
+	onURL := start(t, binary, append([]string{"SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1&sslmode=disable"}, shopAPI...)...)
+	onURL.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
+	onURL.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
+	onURL.stop(t)
 
 	cloud := start(t, binary, append(append(cloudSQL, offlineCredentials(t)...), shopAPI...)...)
 	cloud.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")

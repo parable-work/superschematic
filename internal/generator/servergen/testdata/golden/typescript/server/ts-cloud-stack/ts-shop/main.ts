@@ -22,6 +22,7 @@ import { createLogger, serviceCredentialFor, type Database, type Service } from 
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { connectPostgres, ping } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
+import { openBucket } from '@superschematic/http-runtime/gcs';
 import * as tsShopApi from '@schemas/ts-shop-api';
 import * as tsShopImpl from '@schemas/ts-shop-implementation';
 import * as tsPricingSdk from '@schemas/ts-pricing-sdk';
@@ -79,6 +80,10 @@ async function main(): Promise<void> {
   // One client per API called, shared by every API that calls it.
   const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE);
 
+  // One handle per bucket, shared by every API that lists it, on GCS or on
+  // the emulator its connection names (D54).
+  const tsMediaBucket = openBucket(tsShopConfig.TS_MEDIA_BUCKET);
+
   const app = new Hono();
   let draining = false;
   app.get('/healthz', c => c.json({ status: 'ok' }));
@@ -105,6 +110,7 @@ async function main(): Promise<void> {
     config: tsShopConfig,
     db: tsDbPool,
     tsPricing: tsPricingClient,
+    tsMedia: tsMediaBucket,
     logger: logger.child({ api: 'ts-shop' }),
   };
   const tsShopImplementations = await construct('ts-shop', 'implementation', () => tsShopImpl.create(tsShopDeps));

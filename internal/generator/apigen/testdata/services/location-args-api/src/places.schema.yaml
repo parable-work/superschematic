@@ -1,0 +1,40 @@
+# Body arguments of Geo.Location, a JSON-object scalar, in each shape a Go
+# route decodes: a required and an optional value, a list, a list of
+# lists, a map and a map of lists. The route checks each value on its own
+# JSON with superscalar before it decodes it. The Go route tests in apigen
+# load it.
+name: location-args-api
+kind: API
+scalars:
+  Geo.Location:
+    name: Geo.Location
+    languagePrimitive: string
+operationSets:
+  - name: PlaceMutations
+    operations:
+      # Pin a place and the places around it; returns whether it was pinned.
+      - name: pinPlace
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: POST
+        restPath: "places"
+        arguments:
+          # Where the place is.
+          - name: at
+            typeRef: { name: Geo.Location }
+            required: true
+          # The nearest landmark.
+          - name: near
+            typeRef: { name: Geo.Location }
+          # The way there.
+          - name: route
+            typeRef: { name: Geo.Location, isArray: true }
+          # Rows of points around it.
+          - name: grid
+            typeRef: { name: Geo.Location, isArray: true, isArrayOfArrays: true }
+          # Named places nearby.
+          - name: named
+            typeRef: { name: Geo.Location, isMap: true }
+          # The legs of named trips.
+          - name: legs
+            typeRef: { name: Geo.Location, isMap: true, isArray: true }

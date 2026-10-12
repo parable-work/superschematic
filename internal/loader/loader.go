@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
@@ -60,6 +61,11 @@ type loadOptions struct {
 	schemaCatalog  map[string]registry.SchemaCatalogEntry
 	naming         naming.Naming
 	registry       *registry.Registry
+	loadDependency func(name string) (*ir.Schema, error)
+	// authDBRead marks the load of an authDb for another schema's route
+	// sets, which reads no authDb of its own: an authDb is a DB schema,
+	// and one that is not fails its reader without a chain of loads.
+	authDBRead bool
 }
 
 // WithNaming supplies the superschematic.toml naming; the verification pass
@@ -88,6 +94,19 @@ func (o *loadOptions) registryOrCore() *registry.Registry {
 		o.registry = registry.New(o.naming.OrDefault())
 	}
 	return o.registry
+}
+
+// WithDependencyLoader supplies how the load reads another service by
+// name: the schema its config's authDb names, which an API's user model
+// route sets (@userSessions, @userAdministration) read their users from
+// (D50). The build commands pass the loader their generators use, so a
+// build reads each service once. Without the option the loader reads the
+// service of that name beside this one, the layout every build command
+// reads, and only for an API with a route set.
+func WithDependencyLoader(load func(name string) (*ir.Schema, error)) Option {
+	return func(o *loadOptions) {
+		o.loadDependency = load
+	}
 }
 
 // WithProfiler enables phase timing for a load.
@@ -181,8 +200,13 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			if err := loadDocuments(servicePath, schema, cfg, &o, reg); err != nil {
 				return nil, nil, err
 			}
+			authDB, err := o.authDBFor(servicePath, schema, reg)
+			if err != nil {
+				return nil, nil, err
+			}
+			vin.AuthDB = authDB
 			var verified *ir.Schema
-			err := o.profile.Measure("loader.verify", func() error {
+			err = o.profile.Measure("loader.verify", func() error {
 				var err error
 				verified, err = runVerify(schema, vin)
 				return err
@@ -277,9 +301,14 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	if err := loadDocuments(servicePath, schema, cfg, &o, reg); err != nil {
 		return nil, nil, err
 	}
+	authDB, err := o.authDBFor(servicePath, schema, reg)
+	if err != nil {
+		return nil, nil, err
+	}
+	vin.AuthDB = authDB
 
 	var verified *ir.Schema
-	err := o.profile.Measure("loader.verify", func() error {
+	err = o.profile.Measure("loader.verify", func() error {
 		var err error
 		verified, err = runVerify(schema, vin)
 		return err
@@ -287,11 +316,46 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	return verified, cfg, err
 }
 
+// authDBFor reads the schema the config's authDb names, which an API's
+// user model route sets read their users from (D50): through the
+// dependency loader (WithDependencyLoader), or as the service of that name
+// beside this one. It reads nothing for a schema without a route set, one
+// that is not an API, one whose config names no authDb, or the load of an
+// authDb itself; the verification pass refuses the ones that need it.
+func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
+	if o.authDBRead || schema.Kind != ir.SchemaKindAPI || schema.AuthDB == "" || schema.AuthDB == schema.Name {
+		return nil, nil
+	}
+	declared := false
+	for _, set := range schema.OperationSets {
+		declared = declared || set.IsIdentityRoutes()
+	}
+	if !declared {
+		return nil, nil
+	}
+	load := o.loadDependency
+	if load == nil {
+		load = func(name string) (*ir.Schema, error) {
+			return LoadService(filepath.Join(servicePath, "..", name),
+				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
+				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache),
+				func(nested *loadOptions) { nested.authDBRead = true })
+		}
+	}
+	authDB, err := load(schema.AuthDB)
+	if err != nil {
+		return nil, fmt.Errorf("%s: reading the authDb %s, whose User table the user model's routes read: %w", schema.Name, schema.AuthDB, err)
+	}
+	return authDB, nil
+}
+
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, any
-// scalar only the generated fields use is hydrated from the registry, and
-// the services its stack declarations name join its references (D41).
+// that verifies has its version graphs expanded into ordinary types, the
+// tables its User and UserRole traits own added and its user model route
+// sets filled from its authDb (D50), any scalar only the generated fields
+// use is hydrated from the registry, and the services its stack
+// declarations name join its references (D41).
 func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
@@ -300,7 +364,10 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	if err := res.Err(); err != nil {
 		return nil, err
 	}
-	if added := versiongraph.Expand(schema); len(added) > 0 {
+	added := versiongraph.Expand(schema)
+	added = append(added, identity.Expand(schema)...)
+	added = append(added, identity.ExpandRoutes(schema, vin.AuthDB, vin.Naming.OrDefault().IdentityPermissionPrefix)...)
+	if len(added) > 0 {
 		reg := vin.Registry
 		if reg == nil {
 			reg = registry.New(vin.Naming.OrDefault())
@@ -326,8 +393,8 @@ func HydrateScalars(schema *ir.Schema, catalog registry.ScalarCatalog) error {
 }
 
 // hydrateScalarsFromRegistry fills every ScalarDef the schema references
-// from the scalar catalog: description, primitive, constraints, custom
-// hooks, upload metadata (from an UploadCatalog) and the per-language type
+// from the scalar catalog: description, primitive, constraints, case and
+// reserved words, custom hooks, upload metadata (from an UploadCatalog) and the per-language type
 // mappings. A name the catalog does not know is an error when the schema
 // declares nothing about it beyond its identity (a TypeScript brand or a
 // bare data-form entry, which can only have meant a catalog scalar); a
@@ -365,6 +432,16 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		scalar.Minimum = metadata.Minimum
 		scalar.Pattern = metadata.Pattern
 		scalar.Format = metadata.Format
+		// The catalog's declarations replace any a data form wrote, so a
+		// schema cannot declare a catalog scalar case-insensitive that the
+		// scalar package does not (D50's login rule reads it).
+		scalar.CaseInsensitive = metadata.CaseInsensitive
+		scalar.ReservedWords = nil
+		if len(metadata.ReservedWords) > 0 {
+			scalar.ReservedWords = append([]string(nil), metadata.ReservedWords...)
+		}
+		scalar.ReservedWordsCaseInsensitive = metadata.ReservedWordsCaseInsensitive
+		scalar.ReservedWordsMatchPartial = metadata.ReservedWordsMatchPartial
 		scalar.HasCustomNormalize = metadata.HasCustomNormalize
 		scalar.HasCustomParse = metadata.HasCustomParse
 		scalar.HasCustomValidate = metadata.HasCustomValidate
@@ -437,8 +514,9 @@ func isCatalogReference(def *ir.ScalarDef) bool {
 
 // isRustTypeExpression reports whether a catalog Rust type can stand where
 // a type goes. A row may describe its shape as a declaration instead
-// (`struct Location { lat: f64, lon: f64 }`); rustgen then keeps its own
-// mapping for the scalar.
+// (`struct Point { x: f64, y: f64 }`); rustgen then keeps its own mapping
+// for the scalar. Every core row names a type, Geo.Location's struct as
+// superscalar::metadata::geo_location::Location.
 func isRustTypeExpression(rustType string) bool {
 	return rustType != "" && !strings.ContainsAny(rustType, "{};")
 }

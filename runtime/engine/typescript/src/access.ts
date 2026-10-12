@@ -14,12 +14,16 @@ schema or its namespace only when called (define_schema and the
 namespace tools), whether the caller may do that at all here; a refusal
 hides the tool, and its call still asks the question the call asks. The
 engine has no roles and no default policy; `allowAll` is explicit, for
-tests and local use.
+tests and local use, and `permissionPolicy` is opt-in: it allows an
+action on a schema to a caller holding `<schema>.<action>`, such as a
+user whose roles grant it (D50), and refuses the questions that name no
+schema.
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
-entry point does not import that package, which brings Hono as a peer
-dependency; only the engine's ./http entry point does (http/app.ts).
+entry point imports only that package's framework-free entry point, for
+the default permission matcher; the engine's ./http entry point imports
+its Hono adapter (http/app.ts).
 
 A call a service makes (D37) carries the calling service in `service`,
 beside the end user it acts for, whose subject and permissions the
@@ -29,6 +33,8 @@ servicePrincipal) and it holds no permissions, since services hold none
 (D37). The policy and the behaviors see the service through the
 principal, and a behavior's can() is false for a service standing in.
 */
+
+import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 
 import { EngineError } from './errors.js';
 
@@ -150,6 +156,59 @@ export type AccessPolicy = (request: AccessRequest) => boolean;
 
 /** allowAll allows everything: for tests and local use. */
 export const allowAll: AccessPolicy = () => true;
+
+// The policies permissionPolicy made without a matcher of their own, which
+// an engine answers with its permissionMatcher (boundPolicy).
+const enginePermissionPolicies = new WeakSet<AccessPolicy>();
+
+/**
+ * permissionAllows is permissionPolicy's rule: the principal holds
+ * `<schema>.<action>`, by matcher. A question that names no schema, a
+ * namespace's own (`manage`) or a listing question, it cannot answer by a
+ * schema's permission, so it refuses it.
+ */
+function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): boolean {
+  if (request.schema === undefined) {
+    return false;
+  }
+  return matcher(request.principal.permissions, [`${request.schema}.${request.action}`]);
+}
+
+/**
+ * permissionPolicy is an opt-in policy (D50): it allows an action to a
+ * caller holding `<schema>.<action>` (`Task.read`, `Task.write`,
+ * `Task.define`, `Task.publish`), so a role that grants `Task` grants every
+ * action on Task. A behavior operation asks the action its declaration
+ * says, so `Task.write` allows a transition; the behavior's own permission,
+ * such as a Workflow transition's, is checked besides. It matches with the
+ * engine's permissionMatcher, or with the one it is given. It refuses a
+ * question that names no schema: a namespace's own (`manage`), which a
+ * deployment's own policy answers, and a listing question, so the tools
+ * document hides define_schema and the namespace tools, though a define
+ * call, which names its schema, asks `<schema>.define`. Called by a policy
+ * of the deployment's own rather than by an engine, it matches with the
+ * HTTP runtime's hasAnyPermission, or the matcher it is given.
+ */
+export function permissionPolicy(options: { permissionMatcher?: PermissionMatcher } = {}): AccessPolicy {
+  const matcher = options.permissionMatcher;
+  if (matcher !== undefined && typeof matcher !== 'function') {
+    throw new TypeError('permissionMatcher is a function (held, required) => boolean');
+  }
+  const policy: AccessPolicy = (request) => permissionAllows(request, matcher ?? hasAnyPermission);
+  if (matcher === undefined) {
+    enginePermissionPolicies.add(policy);
+  }
+  return policy;
+}
+
+/**
+ * boundPolicy is the policy an engine asks: a permissionPolicy made
+ * without a matcher matches with the engine's, and any other policy is
+ * itself.
+ */
+export function boundPolicy(policy: AccessPolicy, matcher: PermissionMatcher): AccessPolicy {
+  return enginePermissionPolicies.has(policy) ? (request) => permissionAllows(request, matcher) : policy;
+}
 
 /**
  * checkPrincipal refuses a call without a principal that names its

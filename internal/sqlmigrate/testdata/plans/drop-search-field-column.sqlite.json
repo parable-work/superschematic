@@ -1,0 +1,46 @@
+{
+  "dialect": "sqlite",
+  "expanded": "da78fc5bb4bb36ae8e91defe9caf71e59394c263525cfafceacabf17ad4b9370",
+  "from": "d152c6e2061e9dcbd1f91b71ff4930f67a9235d1e0509eb32f5a0f2beac519f2",
+  "hash": "fb2c4eeac45261bb4acefb20f30eac19620a91842f2c5b040346c66483d3b391",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"customer\" DROP COLUMN \"search_text\""
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/customer/column/bio",
+          "reason": "Dropping customer.bio deletes the values of Customer.bio.",
+          "subject": "table/customer/column/bio"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer/column/bio",
+          "reason": "SQLite rewrites customer to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/customer/column/bio"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"customer\" DROP COLUMN \"bio\""
+      ],
+      "subject": "table/customer/column/bio",
+      "transactional": true
+    }
+  ],
+  "to": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "toModel": null,
+  "version": 1
+}

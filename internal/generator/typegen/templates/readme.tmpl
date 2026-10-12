@@ -49,5 +49,8 @@ if errors.HasErrors() {
 {{- if .Unions}}
 | `unions.go` | Discriminated union interfaces and JSON wrappers |
 {{- end}}
+{{- if .Identity}}
+| `identity.go` | `IdentityDescriptor`, the identity descriptor (D50); `identity/{{.Identity.FileName}}.json` holds the same document |
+{{- end}}
 
 Generated at {{.Timestamp}}.

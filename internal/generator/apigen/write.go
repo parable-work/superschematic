@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -25,27 +26,39 @@ var templatesFS embed.FS
 // importable Go module:
 //
 //	{schema-name}/
-//	├── go.mod          # Module definition
-//	├── interfaces.go   # Implementation interfaces per namespace
-//	├── routes.go       # RegisterRoutes() with handler factories
-//	├── middleware.go   # Auth middleware + ORM store adapters (public only)
-//	├── openapi.go      # Embedded OpenAPI spec constant
-//	├── openapi.json    # Standalone spec for downstream tooling
-//	├── index.go        # Index page HTML
-//	├── rapidoc.go      # API docs page HTML
-//	├── errors.go       # Error shims over superschematic-http-runtime
-//	├── response.go     # Response shims over superschematic-http-runtime
-//	├── context.go      # Request context shims
-//	├── deps.go         # Deps and the implementation's Constructor
-//	├── config.go       # EnvConfig and its loader (settings or derived fields)
-//	├── constants.go    # SystemUserID (public schemas with a UUID scalar)
-//	└── fileupload.go   # Multipart upload helpers (only with file uploads)
+//	├── go.mod           # Module definition
+//	├── interfaces.go    # Implementation interfaces per namespace
+//	├── routes.go        # RegisterRoutes() with handler factories
+//	├── middleware.go    # Auth middleware and the database context (public only)
+//	├── identity.go      # NewIdentity and the identity route table (D50; Auth.Identity only)
+//	├── openapi.go       # Embedded OpenAPI spec constant
+//	├── openapi.json     # Standalone spec for downstream tooling
+//	├── permissions.json # Permission catalog (only when an operation names a permission)
+//	├── index.go         # Index page HTML
+//	├── rapidoc.go       # API docs page HTML
+//	├── errors.go        # Error shims over superschematic-http-runtime
+//	├── response.go      # Response shims over superschematic-http-runtime
+//	├── context.go       # Request context shims
+//	├── deps.go          # Deps and the implementation's Constructor
+//	├── config.go        # EnvConfig and its loader (settings or derived fields)
+//	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
+//	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
 }
 
 // WriteAPIWithProfile writes the generated API module with shared codegen profiling.
 func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) error {
+	// The user model's operations are the identity runtime's (D50): the
+	// interfaces, the router and the Deps leave them out, and the router
+	// mounts the runtime's handlers at their routes.
+	output, err := ImplementedOutput(output)
+	if err != nil {
+		return err
+	}
+	if len(output.IdentityEndpoints) > 0 && !output.Auth.Identity {
+		return fmt.Errorf("apigen: %s declares the user model's routes (@userSessions or @userAdministration), which the identity runtime serves, and the auth provider %s does not authenticate with it", output.SchemaName, output.Provider.Name())
+	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
@@ -100,9 +113,15 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 			return fmt.Errorf("failed to write openapi.json: %w", err)
 		}
 	}
+	if output.PermissionCatalogJSON != "" {
+		if err := os.WriteFile(filepath.Join(outputDir, permcatalog.FileName), []byte(output.PermissionCatalogJSON), 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", permcatalog.FileName, err)
+		}
+	}
 
 	conditionalFiles := []codegen.ConditionalFile{
 		{Condition: output.IsPublic, Template: "middleware.tmpl", Filename: "middleware.go"},
+		{Condition: output.Auth.Identity, Template: "identity.tmpl", Filename: "identity.go"},
 		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
 	}
@@ -134,6 +153,12 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 
 // WriteScaffoldsWithProfile writes route-impl scaffold files with shared codegen profiling.
 func WriteScaffoldsWithProfile(output *APIOutput, scaffoldsDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) (*codegen.ScaffoldResult, error) {
+	// No scaffold for a user model operation, which the identity runtime
+	// serves (D50).
+	output, err := ImplementedOutput(output)
+	if err != nil {
+		return nil, err
+	}
 	funcs, err := templateFuncs(output.Provider)
 	if err != nil {
 		return nil, err

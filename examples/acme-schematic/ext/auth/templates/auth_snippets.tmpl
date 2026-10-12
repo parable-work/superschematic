@@ -38,14 +38,14 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 {{- end }}
 
 {{ define "middlewareStdImports" }}
-{{- if or .Auth.Extra.HasKeyStore .Auth.HasPrincipalStore }}
+{{- if or .Auth.Extra.HasKeyStore .Auth.User.KeyIsUUID }}
 	"errors"
 {{- end }}
 {{- end }}
 
 {{ define "middlewareImports" }}
 	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
-{{- if .Auth.HasPrincipalStore }}
+{{- if .Auth.User.KeyIsUUID }}
 	scalars "{{ $.Naming.ScalarGoModule }}"
 {{- end }}
 {{- end }}
@@ -146,20 +146,23 @@ func NewKeyStore(db orm.DatabaseInterface) KeyStore {
 }
 {{- end }}
 
-{{- if .Auth.HasPrincipalStore }}
+{{- if .Auth.User.KeyIsUUID }}
+{{- $user := .Auth.User }}
 
 type ormPrincipalStore struct {
 	db orm.DatabaseInterface
 }
 
+// GetByID reads the principal from {{ $user.Type }}, the table with the User
+// trait: its {{ $user.Key }} and its {{ $user.Name }}.
 func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesession.Principal, error) {
 	// The ORM filter takes the scalar UUID, not its string form.
 	idUUID, err := scalars.ParseUUID(id)
 	if err != nil {
 		return runtimesession.Principal{}, runtimesession.ErrNotFound
 	}
-	user, err := s.db.GetUserRepository().FindOne(ctx, &orm.UserFilter{
-		Id: &orm.UUIDFilter{Eq: &idUUID},
+	user, err := s.db.Get{{ $user.Type }}Repository().FindOne(ctx, &orm.{{ $user.Type }}Filter{
+		{{ toGoName $user.Key }}: &orm.UUIDFilter{Eq: &idUUID},
 	}, nil)
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {
@@ -168,8 +171,8 @@ func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesess
 		return runtimesession.Principal{}, err
 	}
 	return runtimesession.Principal{
-		ID:   user.Id.String(),
-		Name: string(user.Name),
+		ID:   user.{{ toGoName $user.Key }}.String(),
+		Name: string(user.{{ toGoName $user.Name }}),
 	}, nil
 }
 

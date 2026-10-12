@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "user": {
+    "type": "User",
+    "table": "user",
+    "columns": {
+      "key": "id",
+      "login": "email",
+      "name": "display_name"
+    },
+    "keyScalar": "Identity.UUID",
+    "loginScalar": "Contact.Email",
+    "nameScalar": "Identity.Name"
+  },
+  "session": {
+    "table": "session",
+    "columns": {
+      "id": "id",
+      "user": "user_id",
+      "tokenHash": "token_hash",
+      "createdAt": "created_at",
+      "expiresAt": "expires_at",
+      "lastSeenAt": "last_seen_at",
+      "revokedAt": "revoked_at"
+    }
+  },
+  "credential": {
+    "table": "user_credential",
+    "columns": {
+      "id": "id",
+      "user": "user_id",
+      "passwordHash": "password_hash",
+      "passwordChangedAt": "password_changed_at",
+      "disabledAt": "disabled_at"
+    }
+  },
+  "role": {
+    "type": "Role",
+    "table": "role",
+    "columns": {
+      "key": "id",
+      "name": "name",
+      "permissions": "permissions"
+    },
+    "keyScalar": "Identity.UUID"
+  },
+  "roleGrant": {
+    "table": "user_role_grant",
+    "columns": {
+      "id": "id",
+      "user": "user_id",
+      "role": "role_id",
+      "grantedAt": "granted_at"
+    }
+  }
+}

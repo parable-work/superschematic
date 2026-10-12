@@ -105,6 +105,13 @@ type DateRange struct {
 	End   string
 }
 
+// GeoPointFilter provides filtering operations for location fields stored as
+// POINT. Postgres has no equality operator for a point, and its ~= compares
+// coordinates within 1e-6 on a plane, so a location matches on presence only.
+type GeoPointFilter struct {
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
+}
+
 // ReferencedByFilter probes for rows another table does or does not
 // reference. It becomes an EXISTS / NOT EXISTS subquery over the referencing
 // table's foreign key, so a filtered page contains only matching rows -- an

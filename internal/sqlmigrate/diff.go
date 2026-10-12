@@ -416,6 +416,12 @@ func (d *differ) addColumn(ft, tt *Table, tc *Column) {
 		op: opAddColumn, phase: Expand, subject: columnSubject(tt.Name, tc.Name),
 		table: tt.Name, column: tc, tableDef: tt,
 	})
+	// A generated column is added after the plain columns the phase adds:
+	// its expression may read them, and neither dialect adds a column whose
+	// expression reads one the table does not have yet.
+	if tc.Generated != "" {
+		c.order = 1
+	}
 	if !tc.Nullable && tc.Default == "" && tc.Generated == "" {
 		c.addHazard(HazardCompat, "", fmt.Sprintf(
 			"%s is required and has no default: servers built from the previous version insert rows without it.", fieldOf(tt, tc)))
@@ -438,6 +444,12 @@ func (d *differ) dropColumn(ft, tt *Table, fc *Column, hint string) {
 		op: opDropColumn, phase: Contract, subject: columnSubject(tt.Name, fc.Name),
 		table: tt.Name, column: fc,
 	})
+	// A generated column is dropped before the plain columns the phase
+	// drops: its expression may read them, and neither dialect drops a
+	// column a generated column reads.
+	if fc.Generated != "" {
+		c.order = -1
+	}
 	// A generated column's values follow from the columns it reads.
 	if fc.Generated == "" {
 		c.addHazard(HazardDestructive, "", fmt.Sprintf("Dropping %s.%s deletes %s%s", tt.Name, fc.Name, valuesOf(ft, fc), hint))

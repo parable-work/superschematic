@@ -16,23 +16,40 @@ from .types import Schema
 ScalarValidateFn = Callable[[str], list[_errors.ValidationError]]
 
 
+def _registry_key(name: str) -> str:
+    """The canonical spelling of a scalar name: a flat name (``Geo_Location``,
+    as the schema JSON form keys its scalars) becomes the dotted one
+    (``Geo.Location``). Canonical segments never contain underscores, so the
+    two spellings name the same scalar, as the TypeScript runtime's registry
+    reads them.
+    """
+    trimmed = name.strip()
+    if not trimmed or "." in trimmed:
+        return trimmed
+    return trimmed.replace("_", ".")
+
+
 class ScalarValidatorRegistry:
-    """Registry mapping canonical scalar names to validator functions."""
+    """Registry mapping canonical scalar names to validator functions.
+
+    A name may be given in either spelling, canonical (``Contact.Email``) or
+    flat (``Contact_Email``); both reach the same entry.
+    """
 
     def __init__(self) -> None:
         self._validators: dict[str, ScalarValidateFn] = {}
 
     def register(self, name: str, fn: ScalarValidateFn) -> None:
-        self._validators[name] = fn
+        self._validators[_registry_key(name)] = fn
 
     def unregister(self, name: str) -> bool:
-        return self._validators.pop(name, None) is not None
+        return self._validators.pop(_registry_key(name), None) is not None
 
     def get(self, name: str) -> ScalarValidateFn | None:
-        return self._validators.get(name)
+        return self._validators.get(_registry_key(name))
 
     def has(self, name: str) -> bool:
-        return name in self._validators
+        return _registry_key(name) in self._validators
 
     def names(self) -> list[str]:
         return sorted(self._validators)

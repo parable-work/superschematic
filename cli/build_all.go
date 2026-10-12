@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -205,6 +206,9 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 				continue
 			}
 			if stackNeedsImplementationScaffold(task.service, services, repoRoot, activeNaming, reg) {
+				continue
+			}
+			if siteNeedsConfig(task.service, repoRoot, activeNaming) {
 				continue
 			}
 			ok, action := resolveBuildAllTask(task, cacheRoot, repoRoot, cmd.ErrOrStderr())
@@ -579,6 +583,18 @@ func needsImplementationScaffold(service buildplan.Service, repoRoot string, nam
 	return err == nil && !exists
 }
 
+// siteNeedsConfig reports whether service is a site whose package, at the
+// [implementation_paths] site template under repoRoot, holds no typed
+// browser config: the site's build writes it there, and scaffolds the
+// package when it is missing, outside the outputs the cache stores (D55).
+func siteNeedsConfig(service buildplan.Service, repoRoot string, names naming.Naming) bool {
+	if service.Config.Kind != ir.SchemaKindSite {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(names.SiteImplementationDir(repoRoot, service.Name), sitegen.ConfigFile))
+	return err != nil
+}
+
 // stackNeedsImplementationScaffold reports whether service is a stack
 // that serves a Go or TypeScript API whose implementation is missing,
 // which the stack's build scaffolds (docs/stack-model.md, sections 8.5 and
@@ -671,7 +687,10 @@ func executeBuildAllStep(cmd *cobra.Command, task buildAllTask, stage buildplan.
 		OutputRoot:  ctx.outputRoot,
 		SchemasRoot: ctx.schemasRoot,
 		Paths:       ctx.naming.LocalPaths(ctx.repoRoot),
-		LoadOptions: buildAllTaskLoadOptions(ctx),
+		// The load reads an API's authDb from the build's schema cache.
+		LoadOptions: append(buildAllTaskLoadOptions(ctx), loader.WithDependencyLoader(func(name string) (*ir.Schema, error) {
+			return loadBuildAllDependency(name, ctx, prof)
+		})),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loadBuildAllDependency(name, ctx, prof)
 		},

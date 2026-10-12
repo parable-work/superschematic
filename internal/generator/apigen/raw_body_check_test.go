@@ -244,6 +244,7 @@ func TestGenerateRefusesAnInvalidRawBodyCheck(t *testing.T) {
 		{"a package name that is not an identifier", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.PackageName = "json-keys" })}, "package name"},
 		{"the blank package name", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.PackageName = "_" })}, "package name"},
 		{"a package name routes.go imports", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.PackageName = "types" })}, "routes.go already imports"},
+		{"the name routes.go imports the scalar module under", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.PackageName = "scalars" })}, "routes.go already imports"},
 		{"an unexported function", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.Func = "duplicateKeyErrors" })}, "exported"},
 		{"a result variable the call reads", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.ErrorsVar = "rawInput" })}, "result variable"},
 		{"a comment with a carriage return", rawBodyChecks{"Generic.JSON": with(func(c *apigen.RawBodyCheck) { c.Comment = "one\r\ntwo" })}, "comment"},

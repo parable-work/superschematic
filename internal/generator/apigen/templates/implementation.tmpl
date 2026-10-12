@@ -6,14 +6,19 @@
 {{- if .HasJobs }} Each job fails
 // until you implement it.
 {{- end }}
+{{- if .HasWorkers }} Each worker fails
+// every message until you implement it.
+{{- end }}
 package {{ toPackageName .SchemaName }}
 
 import (
+{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs }}
 	"context"
+{{- end }}
 {{- if .HasEncryptedEndpoints }}
 	"errors"
 {{- end }}
-{{- if .IsPublic }}
+{{- if and .IsPublic (not .Auth.Identity) }}
 	"net/http"
 {{- end }}
 {{- if or .HasFilterableEndpoints .HasEncryptedEndpoints }}
@@ -28,6 +33,9 @@ import (
 	api "{{ .ModulePath }}"
 {{- if .NeedsTypesImport }}
 	types "{{ .TypesModule }}"
+{{- end }}
+{{- if .HasWorkers }}
+	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
 {{- end }}
 )
 
@@ -69,7 +77,29 @@ func (j *jobs) {{ .Method }}(ctx context.Context) error {
 }
 {{- end }}
 {{- end }}
-{{- if .IsPublic }}
+{{- if .HasWorkers }}
+
+// NewWorkers builds the workers of {{ .SchemaName }} from the API's dependencies.
+// Its signature is the generated one, api.WorkersConstructor.
+func NewWorkers(deps api.Deps) (api.Workers, error) {
+	return &workers{deps: deps}, nil
+}
+
+var _ api.WorkersConstructor = NewWorkers
+
+// workers implements api.Workers.
+type workers struct {
+	deps api.Deps
+}
+{{- range .Workers }}
+
+// {{ .Method }} handles a message of the queue {{ .Queue }}.
+func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error {
+	return api.NotImplementedError("worker {{ .Name }}")
+}
+{{- end }}
+{{- end }}
+{{- if and .IsPublic (not .Auth.Identity) }}
 
 // AuthMiddleware authenticates the end user on the protected routes of
 // {{ .SchemaName }}. The server's entrypoint passes it to the generated

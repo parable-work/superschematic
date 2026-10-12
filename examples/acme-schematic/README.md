@@ -108,7 +108,7 @@ examples/acme-schematic/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/* (@acme/schema-config included), superscalar
-    services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
+    services/shop-db          DB: User (the User trait), ApiKey, Product, StockLevel
                               tables, the storefront.stock projection and
                               the Planogram version graph (Bay, Facing)
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
@@ -493,7 +493,7 @@ which provider supplies them. The core ships `session`. `ext/auth` ships
 | Method | What acme does |
 |---|---|
 | `Name()` | `"apikey"` |
-| `Analyze(api, upstream)` | `registry.AnalyzeSessionStores(upstream)` for the core `User` probe, plus `registry.HasTable(upstream, "ApiKey", "id", "secret", "user")` into `AuthModel.Extra` |
+| `Analyze(api, upstream)` | `registry.AnalyzeSessionStores(upstream)` for the core user model, the table with the `User` trait, with `Identity` cleared, since API keys and not the identity runtime authenticate the callers; plus `registry.HasTable(upstream, "ApiKey", "id", "secret", "user")` into `AuthModel.Extra` |
 | `Endpoint(field, set, info)` | nothing; API keys scope no endpoint |
 | `Templates()` | the embedded `templates/auth_snippets.tmpl` |
 | `Funcs()` | nil |
@@ -505,7 +505,14 @@ reports which stores the upstream DB can back, and the snippets branch on
 the model, so the generated code always compiles against the ORM it is
 given. `Config.APIKeys KeyStore` is always required; with an `ApiKey` table
 the module also generates `NewKeyStore(db)` over the ORM, without one the
-caller supplies its own.
+caller supplies its own. The principal store, `NewPrincipalStore(db)`,
+reads the table with the `User` trait (`AuthModel.User`, D50), under
+whatever name the schema gives it and its fields: `shop-db`'s `User`
+implements `User<{ login: "email"; name: "name" }>`, imported as
+`UserTrait` since the table has the trait's name. A table named `User`
+without the trait backs no store. Clearing `Identity` keeps the core from
+wiring the identity runtime, so a `shop-api` on this provider declares no
+`@userSessions` set.
 
 The snippet file defines one `{{ define }}` per hook point the core
 templates call: `contextImports`, `contextAuth`, `middlewareStdImports`,
@@ -525,10 +532,9 @@ context.
 
 The smoke `go build`s the generated `shop-api` module to prove the result
 compiles. It also builds `shop-db` and `shop-api` with the core-only binary
-and `auth_provider = "session"` and compiles that too. Writing this example
-is how the session provider's stores were found not to compile against a
-DB with a `User` table; the fix is in the core with a test, and the smoke
-keeps it fixed.
+and `auth_provider = "session"`, whose server authenticates with the
+identity runtime over the same `User` table (`Config.Identity`,
+`NewIdentity`), and compiles that too.
 
 ## A TypeScript API server
 

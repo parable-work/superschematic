@@ -49,6 +49,11 @@ var corpus = []roundtripFixture{
 	// An API's @job classes (D52), which every form writes as the
 	// schema's jobs, not as types.
 	{name: "fixture-jobs-api", dir: tsFixtures + "/fixture-jobs-api", native: FormatTS},
+	// A DB's @queue classes (D53), types that carry the queue, and an API's
+	// @worker classes, which every form writes as the schema's workers,
+	// each naming a queue it imports.
+	{name: "fixture-queue-db", dir: tsFixtures + "/fixture-queue-db", native: FormatTS},
+	{name: "fixture-queue-api", dir: tsFixtures + "/fixture-queue-api", native: FormatTS},
 	// Operation @mcp, @icon and @docs replay keys in the data forms.
 	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both
@@ -65,6 +70,11 @@ var corpus = []roundtripFixture{
 	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
 	// @optimistic tables and, in the graph above, @versioned({ exclude }).
 	{name: "fixture-optimistic-db", dir: tsFixtures + "/fixture-optimistic-db", native: FormatTS},
+	// The user model's traits (D50): every format writes User and
+	// UserRole, and the JSON-native schema's tables share the traits'
+	// names, so the TypeScript leg imports them under an alias.
+	{name: "fixture-users-db", dir: tsFixtures + "/fixture-users-db", native: FormatTS},
+	{name: "fixture-user-handles-json", dir: dataFixtures + "/fixture-user-handles-json", native: FormatJSON},
 	// Service clauses on operations and sets (D37), in the data forms.
 	{
 		name: "fixture-service-auth-api", dir: tsFixtures + "/fixture-service-auth-api", native: FormatTS,
@@ -449,8 +459,9 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 // their schema kinds, for the generated service configs (the verification
 // pass requires every imported service to be a declared dependency).
 var fixtureDependencyKinds = map[string]ir.SchemaKind{
-	"fixture-db": ir.SchemaKindDB,
-	"web-db":     ir.SchemaKindDB,
+	"fixture-db":       ir.SchemaKindDB,
+	"fixture-queue-db": ir.SchemaKindDB,
+	"web-db":           ir.SchemaKindDB,
 }
 
 // writeServiceConfig writes the minimal data-form service config, declaring

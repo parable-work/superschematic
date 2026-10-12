@@ -43,3 +43,8 @@ export * from './validators';
 
 // Re-export mask helpers
 export * from './mask';
+{{- if .IdentityDescriptor}}
+
+// Re-export the identity descriptor
+export { identityDescriptor } from './identity';
+{{- end}}

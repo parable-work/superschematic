@@ -30,6 +30,10 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 	if len(set.Extensions) > 0 {
 		e.failf("%s: extension data (%s) has no TypeScript authoring form in this writer", owner, strings.Join(sortedKeys(set.Extensions), ", "))
 	}
+	if set.IsIdentityRoutes() {
+		e.emitIdentityRoutesSet(set, owner)
+		return
+	}
 
 	auth := false
 	for i, op := range set.Operations {
@@ -63,6 +67,57 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 		e.emitOperation(set.Name, op)
 	}
 	e.body.WriteString("}\n")
+}
+
+// emitIdentityRoutesSet renders a user model route set (D50): its
+// decorator, with the config keys that differ from the defaults, on a class
+// with no members. Its operations are the loader's, which the writer leaves
+// out (withoutExpansion), so the reader expands it again.
+func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
+	if len(set.Operations) > 0 {
+		e.failf("%s: a @userSessions or @userAdministration class has no methods; write the set the loader has not filled", owner)
+	}
+	if set.UserSessions != nil && set.UserAdministration != nil {
+		e.failf("%s: a class takes @userSessions or @userAdministration, not both", owner)
+	}
+	if set.Encrypted || set.ServiceCallers != nil {
+		e.failf("%s: a route set takes no Encrypted base and no service clause", owner)
+	}
+
+	e.body.WriteString("\n")
+	e.comment("", set.Comment)
+	if cfg := set.UserSessions; cfg != nil {
+		var keys []string
+		if cfg.Path != "" {
+			keys = append(keys, "path: "+quote(cfg.Path))
+		}
+		if cfg.NoLogin {
+			keys = append(keys, "login: false")
+		}
+		if cfg.Register {
+			keys = append(keys, "register: true")
+		}
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), optionalObjectLiteral(keys))
+	}
+	if cfg := set.UserAdministration; cfg != nil {
+		var keys []string
+		if cfg.Path != "" {
+			keys = append(keys, "path: "+quote(cfg.Path))
+		}
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userAdministration"), optionalObjectLiteral(keys))
+	}
+	e.emitMiddlewareDecorators("", set.Middleware)
+	fmt.Fprintf(&e.body, "export class %s {}\n", e.ident(set.Name, "operation set"))
+}
+
+// optionalObjectLiteral renders keys, each "key: value", as an object
+// literal, or nothing when there are none, for a decorator whose argument
+// is optional.
+func optionalObjectLiteral(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(keys, ", ") + " }"
 }
 
 // emitOperation renders one operation method stub with its decorators.

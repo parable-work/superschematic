@@ -1,0 +1,6 @@
+name: users-admin
+kind: API
+operationSets:
+  - name: AccountAdmin
+    userAdministration: {}
+    operations: []

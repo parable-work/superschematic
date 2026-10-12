@@ -163,6 +163,20 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 // honored when set.
 func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName, test string, extras ...func(apiDir string, output *APIOutput) error) {
 	t.Helper()
+	cargoTestAPICrateWith(t, service, schema, testName, test, cargoOptions{}, extras...)
+}
+
+// cargoOptions are what a test of the API crate adds to its build: the
+// crate's features, which clippy and cargo test turn on, and lines of the
+// manifest's [dev-dependencies].
+type cargoOptions struct {
+	features        []string
+	devDependencies string
+}
+
+// cargoTestAPICrateWith is cargoTestAPICrate with options.
+func cargoTestAPICrateWith(t *testing.T, service string, schema *ir.Schema, testName, test string, options cargoOptions, extras ...func(apiDir string, output *APIOutput) error) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
 	}
@@ -187,7 +201,7 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 	if err := rustgen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("rustgen.WriteTypes: %v", err)
 	}
-	output, err := generateFrom(schema, apiSource{}, Options{
+	output, err := generateFrom(schema, apiSource{authDB: authDBOf(t, schema)}, Options{
 		SchemaName: service,
 		TypesCrate: naming.Default().RustTypesCrate(service),
 		TypesDir:   typesDir,
@@ -217,7 +231,7 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
-
+`+options.devDependencies+`
 `+testpaths.RustPatch(paths, naming.Default()))...)
 	if err := os.WriteFile(filepath.Join(apiDir, "Cargo.toml"), cargoToml, 0o644); err != nil {
 		t.Fatal(err)
@@ -236,9 +250,13 @@ tower = { version = "0.5", features = ["util"] }
 	}
 	// The crate is linted as a service's CI would lint it, with warnings
 	// denied, before its tests run.
+	var features []string
+	if len(options.features) > 0 {
+		features = []string{"--features", strings.Join(options.features, ",")}
+	}
 	for _, args := range [][]string{
-		{"clippy", "--quiet", "--all-targets", "--", "-D", "warnings"},
-		{"test", "--quiet"},
+		append(append([]string{"clippy", "--quiet", "--all-targets"}, features...), "--", "-D", "warnings"),
+		append([]string{"test", "--quiet"}, features...),
 	} {
 		cmd := exec.Command(cargoPath, args...)
 		cmd.Dir = apiDir

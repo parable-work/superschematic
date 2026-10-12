@@ -1,0 +1,26 @@
+# One server, Accounts, serves both APIs over users-db. Its one
+# environment, Local, runs on the local target, whose platform gives each
+# API's identity config a cookie without Secure.
+kind: Stack
+types:
+  Users:
+    name: Users
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-api, kind: API }
+        - { name: users-admin, kind: API }
+      expose:
+        - deployable: Accounts
+  Accounts:
+    name: Accounts
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: users-api, kind: API }
+        - { name: users-admin, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

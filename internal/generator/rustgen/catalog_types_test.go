@@ -16,9 +16,9 @@ import (
 
 // TestCatalogRustTypes pins the Rust aliases of scalars whose Rust type
 // comes from the catalog through the loader: Generic.StringMap is the
-// catalog's HashMap, Generic.JSON its serde_json::Value, and Geo.Location,
-// whose catalog row declares a struct instead of naming a type, falls back
-// to rustgen's own mapping. With cargo available, the crate is built.
+// catalog's HashMap, Generic.JSON its serde_json::Value, and Geo.Location
+// the scalar crate's own {lat, lon} struct. With cargo available, the crate
+// is built, so the struct is checked against superscalar's.
 func TestCatalogRustTypes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "catalog-rust")
 	names := []string{"Generic.StringMap", "Generic.JSON", "Geo.Location", "Contact.Email"}
@@ -75,7 +75,7 @@ func TestCatalogRustTypes(t *testing.T) {
 	for _, want := range []string{
 		"pub type GenericStringMap = std::collections::HashMap<String, String>;",
 		"pub type GenericJSON = serde_json::Value;",
-		"pub type GeoLocation = serde_json::Value;",
+		"pub type GeoLocation = superscalar::metadata::geo_location::Location;",
 		"pub type ContactEmail = String;",
 	} {
 		if !strings.Contains(string(scalarsRs), want) {
@@ -95,5 +95,24 @@ func TestCatalogRustTypes(t *testing.T) {
 	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(outDir, "target"))
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cargo build failed: %v\n%s", err, combined)
+	}
+}
+
+// A catalog type that lives in the superscalar crate keeps its path under
+// whatever the generated crates call the scalar crate, as Uuid does.
+func TestRemapScalarLibTypeFollowsTheScalarCrate(t *testing.T) {
+	location := codegen.ScalarInfo{Name: "Geo.Location"}
+	for _, tc := range []struct {
+		crate, want string
+	}{
+		{"superscalar", "superscalar::metadata::geo_location::Location"},
+		{"acme_scalars_core", "acme_scalars_core::metadata::geo_location::Location"},
+	} {
+		if got := remapScalarLibType("superscalar::metadata::geo_location::Location", location, tc.crate); got != tc.want {
+			t.Errorf("crate %s: Geo.Location = %q, want %q", tc.crate, got, tc.want)
+		}
+	}
+	if got := remapScalarLibType("serde_json::Value", codegen.ScalarInfo{Name: "Generic.JSON"}, "acme_scalars_core"); got != "serde_json::Value" {
+		t.Errorf("a type outside the scalar crate moved: %q", got)
 	}
 }

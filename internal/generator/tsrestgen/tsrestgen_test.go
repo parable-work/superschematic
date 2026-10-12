@@ -2,7 +2,9 @@ package tsrestgen
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -155,6 +158,21 @@ func checkGolden(t *testing.T, output *APIOutput, service string) {
 	}
 	if _, ok := doc["paths"]; !ok {
 		t.Error("openapi.json has no paths")
+	}
+	checkPermissionCatalog(t, outDir, output.PermissionCatalogJSON)
+}
+
+// checkPermissionCatalog checks the permissions.json in dir, which is
+// apigen's and pinned by apigen's goldens: it is want, and is absent when
+// want is empty.
+func checkPermissionCatalog(t *testing.T, dir, want string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(dir, permcatalog.FileName))
+	switch {
+	case want == "" && !errors.Is(err, fs.ErrNotExist):
+		t.Errorf("%s was written for an API whose operations name no permission: %v", permcatalog.FileName, err)
+	case want != "" && string(got) != want:
+		t.Errorf("%s is not apigen's catalog: %v", permcatalog.FileName, err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -235,16 +236,21 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		implementationRoot = repoRoot
 	}
 
+	// The load reads an API's authDb through the loader the generators
+	// use, so the build reads it once.
+	loadDependency := memoizedSchemas(func(name string) (*ir.Schema, error) {
+		return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
+	})
+	loadOpts = append(loadOpts, loader.WithDependencyLoader(loadDependency))
+
 	_, err = buildService(buildServiceOptions{
-		Naming:      names,
-		ServicePath: servicePath,
-		OutputRoot:  outputRoot,
-		SchemasRoot: schemasRoot,
-		Paths:       names.LocalPaths(repoRoot),
-		LoadOptions: loadOpts,
-		LoadDependency: func(name string) (*ir.Schema, error) {
-			return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
-		},
+		Naming:         names,
+		ServicePath:    servicePath,
+		OutputRoot:     outputRoot,
+		SchemasRoot:    schemasRoot,
+		Paths:          names.LocalPaths(repoRoot),
+		LoadOptions:    loadOpts,
+		LoadDependency: loadDependency,
 		LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
 			return buildplan.ReadConfig(filepath.Join(servicePath, "..", name), reg)
 		},
@@ -258,6 +264,27 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		ImplementationRoot: implementationRoot,
 	})
 	return err
+}
+
+// memoizedSchemas returns load, reading each schema once: the later calls
+// for a name return the first call's schema, or its error.
+func memoizedSchemas(load func(name string) (*ir.Schema, error)) func(name string) (*ir.Schema, error) {
+	type loaded struct {
+		schema *ir.Schema
+		err    error
+	}
+	var mu sync.Mutex
+	seen := map[string]loaded{}
+	return func(name string) (*ir.Schema, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if l, ok := seen[name]; ok {
+			return l.schema, l.err
+		}
+		schema, err := load(name)
+		seen[name] = loaded{schema, err}
+		return schema, err
+	}
 }
 
 // apiLanguageFlag returns the --api-language value as the config spells it,

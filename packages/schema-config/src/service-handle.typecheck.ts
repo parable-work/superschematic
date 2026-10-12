@@ -24,6 +24,12 @@ const dbHandle: ServiceHandle<"DB"> = ShopDb;
 const ShopOrders = service<"API", unknown, "ExpireCarts" | "SendDigest">({ name: "shop-orders", kind: SchemaKind.API });
 const ordersAsApi: ServiceHandle<"API"> = ShopOrders;
 
+// An API with @worker classes: the sentinel writes their names as the
+// fourth type argument, with the jobs `never` when it declares none, and
+// the handle is still an API handle.
+const ShopFulfilment = service<"API", unknown, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
+const fulfilmentAsApi: ServiceHandle<"API"> = ShopFulfilment;
+
 // Every handle is a ServiceHandle, so authDb and dependencies take any kind.
 const anyHandles: readonly ServiceHandle[] = [ShopApi, ShopDb, ShopCommon, ShopCatalog, handWrittenApi, ShopOrders];
 
@@ -38,6 +44,9 @@ export const accepted = defineConfig({
 
 // @ts-expect-error a handle that may have any job does not stand for one whose jobs are named
 const untypedJobs: ServiceHandle<"API", unknown, "ExpireCarts"> = handWrittenApi;
+
+// @ts-expect-error a handle that may have any worker does not stand for one whose workers are named
+const untypedWorkers: ServiceHandle<"API", unknown, never, "FulfilOrders"> = handWrittenApi;
 
 export const refusedDbCall = defineConfig({
   name: "shop-storefront",
@@ -63,6 +72,35 @@ export const refusedExtensionCall = defineConfig({
   outputs: {}
 });
 
+// A Bucket service's sentinel, and its config: a name and a kind (D54).
+const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
+const bucketHandle: ServiceHandle<"Bucket"> = ShopMedia;
+
+export const bucket = defineConfig({ name: "shop-media", kind: SchemaKind.Bucket, outputs: {} });
+
+export const acceptedBuckets = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  buckets: [ShopMedia, service({ name: "shop-exports", kind: SchemaKind.Bucket })],
+  outputs: {}
+});
+
+export const refusedApiBucket = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error buckets takes Bucket handles, and ShopApi is an API handle
+  buckets: [ShopApi],
+  outputs: {}
+});
+
+export const refusedBucketCall = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error calls takes API handles, and ShopMedia is a Bucket handle
+  calls: [ShopMedia],
+  outputs: {}
+});
+
 // @ts-expect-error a handle with no config type does not stand for one with
 const untypedForTyped: ServiceHandle<"API", ShopApiConfig> = handWrittenApi;
 
@@ -72,4 +110,16 @@ const mismatchedKind = service<"API">({ name: "shop-db", kind: SchemaKind.DB });
 // @ts-expect-error a DB handle is not an API handle
 const dbForApi: ServiceHandle<"API"> = ShopDb;
 
-export const checked = { typedApi, dbHandle, anyHandles, untypedForTyped, mismatchedKind, dbForApi, ordersAsApi, untypedJobs };
+export const checked = {
+  typedApi,
+  dbHandle,
+  anyHandles,
+  untypedForTyped,
+  mismatchedKind,
+  dbForApi,
+  ordersAsApi,
+  untypedJobs,
+  bucketHandle,
+  fulfilmentAsApi,
+  untypedWorkers
+};

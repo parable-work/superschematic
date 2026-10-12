@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@google-cloud/storage": "8.3.0",
     "@schemas/ts-pricing-sdk": "workspace:*",
     "@schemas/ts-shop-api": "workspace:*",
     "@schemas/ts-shop-implementation": "workspace:*",

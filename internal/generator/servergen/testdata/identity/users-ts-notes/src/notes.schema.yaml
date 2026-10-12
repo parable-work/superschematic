@@ -1,0 +1,25 @@
+name: users-ts-notes
+kind: API
+types:
+  Note:
+    name: Note
+    role: APIView
+    fields:
+      - name: text
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Notes
+    operations:
+      - name: listNotes
+        typeRef: { name: Note, isArray: true }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes
+      - name: replyToGreeting
+        typeRef: { name: Note }
+        required: true
+        auth: true
+        httpMethod: POST
+        restPath: greeting

@@ -5,7 +5,12 @@
 //! the router checks them, then the implementation. A refusal is the
 //! `ApiError` the route answers, and `?` carries it into a page's error.
 //! A guard (`can_<operation>`) admits the caller alone, for a page that
-//! shows or hides what the operation does.
+//! shows or hides what the operation does. An operation without a call
+//! still has its guard, whose doc says why.
+//!
+//! A call does not apply the route's traffic controls (@rateLimit,
+//! @bodyLimit, @timeout): the page that makes it is a route of the app,
+//! under the controls the app gives it.
 
 #![allow(unused_imports)]
 
@@ -39,6 +44,18 @@ pub async fn account_annotate(cx: &Cx, args: crate::api::AccountAnnotateArgs) ->
         .await
 }
 
+/// booking.book (`POST /api/bookings`): Book a stay.
+pub async fn booking_book(cx: &Cx, args: crate::api::BookingBookArgs) -> Result<types::BookingView, ApiError> {
+    let caller = can_booking_book(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .booking
+        .book(operations::BOOKING_BOOK.context(caller), args)
+        .await
+}
+
 /// Admits the caller of account.signUp as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_account_sign_up(cx: &Cx) -> Result<Option<Principal>, ApiError> {
@@ -49,6 +66,13 @@ pub async fn can_account_sign_up(cx: &Cx) -> Result<Option<Principal>, ApiError>
 /// Admits the caller of account.annotate as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_account_annotate(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
+}
+
+/// Admits the caller of booking.book as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_booking_book(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     let _ = cx;
     Ok(None)
 }

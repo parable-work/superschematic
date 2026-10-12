@@ -1,8 +1,8 @@
 {{- /*
 The wiring a server's main.go and a job's share (docs/stack-model.md,
 sections 8.1 and 8.7): the named templates below read each API's config,
-connect one pool per database, build one SDK client per API called, and
-fill an API's Deps. Both entrypoints execute them, so a job builds Deps
+connect one pool per database, build one SDK client per API called, open
+one handle per bucket (D54), and fill an API's Deps. Both entrypoints execute them, so a job builds Deps
 exactly as a server does.
 */ -}}
 
@@ -10,11 +10,18 @@ exactly as a server does.
 {{- if .Databases }}
 	"github.com/jackc/pgx/v5/pgxpool"
 {{- end }}
+{{- if anyIdentity .APIs }}
+	"github.com/jackc/pgx/v5/stdlib"
+	"{{ .Naming.HTTPRuntimeGoModule }}/identity"
+{{- end }}
 {{- if .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
 {{- if or .Databases .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
+{{- end }}
+{{- if .Worker }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/worker"
 {{- end }}
 	"go.uber.org/zap"
 {{ range .APIs }}
@@ -23,6 +30,9 @@ exactly as a server does.
 {{- end }}
 {{- range .Databases }}
 	{{ .Package }} "{{ .Module }}"
+{{- if .Identity }}
+	{{ .Types }} "{{ .TypesModule }}"
+{{- end }}
 {{- end }}
 {{- range .Clients }}
 	{{ .Package }} "{{ .Module }}"
@@ -43,7 +53,7 @@ exactly as a server does.
 
 	// One pool per database, shared by every API on it. A pool connects when
 	// it is first used, so the {{ .Kind }} starts while its database is not up yet
-{{- if .Job }}.
+{{- if .Background }}.
 {{- else }}
 	// and /readyz reports it.
 {{- end }}
@@ -57,6 +67,16 @@ exactly as a server does.
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
+{{- if .Identity }}
+	// The identity store of the user model in {{ .Service }} (D50), over the
+	// same pool, for every API that authenticates its users against it.
+	{{ .Var }}SQL := stdlib.OpenDBFromPool({{ .Var }}Pool)
+	defer {{ .Var }}SQL.Close()
+	{{ .Var }}IdentityStore, err := identity.NewSQLStore({{ .Var }}SQL, identity.Postgres, []byte({{ .Types }}.IdentityDescriptor))
+	if err != nil {
+		return fmt.Errorf("identity store of {{ .Service }}: %w", err)
+	}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if .Clients }}
@@ -66,6 +86,17 @@ exactly as a server does.
 	{{ .Var }}, err := {{ .Constructor }}({{ .From }})
 	if err != nil {
 		return fmt.Errorf("client of {{ .Service }}: %w", err)
+	}
+{{- end }}
+{{- end }}
+{{- if .Buckets }}
+
+	// One handle per bucket, shared by every API that lists it (buckets.go).
+	defer closeBuckets()
+{{- range .Buckets }}
+	{{ .Var }}, err := openBucket(ctx, {{ quote .Field }}, {{ .From }})
+	if err != nil {
+		return fmt.Errorf("bucket {{ .Service }}: %w", err)
 	}
 {{- end }}
 {{- end }}
@@ -82,6 +113,9 @@ exactly as a server does.
 {{- end }}
 {{- range .Calls }}
 		{{ .Field }}: {{ .Client.Var }},
+{{- end }}
+{{- range .Buckets }}
+		{{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
 		Logger: {{ .Var }}Logger,
 	}
@@ -123,7 +157,7 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // at endpoint, the field its edge derives. The client sends the service
 // credential the edge's connector chose, and forwards the end user of the
 // request on each call's context (docs/stack-model.md, sections 9.4 and
-// 9.6){{ if $.Job }}: a job serves no request, so it forwards none{{ end }}.
+// 9.6){{ if $.Background }}: a {{ $.Kind }} serves no request, so it forwards none{{ end }}.
 func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type }}, error) {
 	cfg := {{ .Package }}.SDKConfig{
 		BaseURL: endpoint.URL,

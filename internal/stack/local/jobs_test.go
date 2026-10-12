@@ -238,7 +238,7 @@ func TestRunJob(t *testing.T) {
 	}
 
 	f.runner.rules = []rule{{prefix: inspectPrefix, out: strings.Replace(running, "true", "false", 1)}}
-	if err := f.prov.RunJob(context.Background(), f.req, shipOrders); err == nil || !strings.Contains(err.Error(), "environment Pinned is not running: its Postgres container superschematic-shop-stack-pinned-postgres does not run; start it with superschematic stack dev") {
+	if err := f.prov.RunJob(context.Background(), f.req, shipOrders); err == nil || !strings.Contains(err.Error(), "environment Pinned is not running: its container superschematic-shop-stack-pinned-postgres does not run; start it with superschematic stack dev") {
 		t.Errorf("RunJob with the environment down = %v", err)
 	}
 

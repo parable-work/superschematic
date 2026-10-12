@@ -11,7 +11,10 @@
 // placement, auth decorators and body limits agree with the Go and Rust
 // routers by construction. The router is provider-neutral: the operation
 // table declares each route's auth requirement, and the service supplies the
-// authenticator that establishes the caller.
+// authenticator that establishes the caller. An API whose authDb has a User
+// table (D50) is the exception: its router takes the identity runtime's
+// service, which authenticates every route and serves the user model's
+// operations.
 package tsrestgen
 
 import (
@@ -27,6 +30,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/permcatalog"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -127,6 +131,20 @@ type EndpointInfo struct {
 	// DocLines is the JSDoc body of the implementation method: title,
 	// description, route, and the auth requirement.
 	DocLines []string
+
+	// IdentityOperation names the user model's operation (D50) the
+	// endpoint is, one of the ir.IdentityOp constants; empty for every
+	// other. The router mounts it with the identity runtime's handler, so
+	// it has no implementation method, and its table entry declares no
+	// input: the runtime decodes the body itself.
+	IdentityOperation string
+}
+
+// Manual reports whether the router mounts the endpoint with a handler of
+// its own rather than an implementation method: a
+// @manualRouteRegistration operation, or one of the user model's.
+func (e EndpointInfo) Manual() bool {
+	return e.ManualRouteRegistration || e.IdentityOperation != ""
 }
 
 // AuthSummary is the README's auth cell: the user clause (public, the
@@ -180,6 +198,25 @@ type NamespaceInfo struct {
 	Endpoints     []EndpointInfo
 }
 
+// IdentityInfo is the user model (D50) as the generated server wires it:
+// the API's authDb has a User table, so buildRouter takes the identity
+// runtime's service, which authenticates every route, and mounts the
+// operations of the API's @userSessions and @userAdministration sets (the
+// endpoints with IdentityOperation set) with the runtime's handlers. An
+// API with no route set still authenticates with it: it verifies the
+// sessions another API's login made.
+type IdentityInfo struct {
+	// AuthDB names the authDb schema. DescriptorModule is the module of
+	// its generated TypeScript types that exports identityDescriptor, the
+	// descriptor the store reads the tables from.
+	AuthDB           string
+	DescriptorModule string
+	// HasRoles reports whether the authDb has a UserRole table.
+	HasRoles bool
+	// Routes counts the user model's operations the API's route sets hold.
+	Routes int
+}
+
 // PackageImport lists the symbols the generated code imports from one package.
 type PackageImport struct {
 	Package string
@@ -211,6 +248,9 @@ type APIOutput struct {
 	// HasServiceCallers reports whether any endpoint has a service clause;
 	// the docs then name RouterOptions.authenticateService.
 	HasServiceCallers bool
+	// Identity is the user model (D50), nil when the API's authDb has no
+	// User table.
+	Identity *IdentityInfo
 
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
@@ -243,11 +283,22 @@ type APIOutput struct {
 	NodeTypesVersion string
 
 	OpenAPISpecRaw string
+	// PermissionCatalogJSON is the API's permissions.json as apigen builds
+	// it, written beside openapi.json and exported from the package; empty
+	// when no operation names a permission.
+	PermissionCatalogJSON string
 }
 
 // HasManualRoutes reports whether any operation is @manualRouteRegistration.
 func (o *APIOutput) HasManualRoutes() bool {
 	return len(o.ManualEndpoints) > 0
+}
+
+// HasManualMounts reports whether the router mounts any endpoint with
+// mountManualOperation: a @manualRouteRegistration operation or one of the
+// user model's.
+func (o *APIOutput) HasManualMounts() bool {
+	return o.HasManualRoutes() || (o.Identity != nil && o.Identity.Routes > 0)
 }
 
 // Options configures TypeScript REST API generation.
@@ -260,6 +311,11 @@ type Options struct {
 	// and the package author. Empty fields fall back to naming.Default().
 	Naming naming.Naming
 	Clock  codegen.Clock
+	// AuthDB is the schema the API's config names as its authDb, loaded,
+	// or nil when it names none. When it has a User table the API has the
+	// user model (D50), and the router authenticates with the identity
+	// runtime.
+	AuthDB *ir.Schema
 }
 
 // Generate produces the TypeScript API package metadata from the endpoints
@@ -277,17 +333,18 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
-		SchemaName:        opts.SchemaName,
-		PackageName:       opts.Naming.NpmAPIPackage(opts.SchemaName),
-		TypesPackage:      opts.Naming.NpmTypesPackage(opts.SchemaName),
-		RuntimePackage:    opts.Naming.HTTPRuntimeNpmPackage,
-		ScalarPackage:     opts.Naming.ScalarNpmPackage + "/scalars",
-		Author:            opts.Naming.PackageAuthor,
-		HonoVersion:       HonoVersion,
-		TSVersion:         TypeScriptVersion,
-		Timestamp:         opts.Clock.RFC3339(),
-		OpenAPISpecRaw:    apiOutput.OpenAPISpecRaw,
-		HasServiceCallers: apiOutput.HasServiceCallers,
+		SchemaName:            opts.SchemaName,
+		PackageName:           opts.Naming.NpmAPIPackage(opts.SchemaName),
+		TypesPackage:          opts.Naming.NpmTypesPackage(opts.SchemaName),
+		RuntimePackage:        opts.Naming.HTTPRuntimeNpmPackage,
+		ScalarPackage:         opts.Naming.ScalarNpmPackage + "/scalars",
+		Author:                opts.Naming.PackageAuthor,
+		HonoVersion:           HonoVersion,
+		TSVersion:             TypeScriptVersion,
+		Timestamp:             opts.Clock.RFC3339(),
+		OpenAPISpecRaw:        apiOutput.OpenAPISpecRaw,
+		HasServiceCallers:     apiOutput.HasServiceCallers,
+		PermissionCatalogJSON: apiOutput.PermissionCatalogJSON,
 
 		ImplementationPackage: opts.Naming.NpmImplementationPackage(opts.SchemaName),
 		PGPeerRange:           PGPeerRange,
@@ -295,9 +352,28 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		NodeTypesVersion:      NodeTypesVersion,
 	}
 
+	if opts.AuthDB != nil && opts.AuthDB.UserTable() != nil {
+		output.Identity = &IdentityInfo{
+			AuthDB:           opts.AuthDB.Name,
+			DescriptorModule: opts.Naming.NpmTypesPackage(opts.AuthDB.Name) + "/identity",
+			HasRoles:         opts.AuthDB.UserRoleTable() != nil,
+		}
+	}
+
 	byNamespace := map[string]*NamespaceInfo{}
 	webhookProviders := map[string]struct{}{}
 	for _, ep := range apiOutput.Endpoints {
+		// The user model's operations are the identity runtime's (D50): the
+		// implementation interfaces leave them out, and the router mounts
+		// each with the runtime's handler.
+		if ep.IdentityOperation != "" {
+			if output.Identity == nil {
+				return nil, fmt.Errorf("tsrestgen: operation %s.%s is the user model's %s, which the identity runtime serves from the User table of the API's authDb (%s); Options.AuthDB holds none", ep.Namespace, ep.Name, ep.IdentityOperation, authDBName(schema))
+			}
+			output.Endpoints = append(output.Endpoints, b.identityEndpoint(ep))
+			output.Identity.Routes++
+			continue
+		}
 		endpoint, err := b.endpoint(ep)
 		if err != nil {
 			return nil, err
@@ -369,6 +445,58 @@ func newBuilder(schema *ir.Schema, opts Options) *builder {
 		validatorImports:  map[string]map[string]struct{}{},
 		scalarImports:     map[string]struct{}{},
 	}
+}
+
+// authDBName names the API's authDb for an error: its name, or that it
+// names none.
+func authDBName(schema *ir.Schema) string {
+	if schema.AuthDB == "" {
+		return "absent (the API's config names no authDb)"
+	}
+	return fmt.Sprintf("%q", schema.AuthDB)
+}
+
+// identityEndpoint is one of the user model's operations as the router
+// mounts it: its route, its path parameters, its auth requirement and its
+// route controls, with no input or body arguments, since the identity
+// runtime decodes the body itself, and no implementation method. Its path
+// parameters are rendered by a builder of their own, so they add no import
+// to the files the project's operations share.
+func (b *builder) identityEndpoint(ep apigen.EndpointInfo) EndpointInfo {
+	endpoint := EndpointInfo{
+		Name:              tsutil.ToCamelCase(ep.Name),
+		Namespace:         ep.Namespace,
+		NamespaceProperty: codegen.ToCamelCase(ep.Namespace),
+		Method:            strings.ToUpper(ep.Method),
+		Path:              ep.Path,
+		Description:       ep.Description,
+		Title:             ep.Title,
+		PublicRoute:       ep.PublicRoute,
+		RequiresAuth:      ep.RequiresAuth,
+		RequiredPerms:     append([]string(nil), ep.RequiredPerms...),
+		PermsLiteral:      tsStringList(ep.RequiredPerms),
+		IdentityOperation: ep.IdentityOperation,
+	}
+	if ep.BodyLimit != nil {
+		bytes := *ep.BodyLimit * 1024 * 1024
+		endpoint.BodyLimitBytes = &bytes
+	}
+	if ep.RateLimit != nil {
+		rateLimit := *ep.RateLimit
+		endpoint.RateLimitPerMinute = &rateLimit
+	}
+	if ep.Timeout != nil {
+		timeout := *ep.Timeout
+		endpoint.TimeoutSeconds = &timeout
+	}
+	params := newBuilder(b.schema, b.opts)
+	for _, p := range ep.PathParams {
+		// A path parameter is a scalar or a string, which param never
+		// refuses.
+		info, _ := params.param(p, inPath)
+		endpoint.PathParams = append(endpoint.PathParams, info)
+	}
+	return endpoint
 }
 
 func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
@@ -907,6 +1035,11 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		}
 		if err := os.WriteFile(filepath.Join(outputDir, "openapi.json"), []byte(output.OpenAPISpecRaw), 0o644); err != nil {
 			return fmt.Errorf("write openapi.json: %w", err)
+		}
+	}
+	if output.PermissionCatalogJSON != "" {
+		if err := os.WriteFile(filepath.Join(outputDir, permcatalog.FileName), []byte(output.PermissionCatalogJSON), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", permcatalog.FileName, err)
 		}
 	}
 	return nil

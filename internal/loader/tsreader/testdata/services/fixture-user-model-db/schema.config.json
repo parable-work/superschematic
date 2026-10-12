@@ -1,0 +1,10 @@
+{
+  "name": "fixture-user-model-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "go": { "enabled": true }
+    }
+  }
+}

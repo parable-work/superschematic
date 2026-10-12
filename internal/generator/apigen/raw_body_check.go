@@ -83,7 +83,7 @@ func (c RawBodyCheck) Var() string {
 var routesImportNames = map[string]bool{
 	"json": true, "fmt": true, "gohttp": true, "regexp": true, "strconv": true, "strings": true, "time": true,
 	"chi": true, "filterparse": true, "bodyargs": true, "runtimemiddleware": true, "runtimerouting": true,
-	"orm": true, "types": true, "zap": true,
+	"orm": true, "scalars": true, "types": true, "zap": true,
 }
 
 // rawBodyCheckCallReads are the names the generated call reads besides its

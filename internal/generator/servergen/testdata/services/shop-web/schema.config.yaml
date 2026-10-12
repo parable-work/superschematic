@@ -1,0 +1,7 @@
+# A static site whose browser code calls shop-orders (D55): Storefront,
+# which serves shop-orders beside shop-reviews, answers CORS for the
+# site's origin on shop-orders' routes alone.
+name: shop-web
+kind: Site
+calls:
+  - { name: shop-orders, kind: API }

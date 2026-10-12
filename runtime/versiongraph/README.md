@@ -184,8 +184,9 @@ have in a column of its own (a list of lists of `Generic.Int64` is
 `integer[][]`). Any other pair has no rule and a graph member with one
 fails generation, naming the field and the SQL type: a JSON scalar stored
 as `TEXT` (the catalog's `Embedding.Vector`, which has no `sql` mapping),
-a string stored as `POINT` (`Geo.Location`) or as the `BIGINT` a
-duration's name infers, and an object type without `@jsonField`.
+a JSON object stored as `POINT` (`Geo.Location`), a string stored as the
+`BIGINT` a duration's name infers, and an object type without
+`@jsonField`.
 
 ## Trees and rows
 

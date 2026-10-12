@@ -77,6 +77,12 @@ type Manifest struct {
 	// Databases holds the schema each database holds, by database
 	// deployable and then by the DB service it hosts.
 	Databases map[string]map[string]*AppliedSchema `json:"databases,omitempty"`
+
+	// Sites holds the digest of the files each site serves, by site: what
+	// a deploy published and pinned (D55). One whose rollout wave did not
+	// finish keeps the digest the previous deploy recorded, and a deploy
+	// given an earlier digest with --site serves those files again.
+	Sites map[string]string `json:"sites,omitempty"`
 }
 
 // AppliedSchema is the schema one DB service's database holds, as the
@@ -96,8 +102,9 @@ type AppliedSchema struct {
 	// it and refuses any other plan until it does.
 	Pending *PendingMigration `json:"pending,omitempty"`
 
-	// Servers are the servers and jobs that connected to the DB service when the
-	// migration runner last ran on it, sorted. A runner that owns the
+	// Servers are the servers, jobs and workers (D53) that connected to the
+	// DB service when the migration runner last ran on it, sorted, by
+	// their sql edges. A runner that owns the
 	// database's privileges gave each what it reads and writes (D46), so a
 	// deploy runs the expand phase of a DB service whose connecting
 	// servers changed even when its plan has no expand steps.
@@ -198,6 +205,14 @@ func (m *Manifest) setImage(server, image, context string) {
 	m.Contexts[server] = context
 }
 
+// setSite records the digest of the files a site serves.
+func (m *Manifest) setSite(site, digest string) {
+	if m.Sites == nil {
+		m.Sites = map[string]string{}
+	}
+	m.Sites[site] = digest
+}
+
 // readManifest returns the run's manifest, or nil when the run was never
 // deployed. It refuses a manifest of another run.
 func readManifest(ctx context.Context, store registry.StateStore, run registry.Run) (*Manifest, error) {
@@ -238,7 +253,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	}
 	for _, d := range env.Deployables {
 		switch d.Kind {
-		case ir.DeployableServer, ir.DeployableJob:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 			if image, ok := prev.Images[d.Name]; ok {
 				m.setImage(d.Name, image, prev.Contexts[d.Name])
 			}
@@ -248,6 +263,10 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 					copied := *applied
 					m.setApplied(d.Name, svc.Name, &copied)
 				}
+			}
+		case ir.DeployableSite:
+			if digest, ok := prev.Sites[d.Name]; ok {
+				m.setSite(d.Name, digest)
 			}
 		}
 	}

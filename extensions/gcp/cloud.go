@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"cloud.google.com/go/serviceusage/apiv1/serviceusagepb"
 	"cloud.google.com/go/storage"
 	"github.com/googleapis/gax-go/v2"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,6 +74,12 @@ type Cloud interface {
 
 	// DeleteObject deletes an object; a missing one is not an error.
 	DeleteObject(ctx context.Context, bucket, object string) error
+
+	// WriteSiteObject replaces an object of a site's bucket, which the
+	// site's load balancer serves with contentType and cacheControl
+	// (D55). It returns an error that wraps fs.ErrNotExist when the
+	// bucket does not exist.
+	WriteSiteObject(ctx context.Context, bucket, object string, data []byte, contentType, cacheControl string) error
 
 	// EnsureSecret creates a Secret Manager secret with automatic
 	// replication, unless it exists.
@@ -384,6 +392,27 @@ func (c *googleCloud) WriteObject(ctx context.Context, bucket, object string, da
 		return fmt.Errorf("gcp: write gs://%s/%s: %w", bucket, object, err)
 	}
 	if err := w.Close(); err != nil {
+		return fmt.Errorf("gcp: write gs://%s/%s: %w", bucket, object, err)
+	}
+	return nil
+}
+
+func (c *googleCloud) WriteSiteObject(ctx context.Context, bucket, object string, data []byte, contentType, cacheControl string) error {
+	if err := c.clients(ctx); err != nil {
+		return err
+	}
+	w := c.storage.Bucket(bucket).Object(object).NewWriter(ctx)
+	w.ContentType = contentType
+	w.CacheControl = cacheControl
+	_, err := w.Write(data)
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) && gerr.Code == http.StatusNotFound {
+		return fmt.Errorf("gcp: write gs://%s/%s: bucket %s: %w", bucket, object, bucket, fs.ErrNotExist)
+	}
+	if err != nil {
 		return fmt.Errorf("gcp: write gs://%s/%s: %w", bucket, object, err)
 	}
 	return nil

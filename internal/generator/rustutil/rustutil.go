@@ -136,6 +136,16 @@ func ToPackageName(value string) string {
 	return strings.ToLower(value)
 }
 
+// RawString writes s as a Rust raw string literal with enough #s that no
+// "#... sequence in s ends it.
+func RawString(s string) string {
+	hashes := "#"
+	for strings.Contains(s, `"`+hashes) {
+		hashes += "#"
+	}
+	return "r" + hashes + `"` + s + `"` + hashes
+}
+
 // SplitLines trims and splits a string by newlines.
 func SplitLines(value string) []string {
 	return strings.Split(strings.TrimSpace(value), "\n")

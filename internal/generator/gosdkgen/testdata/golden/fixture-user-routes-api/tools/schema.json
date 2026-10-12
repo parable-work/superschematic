@@ -1,0 +1,664 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureUserRoutesApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-user-routes-api API",
+  "tools": [
+    {
+      "name": "account.capabilities",
+      "operationId": "AccountCapabilitiesHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller. (Requires authentication)",
+      "namespace": "account",
+      "methodName": "capabilities",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/capabilities",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Capabilities object"
+      }
+    },
+    {
+      "name": "account.login",
+      "operationId": "AccountLoginHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "It carries a password, which an agent does not hold."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.",
+      "namespace": "account",
+      "methodName": "login",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/login",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:0fddb64e199626cba1c03297716f9ad37b4d4bd15585e214fbedaa973c9f2405",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+          "session": {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]}
+        },
+        "required": ["login", "password"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "LoginResult object"
+      }
+    },
+    {
+      "name": "account.logout",
+      "operationId": "AccountLogoutHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Ends the caller's session and clears the session cookie. It answers true. (Requires authentication)",
+      "namespace": "account",
+      "methodName": "logout",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/logout",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "boolean",
+        "description": "A boolean value (true or false)"
+      }
+    },
+    {
+      "name": "account.me",
+      "operationId": "AccountMeHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "The caller's user, the roles they hold and the permissions those roles grant. (Requires authentication)",
+      "namespace": "account",
+      "methodName": "me",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/me",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "CurrentUser object"
+      }
+    },
+    {
+      "name": "account.changePassword",
+      "operationId": "AccountChangePasswordHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "It carries a password, which an agent does not hold."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Changes the caller's password, given their current one, and ends their other sessions. It answers true. (Requires authentication)",
+      "namespace": "account",
+      "methodName": "changePassword",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/password",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a441fcf2c75873b5f0aba80576a07ab531b13a775a0ddf218552bcf5e349383e",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "current": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+          "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"}
+        },
+        "required": ["current", "password"]
+      },
+      "returns": {
+        "type": "boolean",
+        "description": "A boolean value (true or false)"
+      }
+    },
+    {
+      "name": "account.register",
+      "operationId": "AccountRegisterHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "It carries a password, which an agent does not hold."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Creates a user with the login, name and password given and signs them in, as login does.",
+      "namespace": "account",
+      "methodName": "register",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/register",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:0e4dbd541200dcd6c5e308ce1cb229a43b7798747ba6e54fe137a4b7dd3bbf76",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "name": {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+          "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+          "session": {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]}
+        },
+        "required": ["login", "password"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "LoginResult object"
+      }
+    },
+    {
+      "name": "account-admin.listRoles",
+      "operationId": "AccountAdminListRolesHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Lists the roles and the permissions each grants. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "listRoles",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/admin/roles",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.read"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of IdentityRole",
+        "items": {
+          "type": "object",
+          "description": "IdentityRole object"
+        }
+      }
+    },
+    {
+      "name": "account-admin.createRole",
+      "operationId": "AccountAdminCreateRoleHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Creates a role. The caller's own permissions must cover each permission it grants. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "createRole",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/admin/roles",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:6aa2e838b5f294ac3216f15cf531c881ba0d8f6fb036fc2ca0dbbe4daad8ff8e",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {"description":"A string value","type":"string"},
+          "permissions": {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"}
+        },
+        "required": ["name", "permissions"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityRole object"
+      }
+    },
+    {
+      "name": "account-admin.deleteRole",
+      "operationId": "AccountAdminDeleteRoleHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Deletes a role and every grant of it. It answers true. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "deleteRole",
+      "httpMethod": "DELETE",
+      "httpPath": "/api/auth/admin/roles/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "boolean",
+        "description": "A boolean value (true or false)"
+      }
+    },
+    {
+      "name": "account-admin.updateRole",
+      "operationId": "AccountAdminUpdateRoleHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Renames a role or replaces its permissions. The caller's own permissions must cover each permission given. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "updateRole",
+      "httpMethod": "PUT",
+      "httpPath": "/api/auth/admin/roles/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:83795bd760cbabd100d62cc73a04fbd1e734a81a51d1d8c8f46fd86847a6249c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","type":"string"},
+          "permissions": {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"}
+        },
+        "required": ["id", "name", "permissions"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityRole object"
+      }
+    },
+    {
+      "name": "account-admin.listUsers",
+      "operationId": "AccountAdminListUsersHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Lists the users and the roles each holds. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "listUsers",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/admin/users",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.read"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of IdentityUser",
+        "items": {
+          "type": "object",
+          "description": "IdentityUser object"
+        }
+      }
+    },
+    {
+      "name": "account-admin.createUser",
+      "operationId": "AccountAdminCreateUserHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "It carries a password, which an agent does not hold."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Creates a user with the login, name and password given. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "createUser",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/admin/users",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:5e31acd1328f88f0f1f8eebe0f18d830fc5313aa100a1db989c11843269082e5",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "name": {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+          "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"}
+        },
+        "required": ["login", "password"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "account-admin.getUser",
+      "operationId": "AccountAdminGetUserHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "One user and the roles they hold. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "getUser",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/admin/users/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.read"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "account-admin.disableUser",
+      "operationId": "AccountAdminDisableUserHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Disables a user, who can no longer sign in, and ends their sessions. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "disableUser",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/admin/users/{id}/disable",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "account-admin.enableUser",
+      "operationId": "AccountAdminEnableUserHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Enables a disabled user. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "enableUser",
+      "httpMethod": "POST",
+      "httpPath": "/api/auth/admin/users/{id}/enable",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "account-admin.setUserPassword",
+      "operationId": "AccountAdminSetUserPasswordHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "It carries a password, which an agent does not hold."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Sets a user's password and ends their sessions. It answers true. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "setUserPassword",
+      "httpMethod": "PUT",
+      "httpPath": "/api/auth/admin/users/{id}/password",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.users.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7cd2c492d5fb2a70dcf1a61d9cb47f7a9bb6a1ac4faa4c00994e89fa9f0ce7af",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"}
+        },
+        "required": ["id", "password"]
+      },
+      "returns": {
+        "type": "boolean",
+        "description": "A boolean value (true or false)"
+      }
+    },
+    {
+      "name": "account-admin.revokeRole",
+      "operationId": "AccountAdminRevokeRoleHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Revokes a role from a user. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "revokeRole",
+      "httpMethod": "DELETE",
+      "httpPath": "/api/auth/admin/users/{id}/roles/{roleId}",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:ad1c69aab1e27698cf2ad062120044b78ae2d7e0897e57e6c6e7f34877a94390",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "roleId": {"description":"roleId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id", "roleId"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "account-admin.grantRole",
+      "operationId": "AccountAdminGrantRoleHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Grants a user a role. The caller's own permissions must cover the role's. (Requires authentication)",
+      "namespace": "account-admin",
+      "methodName": "grantRole",
+      "httpMethod": "PUT",
+      "httpPath": "/api/auth/admin/users/{id}/roles/{roleId}",
+      "requiresAuth": true,
+      "requiredPermissions": ["identity.roles.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:ad1c69aab1e27698cf2ad062120044b78ae2d7e0897e57e6c6e7f34877a94390",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "roleId": {"description":"roleId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id", "roleId"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "IdentityUser object"
+      }
+    },
+    {
+      "name": "greeting.greet",
+      "operationId": "GreetingGreetHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "greet endpoint (Requires authentication)",
+      "namespace": "greeting",
+      "methodName": "greet",
+      "httpMethod": "GET",
+      "httpPath": "/api/greeting",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Greeting object"
+      }
+    }
+  ]
+}

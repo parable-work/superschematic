@@ -1,8 +1,11 @@
 {{/* Core session auth snippets: the hook points the core apigen templates
-     render through authSnippet (apigen.AuthSnippets). Generated code imports
-     only the generic http-runtime session package. Each non-empty snippet
-     starts with the newline separating it from the line before; the data is
-     the APIOutput unless the hook says otherwise. */}}
+     render through authSnippet (apigen.AuthSnippets). The callers are the
+     user model's (D50): the core templates wire the identity runtime when
+     the upstream schema has a User table (Auth.Identity), so these
+     snippets add only the session package's context helpers, aliases and
+     permission checks. Each non-empty snippet starts with the newline
+     separating it from the line before; the data is the APIOutput unless
+     the hook says otherwise. */}}
 
 {{ define "contextImports" }}
 
@@ -62,18 +65,10 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 }
 {{- end }}
 
-{{ define "middlewareStdImports" }}
-{{- /* middleware.tmpl imports "time" itself; the session store's ExpiresAt uses that import. */}}
-{{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
-	"errors"
-{{- end }}
-{{- end }}
+{{ define "middlewareStdImports" }}{{ end }}
 
 {{ define "middlewareImports" }}
 	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
-{{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
-	scalars "{{ $.Naming.ScalarGoModule }}"
-{{- end }}
 {{- end }}
 
 {{ define "middlewareAliases" }}
@@ -85,12 +80,14 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 // Role is the role projection (id + name + permissions) propagated through
 // request context.
 type Role = runtimesession.Role
+{{- if not .Auth.Identity }}
 
 // SessionRecord is the session row the SessionStore returns.
 type SessionRecord = runtimesession.Record
 
 // Principal is the authenticated principal the PrincipalStore returns.
 type Principal = runtimesession.Principal
+{{- end }}
 {{- end }}
 
 {{ define "middlewareAuthz" }}
@@ -106,7 +103,11 @@ var (
 )
 {{- end }}
 
+{{- /* The identity runtime (D50) holds the user model's store, which the
+     server's entrypoint builds over the database; a schema without a User
+     table gets none. */}}
 {{ define "middlewareStores" }}
+{{- if not .Auth.Identity }}
 
 // ===========================================================================
 // ORM Store Adapters
@@ -114,89 +115,6 @@ var (
 // Each adapter is generated only when the upstream DB schema declares the
 // table shape it queries, so this file always compiles against the upstream
 // ORM regardless of which auth tables the schema defines.
-
-{{- if .Auth.HasSessionStore }}
-
-type ormSessionStore struct {
-	db orm.DatabaseInterface
-}
-
-func (s *ormSessionStore) FindByJTI(ctx context.Context, jti string) (runtimesession.Record, error) {
-	// The filter takes the scalar UUID type, not its string form; a string
-	// that is not a UUID cannot name a session.
-	jtiUUID, err := scalars.ParseUUID(jti)
-	if err != nil {
-		return runtimesession.Record{}, runtimesession.ErrNotFound
-	}
-{{- if .Auth.SessionSoftDelete }}
-	// A revoked (soft-deleted) session is found with its DeletedAt set, so
-	// the caller can tell it from a jti that names no session.
-	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
-		Jti: &orm.UUIDFilter{Eq: &jtiUUID},
-	}, &orm.SessionFindOptions{
-		IncludeDeleted: true,
-	})
-{{- else }}
-	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
-		Jti: &orm.UUIDFilter{Eq: &jtiUUID},
-	}, nil)
-{{- end }}
-	if err != nil {
-		if errors.Is(err, orm.ErrNotFound) {
-			return runtimesession.Record{}, runtimesession.ErrNotFound
-		}
-		return runtimesession.Record{}, err
-	}
-	record := runtimesession.Record{
-		ID:          session.Id.String(),
-		PrincipalID: session.User.Id.String(),
-		ExpiresAt:   time.Time(session.ExpiresAt),
-	}
-{{- if .Auth.SessionSoftDelete }}
-	if session.DeletedAt != nil {
-		deletedAt := time.Time(*session.DeletedAt)
-		record.DeletedAt = &deletedAt
-	}
-{{- end }}
-	return record, nil
-}
-
-// NewSessionStore creates a SessionStore backed by the generated ORM.
-func NewSessionStore(db orm.DatabaseInterface) runtimesession.Store {
-	return &ormSessionStore{db: db}
-}
-{{- end }}
-
-{{- if .Auth.HasPrincipalStore }}
-
-type ormPrincipalStore struct {
-	db orm.DatabaseInterface
-}
-
-func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesession.Principal, error) {
-	idUUID, err := scalars.ParseUUID(id)
-	if err != nil {
-		return runtimesession.Principal{}, runtimesession.ErrNotFound
-	}
-	user, err := s.db.GetUserRepository().FindOne(ctx, &orm.UserFilter{
-		Id: &orm.UUIDFilter{Eq: &idUUID},
-	}, nil)
-	if err != nil {
-		if errors.Is(err, orm.ErrNotFound) {
-			return runtimesession.Principal{}, runtimesession.ErrNotFound
-		}
-		return runtimesession.Principal{}, err
-	}
-	return runtimesession.Principal{
-		ID:   user.Id.String(),
-		Name: string(user.Name),
-	}, nil
-}
-
-// NewPrincipalStore creates a PrincipalStore backed by the generated ORM.
-func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
-	return &ormPrincipalStore{db: db}
-}
 {{- end }}
 {{- end }}
 

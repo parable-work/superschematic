@@ -28,6 +28,36 @@ type procedure struct {
 	// (`json`).
 	Output     string
 	ReadOutput string
+	// RateLimit, BodyLimit and Timeout are the route's @rateLimit requests
+	// per minute, @bodyLimit megabytes and @timeout seconds, 0 without the
+	// directive. The procedure meets them as the route does
+	// (ProcedureControls).
+	RateLimit int
+	BodyLimit int
+	Timeout   int
+}
+
+// HasControls reports whether the procedure's route has a traffic
+// control, so a ProcedureControls layer goes on its path.
+func (p procedure) HasControls() bool {
+	return p.RateLimit > 0 || p.BodyLimit > 0 || p.Timeout > 0
+}
+
+// ControlCalls are the ProcedureControls builder calls of the procedure,
+// in the order a request meets them on the route: the rate limit, the
+// body limit, then the timeout.
+func (p procedure) ControlCalls() []string {
+	var calls []string
+	if p.RateLimit > 0 {
+		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", p.RateLimit))
+	}
+	if p.BodyLimit > 0 {
+		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", p.BodyLimit))
+	}
+	if p.Timeout > 0 {
+		calls = append(calls, fmt.Sprintf(".timeout_seconds(%d)", p.Timeout))
+	}
+	return calls
 }
 
 // procedureArg is one field of an Args record.
@@ -52,22 +82,23 @@ func (a procedureArg) Decode() string {
 	return fmt.Sprintf("decode(%s, %s)?", rustString(a.Name), apply(a.Put, "&self."+a.RecordField))
 }
 
-// proceduresOf is a procedure per mounted operation of api, its argument
-// and result types added to records.
-func proceduresOf(records *recordBuilder, api *registry.RustAPI, service string) ([]procedure, error) {
+// proceduresOf is a procedure per operation of ops, the operations browser
+// code may call, its argument and result types added to records.
+func proceduresOf(records *recordBuilder, ops []declared, service string) ([]procedure, error) {
 	var out []procedure
-	for _, endpoint := range api.Endpoints {
-		op, err := records.operation(endpoint)
-		if err != nil {
-			return nil, err
-		}
+	for _, d := range ops {
+		endpoint, op := d.endpoint, d.op
 		p := procedure{
 			Namespace: endpoint.Namespace,
 			Name:      endpoint.Name,
 			Route:     "/_superschematic/" + service + "/" + kebabCase(endpoint.Namespace) + "/" + kebabCase(endpoint.Name),
 			SnakeName: endpoint.SnakeName(),
 			Output:    "()",
+			RateLimit: endpoint.RateLimit,
+			BodyLimit: endpoint.BodyLimit,
+			Timeout:   endpoint.Timeout,
 		}
+		var err error
 		if endpoint.HasArgs() {
 			p.ArgsName, p.ArgsRecord = endpoint.ArgsName, endpoint.HandlerName+"ArgsRecord"
 			if p.Args, err = records.procedureArgs(endpoint, op); err != nil {
@@ -129,9 +160,9 @@ func (b *recordBuilder) procedureArgs(endpoint registry.RustEndpoint, op *ir.Fie
 
 // operation is the service's operation endpoint serves: the one of its
 // name, and, when two sets share the name, of its method and path.
-func (b *recordBuilder) operation(endpoint registry.RustEndpoint) (*ir.FieldDef, error) {
+func (s schemaSet) operation(endpoint registry.RustEndpoint) (*ir.FieldDef, error) {
 	var named []*ir.FieldDef
-	for _, set := range b.schemaSet[0].OperationSets {
+	for _, set := range s[0].OperationSets {
 		for _, op := range set.Operations {
 			if op.Name == endpoint.Name {
 				named = append(named, op)
@@ -147,5 +178,5 @@ func (b *recordBuilder) operation(endpoint registry.RustEndpoint) (*ir.FieldDef,
 			return op, nil
 		}
 	}
-	return nil, fmt.Errorf("topcoat: no operation of %s serves %s.%s (%s %s)", b.schemaSet[0].Name, endpoint.Namespace, endpoint.Name, strings.ToUpper(endpoint.Method), endpoint.Path)
+	return nil, fmt.Errorf("topcoat: no operation of %s serves %s.%s (%s %s)", s[0].Name, endpoint.Namespace, endpoint.Name, strings.ToUpper(endpoint.Method), endpoint.Path)
 }

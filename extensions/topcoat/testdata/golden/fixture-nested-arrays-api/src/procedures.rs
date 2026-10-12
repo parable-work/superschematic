@@ -9,6 +9,10 @@
 //! `call_<operation>` is the procedure's body as a plain function: the
 //! record decoded into the operation's arguments, then the operation called
 //! in-process by its route's rules.
+//!
+//! An operation without an in-process call has no procedure, and neither
+//! has one whose route admits only a service caller (@requireService): a
+//! browser holds no service credential. `operations` says why on each.
 
 #![allow(unused_imports)]
 

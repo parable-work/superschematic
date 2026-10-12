@@ -63,6 +63,29 @@ func builds(calls []string) []string {
 	return out
 }
 
+// TestDeployBuildsAWorkersImage: a worker has an image as a job has (D53):
+// a deploy builds it from the Dockerfile the stack's build writes for it,
+// pins it in the worker's pool and records it in the manifest.
+func TestDeployBuildsAWorkersImage(t *testing.T) {
+	f := newFixture(t)
+	env := f.workerEnv(t, "Staging")
+	f.ready(t, env)
+	src := sources(t, "shop-api", "Orders", stacktest.ShipOrdersJob, stacktest.FulfilOrdersWorker)
+	o := deployOptions(f, t, env, nil, &planner{to: 1}, nil)
+	o.Sources = src
+	m, err := stackdeploy.Deploy(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(builds(f.calls(0)), "build shop-orders-fulfil-orders: schemas/dist/server/shop-stack/shop-orders-fulfil-orders/Dockerfile") {
+		t.Fatalf("the deploy built %v, not the worker", builds(f.calls(0)))
+	}
+	pool := f.ext.Provisioner.Rendered().Resources.Resource(stacktest.FulfilOrdersWorker + ".pool")
+	if got, image := pool.Properties["image"], m.Images[stacktest.FulfilOrdersWorker]; got != image || !strings.HasPrefix(image, stacktest.FulfilOrdersWorker+"@sha256:") {
+		t.Errorf("the worker's pool renders image %v, and the manifest records %s", got, image)
+	}
+}
+
 // TestDeployBuildsImages: a deploy with the build's sources builds each
 // server's and job's image before it changes anything, from a context its
 // ignore file cuts down, and pins the image built; the next deploy builds
@@ -282,7 +305,7 @@ func TestBuild(t *testing.T) {
 		t.Errorf("a forced build of Orders: %+v", r)
 	}
 	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *src, Deployables: []string{"shop-db"}})
-	if err == nil || !strings.Contains(err.Error(), "has no server or job shop-db") {
+	if err == nil || !strings.Contains(err.Error(), "has no server, job or site shop-db") {
 		t.Errorf("a build of a database: %v", err)
 	}
 	_, err = stackdeploy.Build(ctx, stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *sources(t, "shop-api"), Deployables: []string{"Orders"}})
