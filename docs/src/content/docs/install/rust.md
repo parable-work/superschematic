@@ -459,6 +459,83 @@ A schema with an `@envVars` class (see
 crate's `config` module, whose `load_config()` reads the class's
 variables from the environment and a `.env` file.
 
+### The implementation crate
+
+The crate's `config` module also holds `EnvConfig`, the API's
+configuration: the `@envVars` settings, when it has them, and the fields
+a [stack](/superschematic/guides/stacks/) sets for it (D57).
+`load_env_config()` reads them through the HTTP runtime's `stackconfig`
+readers, and its `ConfigError` names every variable missing or invalid,
+one line each.
+
+| Field | Type | For |
+| --- | --- | --- |
+| `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
+| `<api>_service` | `stackconfig::Service` | each API it `calls` |
+| `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService` |
+| `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
+| `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
+
+The crate's `deps` module declares what the implementation is built from,
+and what it returns:
+
+```rust
+#[derive(Clone)]
+pub struct Deps {
+    pub config: EnvConfig,
+    // runtime::postgres::Pool, for a database
+    pub db: Pool,
+    // a Rust SDK client per calls entry, here of shop-api
+    pub shop_api: schemas_shop_api_sdk::ShopApiSdk,
+    pub span: tracing::Span,
+}
+
+#[derive(Clone)]
+pub struct Handlers {
+    pub product: Arc<dyn ProductImplementation>, // one per namespace
+}
+```
+
+A field is left out when the API has nothing for it. `Handlers` also holds
+the `authenticator` of an API whose operations need a caller and whose
+`authDb` has no `User` table, and the `webhook_verifiers` of an API with
+`@hmacVerified` operations: the implementation builds both.
+`Implementations::new(handlers, ...)` joins the handlers with what the
+server builds: the `Arc<IdentityAuthenticator>` of an API over the user
+model, and the service authenticator of an API with a service clause,
+each a typed argument, so none is forgotten. A callee needs
+`outputs.sdk` for Rust, which the crate depends on by path, and an API
+that lists a bucket is refused, since buckets from a Rust server are not
+built. The crate turns on the runtime's `postgres` feature for a
+database, `identity-postgres` beside the user model, so the identity
+store runs over `Deps.db` (`runtime::identity::PostgresPool`), and
+`http-client` for a callee.
+
+The implementation is a crate of its own at the naming file's
+[`[implementation_paths]`](/superschematic/reference/naming/#implementation_pathsrust)
+`rust` template, `rust/<service>` from the parent of the schemas root by
+default. `build --scaffold` and `build-all --scaffold` write a missing one
+for each Rust API built: a `Cargo.toml` (`schemas-<service>-implementation`)
+that depends on the API crate and the runtime by path, and a `src/lib.rs`
+whose methods answer 501. It never writes into a directory that holds a
+`Cargo.toml`.
+
+```rust
+pub async fn create(deps: Deps) -> Result<Handlers, Box<dyn std::error::Error + Send + Sync>> {
+    let deps = Arc::new(deps);
+    Ok(Handlers {
+        product: Arc::new(Products { deps: Arc::clone(&deps) }),
+    })
+}
+```
+
+A server builds the router from it:
+
+```rust
+let handlers = schemas_catalog_implementation::create(deps).await?;
+let router = build_router(Implementations::new(handlers, authenticator, service_authenticator));
+```
+
 With `scaffoldsOutputDir` set, the build writes starter implementations
 once, never overwriting them: a `mod.rs` with one module per namespace,
 and in each namespace's directory a `mod.rs`, `implementation.rs` with the
@@ -512,7 +589,9 @@ let router = build_router(Implementations {
 The store's SQL client is the service's choice, through the crate's
 features: `identity-postgres` adds `TokioPostgres`, `identity-sqlite`
 adds `Rusqlite`, and with neither the service binds a `Client` of its
-own.
+own. The crate a build writes turns `identity-postgres` on itself, since
+its `authDb` is its database, so `PostgresPool` runs the store over
+`Deps.db` ([The implementation crate](#the-implementation-crate)).
 
 ```toml
 schemas-catalog-api = { path = "schemas/dist/api/catalog", features = ["identity-postgres"] }

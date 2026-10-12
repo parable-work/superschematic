@@ -129,7 +129,11 @@ method answers 501 until it is implemented. It never writes into a
 directory that holds a Go file. A TypeScript API's is a package at the
 `typescript` template (`typescript/{service}`): `package.json`,
 `tsconfig.json` and an `index.ts` whose `create` is the generated
-`Constructor`, written only while the directory holds no `.ts` file.
+`Constructor`, written only while the directory holds no `.ts` file. A
+Rust API's is a crate at the `rust` template (`rust/{service}`): a
+`Cargo.toml` and a `src/lib.rs` whose `create(deps)` returns the API
+crate's `Handlers`, written only while the directory holds no
+`Cargo.toml`.
 Without the flag a build writes nothing outside the output root, except a
 stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
@@ -158,7 +162,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
-| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API built whose package is missing, at the `[implementation_paths]` template of its language |
+| `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API built whose package is missing, at the `[implementation_paths]` template of its language |
 
 ## `build-all <services-root>`
 
@@ -209,7 +213,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
-| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
+| `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
 
 Every service `build-all` builds gets a stamp,
 `<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the

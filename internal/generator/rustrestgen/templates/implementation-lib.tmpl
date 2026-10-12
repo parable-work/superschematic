@@ -1,0 +1,109 @@
+//! The implementation of the {{ .SchemaName }} API.
+//!
+//! superschematic wrote this crate once, as a scaffold, because it was
+//! missing. It never writes it again: the crate is yours. Each method
+//! answers 501 Not Implemented until you implement it.
+{{- if .ChecksEndUsers }}
+//!
+//! The authenticator establishes no caller, so each route that needs one
+//! answers 401 until it does.
+{{- end }}
+{{- if .WebhookProviders }}
+//!
+//! The server does not start until each @hmacVerified provider has a
+//! verifier in `webhook_verifiers`.
+{{- end }}
+{{- $async := or .Namespaces .ChecksEndUsers }}
+{{ if or .WebhookProviders $async }}
+{{- if .WebhookProviders }}
+use std::collections::HashMap;
+{{- end }}
+{{- if $async }}
+use std::sync::Arc;
+{{- end }}
+{{ end }}
+{{- if $async }}
+use async_trait::async_trait;
+{{- end }}
+{{- if .ChecksEndUsers }}
+use http::request::Parts;
+{{- end }}
+{{- if .UsesTypes }}
+use {{ .CrateIdent }}::types;
+{{- end }}
+{{ .APIUse }}
+{{- with .RuntimeUse }}
+{{ . }}
+{{- end }}
+
+/// Builds the implementation of {{ .SchemaName }} from its dependencies: the
+/// handlers the server's entrypoint joins with what it builds into the
+/// API's `Implementations` (`Implementations::new`).
+pub async fn create({{ if not .Namespaces }}_{{ end }}deps: Deps) -> Result<Handlers, Box<dyn std::error::Error + Send + Sync>> {
+{{- if .Namespaces }}
+    let deps = Arc::new(deps);
+{{- end }}
+    Ok(Handlers {
+{{- range .Namespaces }}
+        {{ toSnakeCase . }}: Arc::new({{ toPascalCase . }} {
+            deps: Arc::clone(&deps),
+        }),
+{{- end }}
+{{- if .ChecksEndUsers }}
+        authenticator: Arc::new(NoCaller),
+{{- end }}
+{{- if .WebhookProviders }}
+        // The verifier of each @hmacVerified provider, which checks the
+        // signature of its requests: {{ join .WebhookProviders ", " }}.
+        webhook_verifiers: HashMap::new(),
+{{- end }}
+    })
+}
+{{- range .Namespaces }}
+{{- $namespace := . }}
+
+/// Implements {{ toPascalCase . }}Implementation.
+pub struct {{ toPascalCase . }} {
+    pub deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl {{ toPascalCase . }}Implementation for {{ toPascalCase . }} {
+{{- $first := true }}
+{{- range $.Endpoints }}
+{{- if eq .Namespace $namespace }}
+{{- if $first }}{{ $first = false }}{{ else }}
+{{ end }}
+{{- if .Description }}
+    /// {{ index (splitLines .Description) 0 }}
+{{- end }}
+{{ $.MethodSignature . }}
+{{- if .RequireOwnership }}
+        // @requireOwnership: the router has established the caller
+        // (ctx.principal); check that it owns the resource (403 otherwise).
+{{- end }}
+{{- if .AllowsService }}
+        // @allowService: a listed service may call with no end user; then
+        // ctx.principal is None and ctx.service_caller names the service.
+{{- end }}
+{{ $.NotImplemented . }}
+    }
+{{- end }}
+{{- end }}
+}
+{{- end }}
+{{- if .ChecksEndUsers }}
+
+/// Establishes the end user on the routes that need one. The scaffold's
+/// establishes none, so each such route answers 401: verify the request's
+/// credential (`runtime::bearer_token(&request.headers)`, or a header) with
+/// your identity provider and return its `Principal`.
+pub struct NoCaller;
+
+#[async_trait]
+impl Authenticator for NoCaller {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+{{- end }}
