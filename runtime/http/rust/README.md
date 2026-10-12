@@ -76,6 +76,23 @@ and TypeScript runtimes' (D51):
   the issuer for the audience. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
+- `cors`, with no feature: a site's CORS (D55), the twin of Go's
+  `cors.Handler` and TypeScript's `corsHandler`. `cors::Api::new(&cors,
+  operations::ALL)` is an API's policy, its `<API>_CORS` origins and the
+  methods of its operations (`cors::methods`), and the requests its
+  operations' routes take (`cors::match_operations`, a `{param}` taking one
+  segment). `SiteCorsLayer::new(apis)`, around the server's router, finds
+  the API a request with an `Origin` is, a preflight by the method it asks
+  for: a preflight from an origin the policy lists is answered 204 with
+  `Access-Control-Allow-Origin`, `-Credentials`, `-Methods`, `-Headers`
+  (`Accept, Authorization, Content-Type`) and `-Max-Age: 600`, and any
+  other request reaches the router, whose answer gets the policy's headers
+  where it set none (`Allow-Origin` and `Allow-Credentials` for a listed
+  origin, `Vary` always). A preflight from an origin the site's policy does
+  not list reaches the router too, so `identity::CorsLayer` on the API's
+  router answers the origins its identity config trusts (D55, amended).
+  `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`
+  holds the three runtimes to; `tests/cors_parity.rs` runs every vector.
 - The `postgres` feature's `postgres` module: `connect(&Database)` opens a
   `deadpool-postgres` pool, which connects when first used, and
   `ping(&Pool)` is the `SELECT 1` a server's `/readyz` makes. A URL

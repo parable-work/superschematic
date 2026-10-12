@@ -9,6 +9,8 @@ mod auth;
 mod body;
 mod context;
 mod controls;
+// A site's CORS (D55), which a stack server answers for the APIs it serves.
+pub mod cors;
 mod error;
 #[cfg(feature = "http-client")]
 mod http_client;
