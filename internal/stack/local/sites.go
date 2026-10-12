@@ -209,9 +209,11 @@ func (p *Provisioner) stopFileServer(rs *runningSite) error {
 // of ir.SiteConfigPath answers config, uncached; of a path that names a
 // file under root, the file, and of a directory, its index.html; and of
 // any other path the fallback file, relative to root, with 200, or 404
-// when there is none. An HTML file is served uncached too, so a browser
-// that reloads sees a rebuilt site; the other files carry no cache header.
-// No path reaches outside root.
+// when there is none. A file is served with the Cache-Control the gcp
+// target gives it (ir.SiteFileCacheControl, D55, amended): a year,
+// immutable, for a name that holds its content's hash, and no-cache for
+// every other file and the fallback, so a browser that reloads sees a
+// rebuilt site. No path reaches outside root.
 func SiteHandler(root, fallback string, config []byte) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -229,23 +231,23 @@ func SiteHandler(root, fallback string, config []byte) http.Handler {
 			}
 			return
 		}
-		name := filepath.Join(root, filepath.FromSlash(clean))
-		if info, err := os.Stat(name); err == nil && info.IsDir() {
-			name = filepath.Join(name, "index.html")
+		rel := strings.TrimPrefix(clean, "/")
+		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil && info.IsDir() {
+			rel = path.Join(rel, "index.html")
 		}
-		if serveSiteFile(w, r, name) {
+		if serveSiteFile(w, r, filepath.Join(root, filepath.FromSlash(rel)), ir.SiteFileCacheControl(rel, fallback)) {
 			return
 		}
-		if fallback != "" && serveSiteFile(w, r, filepath.Join(root, filepath.FromSlash(path.Clean("/"+fallback)))) {
+		if fallback != "" && serveSiteFile(w, r, filepath.Join(root, filepath.FromSlash(path.Clean("/"+fallback))), ir.SiteCacheRevalidate) {
 			return
 		}
 		http.NotFound(w, r)
 	})
 }
 
-// serveSiteFile serves the regular file name, reporting false when there
-// is none.
-func serveSiteFile(w http.ResponseWriter, r *http.Request, name string) bool {
+// serveSiteFile serves the regular file name with cacheControl, reporting
+// false when there is none.
+func serveSiteFile(w http.ResponseWriter, r *http.Request, name, cacheControl string) bool {
 	f, err := os.Open(name)
 	if err != nil {
 		return false
@@ -255,9 +257,7 @@ func serveSiteFile(w http.ResponseWriter, r *http.Request, name string) bool {
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	if strings.EqualFold(filepath.Ext(name), ".html") {
-		w.Header().Set("Cache-Control", "no-cache")
-	}
+	w.Header().Set("Cache-Control", cacheControl)
 	http.ServeContent(w, r, info.Name(), time.Time{}, f)
 	return true
 }

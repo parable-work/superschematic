@@ -2593,7 +2593,8 @@ config may leave `outputs` out.
   records each site's digest (`sites`).
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
-  fallback, and prints its URL in the summary (section 8.3).
+  fallback and the Cache-Control the gcp target gives each file (below),
+  and prints its URL in the summary (section 8.3).
 - **gcp.** The site platform, `gcp.site`, gives each site a bucket of its
   own, `<project>-<site>`, and the publisher puts each build's files in it
   under the hex of their digest, `<hex>/index.html`, with a marker object
@@ -2610,9 +2611,17 @@ config may leave `outputs` out.
   with 200, through the URL map's `defaultCustomErrorResponsePolicy`;
   since a load balancer with backend buckets alone serves no custom error
   response, the URL map sends one reserved path,
-  `/__superschematic/none`, to a backend service with no backends. Files
-  are served `no-cache`, so the CDN asks the bucket whether a file
-  changed before it serves it, and the config `no-store`. The bucket is
+  `/__superschematic/none`, to a backend service with no backends. A
+  file whose name holds a hash of its content, 8 or more lowercase hex
+  digits with a digit and a letter, as the name's last part before its
+  extension (`app.3f9a2c1d.js`), is served `public, max-age=31536000,
+  immutable`: that name has that content in every build, whichever path
+  the CDN keys it on. Every other file, HTML files and the fallback among
+  them, is served `no-cache`, so the CDN asks the bucket whether it
+  changed before it serves it, and the config `no-store`
+  (`ir.SiteFileCacheControl`, D55, amended). Bun's base-36 hashes
+  (`index-5psy29er.js`) are not hex, so a site the scaffold builds keeps
+  every file `no-cache`. The bucket is
   readable by `allUsers`: a backend bucket reads only public objects for a
   browser's unsigned requests, so a project whose organization policy
   forbids public buckets cannot serve a site. With no domain, the site is

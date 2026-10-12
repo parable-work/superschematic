@@ -5124,6 +5124,29 @@ first things to check.
 
 The rule is reversible until the first release.
 
+### D55, amended: a file whose name holds a hex hash of its content is cached for a year
+
+The amendment above served every file of a site `no-cache`, since a file
+of a new build may come under the path of one of the last, and Google's
+documentation does not say whether Cloud CDN keys a file on its path
+before or after the URL map's rewrite to the build's prefix. So every
+request for a script or a stylesheet asked the bucket whether it
+changed, though a bundler names those files by their content. This
+replaces that amendment's refusal to tell such files by their names.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A file whose name holds a hash of its content is served `public, max-age=31536000, immutable`, by the gcp publisher on its object and by `stack dev`'s file server alike. Such a name has the same content in every build, so a cached copy is right whichever path the CDN keys it on. `index.html` and every other HTML file, the fallback, which the URL map serves for each path that names no file, and every other file stay `no-cache`; the config and the publisher's marker stay `no-store`. One function decides, `ir.SiteFileCacheControl`. | A long `max-age` for every file but the HTML, which the amendment above refused. A list of long-cached paths in the site's config, a setting for what the names already say. |
+| The pattern is conservative. A name holds a hash when its part before the extension, or that part's last piece after a `.` or a `-`, is 8 or more lowercase hex digits, at least one a digit and one a letter: `app.3f9a2c1d.js`, `vendor-3f9a2c1d.css`, `3f9a2c1d5e7b.png`. Digits alone are a date or a number (`photo-20261012.jpg`), and letters alone a word. A hash in another alphabet does not count: Bun's and esbuild's (`index-5psy29er.js`), and Rollup's, so Vite's, unless its `output.hashCharacters` is `hex`. The scaffold's `bun build` output, acme's among it, stays `no-cache`. | Bun's shape too, 8 lowercase letters and digits after a hyphen, which names written by hand also have (`og-1200x630.png`, `logo-retina2x.png`): such a file changed under its name would be stale for a year. |
+
+Status: built. `TestContentHashedName` and `TestSiteFileCacheControl`
+hold the pattern. gcp's `TestSitePublisher` and
+`TestSiteFallbackIsRevalidated`, and the local target's `TestSiteHandler`,
+serve a hashed file for a year and every other file, a hashed fallback
+too, `no-cache`. None of it has run against Google Cloud.
+
+The rule is reversible until the first release.
+
 ### D44, amended: a form for every input type and every operation a form submits, its controls named by path
 
 The first forms amendment gave a form only to an input type whose fields
