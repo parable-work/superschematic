@@ -1,6 +1,7 @@
 # Accounts, signed up through a form: the input's fields are an email, a
 # URL, strings with rules, an enum, an integer and a number scalar, and a
-# boolean. A note's input holds a list of strings, a row each. A booking's
+# boolean. A note's input holds a list of strings, a row each; one
+# operation requires it and another takes it optionally. A booking's
 # input holds a field of every other kind a form renders: a nested object
 # with an optional field, an optional nested object whose second line its
 # name labels, a list of objects with bounds, a list of enums, a date, a
@@ -242,6 +243,19 @@ operationSets:
           - name: input
             typeRef: { name: NoteInput }
             required: true
+      # Draft a note about an account, its text to come: the same input
+      # as annotate's, optional here, which has one form all the same.
+      - name: draftNote
+        typeRef: { name: AccountView }
+        required: true
+        httpMethod: POST
+        restPath: "accounts/{id}/drafts"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: NoteInput }
   - name: BookingMutations
     operations:
       # Book a stay.

@@ -1164,6 +1164,12 @@ impl NoteInputForm {
         json
     }
 
+    /// Whether a field was sent: an optional nested object is part of the
+    /// input only then.
+    fn is_sent(&self) -> bool {
+        self.text.is_some() || !self.tags.is_empty()
+    }
+
     /// Whether the component shows the errors at `path`: at a control, a
     /// nested object's or a list's fieldset, or a row.
     fn shows(path: &[Segment]) -> bool {
@@ -1931,6 +1937,169 @@ pub async fn account_annotate_args_fields(
                 <div class="field ss-row">
                     let name = format!("tags[{i0}]");
                     let id = format!("account-annotate-tags-{i0}");
+                    let label = format!("Tags {}", i0 + 1);
+                    <label for=(&id)>(&label)</label>
+                    match choices.of(&name, "tags") {
+                        Some(options) => choice_select(id: &id, name: &name, required: true, invalid: errors.invalid(&name), options: choice_options(options, row0.as_deref())),
+                        None => <input id=(&id) name=(&name) type="text" required=(true) value=(row0.clone()) aria-invalid=(errors.invalid(&name))>,
+                    }
+                    <button type="submit" class="ss-remove" name="_action" value=(format!("remove:{name}")) formnovalidate=(true) aria-label=(format!("Remove {label}"))>"Remove"</button>
+                    for message in errors.of(&name) {
+                        <p class="field-error">(message)</p>
+                    }
+                </div>
+            }
+            if form.input.tags.len() < 3 {
+                <button type="submit" class="ss-add" name="_action" value="add:tags" formnovalidate=(true)>"Add"</button>
+            }
+        </fieldset>
+    })
+}
+
+/// The arguments of account.draftNote, each as the browser sends it, its
+/// input's fields beside them. Sent by POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountDraftNoteArgsForm {
+    pub id: Option<String>,
+    pub input: NoteInputForm,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl AccountDraftNoteArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default, and
+    /// the input's new form.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            input: NoteInputForm::new(),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value, and the input's fields by their names.
+    /// `Form<AccountDraftNoteArgsForm>` decodes a post this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            input: NoteInputForm::from_post(&posted),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, the input parsed by its form when one of its
+    /// fields was sent, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::AccountDraftNoteArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        // The input is optional: absent when none of its fields was sent.
+        let input = match self.input.is_sent().then(|| self.input.parse()).transpose() {
+            Ok(input) => Some(input),
+            Err(refused) => {
+                errors.merge(refused);
+                None
+            }
+        };
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(input) = input else {
+            return Err(errors);
+        };
+        let args = crate::api::AccountDraftNoteArgs {
+            id: arg_id,
+            input,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::account_draft_note`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::AccountView, Refusal> {
+        let args = self.parse()?;
+        operations::account_draft_note(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Applies the row button that submitted the form to its input's rows
+    /// (`NoteInputForm::apply_action`): true when a row button
+    /// submitted it, and the page renders the form again without calling
+    /// the operation.
+    pub fn apply_action(&mut self) -> bool {
+        self.input.apply_action()
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control or the input's. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        NoteInputForm::shows(path)
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountDraftNoteArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `AccountDraftNoteArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input; then the input's fields. `choices` turns a text
+/// or number control the app names into a select.
+#[component]
+pub async fn account_draft_note_args_fields(
+    #[default] form: AccountDraftNoteArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(AccountDraftNoteArgsForm::shows);
+    Ok(view! {
+        // The button Enter presses, ahead of every row button: it submits
+        // the form without an `_action`.
+        <button type="submit" class="ss-submit" hidden=(true)></button>
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="account-draft-note-text">"Text"</label>
+            match choices.of("text", "text") {
+                Some(options) => choice_select(id: "account-draft-note-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.input.text.as_deref())),
+                None => <input id="account-draft-note-text" name="text" type="text" required=(true) value=(form.input.text.clone()) aria-invalid=(errors.invalid("text"))>,
+            }
+            for message in errors.of("text") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <fieldset class="ss-list" data-field="tags">
+            <legend>"Tags"</legend>
+            for message in errors.of("tags") {
+                <p class="field-error">(message)</p>
+            }
+            #[key(i0)]
+            for (i0, row0) in form.input.tags.iter().enumerate() {
+                <div class="field ss-row">
+                    let name = format!("tags[{i0}]");
+                    let id = format!("account-draft-note-tags-{i0}");
                     let label = format!("Tags {}", i0 + 1);
                     <label for=(&id)>(&label)</label>
                     match choices.of(&name, "tags") {

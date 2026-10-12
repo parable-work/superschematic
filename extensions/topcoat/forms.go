@@ -138,11 +138,16 @@ func formsOf(schemas schemaSet, inProcess []declared, log func(format string, ar
 	var forms []form
 	for _, d := range inProcess {
 		input := d.endpoint.Input
-		if input == nil || seen[input.RustType] {
+		if input == nil {
 			continue
 		}
-		seen[input.RustType] = true
+		// One form per type, whether an operation takes it as a required
+		// input or an optional one.
 		name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(input.RustType, "Option<"), "types::"), ">")
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
 		parse, ok := strings.CutPrefix(input.Parse, "types::validators::")
 		if !ok {
 			log("  - topcoat: no form for %s: the service's own types crate does not declare it\n", name)

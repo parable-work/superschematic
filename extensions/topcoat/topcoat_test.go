@@ -329,7 +329,9 @@ func TestFormsServeATopcoatApp(t *testing.T) {
 // TestEveryInputHasAForm builds fixture-forms-api: every input type its
 // calls take has a form, NoteInput's list of strings and BookingInput's
 // nested objects, rows, map and JSON value included, and each nested type
-// a struct; with forms off the crate has no forms module.
+// a struct; NoteInput, which annotate requires and draftNote takes
+// optionally, has one form and one component; with forms off the crate has
+// no forms module.
 func TestEveryInputHasAForm(t *testing.T) {
 	root := testpaths.TempDir(t)
 	var log strings.Builder
@@ -350,6 +352,11 @@ func TestEveryInputHasAForm(t *testing.T) {
 	} {
 		if !strings.Contains(string(forms), want) {
 			t.Errorf("forms.rs: want %s", want)
+		}
+	}
+	for _, once := range []string{"pub struct NoteInputForm ", "pub async fn note_input_fields(", "impl NoteInputForm {"} {
+		if n := strings.Count(string(forms), once); n != 1 {
+			t.Errorf("forms.rs: %s %d times, want once", once, n)
 		}
 	}
 	if strings.Contains(log.String(), "no form") {
@@ -1026,7 +1033,8 @@ const formsAppTest = `use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
 use schemas_fixture_forms_api_topcoat::api::{
-    types, AccountAnnotateArgs, AccountImplementation, AccountSignUpArgs, BookingBookArgs, BookingImplementation, Implementations,
+    types, AccountAnnotateArgs, AccountDraftNoteArgs, AccountImplementation, AccountSignUpArgs, BookingBookArgs, BookingImplementation,
+    Implementations,
 };
 use schemas_fixture_forms_api_topcoat::forms::{
     booking_input_fields, signup_input_fields, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
@@ -1064,6 +1072,9 @@ impl AccountImplementation for Accounts {
     }
     async fn annotate(&self, _ctx: RequestContext, _args: AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
         Err(ApiError::not_implemented("annotate"))
+    }
+    async fn draft_note(&self, _ctx: RequestContext, _args: AccountDraftNoteArgs) -> Result<types::AccountView, ApiError> {
+        Err(ApiError::not_implemented("draft_note"))
     }
 }
 
