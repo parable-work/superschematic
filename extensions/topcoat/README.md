@@ -32,6 +32,8 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 - renders each record as a description list and as a table, labeled by
   the schema's titles and its types' `@display`
   ([Display components](#display-components)).
+- when asked, serves a page per resource the operations describe, under a
+  prefix, with a layout, a nav and an index ([Pages](#pages)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -78,7 +80,9 @@ Records, forms, procedures and views are on by default. `forms: false`
 leaves out both kinds of form; `procedures: false` and `views: false` each
 leave out their module;
 `records: false` leaves out the records, and with them the procedures and
-the views, which are built on records.
+the views, which are built on records. Pages are off by default:
+`pages: { enabled: true, prefix: "/console" }` turns them on, and they
+need the records, the forms and the views ([Pages](#pages)).
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -96,7 +100,14 @@ services = ["shop-orders"]
 ```
 
 A listed service gets the crate with every default when its server is
-Rust. `outputs.topcoat` in its config, when present, wins.
+Rust. `outputs.topcoat` in its config, when present, wins. The table's
+`pages_prefix` also turns on the listed services' pages, under it:
+
+```toml
+[extension.topcoat]
+services = ["shop-orders"]
+pages_prefix = "/console"
+```
 
 ## The app
 
@@ -583,3 +594,111 @@ no CSS and no inline styles: a stylesheet styles them by their `ss-`
 classes and `data-field` attributes, and fills an empty value with
 `:empty`. A type that nests itself boxes its components' views, as
 Topcoat requires of a recursive component.
+
+A table's rows link to pages through `hrefs`, a prop every
+`<type>_table` takes, empty by default: its i-th entry, unless it is
+empty, links row i, on its title's cell, or on its first cell when the
+columns hold no title. The [pages](#pages) fill it; a page of the app's
+own can too:
+
+```rust
+let hrefs: Vec<String> = rows.iter().map(|row| format!("/orders/{}", row.id)).collect();
+view! { order_view_table(rows: rows, hrefs: hrefs) }
+```
+
+## Pages
+
+`pages: { enabled: true }` in `outputs.topcoat` (or `pages_prefix` in
+`[extension.topcoat]`) adds `pages`: a page for every resource the API's
+operations describe, under a prefix, `/console` unless `prefix` says
+otherwise. A prefix starts with `/`, does not end with one, holds only
+segments of letters, digits and `-._~`, and is not under `/api` or
+`/_superschematic`, which the crate serves itself. The pages need the
+records, the forms and the display components; turning one of those off
+with the pages on fails the build.
+
+### Resources
+
+The resources come from the operations a page can call (the ones with an
+in-process call, and not `@requireService`), by REST path and result:
+
+| Operation | Page |
+| --- | --- |
+| `GET C` returning `T[]` | C's list, `<prefix>/C`, its query arguments the filter form |
+| `GET C/{p}` returning `T` | an item's page, `<prefix>/C/{p}` |
+| `POST C` with an input or arguments | the new page, `<prefix>/C/new`, and its POST |
+| `PUT` or `PATCH C/{p}` with an input | the edit page, `<prefix>/C/{p}/edit`, and its POST |
+| `DELETE C/{p}` | a link to `<prefix>/C/{p}/delete`, which confirms, and its POST |
+| any other method on `C/{p}/<verb>` | the action's form on the item's page, posting to `<prefix>/C/{p}/<verb>` |
+| `C/{p}/D` | D nested under C's item: its pages under `<prefix>/C/{p}/D`, and its list and new link a section of C's item page when C has one |
+
+A list or a detail makes C a resource; the edit page, the delete and the
+actions need the detail, whose page holds them. Every other operation is
+left out, and the build log says why: `no page for viewer.me: a GET of
+auth/me, a path that ends in a word, is a list only when it returns a list
+of records`.
+
+A resource is named by its type's `@display` (`noun`, `plural`,
+`createLabel`, `titleField`), else by its path's last word: `projects`
+is Projects, an item a Project, the new page "New project". A list's rows
+link to their items' pages when the list returns the detail's type and
+the detail's path parameter names one of its fields (`{id}` and `id`).
+
+### What each page does
+
+Every page calls its operation through `operations`, so the route's
+rules hold, and takes its input through the [forms](#forms):
+
+- **A list** checks the guard, renders the filter form (a GET, read from
+  the query), and the result as `<type>_table` with each row linked, and a
+  link to the new page when the caller may create one.
+- **An item's page** renders `<type>_detail`, headed by its title, links
+  to its edit and delete pages, a form per action and a section per
+  resource under it, each only when the caller may.
+- **The new and edit pages** render their form, the edit form filled
+  from the item: each field the update's input and the item's type share
+  by JSON name and kind; any other starts as the form's `new()`.
+- **The delete page** shows the item and the form that deletes it, so a
+  GET never deletes and no script confirms.
+
+A route's values come from the page's path, set on the form over its
+hidden inputs, which a reader can change, and decoded as an argument form
+decodes them; one that does not decode is no page, 404.
+
+A successful post goes on with 303: to the new item after a create, to
+the item after an edit or an action, to the list after a delete. A
+refused form renders again, each error at its control, with 422 for a bad
+request and the route's status for any other: a conflict's (409) message
+is the form's own. A row button renders the form again with 200. A
+refused caller keeps the route's status on a page of its own: 401 with a
+link to sign in, 403, and 404 for an item that is not there.
+
+### Layout, nav and index
+
+A `#[layout]` at the prefix puts each page in `<main class="ss-main">`,
+after `<nav class="ss-nav">`, a link to each resource no item holds whose
+list the caller may use (`can_<operation>`), the current one
+`aria-current`, and `<nav class="ss-trail">`, the trail from the index to
+the page: each list, each item by its noun and id, then the page. The
+index at the prefix lists the same resources. The markup is semantic HTML
+with `ss-` classes and ships no styles.
+
+### Mounting them
+
+The pages, the layout and the index are `#[page]`s and a `#[layout]`,
+which the app's `.discover()` registers, as it registers the procedures:
+
+```rust
+Router::builder()
+    .discover()
+    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in"))
+    .shop_orders(implementations, page_authenticator)
+    .build()
+```
+
+`pages::Settings`, which the app puts in its app context, names the
+site's title (the service's name in words without it) and its sign-in
+page: a 401 links to it with the page to come back to as `next`, the
+item's page for an action. Without it a 401 has no link. The page
+functions and their path parameters are public, so an app's own page can
+link to one with `href!(pages::projects_item_page, pages::ProjectId(id))`.
