@@ -120,7 +120,7 @@
           "field": "SHOP_MEDIA_BUCKET",
           "source": "derived",
           "value": {
-            "endpoint": "http://127.0.0.1:25414",
+            "endpoint": "http://127.0.0.1:23222",
             "name": "shop-media"
           },
           "edge": "bucket:shop-api->shop-media"
@@ -157,7 +157,7 @@
         }
       ],
       "resourceName": "shop-media",
-      "address": "http://127.0.0.1:25414"
+      "address": "http://127.0.0.1:23222"
     },
     {
       "name": "shop-orders-fulfil-orders",
@@ -504,10 +504,11 @@
           ],
           "image": "postgres:17-alpine",
           "labels": {
+            "superschematic.checkout": "963e50",
             "superschematic.environment": "Pinned",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-pinned-postgres",
+          "name": "superschematic-shop-stack-pinned-963e50-postgres",
           "ports": [
             {
               "containerPort": 5432,
@@ -548,7 +549,7 @@
             },
             {
               "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-              "value": "http://127.0.0.1:25414"
+              "value": "http://127.0.0.1:23222"
             },
             {
               "name": "SHOP_MEDIA_BUCKET_NAME",
@@ -602,7 +603,7 @@
               "name": "name"
             }
           },
-          "endpoint": "http://127.0.0.1:25414",
+          "endpoint": "http://127.0.0.1:23222",
           "name": "shop-media",
           "service": "shop-media"
         },
@@ -786,21 +787,22 @@
             "-filesystem-root",
             "/storage",
             "-public-host",
-            "127.0.0.1:25414",
+            "127.0.0.1:23222",
             "-external-url",
-            "http://127.0.0.1:25414"
+            "http://127.0.0.1:23222"
           ],
           "image": "fsouza/fake-gcs-server:1.56.1",
           "labels": {
+            "superschematic.checkout": "963e50",
             "superschematic.environment": "Pinned",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-pinned-storage",
+          "name": "superschematic-shop-stack-pinned-963e50-storage",
           "ports": [
             {
               "containerPort": 4443,
               "host": "127.0.0.1",
-              "hostPort": 25414
+              "hostPort": 23222
             }
           ],
           "readiness": {

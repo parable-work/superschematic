@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/stack"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	"github.com/parable-work/superschematic/stack/stacktest"
@@ -192,8 +193,22 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	stateDir, err := local.EnsureStateDir(filepath.Dir(servicesRoot), "dev-stack", "Dev")
 	require.NoError(t, err)
 	require.NoError(t, local.WriteSecret(filepath.Join(stateDir, local.SecretsFile), "PaymentsSecrets.STRIPE_KEY", "sk_test_dev"))
-	container, storage := local.ContainerName("dev-stack", "Dev"), local.StorageContainerName("dev-stack", "Dev")
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run() })
+	// The containers are the checkout's, named for the state directory of
+	// the schemas root as the build resolves it, its links resolved.
+	schemasRoot, err := stack.CanonicalSchemasRoot(filepath.Dir(servicesRoot))
+	require.NoError(t, err)
+	checkout := local.Checkout(schemasRoot, "dev-stack", "Dev")
+	require.Len(t, checkout, 6)
+	container, storage := local.ContainerName("dev-stack", "Dev", checkout), local.StorageContainerName("dev-stack", "Dev", checkout)
+	// A container an older superschematic left for the environment, which
+	// names no checkout: stack dev says how to remove it, and leaves it,
+	// --remove-data or not. Its name is the test's own, so another
+	// checkout's run of the test keeps its own.
+	old := fmt.Sprintf("%s-%d", local.ContainerName("dev-stack", "Dev", ""), os.Getpid())
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage, old).Run() })
+	created, err := exec.Command("docker", "create", "--name", old,
+		"--label", local.LabelStack+"=dev-stack", "--label", local.LabelEnvironment+"=Dev", local.DefaultPostgresImage).CombinedOutput()
+	require.NoError(t, err, string(created))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -257,5 +272,8 @@ func TestStackDevRunsALocalEnvironment(t *testing.T) {
 	require.Contains(t, buf.String(), "removed container "+storage)
 	require.Error(t, exec.Command("docker", "container", "inspect", container).Run(), "the container outlived --remove-data")
 	require.Error(t, exec.Command("docker", "container", "inspect", storage).Run(), "the storage emulator outlived --remove-data")
+	require.Contains(t, buf.String(), "container "+old+" of stack dev-stack environment Dev names no checkout")
+	require.Contains(t, buf.String(), "docker rm --force --volumes "+old+" removes the old one and its data")
+	require.NoError(t, exec.Command("docker", "container", "inspect", old).Run(), "--remove-data removed a container of no checkout")
 	t.Log(buf.String())
 }

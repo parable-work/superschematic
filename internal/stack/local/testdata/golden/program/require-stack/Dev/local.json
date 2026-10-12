@@ -5,10 +5,10 @@
   "containers": [
     {
       "id": "postgres.container",
-      "name": "superschematic-require-stack-dev-postgres",
+      "name": "superschematic-require-stack-dev-9ead36-postgres",
       "image": "postgres:16-alpine",
       "host": "127.0.0.1",
-      "hostPort": 32406,
+      "hostPort": 32060,
       "containerPort": 5432,
       "env": [
         {
@@ -17,6 +17,7 @@
         }
       ],
       "labels": {
+        "superschematic.checkout": "9ead36",
         "superschematic.environment": "Dev",
         "superschematic.stack": "require-stack"
       },
@@ -35,10 +36,10 @@
     },
     {
       "id": "storage.container",
-      "name": "superschematic-require-stack-dev-storage",
+      "name": "superschematic-require-stack-dev-9ead36-storage",
       "image": "fsouza/fake-gcs-server:1.56.1",
       "host": "127.0.0.1",
-      "hostPort": 25406,
+      "hostPort": 25060,
       "containerPort": 4443,
       "args": [
         "-scheme",
@@ -52,11 +53,12 @@
         "-filesystem-root",
         "/storage",
         "-public-host",
-        "127.0.0.1:25406",
+        "127.0.0.1:25060",
         "-external-url",
-        "http://127.0.0.1:25406"
+        "http://127.0.0.1:25060"
       ],
       "labels": {
+        "superschematic.checkout": "9ead36",
         "superschematic.environment": "Dev",
         "superschematic.stack": "require-stack"
       },
@@ -71,7 +73,7 @@
       "name": "shop_db",
       "service": "shop-db",
       "container": "postgres.container",
-      "url": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+      "url": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable"
     }
   ],
   "buckets": [
@@ -80,7 +82,7 @@
       "name": "shop-media",
       "service": "shop-media",
       "container": "storage.container",
-      "endpoint": "http://127.0.0.1:25406"
+      "endpoint": "http://127.0.0.1:25060"
     }
   ],
   "keyPairs": [
@@ -105,7 +107,7 @@
       "database": "shop-db",
       "service": "shop-db",
       "resource": "shop-db.database.shop-db",
-      "url": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable",
+      "url": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable",
       "model": "models/shop-db.json",
       "plan": "migrations/shop-db.plan.json"
     }
@@ -119,8 +121,8 @@
       "language": "go",
       "module": "server/require-stack/shop-api",
       "binary": "bin/shop-api",
-      "port": 21859,
-      "url": "http://127.0.0.1:21859",
+      "port": 21513,
+      "url": "http://127.0.0.1:21513",
       "readiness": "/readyz",
       "env": [
         {
@@ -268,11 +270,11 @@
         },
         {
           "name": "SHOP_DB_DATABASE_URL",
-          "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+          "value": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable"
         },
         {
           "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-          "value": "http://127.0.0.1:25406"
+          "value": "http://127.0.0.1:25060"
         },
         {
           "name": "SHOP_MEDIA_BUCKET_NAME",
@@ -292,8 +294,8 @@
       "language": "go",
       "module": "server/require-stack/Orders",
       "binary": "bin/orders",
-      "port": 21243,
-      "url": "http://127.0.0.1:21243",
+      "port": 20897,
+      "url": "http://127.0.0.1:20897",
       "readiness": "/readyz",
       "env": [
         {
@@ -327,11 +329,11 @@
         },
         {
           "name": "SHOP_API_SERVICE_URL",
-          "value": "http://127.0.0.1:21859"
+          "value": "http://127.0.0.1:21513"
         },
         {
           "name": "SHOP_DB_DATABASE_URL",
-          "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+          "value": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable"
         },
         {
           "name": "STRIPE_KEY",
@@ -381,11 +383,11 @@
         },
         {
           "name": "SHOP_API_SERVICE_URL",
-          "value": "http://127.0.0.1:21859"
+          "value": "http://127.0.0.1:21513"
         },
         {
           "name": "SHOP_DB_DATABASE_URL",
-          "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+          "value": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable"
         },
         {
           "name": "STRIPE_KEY",
@@ -444,11 +446,11 @@
         },
         {
           "name": "SHOP_API_SERVICE_URL",
-          "value": "http://127.0.0.1:21859"
+          "value": "http://127.0.0.1:21513"
         },
         {
           "name": "SHOP_DB_DATABASE_URL",
-          "value": "postgres://postgres@127.0.0.1:32406/shop_db?sslmode=disable"
+          "value": "postgres://postgres@127.0.0.1:32060/shop_db?sslmode=disable"
         },
         {
           "name": "STRIPE_KEY",

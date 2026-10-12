@@ -63,7 +63,10 @@
 #      restores every service once dist is gone;
 #   7. the copies under testdata/generated/ match this run byte for byte:
 #      the generated files the docs site quotes, and under logs/ the output
-#      of the commands it shows.
+#      of the commands it shows; but for the ports and the checkout's
+#      discriminator in shop-stack's Dev environment.json, which name this
+#      checkout's containers and differ from checkout to checkout (D30,
+#      amended).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -319,6 +322,24 @@ echo "==> testdata/generated/ matches this run"
 # committed copies. A change that alters one fails here until the copy is
 # refreshed with UPDATE=1.
 COPIES="$EXAMPLE_DIR/testdata/generated"
+# The build resolves the local environment Dev for this checkout: its
+# containers carry the checkout's discriminator, a hash of the path of its
+# state directory, and each default port is shifted by it (D30, amended).
+# So this run's environment.json is compared with the copy with every port
+# and the discriminator masked, and the copy stays as it is while they
+# match that way, whichever checkout wrote it.
+ENVIRONMENT=stack/shop-stack/Dev/environment.json
+mask_checkout() {
+  sed -E \
+    -e 's/(superschematic-shop-stack-dev-)[0-9a-f]{6}-/\1CHECKOUT-/g' \
+    -e 's/("superschematic\.checkout": ")[0-9a-f]{6}"/\1CHECKOUT"/g' \
+    -e 's/(127\.0\.0\.1:)[0-9]+/\1PORT/g' \
+    -e 's/("(hostPort|port)": )[0-9]+/\1PORT/g' \
+    "$1"
+}
+if [[ -f "$COPIES/$ENVIRONMENT" ]] && cmp -s <(mask_checkout "$OUT/quoted/$ENVIRONMENT") <(mask_checkout "$COPIES/$ENVIRONMENT"); then
+  cp "$COPIES/$ENVIRONMENT" "$OUT/quoted/$ENVIRONMENT"
+fi
 if [[ "${UPDATE:-}" == 1 ]]; then
   rm -rf "$COPIES"
   cp -R "$OUT/quoted" "$COPIES"

@@ -33,7 +33,7 @@ func TestSiteGolden(t *testing.T) {
 func TestSiteWiring(t *testing.T) {
 	reg := assemble(t)
 	dev := resolve(t, reg, stacktest.WithSite(shop()), stacktest.SiteShop(), "Dev")
-	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev"}
+	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev", SchemasRoot: checkoutRoot}
 	site, api := dev.Deployable("shop-web"), dev.Deployable("shop-api")
 	origin := local.ServerURL(local.ServerPort(env, *site))
 	if site.PublicAddress != origin || !site.Exposed {

@@ -93,6 +93,14 @@ type Options struct {
 	// entrypoint.
 	RepositoryRoot string
 
+	// SchemasRoot is the schemas root, the parent of the services root,
+	// which every build of the CLI sets. The Stack kind's generator
+	// resolves each environment in the checkout it names, so a local
+	// environment's containers and default ports are the checkout's own
+	// (docs/stack-model.md, section 8.3). Empty resolves them for no
+	// checkout.
+	SchemasRoot string
+
 	// Release is the release of superschematic the generated code pins:
 	// the one a stack's workflow installs, and the modules and static
 	// archives a server takes when no [paths] key names a checkout of them

@@ -43,9 +43,11 @@ var inheritedVariables = []string{
 // deploy order at a time:
 //
 //   - infrastructure: it starts the Postgres container and the storage
-//     emulator's, creating each when it is missing and keeping its data
-//     when it is stopped, waits until each is ready, and creates each
-//     database and each bucket that is missing (D54);
+//     emulator's, the checkout's own, creating each when it is missing and
+//     keeping its data when it is stopped, says how to remove a container
+//     of the environment an older superschematic named for no checkout,
+//     waits until each is ready, and creates each database and each bucket
+//     that is missing (D54);
 //   - migrate expand: it plans each hosted DB schema's migration from the
 //     model its database recorded to the model the deploy wrote into
 //     ModelsDir, and applies it with the migration runner, expand and
@@ -375,6 +377,9 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 				return err
 			}
 		}
+		if len(containers) > 0 {
+			p.noticeContainersOfNoCheckout(ctx, docker, req.Environment, containers)
+		}
 		for _, c := range containers {
 			if err := waitReady(c); err != nil {
 				return err
@@ -421,7 +426,9 @@ func (p *Provisioner) Destroy(ctx context.Context, req registry.ProvisionRequest
 }
 
 // Purge stops the environment's servers, and removes its containers with
-// their data: the databases, and the buckets and their objects.
+// their data: the databases, and the buckets and their objects. The
+// containers are the program's, the checkout's own; a container of another
+// checkout, or of none, stays.
 func (p *Provisioner) Purge(ctx context.Context, req registry.ProvisionRequest) error {
 	return p.destroy(ctx, req, true)
 }
@@ -724,6 +731,44 @@ func (p *Provisioner) ensureContainer(ctx context.Context, docker string, c *Con
 		return fmt.Errorf("local: start container %s: %w", c.Name, err)
 	}
 	return nil
+}
+
+// noticeContainersOfNoCheckout prints how to remove each container of the
+// environment that names no checkout: one an older superschematic created
+// before each checkout's containers had names of their own (D30, amended),
+// which holds the environment's data from then. The provisioner runs the
+// checkout's containers in its place and never removes it, so its data
+// stays until the person removes it. It says nothing when the environment's
+// own containers name no checkout either, and nothing when Docker cannot
+// list the containers: the notice is no step of the deploy.
+func (p *Provisioner) noticeContainersOfNoCheckout(ctx context.Context, docker string, env *ir.ResolvedEnvironment, containers []*Container) {
+	for _, c := range containers {
+		if c.Labels[LabelCheckout] == "" {
+			return
+		}
+	}
+	out, err := p.runner().Run(ctx, Command{Path: docker, Args: []string{
+		"container", "ls", "--all",
+		"--filter", "label=" + LabelStack + "=" + env.Stack,
+		"--filter", "label=" + LabelEnvironment + "=" + env.Environment,
+		"--format", `{{.Names}}|{{.State}}|{{.Label "` + LabelCheckout + `"}}`,
+	}})
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 || parts[0] == "" || parts[2] != "" {
+			continue
+		}
+		name, state := parts[0], parts[1]
+		remove := "docker rm --force --volumes " + name
+		if state == "running" {
+			p.printf("container %s of stack %s environment %s names no checkout: an older superschematic created it, and it still runs, maybe for another checkout's stack dev; this checkout runs its own containers, and once nothing uses the old one, %s removes it and its data", name, env.Stack, env.Environment, remove)
+			continue
+		}
+		p.printf("container %s of stack %s environment %s names no checkout: an older superschematic created it, and this checkout runs its own containers instead; %s removes the old one and its data", name, env.Stack, env.Environment, remove)
+	}
 }
 
 // waitContainer waits until a container is ready (containerReady): the

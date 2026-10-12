@@ -157,7 +157,11 @@ func TestLocalStackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev"})
+	// The environment resolves in a checkout of the test's own, whose
+	// containers are named for it.
+	root := t.TempDir()
+	schemasRoot := filepath.Join(root, "schemas")
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev", SchemasRoot: schemasRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +173,10 @@ func TestLocalStackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	container, storage := local.ContainerName(stackName, "Dev"), local.StorageContainerName(stackName, "Dev")
+	checkout := local.Checkout(schemasRoot, stackName, "Dev")
+	container, storage := local.ContainerName(stackName, "Dev", checkout), local.StorageContainerName(stackName, "Dev", checkout)
 	emulator := local.StorageURL(storagePort)
 
-	root := t.TempDir()
 	outputRoot := filepath.Join(root, "dist")
 	for _, server := range []string{"ledger-api", "ledger-worker"} {
 		copyFakeServer(t, filepath.Join(outputRoot, local.ModulePath(stackName, server)))
@@ -191,7 +195,7 @@ func TestLocalStackRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), stackName, "Dev")
+	stateDir, err := local.EnsureStateDir(schemasRoot, stackName, "Dev")
 	if err != nil {
 		t.Fatal(err)
 	}

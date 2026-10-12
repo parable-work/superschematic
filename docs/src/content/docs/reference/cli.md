@@ -516,8 +516,14 @@ design is section 8.3 of
    `<out>/stack/<stack>/<environment>/environment.json`: `--environment`,
    or the stack's one environment on the local target.
 3. Start the environment's Postgres container,
-   `superschematic-<stack>-<environment>-postgres`, published on
+   `superschematic-<stack>-<environment>-<checkout>-postgres`, published on
    127.0.0.1 only, and create a database per DB schema it hosts.
+   `<checkout>` is six hexadecimal digits of a hash of the environment's
+   state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`,
+   so each checkout of the repository runs containers of its own, and
+   keeps them from run to run. A container of the environment that an
+   older superschematic named without a checkout is left as it is, with
+   its data: dev prints the `docker rm` that removes it.
 4. Migrate each database to its schema's model: a plan from the model the
    database recorded, applied with `superschematic-migrate`, expand and
    contract back to back. The runner must be on `PATH`, or named by
@@ -556,7 +562,7 @@ Dev stays in the foreground until Ctrl-C or until a server or a worker
 exits, then stops the sites, the servers and the workers, callers first,
 and the containers, which keep their data for the next run: the
 databases, and the buckets' objects. `--remove-data` removes the
-containers and their data instead.
+checkout's containers and their data instead, and no other checkout's.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -579,13 +585,16 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-data` | false | on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
+| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its
 values, Postgres's and the storage emulator's, and a server's port with
 its settings; a port it leaves out comes from a hash of the stack, the
-environment and the server, so it stays the same from run to run:
+environment and the server, shifted by the checkout, so it stays the same
+from run to run and two checkouts run the environment side by side. A
+port the environment sets is the same in every checkout, so only one
+checkout at a time can run an environment that sets one:
 
 ```ts
 @environment({
