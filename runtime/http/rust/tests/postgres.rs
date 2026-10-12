@@ -241,3 +241,53 @@ async fn a_cloud_sql_instance_connects_over_its_socket_with_an_access_token() {
         .unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The identity store's client over the pool: a transaction dropped
+/// without ending leaves no write and no open transaction behind.
+#[cfg(feature = "identity-postgres")]
+#[tokio::test]
+async fn an_abandoned_identity_transaction_closes_its_connection() {
+    use superschematic_http_runtime::identity::{Client, PostgresPool, SqlValue};
+
+    let Some(url) = database_url() else { return };
+    let pool = connect_with(&Database::Url(url), ConnectOptions::new().with_max_size(1)).unwrap();
+    let client = PostgresPool::new(pool.clone());
+    let table = format!("abandoned_{}", std::process::id());
+    client
+        .execute(&format!("CREATE TABLE {table} (v TEXT)"), &[])
+        .await
+        .unwrap();
+    let pid = "SELECT pg_backend_pid()::bigint";
+    let abandoned = {
+        let mut tx = client.begin().await.unwrap();
+        tx.execute(
+            &format!("INSERT INTO {table} VALUES ($1)"),
+            &[SqlValue::from("dropped")],
+        )
+        .await
+        .unwrap();
+        tx.query(pid, &[]).await.unwrap()
+    };
+    // The pool's one connection was the transaction's, which it closed; a
+    // new one serves, and the write is gone.
+    let rows = client
+        .query(&format!("SELECT count(*) FROM {table}"), &[])
+        .await
+        .unwrap();
+    assert_eq!(rows, [[SqlValue::Int(0)]]);
+    assert_ne!(client.query(pid, &[]).await.unwrap(), abandoned);
+
+    // An ended transaction's connection goes back to the pool.
+    let mut tx = client.begin().await.unwrap();
+    let committed = tx.query(pid, &[]).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(client.query(pid, &[]).await.unwrap(), committed);
+    let tx = client.begin().await.unwrap();
+    tx.rollback().await.unwrap();
+    assert_eq!(client.query(pid, &[]).await.unwrap(), committed);
+
+    client
+        .execute(&format!("DROP TABLE {table}"), &[])
+        .await
+        .unwrap();
+}

@@ -1,7 +1,7 @@
 //! The seam the SQL store runs its statements through. `TokioPostgres` (the
-//! `identity-postgres` feature) and `Rusqlite` (the `identity-sqlite`
-//! feature) bind it; another driver, or a pool, implements the two traits
-//! itself.
+//! `identity-postgres` feature), `PostgresPool` (with the `postgres`
+//! feature too) and `Rusqlite` (the `identity-sqlite` feature) bind it;
+//! another driver implements the two traits itself.
 
 use std::fmt;
 use std::time::SystemTime;
@@ -137,6 +137,8 @@ impl<C: Client + ?Sized> Client for std::sync::Arc<C> {
     }
 }
 
+#[cfg(all(feature = "identity-postgres", feature = "postgres"))]
+pub use postgres_binding::PostgresPool;
 #[cfg(feature = "identity-postgres")]
 pub use postgres_binding::TokioPostgres;
 
@@ -158,7 +160,8 @@ mod postgres_binding {
     /// statement on its own runs beside the others, pipelined on the
     /// connection; a transaction holds the connection alone until it ends,
     /// and statements on their own wait for it. A service whose writes
-    /// should not wait on each other binds a pool through [`Client`].
+    /// should not wait on each other binds a pool: [`PostgresPool`], with
+    /// the `postgres` feature.
     pub struct TokioPostgres {
         session: RwLock<Session>,
         statements: Mutex<HashMap<String, Statement>>,
@@ -225,18 +228,7 @@ mod postgres_binding {
             args: &[SqlValue],
         ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
             let statement = self.statement(client, sql).await?;
-            let values = typed(&statement, args)?;
-            let params: Vec<&(dyn ToSql + Sync)> = values
-                .iter()
-                .map(|v| v.as_ref() as &(dyn ToSql + Sync))
-                .collect();
-            let rows = client
-                .query(&statement, &params)
-                .await
-                .map_err(client_error)?;
-            rows.iter()
-                .map(|row| (0..row.len()).map(|i| cell(row, i)).collect())
-                .collect()
+            query_rows(client, &statement, args).await
         }
 
         async fn run(
@@ -246,16 +238,45 @@ mod postgres_binding {
             args: &[SqlValue],
         ) -> Result<u64, ClientError> {
             let statement = self.statement(client, sql).await?;
-            let values = typed(&statement, args)?;
-            let params: Vec<&(dyn ToSql + Sync)> = values
-                .iter()
-                .map(|v| v.as_ref() as &(dyn ToSql + Sync))
-                .collect();
-            client
-                .execute(&statement, &params)
-                .await
-                .map_err(client_error)
+            execute_statement(client, &statement, args).await
         }
+    }
+
+    /// Runs a prepared statement and returns its rows.
+    async fn query_rows(
+        client: &tokio_postgres::Client,
+        statement: &Statement,
+        args: &[SqlValue],
+    ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+        let values = typed(statement, args)?;
+        let params: Vec<&(dyn ToSql + Sync)> = values
+            .iter()
+            .map(|v| v.as_ref() as &(dyn ToSql + Sync))
+            .collect();
+        let rows = client
+            .query(statement, &params)
+            .await
+            .map_err(client_error)?;
+        rows.iter()
+            .map(|row| (0..row.len()).map(|i| cell(row, i)).collect())
+            .collect()
+    }
+
+    /// Runs a prepared statement and returns how many rows it changed.
+    async fn execute_statement(
+        client: &tokio_postgres::Client,
+        statement: &Statement,
+        args: &[SqlValue],
+    ) -> Result<u64, ClientError> {
+        let values = typed(statement, args)?;
+        let params: Vec<&(dyn ToSql + Sync)> = values
+            .iter()
+            .map(|v| v.as_ref() as &(dyn ToSql + Sync))
+            .collect();
+        client
+            .execute(statement, &params)
+            .await
+            .map_err(client_error)
     }
 
     async fn roll_back_abandoned(session: &Session) -> Result<(), ClientError> {
@@ -421,6 +442,159 @@ mod postgres_binding {
 
         async fn rollback(self: Box<Self>) -> Result<(), ClientError> {
             self.end("ROLLBACK").await
+        }
+    }
+
+    #[cfg(feature = "postgres")]
+    pub use pool::PostgresPool;
+
+    #[cfg(feature = "postgres")]
+    mod pool {
+        use async_trait::async_trait;
+        use deadpool_postgres::{Object, Pool};
+
+        use super::{client_error, execute_statement, query_rows};
+        use super::{Client, ClientError, Conn, Dialect, SqlValue};
+
+        /// The Postgres [`Client`] over a `deadpool-postgres` pool, the
+        /// server's own (`crate::postgres::connect`), so the identity
+        /// service shares its connections with the API's handlers. Each
+        /// statement on its own borrows a connection for its run, and a
+        /// transaction holds one until it ends; each connection keeps its
+        /// own prepared statements. A transaction dropped without ending
+        /// takes its connection out of the pool and closes it, which rolls
+        /// it back, rather than hand the next borrower an open transaction.
+        #[derive(Clone)]
+        pub struct PostgresPool {
+            pool: Pool,
+        }
+
+        impl PostgresPool {
+            pub fn new(pool: Pool) -> Self {
+                PostgresPool { pool }
+            }
+
+            /// The pool the client runs on.
+            pub fn pool(&self) -> &Pool {
+                &self.pool
+            }
+
+            async fn connection(&self) -> Result<Object, ClientError> {
+                self.pool.get().await.map_err(|err| ClientError {
+                    code: None,
+                    source: Box::new(err),
+                })
+            }
+        }
+
+        async fn rows(
+            connection: &Object,
+            sql: &str,
+            args: &[SqlValue],
+        ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+            let statement = connection.prepare_cached(sql).await.map_err(client_error)?;
+            query_rows(connection, &statement, args).await
+        }
+
+        async fn run(
+            connection: &Object,
+            sql: &str,
+            args: &[SqlValue],
+        ) -> Result<u64, ClientError> {
+            let statement = connection.prepare_cached(sql).await.map_err(client_error)?;
+            execute_statement(connection, &statement, args).await
+        }
+
+        #[async_trait]
+        impl Client for PostgresPool {
+            fn dialect(&self) -> Dialect {
+                Dialect::Postgres
+            }
+
+            async fn query(
+                &self,
+                sql: &str,
+                args: &[SqlValue],
+            ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+                rows(&self.connection().await?, sql, args).await
+            }
+
+            async fn execute(&self, sql: &str, args: &[SqlValue]) -> Result<u64, ClientError> {
+                run(&self.connection().await?, sql, args).await
+            }
+
+            async fn begin(&self) -> Result<Box<dyn Conn + '_>, ClientError> {
+                let connection = self.connection().await?;
+                connection
+                    .batch_execute("BEGIN")
+                    .await
+                    .map_err(client_error)?;
+                Ok(Box::new(Transaction {
+                    connection: Some(connection),
+                }))
+            }
+        }
+
+        /// A transaction on a connection the pool lent. `None` once it
+        /// ended.
+        struct Transaction {
+            connection: Option<Object>,
+        }
+
+        impl Transaction {
+            fn connection(&self) -> Result<&Object, ClientError> {
+                self.connection
+                    .as_ref()
+                    .ok_or_else(|| ClientError::new("the transaction has ended"))
+            }
+
+            async fn end(&mut self, sql: &str) -> Result<(), ClientError> {
+                let connection = self
+                    .connection
+                    .take()
+                    .ok_or_else(|| ClientError::new("the transaction has ended"))?;
+                match connection.batch_execute(sql).await {
+                    // The connection goes back to the pool.
+                    Ok(()) => Ok(()),
+                    Err(err) => {
+                        // Not knowing whether the transaction ended, keep
+                        // the connection from the next borrower.
+                        drop(Object::take(connection));
+                        Err(client_error(err))
+                    }
+                }
+            }
+        }
+
+        impl Drop for Transaction {
+            fn drop(&mut self) {
+                if let Some(connection) = self.connection.take() {
+                    drop(Object::take(connection));
+                }
+            }
+        }
+
+        #[async_trait]
+        impl Conn for Transaction {
+            async fn query(
+                &mut self,
+                sql: &str,
+                args: &[SqlValue],
+            ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+                rows(self.connection()?, sql, args).await
+            }
+
+            async fn execute(&mut self, sql: &str, args: &[SqlValue]) -> Result<u64, ClientError> {
+                run(self.connection()?, sql, args).await
+            }
+
+            async fn commit(mut self: Box<Self>) -> Result<(), ClientError> {
+                self.end("COMMIT").await
+            }
+
+            async fn rollback(mut self: Box<Self>) -> Result<(), ClientError> {
+                self.end("ROLLBACK").await
+            }
         }
     }
 }
