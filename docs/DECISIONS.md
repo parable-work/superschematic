@@ -5261,36 +5261,43 @@ though the operations already say most of it: a GET of a collection
 returning a list is its list, a GET of an item its detail, a POST to the
 collection its new page, a PATCH or PUT of an item its edit page, a
 DELETE its delete, and a POST to a word after an item an action. The
-forms, the records and the display components each page needs exist.
-An admin surface of those pages, off by default and under a prefix of
-its own, takes no route from the app that does not ask for it.
+forms, the records, the display components and, since the amendment
+above, a submission's `Refusal` and the app's choices in a display
+component, each page needs exist. An admin surface of those pages, off
+by default and under a prefix of its own, takes no route from the app
+that does not ask for it.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | Pages are opt-in. `outputs.topcoat.pages: { enabled, prefix }` turns them on under `prefix`, `/console` by default, and `[extension.topcoat] pages_prefix = "/console"` in `superschematic.toml` does so for the services the table lists, so a project that builds its configs with the core binary has them too. A prefix starts with `/`, does not end with one, holds no parameter and only segments of letters, digits and `-._~`, and is not, nor is under, `/api` or `/_superschematic`, which the crate serves itself. The pages need the forms and the display components, and so the records; turning any of them off with the pages on is the build's error. They are written to `pages.rs`, `pub mod pages`, and no other module changes when they are off. | Pages on by default, an admin surface no app asked for; a prefix per resource; leaving the pages out silently when forms or views are off |
 | The resources come from the operations with an in-process call, by REST path and result. `GET C` returning `T[]` is C's list and `GET C/{p}` returning `T` its detail, either making C a resource; `POST C` with an input or arguments is its new page; `PUT` or `PATCH C/{p}` with an input its edit page, `DELETE C/{p}` its delete and any other method on `C/{p}/<verb>` an action, each needing the detail, whose page holds them; `C/{p}/D` is D nested under C's item, even when nothing lists or reads C. Every other operation is left out with its reason in the build log, `GET auth/me` returning one object among them, and so is a `@requireService` one, since a browser holds no service credential. A collection is named by its words, its parameters' names aside, so `{id}` and `{projectId}` at one place are one collection's. | A resource declaration in the schema, which no schema has; grouping by operation set, which acme's `OrderQueries` and `OrderMutations` split across one collection; matching operations by type names |
 | Names and labels: the type's `@display` (D48) `noun`, `plural`, `createLabel` and `titleField` when it declares them, else the collection's last word in words, singular for the noun by English rules. A list's row links to its item's page when the list's element type is the detail's result type and the detail's last path parameter names one of its fields, a text or a whole number (`{id}` and `id`). | Linking every row by a field named `id` whatever the detail's parameter |
-| Every page calls its operation through `operations::*`, so the route's caller rule and argument checks hold, and submits through the forms: an argument form, or the input form of an operation whose only argument is its input. A route's values come from the page's path, set on the form over its hidden inputs, which a reader can change, and are decoded as an argument form decodes them; one that does not decode, or that the operation refuses at its parameter, is no page, 404. | Calling the implementations directly; trusting a hidden input |
-| A successful post goes on with 303 (POST-redirect-GET): to the new item's page after a create, when the result holds the field its detail's parameter names, else to the list; to the item after an edit or an action; to the list, or the parent's item, after a delete. A form's refusal renders the form again with each error at its control, 422 for a bad request and the route's status for any other, a conflict's (409) as the form's own message; a row button renders it again, 200. A refused caller or a missing item keeps the route's status on a page of its own: 401 says so and, when the app's `Settings` name a sign-in page, links to it with the page to come back to as `next`, which for an action is the item's page; 403 and 404 say so. | Every refusal as 200 with a message; redirecting a 401 to the sign-in page, which the pages do not know and which loses the status |
+| Every page calls its operation through `operations::*`, so the route's caller rule and argument checks hold, and submits through the forms: an argument form's `submit`, or the input form of an operation whose only argument is its input, parsed, with the operation called and its refusal `Refusal::from_api`, the amendment above's. A route's values come from the page's path, set on the form over its hidden inputs, which a reader can change, and are decoded as an argument form decodes them; one that does not decode, or that the operation refuses at its parameter, is no page, 404. | Calling the implementations directly; trusting a hidden input; a submit helper of the pages' own beside the forms' |
+| A successful post goes on with 303 (POST-redirect-GET): to the new item's page after a create, when the result holds the field its detail's parameter names, else to the list; to the item after an edit or an action; to the list, or the parent's item, after a delete. A refused post renders the form again with the `Refusal`'s status and each error at its control: 422 for what the form's `parse` refuses, the route's status for what the operation refuses, a conflict's (409) as the form's own message; a row button renders it again, 200. A refused caller or a missing item keeps the route's status on a page of its own: 401 says so and, when the app's `Settings` name a sign-in page, links to it with the page to come back to as `next`, which for an action is the item's page; 403 and 404 say so. | Every refusal as 200 with a message; redirecting a 401 to the sign-in page, which the pages do not know and which loses the status |
 | A delete asks first: the item's page links to `<item>/delete`, a page that shows the item and posts the delete's form, so a GET never deletes and no script confirms. An action is a form on the item's page that posts to `<item>/<verb>`; a refused action renders the item's page again with its form as sent. A nested resource's list and new link are a section of the parent's item page when the parent has a detail, and its pages live under the parent's item either way. | A script's `confirm()`; a page per action; nested pages only as sections |
 | An edit page fills the update's input form from the detail's result, as its JSON: each field the two types share by JSON name and kind (a value of the same type's values, an object, rows of objects or of values, a group of one enum's members, JSON text of one type), recursively; any other field starts as the form's `new()`, and a secret or hidden one is not filled. | Requiring the update's input to be the detail's type |
-| A `#[layout]` at the prefix puts each page in `<main>` after a nav of the resources no item holds whose list the caller may use (`can_*`), the current one `aria-current`, and a breadcrumb trail read from the path: the index, each list, each item by its noun and id, then the page. The index at the prefix lists the same resources, and a sign-in link when a guard refused a caller who is not signed in. The markup is semantic HTML with `ss-` classes and no styles. | A layout the app writes, which would restate the resources; marking only an exact match current |
+| A `#[layout]` at the prefix puts each page in `<main>` after a nav of the resources no item holds whose list the caller may use (`can_*`), the current one `aria-current`, and a breadcrumb trail read from the path: the index, each list, each item by its title, its type's `titleField` value, else by its noun and id, then the page. The item's detail is the page's own call, kept for the request (`#[memoize]`), so the trail costs no second call. The index at the prefix lists the same resources, and a sign-in link when a guard refused a caller who is not signed in. A list under an item, even one of a collection without pages, is in neither: it needs the item's id. The markup is semantic HTML with `ss-` classes and no styles. | A layout the app writes, which would restate the resources; marking only an exact match current; the item's id alone in the trail, which reads as a UUID; handing the title from the page to the layout, which Topcoat renders without an order between them |
 | The pages, the layout and the index are `#[page]`s and a `#[layout]` with paths fixed at build time, which the app's `.discover()` registers, as it registers the procedures. Links and redirects are built as strings, each value a percent-encoded segment, and the page functions and their path parameters are public, so an app's own page can link to one with `href!`. A route's parameters are named after their collections, `project_id`, so each place of a path has one name in every route through it, as Topcoat's router requires. | Registering them in `<service>(...)`, which panics beside `.discover()`; `href!` inside the crate, which panics for a page not registered and for an empty or dot segment; the API's parameter names, which differ between operations at one place |
 | `<type>_table` takes `#[default] hrefs: Vec<String>`: the i-th entry, unless empty, links row i, on its title's cell, or its first when the columns hold no title. Without it a table renders as before, so the display components stay usable without pages. | A column of links, one more cell per row; a function from a record to its link, which would tie the component to the pages' routes |
-| What the app tells the pages is `pages::Settings`, its site title and its sign-in page, in its app context, read with `try_app_context`; without it the title is the service's name in words and a 401 has no link. `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` is unchanged. | New arguments to `<service>(...)`, a change to every app |
+| What the app tells the pages is `pages::Settings`, its site title, its sign-in page and its `Choices`, in its app context, read with `try_app_context`; without it the title is the service's name in words, a 401 has no link and there are no choices. Every form and display component the pages render takes the choices, by each field's path, so `lines.productId` makes each line's product a select on the new-order page and its name in an order's lines. `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` is unchanged. | New arguments to `<service>(...)`, a change to every app; choices per page, which the generated pages could not take from the app |
 
 Status: built. The goldens cover an eighth fixture, the extension's own
 `fixture-pages-api`, the only golden with pages: projects listed by
 status, read, started from an input, edited with a patch whose tags and
-milestones are rows, deleted and archived with a reason, each needing `projects.read` or `projects.write`;
-a project's tasks, listed, read and added under it; members, which only a
-member reader lists; and `GET auth/me`, which is no resource.
+milestones are rows, deleted and archived with a reason, each owned by a
+member and needing `projects.read` or `projects.write`; a project's
+tasks, listed, read and added under it; the tasks a label marks, under a
+label without pages; members, which only a member reader lists; and
+`GET auth/me`, which is no resource.
 `TestPagesServeATopcoatApp` drives a Topcoat app over it through
 `Router::handle`: the index and the nav list only what the caller may
-list, the current one marked; the list filters by the query, links each
-row's title to its project and offers the new page to a writer only; the
-item's page shows the detail, the edit and delete links, the archive form
-and the tasks' section, and a reader none of what changes it; a create
+list, the current one marked, and the trail names a project by its name,
+or by its noun and id for a caller who may not read it; the list filters
+by the query, links each row's title to its project, names each owner by
+the app's choices and offers the new page to a writer only; the item's
+page shows the detail, the edit and delete links, the archive form and
+the tasks' section, and a reader none of what changes it; the new page's
+owner is a select of the choices; a create
 posts, refuses a short name with 422 at its control and goes to the new
 project (303); the edit form is filled from the project, its tags and its
 milestones as rows, the milestones from another type with the same
@@ -5300,7 +5307,8 @@ project whatever the hidden id says; a delete confirms on its own page and
 goes to the list; an archive goes back to the item, and a second one
 renders the item's page again with 409 and the conflict as the form's
 message; the tasks' pages live under the project, a new task under the
-route's project; and a caller who is not signed in gets 401 with a sign-in
+route's project; the label's tasks have a page of their own and no place
+in the nav; and a caller who is not signed in gets 401 with a sign-in
 link that comes back (to the item for an action), one without the
 permission 403, a project that is not there and a route's id that is not
 a UUID 404. `TestPagesServeAnAPIWithoutCallers` turns the pages on for
@@ -5312,7 +5320,20 @@ operation of every shape and each one left out with its reason;
 `TestPagesAreOffByDefault`,
 `TestThePagesServeUnderTheirPrefix`, `TestABadPagesConfigIsRefused`,
 `TestTheNamingFileTurnsPagesOn` and `TestATableLinksItsRows` check the
-config, the table and the generated code. The acme shop does not mount the
-pages yet.
+config, the table and the generated code.
+
+acme's `superschematic.toml` sets `pages_prefix = "/console"`, so
+shop-orders' crate has a console: its orders' list, new page, item page
+and cancel, and a product's reviews and new review under
+`/console/products/{product_id}/reviews`. The app gives
+`pages::Settings` its title, its sign-in page and the catalog's choices,
+and links the console from its own pages. Its tests, in memory and over
+SQLite, see the console list nothing and offer to sign in for a shopper
+who is not signed in, the orders answer 401 with a link that comes back,
+the nav list the orders once signed in, an order cancelled from its
+console page (303) and a second cancel's 409, an order placed with the
+product's select, and a product's reviews listed and one written. The
+copies in acme's `testdata/generated/` are unchanged: the core binary
+never reads the table.
 
 The rule is reversible until the first release.

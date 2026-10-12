@@ -24,7 +24,9 @@ serves, which keep the shop in memory or in a SQLite file, with the
 shop's users in SQLite. A shopper signs in with their password, writes a
 review at `/reviews`, places an order at `/orders/new`, filters their
 orders at `/orders` and cancels one from its page, `/orders/{id}`, each
-page's input taken through a form the crate builds.
+page's input taken through a form the crate builds. The crate also
+generates a console of the shop's resources at `/console`
+([Generated pages](#generated-pages)).
 
 ## Build the crate
 
@@ -387,18 +389,22 @@ review's body never becomes markup.
 
 An app over an API whose operations list, read, create, edit, delete and
 act on records can have a page for each without writing one. The pages
-are off by default; a service's config turns them on, under a prefix of
+are off by default. A service's config turns them on, under a prefix of
 their own, `/console` unless it names another:
 
 ```ts
 topcoat: { enabled: true, pages: { enabled: true, prefix: "/console" } },
 ```
 
-A project that builds its configs with the core binary, which refuses
-`outputs.topcoat`, sets `pages_prefix = "/console"` beside `services` in
-`superschematic.toml`'s `[extension.topcoat]`. The pages need the forms,
-the records and the display components, and a prefix under `/api` or
-`/_superschematic`, which the crate serves itself, is refused.
+The acme shop builds its configs with the core binary, which refuses
+`outputs.topcoat`, so it sets `pages_prefix` beside `services` in
+`superschematic.toml`'s `[extension.topcoat]` instead:
+
+<Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_prefix" />
+
+The pages need the forms, the records and the display components, and a
+prefix under `/api` or `/_superschematic`, which the crate serves itself,
+is refused.
 
 The crate reads the resources from the operations' REST paths and
 results. A GET of a collection that returns a list is its list, and a GET
@@ -413,45 +419,58 @@ operation gets no page, and the build log says why. Each resource is
 named by its type's `@display` (`noun`, `plural`, `createLabel`,
 `titleField`) where it declares them, else by its path's words.
 
+`shop-orders` gives the acme shop this console:
+
 | Page | Path |
 | --- | --- |
-| The index of the resources the caller may list | `/console` |
-| A list, with its filter and a link to each row's item | `/console/projects` |
-| The new page, and the POST that creates | `/console/projects/new` |
-| An item's page: its detail, its edit and delete links, its actions and the sections under it | `/console/projects/{project_id}` |
-| The edit page, its form filled from the item | `/console/projects/{project_id}/edit` |
-| The delete's confirmation, and the POST that deletes | `/console/projects/{project_id}/delete` |
-| An action's POST | `/console/projects/{project_id}/archive` |
+| The index of the resources the shopper may list | `/console` |
+| The orders, with their filter and a link to each | `/console/orders` |
+| The new order, and the POST that places it | `/console/orders/new` |
+| An order: its detail, its lines by their products' names, and the cancel form | `/console/orders/{order_id}` |
+| The cancel's POST | `/console/orders/{order_id}/cancel` |
+| A product's reviews, with their filter | `/console/products/{product_id}/reviews` |
+| A new review, and the POST that writes it | `/console/products/{product_id}/reviews/new` |
+
+Nothing lists or reads a product, so the reviews have no section and no
+link in the nav: a page reaches them by the product's id. An API whose
+operations edit or delete an item gets `/edit` and `/delete` pages under
+it too, the edit form filled from the item and the delete confirmed on a
+page of its own before its POST.
 
 Every page calls its operation in-process, so the route's caller rule and
 argument checks hold, and takes its input through the [forms](#forms). A
 route's values come from the page's path, never from the form's hidden
 inputs, and one its argument does not decode is no page (404). A post
 that succeeds redirects (303): to the item after a create, an edit or an
-action, and to the list after a delete. A refused form renders again
-with each error at its control, 422, or with the route's status, a
-conflict's message (409) as the form's own. A refused caller keeps the
-route's status on a page of its own: 403, 404, and 401 with a link to
-the app's sign-in page that comes back to the page.
+action, and to the list after a delete. A refused post answers with its
+`Refusal`: the form again with each error at its control, 422 for what
+the form's rules refuse and the route's status for what the operation
+refuses, a conflict's message (409) as the form's own. A refused caller
+keeps the route's status on a page of its own: 403, 404, and 401 with a
+link to the app's sign-in page that comes back to the page.
 
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
-`aria-current`, and a breadcrumb trail from the index to the page. List
-rows link to their items through the `hrefs` prop each
-`<type>_table` takes. The markup has the display components' `ss-`
-classes and no styles.
+`aria-current`, and a breadcrumb trail from the index to the page, an
+item by its title where its type declares one. List rows link to their
+items through the `hrefs` prop each `<type>_table` takes. The markup has
+the display components' `ss-` classes and no styles.
 
 The app's `.discover()` registers the pages, as it registers the
-procedures. The app tells them its sign-in page and its site's title
-through `pages::Settings` in its app context:
+procedures. The app tells them its site's title, its sign-in page and
+its choices through `pages::Settings` in its app context. The acme app
+gives the console the catalog's products, so the new-order page offers
+each line's product in a select and an order's page names its lines'
+products, and adds a Console link to its own pages:
 
-```rust
-Router::builder()
-    .discover()
-    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in"))
-    .shop_orders(implementations, page_authenticator)
-    .build()
-```
+<Snippet file="topcoat/src/lib.rs" symbol={['console_settings', 'product_choices']} />
+
+The app's tests drive the console as they drive its own pages. A
+shopper's orders are listed with a link to each; an order's page cancels
+it through its form and goes back to it, and a second cancel is the
+operation's 409:
+
+<Snippet file="topcoat/tests/app.rs" symbol="the_console_lists_orders_and_cancels_one_from_its_page" />
 
 ## Procedures
 

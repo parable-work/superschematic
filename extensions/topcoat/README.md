@@ -119,16 +119,19 @@ guide walks it. Its `app` mounts the crate:
 
 ```rust
 let implementations = implementations(shop, Arc::clone(&users));
-let pages = IdentityPageAuthenticator::of(&implementations);
+let authenticator = IdentityPageAuthenticator::of(&implementations);
 Router::builder()
     .discover()
     .app_context(users)
-    .shop_orders(implementations, pages)
+    .app_context(console_settings())
+    .shop_orders(implementations, authenticator)
     .build()
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
+`console_settings()` is the [pages](#pages)' `pages::Settings`, since
+acme's `superschematic.toml` turns shop-orders' console on.
 The authenticator establishes a page's caller, here from the session the
 shop's users sign in with ([Users and sessions](#users-and-sessions)); an
 app whose users are its own writes one over a Topcoat session, say. The
@@ -715,12 +718,15 @@ hidden inputs, which a reader can change, and decoded as an argument form
 decodes them; one that does not decode is no page, 404.
 
 A successful post goes on with 303: to the new item after a create, to
-the item after an edit or an action, to the list after a delete. A
-refused form renders again, each error at its control, with 422 for a bad
-request and the route's status for any other: a conflict's (409) message
-is the form's own. A row button renders the form again with 200. A
-refused caller keeps the route's status on a page of its own: 401 with a
-link to sign in, 403, and 404 for an item that is not there.
+the item after an edit or an action, to the list after a delete. A post
+is an argument form's `submit`, or an input form's `parse` and its
+operation, and a refusal is its [`Refusal`](#argument-forms): the form
+renders again, each error at its control, with the refusal's status, 422
+for what `parse` refuses and the route's for what the operation refuses,
+a conflict's (409) message the form's own. A row button renders the form
+again with 200. A refused caller keeps the route's status on a page of
+its own: 401 with a link to sign in, 403, and 404 for an item that is not
+there.
 
 ### Layout, nav and index
 
@@ -728,7 +734,9 @@ A `#[layout]` at the prefix puts each page in `<main class="ss-main">`,
 after `<nav class="ss-nav">`, a link to each resource no item holds whose
 list the caller may use (`can_<operation>`), the current one
 `aria-current`, and `<nav class="ss-trail">`, the trail from the index to
-the page: each list, each item by its noun and id, then the page. The
+the page: each list, each item by its title (its type's `titleField`),
+else by its noun and id, then the page. The item's detail, which the
+item's page calls too, is called once per request (`#[memoize]`). The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
 
@@ -738,16 +746,21 @@ The pages, the layout and the index are `#[page]`s and a `#[layout]`,
 which the app's `.discover()` registers, as it registers the procedures:
 
 ```rust
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id(), product.name)));
 Router::builder()
     .discover()
-    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in"))
+    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in").choices(choices))
     .shop_orders(implementations, page_authenticator)
     .build()
 ```
 
 `pages::Settings`, which the app puts in its app context, names the
-site's title (the service's name in words without it) and its sign-in
-page: a 401 links to it with the page to come back to as `next`, the
-item's page for an action. Without it a 401 has no link. The page
-functions and their path parameters are public, so an app's own page can
-link to one with `href!(pages::projects_item_page, pages::ProjectId(id))`.
+site's title (the service's name in words without it), its sign-in page
+(a 401 links to it with the page to come back to as `next`, the item's
+page for an action; without it a 401 has no link), and the
+[choices](#choices-the-app-supplies) every form and display component of
+the pages takes, by each field's path: `lines.productId` makes each
+line's product a select on the new-order page and its name in an order's
+lines. The page functions and their path parameters are public, so an
+app's own page can link to one with
+`href!(pages::projects_item_page, pages::ProjectId(id))`.
