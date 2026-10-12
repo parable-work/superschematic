@@ -10,10 +10,13 @@
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `views` renders each record as a description list and as a table.
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod choices;
 pub mod operations;
 pub mod procedures;
 pub mod records;

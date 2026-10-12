@@ -2,9 +2,10 @@
 # URL, strings with rules, an enum, an integer and a number scalar, and a
 # boolean. A note's input holds a list of strings, a row each. A booking's
 # input holds a field of every other kind a form renders: a nested object
-# with an optional field, an optional nested object, a list of objects with
-# bounds, a list of enums, a date, a time, a date-time, a secret, a list of
-# secrets without a listMax, a default, any JSON value and a map.
+# with an optional field, an optional nested object whose second line its
+# name labels, a list of objects with bounds, a list of enums, a date, a
+# time, a date-time, a secret, a list of secrets without a listMax, a
+# default, long text, any JSON value and a map.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -113,6 +114,8 @@ types:
         title: Address line 1
         typeRef: { name: string }
         required: true
+      - name: line2
+        typeRef: { name: string }
       - name: city
         typeRef: { name: string }
         required: true
@@ -172,6 +175,12 @@ types:
         typeRef: { name: string }
         default: GBP
         validatePattern: "^[A-Z]{3}$"
+      - name: requests
+        description: Anything the hotel should know.
+        typeRef: { name: string }
+        validateMinLength: 3
+        validateMaxLength: 500
+        validatePattern: "^[^<>]*$"
       - name: preferences
         typeRef: { name: Generic.JSON }
       - name: labels

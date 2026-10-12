@@ -25,10 +25,17 @@
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
 {{- end }}
+{{- if .HasChoices }}
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
+{{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+{{ if .HasChoices -}}
+pub mod choices;
+{{ end -}}
 {{ if .HasForms -}}
 pub mod forms;
 {{ end -}}

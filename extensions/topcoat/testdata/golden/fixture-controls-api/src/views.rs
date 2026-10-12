@@ -9,26 +9,36 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{OrderViewRecord, ReservationRecord, StockRunRecord};
 use topcoat::view::{View, component, view};
 
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
 /// `OrderViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl View> {
+pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
             </dl>
         </div>
@@ -36,8 +46,9 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(rows: Vec<OrderViewRecord>, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <thead>
@@ -48,7 +59,7 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
             <tbody>
                 for row in rows {
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">(text_of(&choices, "id", &row.id))</td>
                     </tr>
                 }
             </tbody>
@@ -57,14 +68,15 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
 }
 
 /// `ReservationRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn reservation_detail(record: ReservationRecord) -> topcoat::Result<impl View> {
+pub async fn reservation_detail(record: ReservationRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Reservation" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="held">
                     <dt>"Held"</dt>
@@ -76,8 +88,9 @@ pub async fn reservation_detail(record: ReservationRecord) -> topcoat::Result<im
 }
 
 /// `ReservationRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name.
 #[component]
-pub async fn reservation_table(rows: Vec<ReservationRecord>) -> topcoat::Result<impl View> {
+pub async fn reservation_table(rows: Vec<ReservationRecord>, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Reservation">
             <thead>
@@ -89,7 +102,7 @@ pub async fn reservation_table(rows: Vec<ReservationRecord>) -> topcoat::Result<
             <tbody>
                 for row in rows {
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">(text_of(&choices, "id", &row.id))</td>
                         <td data-field="held">(if row.held { "Yes" } else { "No" })</td>
                     </tr>
                 }
@@ -99,8 +112,10 @@ pub async fn reservation_table(rows: Vec<ReservationRecord>) -> topcoat::Result<
 }
 
 /// `StockRunRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn stock_run_detail(record: StockRunRecord) -> topcoat::Result<impl View> {
+pub async fn stock_run_detail(record: StockRunRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let _ = choices;
     Ok(view! {
         <div class="ss-detail" data-type="StockRun" role="group">
             <dl>
@@ -114,8 +129,10 @@ pub async fn stock_run_detail(record: StockRunRecord) -> topcoat::Result<impl Vi
 }
 
 /// `StockRunRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name.
 #[component]
-pub async fn stock_run_table(rows: Vec<StockRunRecord>) -> topcoat::Result<impl View> {
+pub async fn stock_run_table(rows: Vec<StockRunRecord>, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let _ = choices;
     Ok(view! {
         <table class="ss-table" data-type="StockRun">
             <thead>

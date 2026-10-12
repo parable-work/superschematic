@@ -408,10 +408,10 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<caption>"Orders"</caption>`,
-		`<th scope="row" data-field="reference">(row.reference)</th>`,
+		`<th scope="row" data-field="reference">(text_of(&choices, "reference", &row.reference))</th>`,
 		`let label = label_of(Some(record.reference.as_str()), Some("Order"));`,
-		`<td data-field="shipTo">(row.ship_to.recipient)</td>`,
-		`<td data-field="price">money_detail(record: row.price)</td>`,
+		`<td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>`,
+		`<td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>`,
 		`<dt>"Ship to"</dt>`,
 		`"on_hold" => "On hold",`,
 	} {
@@ -678,6 +678,7 @@ use schemas_fixture_api_topcoat::api::{
     types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation,
     TenantListTenantsArgs, TenantUpdateSecretArgs,
 };
+use schemas_fixture_api_topcoat::forms::TenantGetTenantArgsForm;
 use schemas_fixture_api_topcoat::procedures::{self, TenantCreateTenantArgsRecord, TenantGetTenantArgsRecord};
 use schemas_fixture_api_topcoat::records::{CreateTenantInputRecord, TenantViewRecord};
 use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureApiExt};
@@ -801,6 +802,24 @@ async fn procedure_create_short(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <p>(said)</p> })
 }
 
+// Gets a tenant through its argument form, a filter read from the query:
+// the result, or the refusal's status, the form's messages and the
+// controls that have one.
+#[page("/tenants/by-form")]
+async fn get_by_form(cx: &Cx) -> topcoat::Result<impl View> {
+    let (status, said) = match TenantGetTenantArgsForm::from_query(cx)?.submit(cx).await {
+        Ok(tenant) => (StatusCode::OK, format!("got {}", tenant.name)),
+        Err(refused) => {
+            let fields: Vec<&String> = refused.errors.fields.keys().collect();
+            (refused.status, format!("{} {fields:?}", refused.errors.form.join("; ")))
+        }
+    };
+    Ok(view! {
+        (status)
+        <p>(said)</p>
+    })
+}
+
 #[page(POST "/procedures/get-unparsed")]
 async fn procedure_get_unparsed(cx: &Cx) -> topcoat::Result<impl View> {
     let args = TenantGetTenantArgsRecord { id: "not a uuid!".to_string(), include_archived: false };
@@ -844,6 +863,27 @@ async fn a_page_calls_an_operation_by_its_route_rules() {
     assert!(body.contains("readable by ada"), "{body}");
     let (_, body) = send(&app(None), "GET", "/tenants/readable").await;
     assert!(body.contains("401 unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_forms_submit_keeps_the_routes_status() {
+    let query = "/tenants/by-form?id=1&includeArchived=false";
+    let (status, body) = send(&app(None), "GET", query).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert!(body.contains("Authentication required []"), "{body}");
+    let (status, body) = send(&app(Some(Principal::new("ada", ["tenants.write"]))), "GET", query).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("Insufficient permissions []"), "{body}");
+    let reader = Some(Principal::new("ada", ["tenants.read"]));
+    let (status, body) = send(&app(reader.clone()), "GET", query).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("got got"), "{body}");
+    // A form parse refuses is 422, whoever sends it.
+    let (status, body) = send(&app(reader), "GET", "/tenants/by-form?id=1&includeArchived=maybe").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains(r#"[&quot;includeArchived&quot;]"#) || body.contains(r#"["includeArchived"]"#), "{body}");
+    let (status, _) = send(&app(None), "GET", "/tenants/by-form?id=1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -1629,6 +1669,43 @@ async fn a_post_of_too_many_rows_renders_a_form_of_bounded_size() {
 }
 
 #[tokio::test]
+async fn long_text_is_a_textarea_that_renders_as_sent() {
+    let (_, _, html) = send(http::Request::builder().uri("/book").body(Body::empty()).unwrap()).await;
+    // A maxLength of 500 makes text long: a textarea with the lengths, but
+    // no pattern, which parse checks. A newline follows its start tag,
+    // which a browser drops.
+    let requests = control(&html, "requests");
+    assert!(
+        requests.contains("<label for=\"booking-input-requests\">Requests</label><p class=\"field-hint\" id=\"booking-input-requests-hint\">Anything the hotel should know.</p><textarea id=\"booking-input-requests\" name=\"requests\" rows=\"6\" minlength=\"3\" maxlength=\"500\" aria-describedby=\"booking-input-requests-hint\">\n</textarea>"),
+        "{requests}"
+    );
+    assert!(!requests.contains("pattern"), "{requests}");
+    // A number that ends a name is a word of its label.
+    assert!(html.contains(r#"<label for="booking-input-billing-line2">Line 2</label>"#), "{html}");
+
+    // Its lines, and a newline it starts with, are the input's.
+    let text = "\nA quiet room.\nWe arrive late & tired.";
+    let (status, _, html, calls) = book_with(&booking_with(&[("requests", text), ("billing.line1", "1 Row"), ("billing.line2", "Flat 2"), ("billing.city", "Leeds")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(calls[0].requests.as_deref(), Some(text));
+    assert_eq!(serde_json::to_value(&calls[0].billing).unwrap()["line2"], "Flat 2");
+
+    // Refused by its pattern, it renders again as sent, escaped, after the
+    // newline the browser drops.
+    let (status, _, html, calls) = book_with(&booking_with(&[("requests", "\n<b>Quiet</b> & calm")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+    let requests = control(&html, "requests");
+    assert!(requests.contains("aria-invalid=\"true\">\n\n&lt;b&gt;Quiet&lt;/b&gt; &amp; calm</textarea><p class=\"field-error\">"), "{requests}");
+    // And past its maxLength, or short of its minLength, at the textarea.
+    let long: &'static str = "x".repeat(501).leak();
+    let (status, _, html, _) = book_with(&booking_with(&[("requests", long)])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(control(&html, "requests").contains("must be at most 500 characters"), "{html}");
+    let (_, _, html, _) = book_with(&booking_with(&[("requests", "Hi")])).await;
+    assert!(control(&html, "requests").contains("must be at least 3 characters"), "{html}");
+}
+
+#[tokio::test]
 async fn a_list_of_secrets_books_and_is_never_rendered_back() {
     let (status, _, html, calls) = book_with(&booking_with(&[("backupCodes[0]", "1111-2222"), ("backupCodes[1]", "3333-4444")])).await;
     assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
@@ -1643,8 +1720,11 @@ async fn a_list_of_secrets_books_and_is_never_rendered_back() {
 `
 
 // viewsAppTest is tests/app.rs of fixture-views-api's Topcoat crate.
-const viewsAppTest = `use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
-use schemas_fixture_views_api_topcoat::views::{comment_detail, order_status_label, order_view_detail, order_view_table};
+const viewsAppTest = `use schemas_fixture_views_api_topcoat::choices::Choices;
+use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
+use schemas_fixture_views_api_topcoat::views::{
+    comment_detail, date_text, date_time_text, order_status_label, order_view_detail, order_view_table, time_text,
+};
 use serde_json::json;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
@@ -1658,6 +1738,7 @@ fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
         "status": status,
         "placedAt": "2026-10-09T08:30:00Z",
         "deliverBy": "2026-10-12",
+        "collectAt": "14:30:15",
         "note": "<script>alert(1)</script>",
         "gift": false,
         "shipTo": {"recipient": "Ada Lovelace", "city": "London & Co"},
@@ -1672,7 +1753,7 @@ fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
 
 // An order whose optional fields are absent.
 fn bare_order() -> OrderViewRecord {
-    OrderViewRecord { deliver_by: None, note: None, metadata: None, ..order("A-1003", "pending", false) }
+    OrderViewRecord { deliver_by: None, collect_at: None, note: None, metadata: None, ..order("A-1003", "pending", false) }
 }
 
 fn thread() -> CommentRecord {
@@ -1702,8 +1783,52 @@ async fn show_thread() -> topcoat::Result<impl View> {
     Ok(view! { comment_detail(record: thread()) })
 }
 
+/// An order whose values the app's choices name: a line's sku and
+/// quantity, a line's price's currency two records down, a tag, and the
+/// city of the address shipped to; a label is text, escaped.
+#[page("/order/choices")]
+async fn show_order_with_choices() -> topcoat::Result<impl View> {
+    let choices = Choices::new()
+        .with("lines.sku", [("anvil", "Anvil <heavy>")])
+        .with("lines.quantity", [("2", "Two")])
+        .with("lines.price.currency", [("GBP", "Pounds sterling")])
+        .with("tags", [("fragile", "Handle with care")])
+        .with("shipTo.city", [("London & Co", "London")])
+        // A form's control name, which a display component does not read.
+        .with("lines[0].sku", [("anvil", "First anvil")]);
+    Ok(view! { order_view_detail(record: order("A-1001", "on_hold", true), choices: choices) })
+}
+
+/// Orders whose references and recipients the app's choices name, one of
+/// each: the other row shows its own values.
+#[page("/orders/choices")]
+async fn show_orders_with_choices() -> topcoat::Result<impl View> {
+    let choices = Choices::new()
+        .with("reference", [("A-1001", "First order")])
+        .with("shipTo.recipient", [("Ada Lovelace", "Ada")]);
+    // Shipped to its billing address, Accounts.
+    let mut other = order("A-1002", "shipped", true);
+    other.ship_to = other.bill_to.take().unwrap();
+    Ok(view! { order_view_table(rows: vec![order("A-1001", "on_hold", true), other], choices: choices) })
+}
+
+/// An order placed at a time with an offset, which shows in UTC.
+#[page("/order/offset")]
+async fn show_order_at_an_offset() -> topcoat::Result<impl View> {
+    let record = OrderViewRecord { placed_at: "2026-01-01T00:15:00+01:00".to_string(), ..order("A-1004", "pending", false) };
+    Ok(view! { order_view_detail(record: record) })
+}
+
 async fn render(uri: &str) -> String {
-    let router = Router::builder().page(show_order).page(show_bare_order).page(show_orders).page(show_thread).build();
+    let router = Router::builder()
+        .page(show_order)
+        .page(show_bare_order)
+        .page(show_orders)
+        .page(show_thread)
+        .page(show_order_with_choices)
+        .page(show_orders_with_choices)
+        .page(show_order_at_an_offset)
+        .build();
     let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -1723,8 +1848,11 @@ async fn a_detail_renders_each_kind_of_field() {
         r#"<div class="ss-detail" data-type="OrderView" role="group" aria-label="A-1001"><dl>"#,
         r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
         r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">On hold</data></dd></div>"#,
-        r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></dd></div>"#,
-        r#"<dd><time datetime="2026-10-12">2026-10-12</time></dd>"#,
+        // A date, a date-time and a time read as text a reader reads, the
+        // value as sent in datetime.
+        r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></dd></div>"#,
+        r#"<dd><time datetime="2026-10-12">12 Oct 2026</time></dd>"#,
+        r#"<div data-field="collectAt"><dt>Collect at</dt><dd><time datetime="14:30:15">14:30</time></dd></div>"#,
         r#"<div data-field="gift"><dt>Gift</dt><dd>No</dd></div>"#,
         r#"<div data-field="shipTo"><dt>Ship to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Ada Lovelace"><dl><div data-field="recipient"><dt>Recipient</dt><dd>Ada Lovelace</dd></div><div data-field="city"><dt>City</dt><dd>London &amp; Co</dd></div></dl></div></dd></div>"#,
         r#"<div data-field="billTo"><dt>Bill to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Accounts">"#,
@@ -1744,6 +1872,7 @@ async fn an_absent_value_leaves_its_entry_empty() {
     let html = render("/bare-order").await;
     assert_has(&html, &[
         r#"<div data-field="deliverBy"><dt>Deliver by</dt><dd></dd></div>"#,
+        r#"<div data-field="collectAt"><dt>Collect at</dt><dd></dd></div>"#,
         r#"<div data-field="note"><dt>Note</dt><dd></dd></div>"#,
         r#"<div data-field="billTo"><dt>Bill to</dt><dd></dd></div>"#,
         r#"<div data-field="metadata"><dt>Metadata</dt><dd></dd></div>"#,
@@ -1755,7 +1884,7 @@ async fn a_table_shows_the_summary_fields_under_its_caption() {
     let html = render("/orders").await;
     assert_has(&html, &[
         r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption><thead><tr><th scope="col" data-field="reference">Reference</th><th scope="col" data-field="status">Status</th><th scope="col" data-field="placedAt">Placed at</th><th scope="col" data-field="shipTo">Ship to</th></tr></thead><tbody>"#,
-        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
+        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
         // A value the enum does not declare is its own label, escaped in
         // the attribute and the text.
         r#"<td data-field="status"><data value="x&quot; onclick=&quot;steal()">x" onclick="steal()</data></td>"#,
@@ -1777,6 +1906,72 @@ async fn a_record_that_nests_itself_renders_each_level() {
 fn an_enum_value_is_labeled_by_its_member() {
     assert_eq!(order_status_label("on_hold"), "On hold");
     assert_eq!(order_status_label("lost"), "lost");
+}
+
+#[tokio::test]
+async fn a_detail_shows_the_label_the_apps_choices_give_a_value() {
+    let html = render("/order/choices").await;
+    assert_has(&html, &[
+        // Two records down, each component handing the next the choices
+        // under its field.
+        r#"<td data-field="sku">Anvil &lt;heavy&gt;</td><td data-field="quantity">Two</td>"#,
+        r#"<div data-field="currency"><dt>Currency</dt><dd>Pounds sterling</dd></div>"#,
+        // A list's items: one labeled, one as it is.
+        r#"<ul class="ss-list"><li>Handle with care</li><li>heavy</li></ul>"#,
+        // The address shipped to has its city's label, the billing one,
+        // which the choices do not name, its own.
+        r#"<div data-field="city"><dt>City</dt><dd>London</dd></div>"#,
+        r#"<div data-field="city"><dt>City</dt><dd>Leeds</dd></div>"#,
+        // A value no choice names shows as it is.
+        r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
+    ]);
+    assert!(!html.contains("Anvil <heavy>") && !html.contains("First anvil"), "{html}");
+}
+
+#[tokio::test]
+async fn a_table_shows_the_label_the_apps_choices_give_a_value() {
+    let html = render("/orders/choices").await;
+    assert_has(&html, &[
+        r#"<th scope="row" data-field="reference">First order</th>"#,
+        r#"<td data-field="shipTo">Ada</td>"#,
+        r#"<th scope="row" data-field="reference">A-1002</th>"#,
+        r#"<td data-field="shipTo">Accounts</td>"#,
+    ]);
+}
+
+#[tokio::test]
+async fn a_date_time_shows_in_utc() {
+    let html = render("/order/offset").await;
+    assert_has(&html, &[r#"<time datetime="2026-01-01T00:15:00+01:00">31 Dec 2025, 23:15 UTC</time>"#]);
+}
+
+#[test]
+fn a_time_value_reads_as_text_a_reader_reads() {
+    for (sent, shown) in [
+        ("2026-10-09T14:30:00Z", "9 Oct 2026, 14:30 UTC"),
+        ("2026-10-09T14:30:59.999999Z", "9 Oct 2026, 14:30 UTC"),
+        ("2026-10-09T00:15:00+01:00", "8 Oct 2026, 23:15 UTC"),
+        ("2026-12-31T23:59:00-00:30", "1 Jan 2027, 00:29 UTC"),
+        ("2028-03-01T00:15:00+01:00", "29 Feb 2028, 23:15 UTC"),
+        ("2026-06-15 14:30:45", "15 Jun 2026, 14:30 UTC"),
+        ("2026-06-15t14:30z", "15 Jun 2026, 14:30 UTC"),
+        // Not a date and time: as it is.
+        ("2026-02-30T10:00:00Z", "2026-02-30T10:00:00Z"),
+        ("2026-10-09T25:00:00Z", "2026-10-09T25:00:00Z"),
+        ("2026-10-09T14:30:00+1", "2026-10-09T14:30:00+1"),
+        ("1786550463000", "1786550463000"),
+        ("", ""),
+    ] {
+        assert_eq!(date_time_text(sent), shown, "{sent}");
+    }
+    assert_eq!(date_text("2026-10-09"), "9 Oct 2026");
+    assert_eq!(date_text("2024-02-29"), "29 Feb 2024");
+    assert_eq!(date_text("2026-02-29"), "2026-02-29");
+    assert_eq!(date_text("9 Oct 2026"), "9 Oct 2026");
+    assert_eq!(time_text("09:05"), "09:05");
+    assert_eq!(time_text("23:59:60"), "23:59");
+    assert_eq!(time_text("9:30 AM"), "9:30 AM");
+    assert_eq!(time_text("24:00"), "24:00");
 }
 `
 

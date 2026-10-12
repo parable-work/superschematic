@@ -69,6 +69,7 @@ impl From<types::AccountView> for AccountViewRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BillingAddressRecord {
     pub line1: String,
+    pub line2: Option<String>,
     pub city: String,
     pub postcode: Option<String>,
 }
@@ -78,6 +79,7 @@ impl BillingAddressRecord {
     pub fn from_wire(json: &serde_json::Value) -> Self {
         Self {
             line1: wire::string(&json["line1"]),
+            line2: wire::optional(&json["line2"], wire::string),
             city: wire::string(&json["city"]),
             postcode: wire::optional(&json["postcode"], wire::string),
         }
@@ -87,6 +89,9 @@ impl BillingAddressRecord {
     pub fn to_wire(&self) -> serde_json::Value {
         let mut json = serde_json::Map::new();
         json.insert("line1".to_owned(), wire::put_string(&self.line1));
+        if let Some(value) = &self.line2 {
+            json.insert("line2".to_owned(), wire::put_string(value));
+        }
         json.insert("city".to_owned(), wire::put_string(&self.city));
         if let Some(value) = &self.postcode {
             json.insert("postcode".to_owned(), wire::put_string(value));
@@ -119,6 +124,7 @@ pub struct BookingInputRecord {
     pub check_in: Option<String>,
     pub hold_until: Option<String>,
     pub currency: Option<String>,
+    pub requests: Option<String>,
     pub preferences: Option<String>,
     pub labels: Option<Vec<(String, String)>>,
 }
@@ -135,6 +141,7 @@ impl BookingInputRecord {
             check_in: wire::optional(&json["checkIn"], wire::string),
             hold_until: wire::optional(&json["holdUntil"], wire::string),
             currency: wire::optional(&json["currency"], wire::string),
+            requests: wire::optional(&json["requests"], wire::string),
             preferences: wire::optional(&json["preferences"], wire::json_text),
             labels: wire::optional(&json["labels"], |v| wire::entries(v, wire::string)),
         }
@@ -160,6 +167,9 @@ impl BookingInputRecord {
         }
         if let Some(value) = &self.currency {
             json.insert("currency".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.requests {
+            json.insert("requests".to_owned(), wire::put_string(value));
         }
         if let Some(value) = &self.preferences {
             json.insert("preferences".to_owned(), wire::put_json_text(value));

@@ -9,26 +9,36 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{GreetingRecord};
 use topcoat::view::{View, component, view};
 
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
 /// `GreetingRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn greeting_detail(record: GreetingRecord) -> topcoat::Result<impl View> {
+pub async fn greeting_detail(record: GreetingRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Greeting" role="group">
             <dl>
                 <div data-field="message">
                     <dt>"Message"</dt>
-                    <dd>(record.message)</dd>
+                    <dd>(text_of(&choices, "message", &record.message))</dd>
                 </div>
             </dl>
         </div>
@@ -36,8 +46,9 @@ pub async fn greeting_detail(record: GreetingRecord) -> topcoat::Result<impl Vie
 }
 
 /// `GreetingRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name.
 #[component]
-pub async fn greeting_table(rows: Vec<GreetingRecord>) -> topcoat::Result<impl View> {
+pub async fn greeting_table(rows: Vec<GreetingRecord>, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Greeting">
             <thead>
@@ -48,7 +59,7 @@ pub async fn greeting_table(rows: Vec<GreetingRecord>) -> topcoat::Result<impl V
             <tbody>
                 for row in rows {
                     <tr>
-                        <td data-field="message">(row.message)</td>
+                        <td data-field="message">(text_of(&choices, "message", &row.message))</td>
                     </tr>
                 }
             </tbody>
