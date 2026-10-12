@@ -7,8 +7,13 @@
 //! the GET form on `/orders` and cancelled from its page, each refusal
 //! rendered at its control with the route's status; an order's page names
 //! its lines' products; a post of far more lines than an order holds
-//! renders a form of 51. Over a SQLite file of shop-db's tables, the
-//! reviews, orders and sessions outlive the app.
+//! renders a form of 51. The console the crate generates at `/console`
+//! lists what the shopper may list, their orders with a link to each,
+//! cancels an order from its page, places one with each line's product a
+//! select of the catalog's, and lists and writes a product's reviews; a
+//! signed-out shopper gets 401 and a sign-in link that comes back. Over a
+//! SQLite file of shop-db's tables, the reviews, orders and sessions
+//! outlive the app, and the console lists the orders.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -451,6 +456,10 @@ async fn a_sqlite_shop_outlives_the_app() {
     let page = send(&router, "GET", &order, Some(&cookie), None).await;
     assert!(page.body.contains(r#"<data value="cancelled">Cancelled</data>"#), "{}", page.body);
     assert!(page.body.contains(r#"<dd>Found a bigger anvil</dd>"#), "{}", page.body);
+    // The console lists the file's orders, each linked to its page.
+    let console = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+    assert_eq!(console.status, StatusCode::OK, "{}", console.body);
+    assert!(console.body.contains(&format!(r#"<a href="/console{order}">"#)), "{}", console.body);
 
     // review's search_text, the VIRTUAL column shop-db's @searchField gives
     // it on SQLite, joins its title and body.
@@ -459,6 +468,144 @@ async fn a_sqlite_shop_outlives_the_app() {
         .query_row("SELECT search_text FROM review", [], |row| row.get(0))
         .unwrap();
     assert_eq!(search_text, "Sturdy Survived three coyotes.");
+}
+
+#[tokio::test]
+async fn the_console_shows_what_the_shopper_may_list() {
+    let router = shop().await;
+    // The shop's own pages link the console.
+    let reviews = send(&router, "GET", "/reviews", None, None).await;
+    assert!(reviews.body.contains(r#"<a href="/console">Console</a>"#), "{}", reviews.body);
+
+    // Signed out, the console lists nothing and offers to sign in, and the
+    // orders answer 401 with a sign-in link that comes back to them.
+    let index = send(&router, "GET", "/console", None, None).await;
+    assert_eq!(index.status, StatusCode::OK);
+    assert!(index.body.contains(r#"<header class="ss-header"><a href="/console">Acme shop console</a></header>"#), "{}", index.body);
+    assert!(index.body.contains("There is nothing here you may list."), "{}", index.body);
+    assert!(!index.body.contains("ss-nav"), "{}", index.body);
+    assert!(index.body.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole">Sign in</a>"#), "{}", index.body);
+    let orders = send(&router, "GET", "/console/orders", None, None).await;
+    assert_eq!(orders.status, StatusCode::UNAUTHORIZED);
+    assert!(orders.body.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole%2Forders">Sign in</a>"#), "{}", orders.body);
+    let signed_in = send(&router, "POST", "/sign-in", None, Some(&format!("{SHOPPER}&next=%2Fconsole%2Forders"))).await;
+    assert_eq!((signed_in.status, signed_in.location.as_deref()), (StatusCode::SEE_OTHER, Some("/console/orders")));
+
+    // Signed in, the nav and the index list the orders.
+    let cookie = signed_in.cookie.expect("the session cookie");
+    let index = send(&router, "GET", "/console", Some(&cookie), None).await;
+    assert!(index.body.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/orders">Orders</a></li></ul></nav>"#), "{}", index.body);
+    assert!(index.body.contains(r#"<ul class="ss-index"><li><a href="/console/orders">Orders</a></li></ul>"#), "{}", index.body);
+    assert!(!index.body.contains("ss-sign-in"), "{}", index.body);
+}
+
+#[tokio::test]
+async fn the_console_lists_orders_and_cancels_one_from_its_page() {
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    let order = place_order(&router, &cookie).await;
+    let id = order.trim_start_matches("/orders/");
+    let other = place_order(&router, &cookie).await;
+    let cancelled = send(&router, "POST", &format!("{other}/cancel"), Some(&cookie), Some("reason=")).await;
+    assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{}", cancelled.body);
+
+    // The placed orders, each linked to its console page, and the link to
+    // place one.
+    let list = send(&router, "GET", "/console/orders?statuses=placed", Some(&cookie), None).await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.body);
+    assert!(list.body.contains(&format!(r#"<td data-field="id"><a href="/console/orders/{id}">{id}</a></td>"#)), "{}", list.body);
+    assert!(!list.body.contains(other.trim_start_matches("/orders/")), "{}", list.body);
+    assert!(list.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{}", list.body);
+    assert!(list.body.contains(r#"<a class="ss-new" href="/console/orders/new">New order</a>"#), "{}", list.body);
+
+    // Its page: the order, its lines by their products' names, and the
+    // form that cancels it.
+    let page_path = format!("/console/orders/{id}");
+    let page = send(&router, "GET", &page_path, Some(&cookie), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(page.body.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", page.body);
+    assert!(page.body.contains(&format!(r#"<form method="post" action="{page_path}/cancel" class="ss-action" data-action="cancel">"#)), "{}", page.body);
+    assert!(page.body.contains(&format!(r#"<li><a href="/console/orders">Orders</a></li><li><span aria-current="page">Order {id}</span></li>"#)), "{}", page.body);
+
+    // A cancel goes back to the order (303), whatever the hidden id says.
+    let other_id = other.trim_start_matches("/orders/");
+    let cancel = format!("{page_path}/cancel");
+    let done = send(&router, "POST", &cancel, Some(&cookie), Some(&format!("id={other_id}&reason=Changed+my+mind"))).await;
+    assert_eq!((done.status, done.location.as_deref()), (StatusCode::SEE_OTHER, Some(page_path.as_str())), "{}", done.body);
+    let page = send(&router, "GET", &page_path, Some(&cookie), None).await;
+    assert!(page.body.contains(r#"<data value="cancelled">Cancelled</data>"#), "{}", page.body);
+    assert!(page.body.contains("<dd>Changed my mind</dd>"), "{}", page.body);
+
+    // A second cancel: the operation's 409 on the order's page, its
+    // message the form's own.
+    let again = send(&router, "POST", &cancel, Some(&cookie), Some("reason=Twice")).await;
+    assert_eq!(again.status, StatusCode::CONFLICT, "{}", again.body);
+    assert!(again.body.contains(&format!(r#"<p class="form-error">order {id} is cancelled</p>"#)), "{}", again.body);
+    let missing = send(&router, "GET", "/console/orders/not-an-order", Some(&cookie), None).await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_console_places_an_order_with_the_catalogs_products() {
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    let new = send(&router, "GET", "/console/orders/new", Some(&cookie), None).await;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.body);
+    let select = format!(
+        r#"<select id="place-order-input-lines-0-product-id" name="lines[0].productId" required=""><option value="" selected=""></option><option value="{}">Anvil</option></select>"#,
+        product()
+    );
+    assert!(new.body.contains(&select), "{}", new.body);
+
+    // A row button adds a line and places nothing.
+    let added = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&format!("{}&_action=add:lines", order_form("2")))).await;
+    assert_eq!(added.status, StatusCode::OK, "{}", added.body);
+    assert!(added.body.contains(r#"name="lines[1].productId""#), "{}", added.body);
+
+    // A quantity out of range: 422 at its control.
+    let refused = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("0"))).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.body);
+
+    let placed = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
+    assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.body);
+    let location = placed.location.expect("the order's console page");
+    assert!(location.starts_with("/console/orders/"), "{location}");
+    let page = send(&router, "GET", &location, Some(&cookie), None).await;
+    assert!(page.body.contains(r#"<data value="placed">Placed</data>"#) && page.body.contains("Anvil"), "{}", page.body);
+
+    // Signed out, the post is refused with 401, its sign-in link coming
+    // back to the new page.
+    let signed_out = send(&router, "POST", "/console/orders/new", None, Some(&order_form("2"))).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{}", signed_out.body);
+    assert!(signed_out.body.contains(r#"href="/sign-in?next=%2Fconsole%2Forders%2Fnew""#), "{}", signed_out.body);
+}
+
+#[tokio::test]
+async fn the_console_lists_and_writes_a_products_reviews() {
+    let router = shop().await;
+    let reviews = format!("/console/products/{PRODUCT}/reviews");
+    // Anyone may list them; only a signed-in shopper gets the new page.
+    let empty = send(&router, "GET", &reviews, None, None).await;
+    assert_eq!(empty.status, StatusCode::OK, "{}", empty.body);
+    assert!(empty.body.contains(r#"<p class="ss-empty">There are no reviews.</p>"#), "{}", empty.body);
+    assert!(!empty.body.contains("ss-new"), "{}", empty.body);
+    assert!(empty.body.contains(&format!(
+        r#"<li><span>Products</span></li><li><span>Product {PRODUCT}</span></li><li><span aria-current="page">Reviews</span></li>"#
+    )), "{}", empty.body);
+
+    let cookie = sign_in(&router).await;
+    let list = send(&router, "GET", &reviews, Some(&cookie), None).await;
+    assert!(list.body.contains(&format!(r#"<a class="ss-new" href="{reviews}/new">New review</a>"#)), "{}", list.body);
+    let new = send(&router, "GET", &format!("{reviews}/new"), Some(&cookie), None).await;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.body);
+    assert!(new.body.contains(r#"name="body" rows="6" required="" maxlength="5000">"#), "{}", new.body);
+
+    let refused = send(&router, "POST", &format!("{reviews}/new"), Some(&cookie), Some("rating=9&title=Heavy&body=Very")).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.body);
+    let written = send(&router, "POST", &format!("{reviews}/new"), Some(&cookie), Some("rating=5&title=Heavy&body=Very+heavy")).await;
+    assert_eq!((written.status, written.location.as_deref()), (StatusCode::SEE_OTHER, Some(reviews.as_str())), "{}", written.body);
+    let list = send(&router, "GET", &reviews, None, None).await;
+    assert!(list.body.contains(r#"<th scope="row" data-field="title">Heavy</th>"#), "{}", list.body);
 }
 
 #[test]

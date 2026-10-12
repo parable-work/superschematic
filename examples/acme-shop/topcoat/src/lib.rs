@@ -6,7 +6,9 @@
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
 //! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
-//! the display components the crate builds from their types. The JSON API
+//! the display components the crate builds from their types. The crate's
+//! generated pages serve a console of shop-orders' resources at `/console`,
+//! the catalog's products named in its forms and tables. The JSON API
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
 //! and the shop's users are the core user model's (D50): one session
@@ -29,7 +31,7 @@ use acme_shop_orders_topcoat::forms::{
 };
 use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
-use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations};
+use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages};
 use serde::Deserialize;
 use topcoat::context::{Cx, app_context};
 use topcoat::router::content::Form;
@@ -93,15 +95,26 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// carries, read by the identity runtime as the JSON API reads it. Topcoat's
 /// origin policy runs before that check, so an origin the identity config
 /// trusts must be one the router's `OriginPolicy` trusts too; this app
-/// trusts none.
+/// trusts none. `.discover()` registers the console the crate generates
+/// under `/console`, whose `pages::Settings` name its title, the sign-in
+/// page a refused shopper comes back from and the catalog's products.
 pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
-    let pages = IdentityPageAuthenticator::of(&implementations);
+    let authenticator = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
         .discover()
         .app_context(users)
-        .shop_orders(implementations, pages)
+        .app_context(console_settings())
+        .shop_orders(implementations, authenticator)
         .build()
+}
+
+/// The console's settings: its title, the sign-in page, which comes back
+/// to the console page it is given as `next`, and the catalog's products,
+/// which the new-order page offers for each line and every order's lines
+/// show by name.
+fn console_settings() -> pages::Settings {
+    pages::Settings::new().title("Acme shop console").sign_in("/sign-in").choices(product_choices())
 }
 
 /// The sign-in form, as the browser sends it: the shopper's email and
@@ -196,6 +209,8 @@ async fn shop_page(title: &str, #[default] child: Child<'_>) -> topcoat::Result<
             <a href="/orders">"Orders"</a>
             " "
             <a href="/orders/new">"Place an order"</a>
+            " "
+            <a href="/console">"Console"</a>
         </nav>
         <h1>(title)</h1>
         (child)
@@ -437,8 +452,9 @@ async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> to
 /// Each line's product, from the catalog: `place_order_input_fields`
 /// renders the `productId` of every line (`lines.productId`) as a select
 /// of these, and `order_view_detail` shows an order's lines by their
-/// products' names. A choice's value is the product's id as the API sends
-/// it, the compact text `to_string()` gives, which a record holds.
+/// products' names, on the shop's pages and the console's. A choice's
+/// value is the product's id as the API sends it, the compact text
+/// `to_string()` gives, which a record holds.
 fn product_choices() -> Choices {
     Choices::new().with("lines.productId", CATALOG.iter().map(|product| (product.id().to_string(), product.name)))
 }
