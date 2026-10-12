@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,12 +36,16 @@ const (
 
 // newJobFixture assembles the gcp target over a fake cloud that records
 // its builds and job runs in the provisioner's call log, with no fake
-// migration runner: migrations run as the Cloud Run job.
+// migration runner: migrations run as the Cloud Run job. The runner's
+// image ext names is in the stack's repository.
 func newJobFixture(t *testing.T, ext gcp.Extension) *deployFixture {
 	t.Helper()
 	t.Setenv(gcp.MigrateImageEnv, "")
 	f := &deployFixture{cloud: newFakeCloud(), prov: &stacktest.FakeProvisioner{}}
 	f.cloud.log = f.prov
+	if repo, digest, ok := strings.Cut(ext.MigrateImage, "@"); ok {
+		f.cloud.images[repo+":dev"] = digest
+	}
 	ext.Cloud = f.cloud
 	reg, err := registry.Assemble(registry.DefaultNaming(), ext, provisionerStub{prov: f.prov})
 	if err != nil {
@@ -161,11 +166,11 @@ func (f *deployFixture) jobDocument(t *testing.T, args []string) (string, map[st
 }
 
 // TestDeployBuildsAndMigratesOnGCP deploys Staging on gcp with fakes and
-// no image: the deploy builds each server's and the job's image with Cloud
-// Build before it changes anything, pins the digests it pushed, and runs
-// each migration phase as an execution of the stack's Cloud Run job, whose
-// image it builds from the release once. A deploy with nothing changed
-// builds and runs nothing.
+// no image: the deploy builds the migration runner's image from the
+// release once, and each server's and the job's image, with Cloud Build
+// before it changes anything, pins the digests it pushed, and runs each
+// migration phase as an execution of the stack's Cloud Run job. A deploy
+// with nothing changed builds and runs nothing.
 func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
 	f.ready(t)
@@ -181,13 +186,13 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud build " + shopRepo + "orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-fulfil-orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
 		"render 56 nodes",
 		"apply infrastructure",
-		"cloud build " + migrateRepo + ":1.2.3",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
 		"apply rollout 1",
 		"apply rollout 2",
@@ -199,7 +204,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	}
 
 	// The servers' builds: their contexts, by the builder account.
-	build := f.cloud.builds[0]
+	build := f.cloud.builds[1]
 	if build.Project != "acme-staging" || build.Region != "us-east1" || build.Bucket != stateBucket ||
 		build.Dockerfile != "schemas/dist/server/Shop/Orders/Dockerfile" ||
 		build.ServiceAccount != "shop-builder@acme-staging.iam.gserviceaccount.com" ||
@@ -240,7 +245,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 	}
 
 	// The runner's image, from the release's module.
-	runner := f.cloud.builds[4]
+	runner := f.cloud.builds[0]
 	if runner.Image != migrateRepo+":1.2.3" || runner.Dockerfile != "Dockerfile" || runner.Object != "superschematic/builds/shop/superschematic-migrate/1.2.3.tar.gz" {
 		t.Errorf("the runner's build: %+v", runner)
 	}
@@ -582,29 +587,50 @@ func TestMigrationJobOfAMember(t *testing.T) {
 	}
 }
 
-// TestMigrationJobNeedsARelease: a binary built from a checkout names no
-// runner release, so its first migration stops, saying how to name an
-// image.
+// TestMigrationJobNeedsARelease: a deploy with a migration to run needs
+// the runner's image before it changes anything. A binary built from a
+// checkout names no release, so it stops, saying how to name an image; an
+// image named by tag, or by a digest Artifact Registry does not hold,
+// stops it too; an image that exists runs the job.
 func TestMigrationJobNeedsARelease(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{})
 	f.ready(t)
 	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
-	_, err := stack.Deploy(context.Background(), stack.DeployOptions{
-		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
-		Images:  shopImages("acme-staging", 1),
-		Planner: firstPlanner,
-	})
-	if err == nil || !strings.Contains(err.Error(), "built from a checkout") || !strings.Contains(err.Error(), gcp.MigrateImageEnv) {
+	deploy := func() error {
+		t.Helper()
+		n := len(f.prov.Calls())
+		_, err := stack.Deploy(context.Background(), stack.DeployOptions{
+			Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
+			Images:  shopImages("acme-staging", 1),
+			Planner: firstPlanner,
+		})
+		if err != nil {
+			if calls := f.prov.Calls()[n:]; len(calls) > 0 {
+				t.Errorf("a deploy refused for its runner's image ran:\n%s", strings.Join(calls, "\n"))
+			}
+		}
+		return err
+	}
+	if err := deploy(); err == nil || !strings.Contains(err.Error(), "built from a checkout") || !strings.Contains(err.Error(), gcp.MigrateImageEnv) {
 		t.Fatalf("deploy = %v", err)
 	}
 	t.Setenv(gcp.MigrateImageEnv, migrateRepo+":latest")
-	_, err = stack.Deploy(context.Background(), stack.DeployOptions{
-		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
-		Images:  shopImages("acme-staging", 1),
-		Planner: firstPlanner,
-	})
-	if err == nil || !strings.Contains(err.Error(), "is not pinned by digest") {
+	if err := deploy(); err == nil || !strings.Contains(err.Error(), "is not pinned by digest") {
 		t.Fatalf("deploy with a tagged runner image = %v", err)
+	}
+	missing := migrateRepo + "@sha256:" + strings.Repeat("9", 64)
+	t.Setenv(gcp.MigrateImageEnv, missing)
+	if err := deploy(); err == nil || !strings.Contains(err.Error(), gcp.MigrateImageEnv+" names "+missing+" as the migration runner's image, which Artifact Registry does not hold") {
+		t.Fatalf("deploy with a runner image that does not exist = %v", err)
+	}
+	digest := "sha256:" + strings.Repeat("8", 64)
+	f.cloud.images[migrateRepo+":dev"] = digest
+	t.Setenv(gcp.MigrateImageEnv, migrateRepo+"@"+digest)
+	if err := deploy(); err != nil {
+		t.Fatalf("deploy with a runner image that exists = %v", err)
+	}
+	if got := f.cloud.jobs[jobKey].Image; got != migrateRepo+"@"+digest {
+		t.Errorf("the migration job runs %s", got)
 	}
 }
 
@@ -628,21 +654,19 @@ func TestBuilder(t *testing.T) {
 	if len(f.cloud.builds) != 4 {
 		t.Fatalf("stack build ran %d builds", len(f.cloud.builds))
 	}
+	// The runner's image builds before any step, so a build of it that
+	// fails changes nothing and writes no manifest.
 	f.cloud.failBuild[migrateRepo+":1.2.3"] = "step 0 exited 1"
+	n := len(f.prov.Calls())
 	_, err = stack.Deploy(context.Background(), o)
 	if len(f.cloud.builds) != 5 || err == nil || !strings.Contains(err.Error(), "step 0 exited 1") {
 		t.Fatalf("deploy = %v after %d builds", err, len(f.cloud.builds))
 	}
-	data, rerr := f.cloud.ReadObject(context.Background(), stateBucket, "superschematic/manifests/shop/Staging.json")
-	if rerr != nil {
-		t.Fatal(rerr)
+	if got := steps(f.prov.Calls()[n:]); !slices.Equal(got, []string{"cloud build " + migrateRepo + ":1.2.3"}) {
+		t.Errorf("a failed build of the runner's image went on to:\n%s", strings.Join(got, "\n"))
 	}
-	m, rerr := stack.UnmarshalManifest(data)
-	if rerr != nil {
-		t.Fatal(rerr)
-	}
-	if m.Status != stack.StatusFailed || m.Step != "migrate expand" || len(m.Images) > 0 {
-		t.Errorf("after the runner's build failed: %s at %s, images %v", m.Status, m.Step, m.Images)
+	if _, rerr := f.cloud.ReadObject(context.Background(), stateBucket, "superschematic/manifests/shop/Staging.json"); !errors.Is(rerr, fs.ErrNotExist) {
+		t.Errorf("a deploy whose runner's build failed wrote a manifest: %v", rerr)
 	}
 	f.cloud.failBuild = map[string]string{}
 	m2, err := stack.Deploy(context.Background(), o)
@@ -661,7 +685,7 @@ func TestBuilder(t *testing.T) {
 	if _, err := stack.Deploy(context.Background(), o); err == nil || !strings.Contains(err.Error(), "the compiler failed") {
 		t.Fatalf("deploy = %v", err)
 	}
-	if got := steps(f2.prov.Calls()); !slices.Equal(got, []string{"cloud build " + shopRepo + "orders:context-<hex>"}) {
+	if got := steps(f2.prov.Calls()); !slices.Equal(got, []string{"cloud build " + migrateRepo + ":1.2.3", "cloud build " + shopRepo + "orders:context-<hex>"}) {
 		t.Errorf("a failed build went on to:\n%s", strings.Join(got, "\n"))
 	}
 }

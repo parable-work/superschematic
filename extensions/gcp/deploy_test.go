@@ -128,6 +128,14 @@ func (c *fakeCloud) ImageDigest(_ context.Context, image string) (string, error)
 	if digest, ok := c.images[image]; ok {
 		return digest, nil
 	}
+	// An image by digest exists when a tag of its repository names it.
+	if repo, digest, ok := strings.Cut(image, "@"); ok {
+		for tagged, d := range c.images {
+			if d == digest && strings.HasPrefix(tagged, repo+":") {
+				return digest, nil
+			}
+		}
+	}
 	return "", fmt.Errorf("%s: %w", image, fs.ErrNotExist)
 }
 

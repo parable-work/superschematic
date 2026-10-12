@@ -109,8 +109,9 @@ type Cloud interface {
 	AccessSecret(ctx context.Context, project, secret string) ([]byte, error)
 
 	// ImageDigest returns the digest, `sha256:<hex>`, of the image an
-	// Artifact Registry tag names (`<repository>:<tag>`), or an error that
-	// wraps fs.ErrNotExist when the tag does not exist.
+	// Artifact Registry tag names (`<repository>:<tag>`), or of an image
+	// given by digest (`<repository>@sha256:<hex>`), or an error that wraps
+	// fs.ErrNotExist when the tag, or the image, does not exist.
 	ImageDigest(ctx context.Context, image string) (string, error)
 
 	// RunBuild runs a Cloud Build build of a Docker image in the
@@ -641,18 +642,59 @@ func tagResource(image string) (string, error) {
 	if colon < slash || colon < 0 {
 		return "", fmt.Errorf("gcp: image %q names no tag", image)
 	}
-	ref, tag := image[:colon], image[colon+1:]
+	pkg, ok := packageResource(image[:colon])
+	if !ok || image[colon+1:] == "" {
+		return "", fmt.Errorf("gcp: image %q is not <region>-docker.pkg.dev/<project>/<repository>/<image>:<tag>", image)
+	}
+	return pkg + "/tags/" + image[colon+1:], nil
+}
+
+// versionResource returns the Artifact Registry resource name of an image
+// given by digest: `<region>-docker.pkg.dev/<project>/<repository>/<image>@sha256:<hex>`
+// is projects/<project>/locations/<region>/repositories/<repository>/packages/<image>/versions/sha256:<hex>.
+func versionResource(image string) (string, error) {
+	ref, digest, ok := strings.Cut(image, "@")
+	if !ok || !digestPattern.MatchString(digest) {
+		return "", fmt.Errorf("gcp: image %q names no digest", image)
+	}
+	pkg, ok := packageResource(ref)
+	if !ok {
+		return "", fmt.Errorf("gcp: image %q is not <region>-docker.pkg.dev/<project>/<repository>/<image>@sha256:<hex>", image)
+	}
+	return pkg + "/versions/" + digest, nil
+}
+
+// packageResource returns the Artifact Registry resource name of an
+// image's package, `<region>-docker.pkg.dev/<project>/<repository>/<image>`
+// with no tag or digest, and whether ref is one.
+func packageResource(ref string) (string, bool) {
 	host, rest, _ := strings.Cut(ref, "/")
 	region, ok := strings.CutSuffix(host, "-docker.pkg.dev")
 	parts := strings.SplitN(rest, "/", 3)
-	if !ok || region == "" || len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" || tag == "" {
-		return "", fmt.Errorf("gcp: image %q is not <region>-docker.pkg.dev/<project>/<repository>/<image>:<tag>", image)
+	if !ok || region == "" || len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" || strings.ContainsAny(rest, ":@") {
+		return "", false
 	}
-	return fmt.Sprintf("projects/%s/locations/%s/repositories/%s/packages/%s/tags/%s",
-		parts[0], region, parts[1], url.PathEscape(parts[2]), tag), nil
+	return fmt.Sprintf("projects/%s/locations/%s/repositories/%s/packages/%s", parts[0], region, parts[1], url.PathEscape(parts[2])), true
 }
 
 func (c *googleCloud) ImageDigest(ctx context.Context, image string) (string, error) {
+	if _, digest, ok := strings.Cut(image, "@"); ok {
+		name, err := versionResource(image)
+		if err != nil {
+			return "", err
+		}
+		if err := c.clients(ctx); err != nil {
+			return "", err
+		}
+		_, err = c.registry.GetVersion(ctx, &artifactregistrypb.GetVersionRequest{Name: name})
+		if status.Code(err) == codes.NotFound {
+			return "", fmt.Errorf("gcp: %s: %w", image, fs.ErrNotExist)
+		}
+		if err != nil {
+			return "", fmt.Errorf("gcp: the version of %s: %w", image, err)
+		}
+		return digest, nil
+	}
 	name, err := tagResource(image)
 	if err != nil {
 		return "", err

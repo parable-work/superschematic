@@ -1068,6 +1068,10 @@ Cloud Build, as the stack's `builder` account, and prints it:
 export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh acme-staging us-east1 shop-stack)"
 ```
 
+A deploy with a migration to run finds or builds the runner's image, or
+checks that the one `SUPERSCHEMATIC_MIGRATE_IMAGE` names exists, before it
+changes anything, and stops there, saying what to set, when it has none.
+
 acme-shop has run this way on a fresh project (milestone 3 of the stack
 model). A failed migration fails its step with the job execution's name
 and the URL of its logs, where the runner's error is. The

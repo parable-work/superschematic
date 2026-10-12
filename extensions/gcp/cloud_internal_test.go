@@ -77,6 +77,34 @@ func TestTagResource(t *testing.T) {
 	}
 }
 
+// TestVersionResource names an image given by digest in Artifact
+// Registry, which ImageDigest reads to find whether it exists.
+func TestVersionResource(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	got, err := versionResource("us-east1-docker.pkg.dev/acme-staging/shop/superschematic-migrate@" + digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "projects/acme-staging/locations/us-east1/repositories/shop/packages/superschematic-migrate/versions/" + digest; got != want {
+		t.Errorf("versionResource = %s, want %s", got, want)
+	}
+	got, err = versionResource("europe-west1-docker.pkg.dev/p/r/a/b@" + digest)
+	if err != nil || got != "projects/p/locations/europe-west1/repositories/r/packages/a%2Fb/versions/"+digest {
+		t.Errorf("a nested image: %s, %v", got, err)
+	}
+	for _, bad := range []string{
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders",
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:abc",
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders:1@" + digest,
+		"docker.io/acme/orders@" + digest,
+		"us-east1-docker.pkg.dev/acme-staging/orders@" + digest,
+	} {
+		if _, err := versionResource(bad); err == nil {
+			t.Errorf("versionResource(%s) is accepted", bad)
+		}
+	}
+}
+
 // TestLiteral puts a run's parameter values in a name.
 func TestLiteral(t *testing.T) {
 	params := map[string]string{"pr": "7"}

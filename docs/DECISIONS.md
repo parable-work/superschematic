@@ -4272,7 +4272,15 @@ Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
 that exists already too, that deletes the build contexts under
 `superschematic/builds/` and the job documents and plans under
 `superschematic/migrations/` after 30 days, live and noncurrent versions
-alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). Nothing
+alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). A
+deploy with a migration phase to run readies the runner's image after the
+plans and the gate, before any step, through an optional seam of the
+runner, `registry.MigrationPreparer`: gcp's finds the release's image by
+its tag or builds it, checks in Artifact Registry that an image
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names exists (`ImageDigest` now takes an
+image by digest), and refuses a checkout's binary with no image named, so
+a missing image no longer fails the deploy after its infrastructure step
+(`TestMigrationJobNeedsARelease`, `TestDeployPreparesTheMigrationRunner`). Nothing
 reads one after the build or the execution it was written for: a deploy
 compares a context's digest with the manifest's, the builder finds an
 image by its tag and uploads the context again for a build, and each

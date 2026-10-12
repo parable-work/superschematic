@@ -176,6 +176,11 @@ type (
 	JobRunRequest    = registry.JobRunRequest
 	Credential       = registry.Credential
 
+	// A target's MigrationRunner that is a MigrationPreparer readies what
+	// its phases need, the runner's image on gcp, before a deploy's first
+	// step (D46).
+	MigrationPreparer = registry.MigrationPreparer
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher

@@ -68,8 +68,10 @@ type DeployOptions struct {
 //     server's image comes from (--image, a build, the manifest) and plans
 //     each database's migration from the schema the manifest records, then
 //     checks the plans against the gate and, when given, against the plans
-//     `stack plan` showed; then it builds the images it decided to build
-//     and pins each server's image (PinImages);
+//     `stack plan` showed; when a migration phase is to run, it has the
+//     target's runner ready what the phases need, when the runner is a
+//     registry.MigrationPreparer; then it builds the images it decided to
+//     build and pins each server's image (PinImages);
 //  2. it runs the deploy order a step at a time: the provisioner applies
 //     the infrastructure; every secret then needs a value; the target's
 //     migration runner runs the expand phase of each plan (first finishing
@@ -131,6 +133,11 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	}
 	if s.target.Migrations == nil && (len(pending) > 0 || hasSteps(plans)) {
 		return nil, fmt.Errorf("environment %s has migrations to run, and target %s has no migration runner", s.env.Environment, s.target.Name)
+	}
+	if p, ok := s.target.Migrations.(registry.MigrationPreparer); ok && runsMigrations(s.env, prev, plans, pending) {
+		if err := p.PrepareMigrations(ctx, s.run, s.log); err != nil {
+			return nil, fmt.Errorf("the migration runner of target %s: %w", s.target.Name, err)
+		}
 	}
 
 	sites, err := s.planSitesFor(ctx, prev, o.Sites, o.Sources)
@@ -203,6 +210,32 @@ type deploy struct {
 func hasSteps(plans []*DatabasePlan) bool {
 	for _, plan := range plans {
 		if plan.ExpandSteps+plan.ContractSteps > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// runsMigrations reports whether a deploy that starts from prev runs a
+// phase through the target's migration runner: a phase a failed deploy
+// left pending, a plan with steps, or the expand phase of a plan whose
+// connecting servers changed since the runner last ran on its DB service,
+// as migrate decides.
+func runsMigrations(env *ir.ResolvedEnvironment, prev *Manifest, plans []*DatabasePlan, pending map[string][]*PendingMigration) bool {
+	for _, p := range pending {
+		if len(p) > 0 {
+			return true
+		}
+	}
+	if hasSteps(plans) {
+		return true
+	}
+	for _, plan := range plans {
+		var servers []string
+		if applied := prev.applied(plan.Database, plan.Service); applied != nil {
+			servers = applied.Servers
+		}
+		if !slices.Equal(servers, connecting(env, plan.Database, plan.Service)) {
 			return true
 		}
 	}

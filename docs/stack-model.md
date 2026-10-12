@@ -1837,7 +1837,15 @@ onto distroless static. `runtime/migrate/go` carries no `replace`
 directive, so `go install` takes it. The release is the one the binary is
 part of; a binary built from a checkout names none, and
 `SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
-its place, which `scripts/migrate-dev-image.sh` builds from the checkout. The local target runs the runner on the host (section 8.3).
+its place, which `scripts/migrate-dev-image.sh` builds from the checkout.
+A deploy with a phase to run readies the image before anything changes,
+after the plans and the hazard gate (section 11.2): it finds the
+release's image by its tag or builds it, checks that an image
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names in Artifact Registry exists, and
+refuses a binary built from a checkout with no image named, saying what to
+set, so a missing image no longer stops a deploy after its infrastructure
+step. The target's runner does this as a `registry.MigrationPreparer`.
+The local target runs the runner on the host (section 8.3).
 
 ### 8.5 Where the implementation lives
 
@@ -3219,7 +3227,10 @@ file.
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
    default) that no `--allow` acknowledges, and with `--expect` refuses
-   plans other than the ones `stack plan --out` wrote;
+   plans other than the ones `stack plan --out` wrote; when a migration
+   phase is to run, the target's migration runner then readies what the
+   phases need, on gcp the runner's image (section 8.4), or refuses the
+   deploy;
 3. builds the images it decided to build, through the target's
    `Builder`, before anything changes, and pins every image. A platform
    writes a server's image into the graph as its repository path, and the
