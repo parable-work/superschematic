@@ -95,7 +95,7 @@ and TypeScript runtimes' (D51):
   stdout at `info`, with the TypeScript `createLogger`'s members: `level`,
   `time` (RFC 3339 in UTC, to the millisecond) and `msg` first, then
   `stack` and `server`, the fields of the spans the event is in (`api`, in
-  an `api_span(api)`), and the event's own.
+  an `api_span(api)`), and the event's own. It re-exports `tracing`.
 
 The Postgres tests run on the database
 `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;

@@ -17,10 +17,11 @@ use crate::{GoogleIdTokenSource, SignedKeySource, TokenFileSource, TokenSource};
 /// `google-id-token` source without the `http-client` feature. Its
 /// messages never carry the key.
 ///
-/// A generated Rust SDK's `ServiceCredential` takes the source and the
-/// headers. Its `ServiceTokenSource` is the same type as [`TokenSource`],
-/// since the SDK does not depend on this crate, so the entrypoint builds a
-/// client's credential from a loaded [`super::Service`] with no conversion:
+/// A generated Rust SDK's `ServiceCredential` takes the token source and
+/// the headers. The SDK spells its `ServiceTokenSource` out, since it does
+/// not depend on this crate, and it is the same type as [`TokenSource`], so
+/// the entrypoint builds a client's credential from a loaded
+/// [`super::Service`] with no conversion:
 ///
 /// ```ignore
 /// let service_credential = match &endpoint.credential {

@@ -38,6 +38,10 @@ use tracing::{Event, Level, Metadata, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry::LookupSpan;
 
+/// The crate a server logs through, re-exported so a generated crate's
+/// `tracing::info!` and `Instrument` are the version this layer reads.
+pub use tracing;
+
 /// The members a line's head takes, which no field replaces.
 const RESERVED: [&str; 3] = ["level", "time", "msg"];
 
@@ -55,9 +59,10 @@ pub fn init_json(
 /// The span of one API of the server: each line written in it carries
 /// `"api": api`. The generated `Deps` holds one, and the entrypoint runs the
 /// API's work in it (`span.in_scope`, or `tracing::Instrument::instrument`
-/// on a future).
+/// on a future). It is an error-level span, so that it is enabled whatever
+/// level the log writes, and every line in it names its API.
 pub fn api_span(api: &str) -> tracing::Span {
-    tracing::info_span!("api", api = api)
+    tracing::error_span!("api", api = api)
 }
 
 /// The layer that writes each event as a JSON line, with `stack` and
@@ -356,6 +361,20 @@ mod tests {
             lines.lock().unwrap().as_slice(),
             [
                 r#"{"level":"debug","time":"2026-10-12T17:32:05.123Z","msg":"formatted","stack":"shop-stack","server":"other","api":"b","request":"r-1","value":"Some(1)"}"#
+            ]
+        );
+    }
+
+    #[test]
+    fn an_api_span_names_its_api_at_every_level() {
+        let (subscriber, lines) = capture(LevelFilter::ERROR);
+        tracing::subscriber::with_default(subscriber, || {
+            api_span("shop-stock").in_scope(|| tracing::error!("down"));
+        });
+        assert_eq!(
+            lines.lock().unwrap().as_slice(),
+            [
+                r#"{"level":"error","time":"2026-10-12T17:32:05.123Z","msg":"down","stack":"shop-stack","server":"shop-stock","api":"shop-stock"}"#
             ]
         );
     }
