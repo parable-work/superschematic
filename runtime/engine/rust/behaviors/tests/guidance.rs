@@ -726,3 +726,285 @@ fn the_approvals_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// Timers' TypeScript guidance (`timersGuidance`) for the configs below,
+/// on a Ticket, each deadline's then.from filled in as `parseConfig` fills
+/// it.
+const TIMERS_EXPECTED: &str = r#"{
+  "described": {
+    "summary": "Deadline close is due 30 days after the create; when it fires, it moves the status to closed from open; it is cancelled when the status enters resolved. Deadline remind is due 1 day before the time visitAt holds. Deadline respond is due 4 hours after the status enters open; when it fires, it moves the status to escalated from open; it is cancelled when the status leaves open. behaviors.Timers.deadlines gives each started deadline's dueAt, fired, firedAt and outcome; one not fired is overdue once its dueAt has passed. The runner fires each due deadline within 1 minute, and a deadline stays fired whatever its move meets. A caller with permission tickets.timers may reset or snooze a deadline.",
+    "operations": {
+      "fireTimer": {
+        "useWhen": "Use to fire a due deadline at once rather than wait for the runner's sweep.",
+        "doNotUseWhen": "Do not use to move the instance early: on a deadline not due, fired already or not started, the call changes nothing.",
+        "success": "Returns fired, whether this call fired the deadline, and with a then the outcome of its move: moved, skipped (the status was not one it moves from), vetoed or forbidden; the deadline is fired whichever.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: close, remind or respond."
+          }
+        ]
+      },
+      "resetTimer": {
+        "useWhen": "Use to start a deadline again from what it starts from now, undoing a snooze or a fire. It needs permission tickets.timers, else the call is forbidden.",
+        "doNotUseWhen": "Do not use to put a deadline off by a time of your choosing; snoozeTimer takes the dueAt.",
+        "success": "Returns dueAt, afterMs after what the deadline starts from; it has not fired.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: close, remind or respond."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "Wait until the instance holds what the deadline starts from, the state it enters or a date-time in its field, and is out of the states that cancel it."
+          }
+        ]
+      },
+      "snoozeTimer": {
+        "useWhen": "Use to move a started deadline's due time to dueAt, in epoch milliseconds; a fired one fires again then. It needs permission tickets.timers, else the call is forbidden.",
+        "doNotUseWhen": "Do not use on a deadline that has not started or was cancelled; behaviors.Timers.deadlines lists the started ones.",
+        "success": "Returns dueAt. A later write keeps it, until what the deadline starts from changes.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: close, remind or respond."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "None: the deadline has no due time to move. Read behaviors.Timers.deadlines."
+          }
+        ]
+      },
+      "create": {
+        "success": "A new Ticket starts deadline close, due 30 days later. A visitAt the create gives starts deadline remind."
+      },
+      "transition": {
+        "success": "Entering resolved cancels deadline close. Entering open starts deadline respond, due 4 hours later. Leaving open cancels deadline respond."
+      },
+      "update": {
+        "success": "Changing visitAt moves deadline remind, which fires again when it comes due; clearing visitAt cancels it."
+      }
+    }
+  },
+  "closed": {
+    "summary": "Deadline ping is due atthe time visitAt holds. behaviors.Timers.deadlines gives each started deadline's dueAt, fired, firedAt and outcome; one not fired is overdue once its dueAt has passed. The runner fires each due deadline within 5 seconds, and a deadline stays fired whatever its move meets. Nobody resets or snoozes a deadline: the config names no permission.",
+    "operations": {
+      "fireTimer": {
+        "useWhen": "Use to fire a due deadline at once rather than wait for the runner's sweep.",
+        "doNotUseWhen": "Do not use to move the instance early: on a deadline not due, fired already or not started, the call changes nothing.",
+        "success": "Returns fired, whether this call fired the deadline, and with a then the outcome of its move: moved, skipped (the status was not one it moves from), vetoed or forbidden; the deadline is fired whichever.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: ping."
+          }
+        ]
+      },
+      "resetTimer": {
+        "useWhen": "",
+        "doNotUseWhen": "Do not use: the config names no permission, so the call is forbidden for every caller.",
+        "success": "Returns dueAt, afterMs after what the deadline starts from; it has not fired.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: ping."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "Wait until the instance holds what the deadline starts from, the state it enters or a date-time in its field, and is out of the states that cancel it."
+          }
+        ]
+      },
+      "snoozeTimer": {
+        "useWhen": "",
+        "doNotUseWhen": "Do not use: the config names no permission, so the call is forbidden for every caller.",
+        "success": "Returns dueAt. A later write keeps it, until what the deadline starts from changes.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: ping."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "None: the deadline has no due time to move. Read behaviors.Timers.deadlines."
+          }
+        ]
+      },
+      "create": {
+        "success": "A visitAt the create gives starts deadline ping."
+      },
+      "update": {
+        "success": "Changing visitAt moves deadline ping, which fires again when it comes due; clearing visitAt cancels it."
+      }
+    }
+  },
+  "mixed": {
+    "summary": "Deadline idle is due 90 seconds after the status enters waiting; it is cancelled when the status enters resolved or closed. Deadline nudge is due 1500 ms after the time visitAt holds; when it fires, it moves the status to escalated from open or waiting. Deadline ping is due at the create. Deadline wake is due when the status enters open. behaviors.Timers.deadlines gives each started deadline's dueAt, fired, firedAt and outcome; one not fired is overdue once its dueAt has passed. The runner fires each due deadline within 7 seconds, and a deadline stays fired whatever its move meets. A caller with permission tickets.timers may reset or snooze a deadline.",
+    "operations": {
+      "fireTimer": {
+        "useWhen": "Use to fire a due deadline at once rather than wait for the runner's sweep.",
+        "doNotUseWhen": "Do not use to move the instance early: on a deadline not due, fired already or not started, the call changes nothing.",
+        "success": "Returns fired, whether this call fired the deadline, and with a then the outcome of its move: moved, skipped (the status was not one it moves from), vetoed or forbidden; the deadline is fired whichever.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: idle, nudge, ping or wake."
+          }
+        ]
+      },
+      "resetTimer": {
+        "useWhen": "Use to start a deadline again from what it starts from now, undoing a snooze or a fire. It needs permission tickets.timers, else the call is forbidden.",
+        "doNotUseWhen": "Do not use to put a deadline off by a time of your choosing; snoozeTimer takes the dueAt.",
+        "success": "Returns dueAt, afterMs after what the deadline starts from; it has not fired.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: idle, nudge, ping or wake."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "Wait until the instance holds what the deadline starts from, the state it enters or a date-time in its field, and is out of the states that cancel it."
+          }
+        ]
+      },
+      "snoozeTimer": {
+        "useWhen": "Use to move a started deadline's due time to dueAt, in epoch milliseconds; a fired one fires again then. It needs permission tickets.timers, else the call is forbidden.",
+        "doNotUseWhen": "Do not use on a deadline that has not started or was cancelled; behaviors.Timers.deadlines lists the started ones.",
+        "success": "Returns dueAt. A later write keeps it, until what the deadline starts from changes.",
+        "errors": [
+          {
+            "code": "no_deadline",
+            "commonCorrection": "Name a deadline: idle, nudge, ping or wake."
+          },
+          {
+            "code": "not_armed",
+            "commonCorrection": "None: the deadline has no due time to move. Read behaviors.Timers.deadlines."
+          }
+        ]
+      },
+      "create": {
+        "success": "A new Ticket starts deadline ping, due at once. A visitAt the create gives starts deadline nudge."
+      },
+      "transition": {
+        "success": "Entering waiting starts deadline idle, due 90 seconds later. Entering resolved or closed cancels deadline idle. Entering open starts deadline wake, due at once."
+      },
+      "update": {
+        "success": "Changing visitAt moves deadline nudge, which fires again when it comes due; clearing visitAt cancels it."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn the_timers_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{
+        Timers, TimersConfig, TimersDeadline, TimersStart, TimersThen, TimersUntil,
+    };
+
+    const HOUR: i64 = 3_600_000;
+    const DAY: i64 = 24 * HOUR;
+    let expected: Value = serde_json::from_str(TIMERS_EXPECTED).expect("the expected guidance");
+    let deadline = |start: TimersStart,
+                    after_ms: i64,
+                    then: Option<(&str, &[&str])>,
+                    until: Option<TimersUntil>| TimersDeadline {
+        start,
+        after_ms,
+        then: then.map(|(transition, from)| TimersThen {
+            transition: transition.to_owned(),
+            from: names(from),
+        }),
+        until,
+    };
+    let enters = |state: &str| TimersStart::Enters(state.to_owned());
+    let field = |name: &str| TimersStart::Field(name.to_owned());
+    let config = |deadlines: Vec<(&str, TimersDeadline)>,
+                  sweep_ms: i64,
+                  permission: Option<&str>| TimersConfig {
+        deadlines: deadlines
+            .into_iter()
+            .map(|(name, deadline)| (name.to_owned(), deadline))
+            .collect(),
+        sweep_ms,
+        permission: permission.map(str::to_owned),
+    };
+    let ticket = DescribeTarget {
+        schema: "Ticket".to_owned(),
+        type_name: "Ticket".to_owned(),
+        ..target()
+    };
+    let guidance = Timers.hooks().guidance.expect("guidance");
+    for (key, config) in [
+        (
+            "described",
+            config(
+                vec![
+                    (
+                        "close",
+                        deadline(
+                            TimersStart::Create,
+                            30 * DAY,
+                            Some(("closed", &["open"])),
+                            Some(TimersUntil::Enters(names(&["resolved"]))),
+                        ),
+                    ),
+                    ("remind", deadline(field("visitAt"), -DAY, None, None)),
+                    (
+                        "respond",
+                        deadline(
+                            enters("open"),
+                            4 * HOUR,
+                            Some(("escalated", &["open"])),
+                            Some(TimersUntil::Leaves("open".to_owned())),
+                        ),
+                    ),
+                ],
+                60_000,
+                Some("tickets.timers"),
+            ),
+        ),
+        (
+            "closed",
+            config(
+                vec![("ping", deadline(field("visitAt"), 0, None, None))],
+                5000,
+                None,
+            ),
+        ),
+        (
+            "mixed",
+            config(
+                vec![
+                    (
+                        "idle",
+                        deadline(
+                            enters("waiting"),
+                            90_000,
+                            None,
+                            Some(TimersUntil::Enters(names(&["resolved", "closed"]))),
+                        ),
+                    ),
+                    (
+                        "nudge",
+                        deadline(
+                            field("visitAt"),
+                            1500,
+                            Some(("escalated", &["open", "waiting"])),
+                            None,
+                        ),
+                    ),
+                    ("ping", deadline(TimersStart::Create, 0, None, None)),
+                    ("wake", deadline(enters("open"), 0, None, None)),
+                ],
+                7000,
+                Some("tickets.timers"),
+            ),
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&Timers, &config, &ticket)),
+            expected[key],
+            "{key}"
+        );
+    }
+}

@@ -9,6 +9,7 @@ pub(crate) mod approvals;
 pub(crate) mod comments;
 pub(crate) mod constants;
 pub(crate) mod staterules;
+pub(crate) mod timers;
 pub(crate) mod variants;
 pub(crate) mod workflow;
 
@@ -37,6 +38,22 @@ pub(crate) fn plural(count: i64, noun: &str) -> String {
     } else {
         format!("{count} {noun}s")
     }
+}
+
+/// A span of milliseconds as a reader says it: `90 seconds`, `2 minutes`,
+/// `30 days`, `1500 ms` (`duration`).
+pub(crate) fn duration(ms: i64) -> String {
+    for (unit, noun) in [
+        (86_400_000, "day"),
+        (3_600_000, "hour"),
+        (60_000, "minute"),
+        (1000, "second"),
+    ] {
+        if ms % unit == 0 {
+            return plural(ms / unit, noun);
+        }
+    }
+    format!("{ms} ms")
 }
 
 /// Starts a sentence with a capital letter (`capital`).
