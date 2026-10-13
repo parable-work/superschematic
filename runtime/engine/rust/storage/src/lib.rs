@@ -8,10 +8,17 @@
 //! before they run.
 
 mod checker;
+mod conn;
+mod db;
 mod ddl;
 mod dialect;
 mod error;
 mod ident;
+mod notifier;
+#[cfg(feature = "postgres")]
+mod postgres;
+#[cfg(feature = "sqlite")]
+mod sqlite;
 mod tokens;
 mod value;
 
@@ -19,6 +26,7 @@ pub use checker::{
     sql_refusal, with_relation, SqlMode, POSTGRES_REFUSED_FUNCTIONS, POSTGRES_RESERVED_PREFIX,
     POSTGRES_SCHEMAS, RESERVED_PREFIXES,
 };
+pub use db::{Db, Lock, Tx, DEFAULT_BUSY_TIMEOUT};
 pub use ddl::{is_column_name, ColumnSpec, ColumnType, IndexSpec, TableSpec, MAX_SAFE_INTEGER};
 pub use dialect::{Dialect, Sql};
 pub use error::{
@@ -28,5 +36,10 @@ pub use ident::{
     catalog_lock_key, identifier, lock_key, migration_lock_key, namespace_lock_key,
     postgres_identifier, quote_identifier, sql_string, POSTGRES_IDENTIFIER_MAX,
 };
+pub use notifier::Notifier;
+#[cfg(feature = "postgres")]
+pub use postgres::{PostgresOptions, DEFAULT_POOL_MAX, DEFAULT_SCHEMA};
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteOptions;
 pub use tokens::postgres_placeholders;
 pub use value::{Row, RunResult, SqlValue};

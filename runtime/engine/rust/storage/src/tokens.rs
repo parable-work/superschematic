@@ -391,6 +391,23 @@ pub(crate) fn main_verb(statement: &[Token]) -> Option<String> {
     None
 }
 
+/// Whether a statement changes rows: an INSERT, UPDATE, DELETE, REPLACE or
+/// MERGE, or a WITH clause before one. The write counter adds the rows a
+/// Postgres statement reports only for these, since Postgres reports a
+/// SELECT's rows the same way (SQLite counts its changes itself).
+#[cfg(feature = "postgres")]
+pub(crate) fn statement_writes(sql: &str, dialect: Dialect) -> bool {
+    let tokens = tokenize(sql, dialect);
+    let Some(first) = tokens.first() else {
+        return false;
+    };
+    let mut verb = first.keyword();
+    if verb == "WITH" {
+        verb = main_verb(&tokens).unwrap_or_default();
+    }
+    WRITE_VERBS.contains(&verb.as_str()) || verb == "MERGE"
+}
+
 /// The statement with each `?` placeholder numbered for Postgres: a bare
 /// `?` is `$k`, one past the largest number before it, as SQLite numbers
 /// it, and `?NNN` is `$NNN`. A `?` in a string, a quoted name or a comment
@@ -568,5 +585,28 @@ mod tests {
             postgres_placeholders("SELECT ?::text, ?3::bigint").unwrap(),
             "SELECT $1::text, $3::bigint"
         );
+    }
+
+    #[cfg(feature = "postgres")]
+    #[test]
+    fn a_statement_writes_when_its_main_verb_does() {
+        for sql in [
+            "INSERT INTO t VALUES (1)",
+            "update t set a = 1",
+            "DELETE FROM t RETURNING id",
+            "WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",
+            "MERGE INTO t USING s ON true WHEN MATCHED THEN DELETE",
+        ] {
+            assert!(statement_writes(sql, Dialect::Postgres), "{sql}");
+        }
+        for sql in [
+            "SELECT * FROM t FOR UPDATE",
+            "WITH x AS (SELECT 1) SELECT * FROM x",
+            "VALUES (1)",
+            "",
+            "-- INSERT",
+        ] {
+            assert!(!statement_writes(sql, Dialect::Postgres), "{sql}");
+        }
     }
 }
