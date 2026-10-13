@@ -72,7 +72,7 @@ pub use behaviors::{
 };
 pub use engine::{
     seeded_uuid, Clock, Engine, EngineClock, EngineOptions, IdCounter, IdQueue, Ids, MetaSchema,
-    Storage, SCENARIO_SEED,
+    Storage, UuidSource, SCENARIO_SEED,
 };
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,

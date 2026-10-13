@@ -978,6 +978,10 @@ impl Core for Ctx<'_, '_, '_> {
         &self.exec.id
     }
 
+    fn uuids(&self) -> crate::UuidSource {
+        self.exec.reach.engine.uuids()
+    }
+
     fn can(&self, permission: &str) -> Result<bool> {
         can(&self.exec.reach, self.name(), permission)
     }

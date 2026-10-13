@@ -20,6 +20,11 @@ serde = { version = "1.0.228", features = ["derive"] }
 # members' order.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
+# The version graph's engine (D32, D58), which Branches runs over the fixed
+# layout in the call's transaction (src/graph.rs). Not published, so a path
+# dependency; without its default features it builds neither the
+# tokio-postgres client nor rusqlite, since the call's SQL is the client.
+superschematic-versiongraph-engine = { path = "../../../versiongraph/rust-engine", default-features = false }
 
 [lints]
 workspace = true

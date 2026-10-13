@@ -98,13 +98,45 @@ pub const SCENARIO_SEED: &str = "superschematic-engine-scenario/";
 /// The n-th seeded id: the version 4 UUID made of the first 16 bytes of
 /// SHA-256(`<prefix><n>`), its version and variant bits set.
 pub fn seeded_uuid(prefix: &str, n: u64) -> String {
+    uuid::Uuid::from_bytes(seeded_bytes(prefix, n)).to_string()
+}
+
+// seeded_bytes is the n-th seeded id's 16 bytes.
+fn seeded_bytes(prefix: &str, n: u64) -> [u8; 16] {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!("{prefix}{n}").as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    uuid::Uuid::from_bytes(bytes).to_string()
+    bytes
+}
+
+/// Where the version 4 UUIDs a behavior makes of its own come from (the
+/// refs, commits and rows of Branches' version graph): the engine's seeded
+/// generator when it has one ([`Ids::Seeded`]), so a replay draws them in
+/// the sequence the scenario recorder's one generator gave the TypeScript
+/// engine's version graph, and random ones otherwise (D58). A behavior
+/// reads it from its context (`uuids()`); it is cheap to clone and lives on
+/// its own.
+#[derive(Clone, Debug, Default)]
+pub struct UuidSource {
+    seeded: Option<(String, IdCounter)>,
+}
+
+impl UuidSource {
+    /// Random version 4 UUIDs.
+    pub fn random() -> Self {
+        Self::default()
+    }
+
+    /// The next UUID's 16 bytes, its version and variant set.
+    pub fn next_bytes(&self) -> [u8; 16] {
+        match &self.seeded {
+            Some((prefix, drawn)) => seeded_bytes(prefix, drawn.next()),
+            None => uuid::Uuid::new_v4().into_bytes(),
+        }
+    }
 }
 
 /// A count of the seeded ids drawn, which engines given one share.
@@ -688,6 +720,17 @@ impl Engine {
     /// The engine's clock.
     pub fn clock(&self) -> &EngineClock {
         &self.clock
+    }
+
+    /// Where a behavior's own version 4 UUIDs come from: the engine's
+    /// seeded generator, or random ones.
+    pub fn uuids(&self) -> UuidSource {
+        match &self.ids.ids {
+            Ids::Seeded { prefix, drawn } => UuidSource {
+                seeded: Some((prefix.clone(), drawn.clone())),
+            },
+            Ids::Uuid4 | Ids::Sequence { .. } | Ids::Queue(_) => UuidSource::random(),
+        }
     }
 
     /// The id of an instance created without one.

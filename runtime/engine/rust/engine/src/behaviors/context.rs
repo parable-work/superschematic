@@ -31,6 +31,7 @@ use crate::events::EngineEvent;
 use crate::instances::references::{Hears, Reference};
 use crate::instances::InstanceRecord;
 use crate::principal::Principal;
+use crate::UuidSource;
 
 /// How deep `call()`, invokes, creates and reads of other instances may
 /// nest together; deeper is a cycle.
@@ -52,6 +53,9 @@ pub(crate) trait Core {
 
     fn id(&self) -> &str {
         ""
+    }
+    fn uuids(&self) -> UuidSource {
+        UuidSource::random()
     }
     fn can(&self, _permission: &str) -> Result<bool> {
         Err(unreachable_here("can()"))
@@ -253,6 +257,13 @@ impl<'a, C> Scope<'a, C> {
     /// Which database the call runs on.
     pub fn dialect(&self) -> Dialect {
         self.core.dialect()
+    }
+
+    /// Where the version 4 UUIDs the behavior makes of its own come from:
+    /// the engine's seeded generator when it has one, random ones
+    /// otherwise (D58).
+    pub fn uuids(&self) -> UuidSource {
+        self.core.uuids()
     }
 }
 

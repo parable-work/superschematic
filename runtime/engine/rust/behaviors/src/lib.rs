@@ -37,6 +37,7 @@ pub mod approvals;
 pub mod comments;
 pub mod constants;
 pub mod dependencies;
+pub mod graph;
 mod guidance;
 pub mod links;
 pub mod numbering;
