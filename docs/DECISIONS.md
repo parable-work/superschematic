@@ -6063,6 +6063,11 @@ reads a parameter's first value and an empty one as absent. Every server
 and SDK generator refuses a paged operation until it renders it
 (`apigen.RefusePages`), and `internal/generator/page_refusal_test.go`
 holds each to it.
+The Go server renders it: a paged method takes `page paging.Request` last
+and returns `paging.Page[T]`, its route reads the page with `paging.Read`
+after its own parameters and answers the page as `data`, and
+`TestPagedRoutesServePages` pages `fixture-paged-api` over httptest, its
+filters on each page and every refusal as `page_parity.json` words it.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
