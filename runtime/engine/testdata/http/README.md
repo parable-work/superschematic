@@ -10,10 +10,8 @@ through Hono, can replay it: request and response exchanges of the routes
 `../scenarios`, from the tests that serve HTTP, and in the same format:
 `../scenarios/README.md` describes files, cases, engine steps, symbols,
 shared values and the values JSON cannot hold, and this file adds what
-serving HTTP needs. Recording the four test files below into
-`runtime/engine/testdata` (`ENGINE_RECORD=../testdata node --test
-test/http.test.ts test/mcp.test.ts test/operations.test.ts
-test/stream.test.ts`, in `typescript/`) rewrites them.
+serving HTTP needs. `typescript/test/corpus.test.ts` fails when a committed
+file is not what the recorder writes; `UPDATE_ENGINE_CORPUS=1` rewrites it.
 
 | File | Recorded from | What it covers |
 |---|---|---|

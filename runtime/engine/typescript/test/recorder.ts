@@ -7,7 +7,8 @@
 // scenarios are written to <dir>/scenarios/<file>.json, or to
 // <dir>/http/<file>.json when its tests served HTTP.
 // runtime/engine/testdata/scenarios/README.md and
-// runtime/engine/testdata/http/README.md give the format.
+// runtime/engine/testdata/http/README.md give the format; the corpus test
+// (corpus.test.ts) holds the committed files to what this writes.
 //
 // Recording keeps what the engine does but for two sources of chance, so
 // recording twice writes the same files: crypto.randomUUID, which the

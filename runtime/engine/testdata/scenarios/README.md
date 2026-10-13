@@ -12,12 +12,13 @@ The files are written by the recorder, `typescript/test/recorder.ts`, never
 by hand. With `ENGINE_RECORD=<dir>` set, every engine a test opens through
 `test/helpers.ts` (`openTestEngine`, `openEngine`) is a proxy that records
 each public call the test makes through it, and at exit each test file's
-scenarios are written to `<dir>/scenarios/<file>.json`. Recording the
-curated files below into `runtime/engine/testdata` rewrites them:
+scenarios are written to `<dir>/scenarios/<file>.json`. `test/corpus.test.ts`
+records the curated files below again, under Node.js, and fails when a
+committed file is not what the recorder writes:
 
 ```
 cd runtime/engine/typescript && bun run build
-ENGINE_RECORD=../testdata node --test test/core-*.test.ts test/access.test.ts ...   # the curated files; review the diff
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts   # rewrite scenarios/ and http/; review the diff
 ENGINE_RECORD=/tmp/corpus node --test 'test/*.test.ts'   # record every test file, curated or not
 ```
 
@@ -29,7 +30,8 @@ the recorder names neither adapter.
 The corpus holds the scenarios of 30 test files: every core behavior's
 (`core-*.test.ts`) and the engine's own `access`, `compat`, `events`,
 `instances`, `list-filters`, `namespaces`, `normalize`, `registry` and
-`unique`. Every test file records, but the others are left out of the committed corpus to keep it
+`unique`. `test/corpus.test.ts` lists them (`SCENARIO_FILES`). Every test file
+records, but the others are left out of the committed corpus to keep it
 small enough to review (about 4 MB):
 
 - the behavior API's files (`behavior-*.test.ts`) and the runner's, retention's

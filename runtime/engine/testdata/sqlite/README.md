@@ -15,12 +15,14 @@ answer every read in `expected.json` as recorded.
 
 `runtime/engine-workqueue/typescript/test/sqlite-corpus.ts` writes both
 (the work-queue package depends on the engine, so it can register both sets
-of behaviors); run it to rewrite them:
+of behaviors), and `test/sqlite-corpus.test.ts` there fails when they are
+stale, when the file the engine writes reads otherwise than its dump loaded
+into a file, or when that file dumps otherwise:
 
 ```
 cd runtime/engine/typescript && bun run build
 cd runtime/engine-workqueue/typescript && bun run build
-node test/sqlite-corpus.ts   # rewrite both; review the diff
+UPDATE_ENGINE_CORPUS=1 node --test test/sqlite-corpus.test.ts   # rewrite both; review the diff
 ```
 
 Until the TypeScript engine goes, a change to its tables or to what a

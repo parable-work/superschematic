@@ -4748,3 +4748,25 @@ the modules `superschematic engine-client` writes (`test/generated/`,
 which `go test ./internal/generator/engineclientgen -update` rewrites)
 against an engine, and its `typos()` holds a misspelled field, state,
 link and parameter to a compile error.
+
+### The corpus a second engine replays
+
+D58 moves the engine to Rust; before it does, what this engine does is
+recorded as data under `testdata/`, which the Rust engine, its bindings and
+the servers replay. With `ENGINE_RECORD=<dir>` set, every engine a test
+opens through `test/helpers.ts` records each call the test makes on it, and
+every app a test serves through `test/recorder.ts`'s `servedApp` or
+`recordedApp` records each exchange; each test file's scenarios go to
+`<dir>/scenarios/<file>.json`, or `<dir>/http/<file>.json` when it served
+HTTP. `testdata/scenarios` and `testdata/http` hold a curated set of them,
+which `test/corpus.test.ts` records again under Node.js and holds to the
+committed files; `testdata/sqlite` holds a file the engine wrote with every
+core and work-queue behavior in use, as SQL text, with the reads expected
+from it, which `runtime/engine-workqueue/typescript/test/sqlite-corpus.test.ts`
+holds the same way. Each directory's README gives its format.
+
+```
+ENGINE_RECORD=/tmp/corpus node --test 'test/*.test.ts'   # record every test file
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts   # rewrite testdata/scenarios and testdata/http
+cd ../../engine-workqueue/typescript && UPDATE_ENGINE_CORPUS=1 node --test test/sqlite-corpus.test.ts   # rewrite testdata/sqlite
+```
