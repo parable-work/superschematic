@@ -180,6 +180,7 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 	}
 
 	for _, set := range doc.OperationSets {
+		fillPageDefaults(set)
 		duplicate := false
 		for _, existing := range schema.OperationSets {
 			if existing != nil && existing.Name == set.Name {
@@ -217,6 +218,22 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 
 	errs = append(errs, applyDocumentDecorators(doc, schema, owner, reg)...)
 	return errs
+}
+
+// fillPageDefaults gives each paged operation of set the limits its page
+// leaves unsaid (D60), as @paginated's Apply does in the TypeScript form,
+// so every form reads to the same IR and a reader never applies the
+// defaults itself.
+func fillPageDefaults(set *ir.OperationSet) {
+	if set == nil {
+		return
+	}
+	for _, op := range set.Operations {
+		if op != nil && op.Page != nil {
+			page := op.Page.WithDefaults()
+			op.Page = &page
+		}
+	}
 }
 
 // checkDocumentSlotNames is checkSlotNames for a decoded Document, so a

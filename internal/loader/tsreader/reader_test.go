@@ -37,6 +37,7 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-users-db",
 		"fixture-user-routes-api",
 		"fixture-display",
+		"fixture-paged-api",
 	}
 	for _, svc := range services {
 		t.Run(svc, func(t *testing.T) {

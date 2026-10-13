@@ -190,6 +190,7 @@ export interface FieldDef {
   mcp?: OperationMCP;
   middleware?: MiddlewareConfig;
   name: string;
+  page?: OperationPage;
   paramType?: 'query';
   permissions?: string[];
   placeholder?: string;
@@ -327,6 +328,16 @@ export interface OperationMCP {
    * invocationPolicy, with the values auto or ask.
    */
   [invocationPolicyKey: string]: unknown;
+}
+
+/**
+ * The operation's list result pages by an opaque cursor (@paginated): it takes
+ * the query parameters cursor and limit and answers {items, next}. A member
+ * left out takes its default.
+ */
+export interface OperationPage {
+  defaultLimit?: number;
+  maxLimit?: number;
 }
 
 export interface OperationSet {

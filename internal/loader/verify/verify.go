@@ -8,7 +8,8 @@
 // the User and UserRole traits and the user model's route sets, projection view
 // declarations, the contexts that refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
-// cannot be encrypted, the service clauses an operation cannot take,
+// cannot be encrypted, the operations @paginated cannot page, the service
+// clauses an operation cannot take,
 // @index placement and keys, each type's
 // behaviors against their declarations, each type's @display against the
 // type and its Workflow, the kind's own KindSpec.Verify and every
@@ -213,6 +214,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkEncryptedArguments(schema, r)
 	checkEncryptedOperations(schema, r)
 	checkMiddleware(schema, r)
+	checkPages(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)

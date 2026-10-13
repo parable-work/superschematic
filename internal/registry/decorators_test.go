@@ -17,7 +17,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "optimistic", "versionGraph", "graphMember", "index", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "sourceMustProject", "docs", "purpose", "icon", "column"},
 		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration"},
-		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "docs", "mcp", "icon"},
+		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "docs", "mcp", "icon"},
 	}
 	total := 0
 	for target, names := range want {

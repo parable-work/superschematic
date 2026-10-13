@@ -133,6 +133,18 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a service clause on a set and an operation", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "require", "from": ["orders-api"]}, "operations": [
 		{"name": "release", "typeRef": {"name": "Order"}, "auth": true, "serviceCallers": {"mode": "allow", "from": []}}]}`},
 	{"a service clause mode outside the enum", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "sometimes"}, "operations": []}`},
+	// A page (D60): the decoder keeps the members as written, the merge
+	// fills the ones left out.
+	{"a page with its members left out and written", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "httpMethod": "GET", "page": {}},
+		{"name": "listTags", "typeRef": {"name": "String", "isArray": true}, "httpMethod": "GET", "page": {"maxLimit": 10}},
+		{"name": "listSkus", "typeRef": {"name": "String", "isArray": true}, "httpMethod": "GET", "page": {"defaultLimit": 2, "maxLimit": 5}}]}`},
+	{"a page limit of 0", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"maxLimit": 0}}]}`},
+	{"a page limit past 1000", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"defaultLimit": 1001}}]}`},
+	{"an unknown key on a page", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"pageSize": 10}}]}`},
 	// The user model's traits (D50): User's config and UserRole's empty
 	// object, which a pointer keeps.
 	{"the user model's traits", "core", `{"kind": "DB", "name": "accounts", "types": {

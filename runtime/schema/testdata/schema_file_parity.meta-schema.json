@@ -2792,6 +2792,9 @@
         "name": {
           "type": "string"
         },
+        "page": {
+          "$ref": "#/$defs/OperationPage"
+        },
         "paramType": {
           "default": "",
           "enum": [
@@ -3301,6 +3304,27 @@
       "required": [
         "hidden"
       ],
+      "type": "object"
+    },
+    "OperationPage": {
+      "additionalProperties": false,
+      "description": "The operation's list result pages by an opaque cursor (@paginated): it takes the query parameters cursor and limit and answers {items, next}. A member left out takes its default.",
+      "properties": {
+        "defaultLimit": {
+          "default": 0,
+          "description": "How many items a page holds when the caller sends no limit: 20, or maxLimit when that is less.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxLimit": {
+          "default": 0,
+          "description": "The most items a caller may ask a page to hold: 1 to 1000, 100 when left out.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "OperationSet": {

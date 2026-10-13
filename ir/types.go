@@ -482,6 +482,10 @@ type FieldDef struct {
 	// filter[field]=value and filter[field][op]=value params.
 	Filterable bool `json:"filterable,omitempty" yaml:"filterable,omitempty"`
 
+	// Page is @paginated (D60): the operation's list result pages by an
+	// opaque cursor. Nil for every other operation and for data fields.
+	Page *OperationPage `json:"page,omitempty" yaml:"page,omitempty"`
+
 	// RequireOwnership indicates the user can only access their own data
 	// (@requireOwnership).
 	RequireOwnership bool `json:"requireOwnership,omitempty" yaml:"requireOwnership,omitempty"`

@@ -174,6 +174,34 @@
       "error": "a service clause mode outside the enum: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/serviceCallers/mode': value must be one of 'require', 'allow'"
     },
     {
+      "name": "a page with its members left out and written",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"httpMethod\": \"GET\", \"page\": {}},\n\t\t{\"name\": \"listTags\", \"typeRef\": {\"name\": \"String\", \"isArray\": true}, \"httpMethod\": \"GET\", \"page\": {\"maxLimit\": 10}},\n\t\t{\"name\": \"listSkus\", \"typeRef\": {\"name\": \"String\", \"isArray\": true}, \"httpMethod\": \"GET\", \"page\": {\"defaultLimit\": 2, \"maxLimit\": 5}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Catalog\",\"operations\":[{\"httpMethod\":\"GET\",\"name\":\"listItems\",\"page\":{},\"typeRef\":{\"isArray\":true,\"name\":\"Item\"}},{\"httpMethod\":\"GET\",\"name\":\"listTags\",\"page\":{\"maxLimit\":10},\"typeRef\":{\"isArray\":true,\"name\":\"String\"}},{\"httpMethod\":\"GET\",\"name\":\"listSkus\",\"page\":{\"defaultLimit\":2,\"maxLimit\":5},\"typeRef\":{\"isArray\":true,\"name\":\"String\"}}]}]}"
+    },
+    {
+      "name": "a page limit of 0",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"page\": {\"maxLimit\": 0}}]}",
+      "accept": false,
+      "error": "a page limit of 0: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page/maxLimit': minimum: got 0, want 1"
+    },
+    {
+      "name": "a page limit past 1000",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"page\": {\"defaultLimit\": 1001}}]}",
+      "accept": false,
+      "error": "a page limit past 1000: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page/defaultLimit': maximum: got 1,001, want 1,000"
+    },
+    {
+      "name": "an unknown key on a page",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"page\": {\"pageSize\": 10}}]}",
+      "accept": false,
+      "error": "an unknown key on a page: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page': additional properties 'pageSize' not allowed"
+    },
+    {
       "name": "the user model's traits",
       "registry": "core",
       "input": "{\"kind\": \"DB\", \"name\": \"accounts\", \"types\": {\n\t\t\"Account\": {\"name\": \"Account\", \"role\": \"DBTable\", \"user\": {\"login\": \"email\", \"name\": \"displayName\"}},\n\t\t\"Admin\": {\"name\": \"Admin\", \"role\": \"DBTable\", \"user\": {\"login\": \"handle\", \"name\": \"\"}},\n\t\t\"Role\": {\"name\": \"Role\", \"role\": \"DBTable\", \"userRole\": {}}}}",
