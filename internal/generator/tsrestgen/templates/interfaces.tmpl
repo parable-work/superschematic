@@ -6,12 +6,17 @@
 // success envelope by the router) or an OperationResult to choose the status.
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
+{{- if .HasPages }}
+// A @paginated operation (D60) takes the page asked for as args.page and
+// returns a Page, {items, next}, next null after the last page:
+// pageFromRows builds one from up to limit + 1 rows.
+{{- end }}
 {{- if and .Identity .Identity.Routes }}
 // Nor are the user model's operations (D50), which the identity runtime
 // serves.
 {{- end }}
 
-import type { OperationResult, RequestContext } from '{{ .RuntimePackage }}';
+import type { OperationResult, {{ if .HasPages }}Page, PageRequest, {{ end }}RequestContext } from '{{ .RuntimePackage }}';
 {{- if .WebhookProviders }}
 import type { WebhookVerifier } from '{{ .RuntimePackage }}/hono';
 {{- end }}
@@ -50,6 +55,10 @@ export interface {{ .ArgsTypeName }} {
 {{- end }}
 {{- if .HasInput }}
   input{{ if not .InputRequired }}?{{ end }}: {{ .InputType }};
+{{- end }}
+{{- if .Page }}
+  /** The page asked for (D60): the cursor of the page before, absent for the first page, and the limit, 1 to {{ .Page.MaxLimit }}, {{ .Page.DefaultLimit }} when the caller sends none. */
+  page: PageRequest;
 {{- end }}
 }
 {{- else }}
