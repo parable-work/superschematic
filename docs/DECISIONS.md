@@ -5658,8 +5658,11 @@ Constants and Variants, and wave 2 (milestone 9) Revisions,
 Dependencies, Links (with D56's many-valued links, and what a move of a
 link's target moves on, which Reactions and Lease hear), and D56's
 Numbering, StateRules, Approvals and Timers, whose deadlines the runner
-fires, with their guidance, migrations on both databases, configs,
-guards, fields, operations, schedules and veto codes; and
+fires, and milestone 11 Branches, the version graph's Rust engine over
+its fixed layout in the call's transaction on either database, its ids
+drawn from the engine's own source (a behavior's `uuids()`), with their
+guidance, migrations on both databases, configs, guards, fields,
+operations, schedules and veto codes; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
 behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
 retention's and the tools', and those of the ported behaviors'
@@ -5671,8 +5674,8 @@ number (a write a rollback undid leaves a gap in a Postgres identity
 column), but for a step it lists with what explains it (a change the
 recording does not see). CI tests the
 workspace on both databases. The Node-API addon is milestone 7, the
-other core behaviors (Rollups, Search and Reactions, then Branches)
-milestones 10 and 11, and the work queue's milestone 12. Until the Rust
+other core behaviors (Rollups, Search and Reactions) milestone 10, and
+the work queue's milestone 12. Until the Rust
 engine passes the TypeScript suite, `@superschematic/engine` is the
 TypeScript implementation and nothing uses the workspace.
 

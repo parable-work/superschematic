@@ -29,9 +29,10 @@
 //! [`Constants`] and [`Variants`]; wave 2 (milestone 9), [`Revisions`],
 //! [`Dependencies`], [`Links`] (with D56's many-valued links, and
 //! [`revised`], what a move of a link's target moves on), [`Numbering`],
-//! and D56's [`StateRules`], [`Approvals`] and [`Timers`]. The other core
-//! behaviors come in the waves after ([`NAMES`] lists the ones [`core`]
-//! registers).
+//! and D56's [`StateRules`], [`Approvals`] and [`Timers`]; and milestone
+//! 11, [`Branches`], the version graph's Rust engine over its fixed layout
+//! in the call's transaction ([`graph`]). The other core behaviors come in
+//! the wave after ([`NAMES`] lists the ones [`core`] registers).
 
 pub mod approvals;
 pub mod branches;
@@ -74,7 +75,7 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 11] = [
+pub const NAMES: [&str; 12] = [
     "Workflow",
     "Comments",
     "Revisions",
@@ -82,6 +83,7 @@ pub const NAMES: [&str; 11] = [
     "Links",
     "Constants",
     "Variants",
+    "Branches",
     "StateRules",
     "Approvals",
     "Numbering",
@@ -100,6 +102,7 @@ pub fn core() -> BehaviorSet {
         .with(Links)
         .with(Constants)
         .with(Variants)
+        .with(Branches)
         .with(StateRules)
         .with(Approvals)
         .with(Numbering)

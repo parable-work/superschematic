@@ -1047,6 +1047,20 @@ impl<'d> Run<'d> {
             }
         };
         match self.bindings.get(&symbol.key()) {
+            // An instant bound from a number stands in a string as a
+            // date-time: Branches' times are RFC 3339 (D32), the
+            // instances' epoch milliseconds.
+            Some(known @ Bound::Time(_)) if actual.is_string() => {
+                if *known == bound {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{at}: expected {{{{{}}}}}, bound to {}, got {actual}",
+                        symbol.text,
+                        render(symbol, known, false)
+                    ))
+                }
+            }
             Some(known) => {
                 let rendered = render(symbol, known, true);
                 if js_equal(&rendered, actual) {
@@ -1115,9 +1129,11 @@ impl<'d> Run<'d> {
                         Value::String(text) => text,
                         other => other.to_string(),
                     }];
-                    // An instant in text is a date-time, or, in JSON a
-                    // string carries, its epoch milliseconds.
+                    // An instant in text is a date-time, the version
+                    // graph's canonical one too, or, in JSON a string
+                    // carries, its epoch milliseconds.
                     if let (Bound::Time(ms), false) = (&known, symbol.micros) {
+                        forms.push(canonical_iso_of(*ms));
                         forms.push(ms.to_string());
                     }
                     return forms.iter().any(|text| {
@@ -1283,28 +1299,48 @@ pub fn iso_of(ms: i64) -> String {
     )
 }
 
-/// The instant an RFC 3339 date-time names, as [`iso_of`] writes it.
+/// An instant in epoch milliseconds as the version graph's canonical
+/// date-time writes it (D32): [`iso_of`]'s, its fraction of a second
+/// without trailing zeros and left out when zero.
+pub fn canonical_iso_of(ms: i64) -> String {
+    let iso = iso_of(ms);
+    let (whole, fraction) = iso.split_at(19);
+    let digits = fraction.trim_start_matches('.').trim_end_matches('Z');
+    let digits = digits.trim_end_matches('0');
+    if digits.is_empty() {
+        format!("{whole}Z")
+    } else {
+        format!("{whole}.{digits}Z")
+    }
+}
+
+/// The instant an RFC 3339 date-time names, as [`iso_of`] or
+/// [`canonical_iso_of`] writes it.
 pub fn ms_of_iso(text: &str) -> Option<i64> {
     let bytes = text.as_bytes();
-    if bytes.len() != 24
+    if bytes.len() < 20
         || bytes[4] != b'-'
         || bytes[7] != b'-'
         || bytes[10] != b'T'
         || bytes[13] != b':'
         || bytes[16] != b':'
-        || bytes[19] != b'.'
-        || bytes[23] != b'Z'
+        || bytes[bytes.len() - 1] != b'Z'
     {
         return None;
     }
     let number = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
     let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hour, minute, second, milli) = (
-        number(11..13)?,
-        number(14..16)?,
-        number(17..19)?,
-        number(20..23)?,
-    );
+    let fraction = text.get(19..text.len() - 1)?;
+    let milli = match fraction.strip_prefix('.') {
+        None if fraction.is_empty() => 0,
+        Some(digits)
+            if (1..=3).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            format!("{digits:0<3}").parse::<i64>().ok()?
+        }
+        _ => return None,
+    };
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
     // Howard Hinnant's days_from_civil.
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
@@ -1314,7 +1350,7 @@ pub fn ms_of_iso(text: &str) -> Option<i64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     let ms = days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1000 + milli;
-    (iso_of(ms) == text).then_some(ms)
+    (iso_of(ms) == text || canonical_iso_of(ms) == text).then_some(ms)
 }
 
 /// The core meta-schema with behaviors let through, as the TypeScript
@@ -1579,11 +1615,13 @@ impl AccessPolicy for AnswerPolicy {
 /// test files, whose scenarios need no behavior or few, and the core
 /// behaviors' files whose behaviors this engine has (a scenario that also
 /// composes one not ported yet is skipped).
-pub const ENGINE_FILES: [&str; 22] = [
+pub const ENGINE_FILES: [&str; 24] = [
     "access",
     "compat",
     "core-approvals",
     "core-behaviors",
+    "core-branches",
+    "core-branches-sweep",
     "core-comments",
     "core-constants",
     "core-dependencies",
@@ -1636,6 +1674,23 @@ mod tests {
         );
         assert_eq!(ms_of_iso("2025-13-09T08:53:20.123Z"), None);
         assert_eq!(iso_of(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        // The version graph's canonical date-time trims its fraction.
+        assert_eq!(
+            canonical_iso_of(1_760_000_000_120),
+            "2025-10-09T08:53:20.12Z"
+        );
+        assert_eq!(canonical_iso_of(1_760_000_000_000), "2025-10-09T08:53:20Z");
+        assert_eq!(
+            ms_of_iso("2025-10-09T08:53:20.12Z"),
+            Some(1_760_000_000_120)
+        );
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20Z"), Some(1_760_000_000_000));
+        assert_eq!(
+            ms_of_iso("2025-10-09T08:53:20.120Z"),
+            Some(1_760_000_000_120)
+        );
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20.1200Z"), None);
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20.Z"), None);
     }
 
     #[test]
