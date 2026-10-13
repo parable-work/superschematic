@@ -147,7 +147,12 @@ function runFile(runtime, file) {
     const log = join(logs, runtime, `${file}.log`);
     mkdirSync(dirname(log), { recursive: true });
     const chunks = [];
-    const child = spawn(program, args, { cwd: root, env: { ...process.env, ENGINE_IMPL: 'rust', FORCE_COLOR: '0', NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Bun shortens its report under an agent (CLAUDECODE, AI_AGENT); the
+    // ratchet reads the whole of it.
+    const env = { ...process.env, ENGINE_IMPL: 'rust', FORCE_COLOR: '0', NO_COLOR: '1' };
+    delete env.CLAUDECODE;
+    delete env.AI_AGENT;
+    const child = spawn(program, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (chunk) => chunks.push(chunk));
     child.stderr.on('data', (chunk) => chunks.push(chunk));
     let timedOut = false;
@@ -189,6 +194,13 @@ function gaps(output) {
     .join(', ');
 }
 
+// counts reads how many of a file's tests passed and failed from its
+// runner's report: node's `ℹ pass N`, Bun's ` N pass`.
+function counts(runtime, output) {
+  const read = (pattern) => Number(output.match(pattern)?.[1] ?? 0);
+  return runtime === 'node' ? { pass: read(/^ℹ pass (\d+)$/m), fail: read(/^ℹ fail (\d+)$/m) } : { pass: read(/^ *(\d+) pass$/m), fail: read(/^ *(\d+) fail$/m) };
+}
+
 function tail(output, lines = 60) {
   return output.split('\n').slice(-lines).join('\n');
 }
@@ -200,7 +212,11 @@ for (const runtime of options.runtimes) {
   const started = Date.now();
   const results = await runAll(runtime);
   let passed = 0;
+  const tests = { pass: 0, fail: 0 };
   for (const result of results) {
+    const { pass, fail } = counts(runtime, result.output);
+    tests.pass += pass;
+    tests.fail += fail;
     const entry = pending.entries.get(result.file);
     const listed = entry !== undefined && entry.runtimes.includes(runtime);
     if (result.passed) {
@@ -221,7 +237,9 @@ for (const runtime of options.runtimes) {
       }
     }
   }
-  console.log(`${runtime}: ${passed} of ${results.length} test files pass on the Rust engine (${Math.round((Date.now() - started) / 1000)}s; logs ${join(logs, runtime)})`);
+  console.log(
+    `${runtime}: ${passed} of ${results.length} test files pass on the Rust engine, and ${tests.pass} of ${tests.pass + tests.fail} tests (${Math.round((Date.now() - started) / 1000)}s; logs ${join(logs, runtime)})`
+  );
 }
 
 if (options.update) {

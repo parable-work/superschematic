@@ -15,7 +15,8 @@ name: ci
 # engine's work-queue
 # package and the engine example, the
 # Python schema runtime, the Rust http runtime, the Rust engine's workspace
-# (D58), the version graph (the core
+# and the engine's TypeScript suite on it through its Node-API addon (D58),
+# the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
 # Python engines against Postgres), the Starlight docs build, and the
@@ -908,6 +909,83 @@ jobs:
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: cargo test --workspace --all-features
 
+  engine-napi:
+    # The engine's TypeScript suite on the Rust engine (D58): the Node-API
+    # addon (runtime/engine/rust/napi) built as scripts/engine-napi.sh builds
+    # it, then every test file run on its own with ENGINE_IMPL=rust under
+    # Node.js and Bun and held to runtime/engine/typescript/test/rust-pending.txt
+    # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
+    # file not on the list fails the job, and so does a listed file that
+    # passes. The setup is the typescript job's, which the engine's build
+    # needs.
+    name: engine-napi (the engine's TypeScript suite on the Rust engine)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        # scripts/superscalar-dep.sh reads go env for the archive directory.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Install Rust toolchain
+        # The wasm32 target builds the version-graph core the TypeScript
+        # engine's Branches behavior runs.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: Build the schema and http runtimes and the version graph's package
+        # The engine's scripts/link-local-deps.mjs copies their dist/ into
+        # its node_modules.
+        run: |
+          (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build)
+          (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
+          (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
+
+      - name: Build the engine and its Node-API addon
+        working-directory: runtime/engine/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          ../../../scripts/engine-napi.sh
+
+      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
+        working-directory: runtime/engine/typescript
+        run: bun run test:rust
+
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
     # The scenarios through each language's engine are the full tier; a pull
@@ -1111,6 +1189,7 @@ jobs:
       - python
       - rust
       - engine-rust
+      - engine-napi
       - versiongraph
       - docs
     runs-on: ubuntu-latest
