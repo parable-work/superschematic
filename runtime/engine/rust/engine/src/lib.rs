@@ -53,6 +53,7 @@ mod indexes;
 pub mod instances;
 pub mod json;
 mod namespaces;
+mod options;
 mod paging;
 mod principal;
 mod registry;

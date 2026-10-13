@@ -202,6 +202,15 @@ export function permissionPolicy(options: { permissionMatcher?: PermissionMatche
 }
 
 /**
+ * isEnginePermissionPolicy is whether permissionPolicy made the policy
+ * without a matcher of its own: the Rust engine's "permission" shorthand,
+ * which its facade (src/native) passes in its place.
+ */
+export function isEnginePermissionPolicy(policy: AccessPolicy): boolean {
+  return enginePermissionPolicies.has(policy);
+}
+
+/**
  * boundPolicy is the policy an engine asks: a permissionPolicy made
  * without a matcher matches with the engine's, and any other policy is
  * itself.
