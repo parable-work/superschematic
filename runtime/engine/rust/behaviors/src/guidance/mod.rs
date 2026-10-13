@@ -6,6 +6,7 @@
 //! text is plain ASCII and depends only on the config and the type.
 
 pub(crate) mod approvals;
+pub(crate) mod branches;
 pub(crate) mod comments;
 pub(crate) mod constants;
 pub(crate) mod dependencies;

@@ -34,6 +34,7 @@
 //! registers).
 
 pub mod approvals;
+pub mod branches;
 pub mod comments;
 pub mod constants;
 pub mod dependencies;
@@ -49,6 +50,10 @@ pub mod variants;
 pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
+pub use branches::{
+    uuid_v5, Branches, BranchesConfig, BranchesKind, BranchesParent, BranchesSweep, BranchesUnit,
+    ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROOT_NAMESPACE,
+};
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};

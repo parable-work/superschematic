@@ -24,10 +24,12 @@
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
 
+mod core_branches;
 mod core_dependencies;
 mod core_numbering;
 mod core_revisions;
 
+pub use core_branches::Keep;
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
 pub use core_revisions::RevisionHold;
