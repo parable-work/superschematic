@@ -56,6 +56,7 @@ mod core;
 mod engine;
 mod error;
 pub mod facade;
+pub mod fixed;
 pub mod postgres;
 pub mod sqlite;
 pub mod storage;
