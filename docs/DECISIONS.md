@@ -6063,6 +6063,10 @@ reads a parameter's first value and an empty one as absent. Every server
 and SDK generator refuses a paged operation until it renders it
 (`apigen.RefusePages`), and `internal/generator/page_refusal_test.go`
 holds each to it.
+The Rust server renders it: a paged operation's `Args` carry `page`, which
+the router reads by `<Args>::PAGE` and `check` holds to it, its method and
+its in-process call return `runtime::page::Page<T>`
+(`rustrestgen/page_test.go`).
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,

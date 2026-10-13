@@ -27,6 +27,9 @@ use {{ .RuntimeCrateIdent }}::{
     request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
     RequestContext, RouterOptions, ScalarConstraints,
 };
+{{- if .HasPages }}
+use {{ .RuntimeCrateIdent }}::page::PageSpec;
+{{- end }}
 {{- if .HasAuth }}
 use {{ .RuntimeCrateIdent }}::Principal;
 {{- end }}
@@ -255,7 +258,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 {{- if .HasArgs }}
 
 /// Decodes the arguments of {{ .Namespace }}.{{ .Name }} in the order the TypeScript
-/// router reads them: path, query, input, then body fields.
+/// router reads them: path, query, {{ if .Page }}the page, {{ end }}input, then body fields.
 fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
     Ok({{ .ArgsName }} {
 {{- range .PathArgs }}
@@ -263,6 +266,9 @@ fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName
 {{- end }}
 {{- range .QueryArgs }}
         {{ .Field }}: {{ .Spec }}.query(query)?,
+{{- end }}
+{{- if .Page }}
+        page: {{ .ArgsName }}::PAGE.query(query)?,
 {{- end }}
 {{- with .Input }}
         input: {{ if .Required }}required_input{{ else }}input{{ end }}({{ if $endpoint.BodyArgs }}body.clone(){{ else }}body{{ end }}, {{ .Parse }})?,
@@ -274,16 +280,30 @@ fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName
 }
 
 impl {{ .ArgsName }} {
+{{- with .Page }}
+    /// The route's @paginated limits (D60): the router reads the `cursor`
+    /// and `limit` query parameters into `page` by them, and `check` holds
+    /// a caller's `page` to them.
+    pub const PAGE: PageSpec = {{ .SpecExpr }};
+{{ end }}
     /// Checks arguments a caller built, in-process rather than in a
     /// request, as the router checks a request's: each by its parameter's
+{{- if .Page }}
+    /// rules, the page by the route's limits, then the input by its type's,
+    /// a refusal the 400 the router answers.
+{{- else }}
     /// rules, then the input by its type's, a refusal the 400 the router
     /// answers.
+{{- end }}
     pub fn check(&self) -> Result<(), ApiError> {
 {{- range .PathArgs }}
         {{ .Spec }}.check_value(ParamLocation::Path, &self.{{ .Field }})?;
 {{- end }}
 {{- range .QueryArgs }}
         {{ .Spec }}.check_value(ParamLocation::Query, &self.{{ .Field }})?;
+{{- end }}
+{{- if .Page }}
+        Self::PAGE.check(&self.page)?;
 {{- end }}
 {{- with .Input }}
 {{- if .Prepare }}
