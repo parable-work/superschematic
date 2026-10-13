@@ -89,11 +89,16 @@ value, in the file's member order. `canonical_json` rewrites any JSON text
 in that form. A refused payload is a `SchemaFileError` with the source and
 a JSON pointer per issue, worded as the TypeScript loader words it: ajv's
 message for a keyword, an `if` branch's own failure beside the errors
-inside it, an unknown key named by itself. The issues come sorted by
-pointer, then by the ajv keyword that failed, then by message, each
-compared by code point, not in the order either validator finds them, as
-the TypeScript loader sorts them (D58), so the two list one payload's
-issues alike. A syntax error's message is not the JavaScript runtime's.
+inside it, an unknown key named by itself, and text that is not JSON in
+Node 24's `JSON.parse` words, position and column in UTF-16 code units
+(`tests/json_syntax_errors.rs` holds Node's message for each case). The
+issues come sorted by pointer, then by the ajv keyword that failed, then by
+message, each compared by code point, not in the order either validator
+finds them, as the TypeScript loader sorts them (D58), so the two list one
+payload's issues alike. Where V8's message holds half a surrogate pair (an
+unexpected character past U+FFFF, or quoted context that cuts one), which
+no Rust string can hold, this one holds U+FFFD, and the reader refuses JSON
+nested more than 1000 levels deep, which V8 reads.
 
 The default meta-schema is the core registry's, `CORE_META_SCHEMA`
 (`src/schemafile/schema-file.json`, which `internal/tools/schemafiletypes`

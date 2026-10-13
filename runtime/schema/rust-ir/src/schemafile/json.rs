@@ -8,6 +8,17 @@
 //! last value, and a `\u` escape that is half a surrogate pair read as
 //! U+FFFD, as Go reads it. It also notes the first repeated key, by its
 //! JSON pointer, which the loader refuses, as Go's reader does.
+//!
+//! It words a syntax error as Node 24's `JSON.parse` (V8's JSON parser)
+//! does, at the same character of the same text: a position and a column
+//! count UTF-16 code units, lines break at `\n`, `\r` and `\r\n`, and an
+//! unexpected token quotes the text, or ten code units either side of the
+//! token when the text is 21 units or more. tests/json_syntax_errors.rs
+//! holds Node's message for each case. A Rust string holds no lone
+//! surrogate, so where V8's message holds half a pair (the token is a
+//! character past U+FFFF, or the quoted context cuts one) this one holds
+//! U+FFFD. V8 nests without bound; this reader refuses more than
+//! `MAX_DEPTH` levels, in its own words.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -118,19 +129,30 @@ impl Node {
     }
 }
 
-/// JSON text the reader refuses, with the JavaScript runtime's reason.
+/// How many UTF-16 code units of context V8 quotes on each side of an
+/// unexpected token (`kMaxContextCharacters`).
+const CONTEXT: usize = 10;
+
+/// The length from which V8 quotes the context around an unexpected token
+/// rather than the whole text (`kMinOriginalSourceLengthForContext`).
+const MIN_LENGTH_FOR_CONTEXT: usize = 2 * CONTEXT + 1;
+
+/// Texts V8 names whole when it meets an unexpected token in one: what
+/// `JSON.parse` gets from `undefined`, `NaN`, `Infinity` and `{}`.
+const SPECIAL_TEXTS: [&str; 4] = ["[object Object]", "undefined", "Infinity", "NaN"];
+
+/// JSON text the reader refuses, with the reason Node's `JSON.parse` gives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonSyntaxError {
     message: String,
 }
 
 impl JsonSyntaxError {
-    fn at(message: &str, offset: usize) -> Self {
-        Self {
-            message: format!("{message} at position {offset}"),
-        }
+    fn new(message: String) -> Self {
+        Self { message }
     }
 
+    /// The message, as Node 24's `JSON.parse` words it.
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -161,18 +183,13 @@ pub(crate) fn parse(text: &str) -> Result<Parsed, JsonSyntaxError> {
         repeated: None,
     };
     reader.skip_space();
-    if reader.at >= reader.text.len() {
-        return Err(JsonSyntaxError {
-            message: "Unexpected end of JSON input".to_owned(),
-        });
-    }
     let node = reader.value(0)?;
     reader.skip_space();
     if reader.at < reader.text.len() {
-        return Err(JsonSyntaxError::at(
-            "Unexpected non-whitespace character after JSON",
-            reader.at,
-        ));
+        return Err(JsonSyntaxError::new(format!(
+            "Unexpected non-whitespace character after JSON at {}",
+            reader.location()
+        )));
     }
     Ok(Parsed {
         node,
@@ -200,21 +217,93 @@ impl Reader<'_> {
         self.text.get(self.at).copied()
     }
 
-    fn unexpected(&self) -> JsonSyntaxError {
-        match self.peek() {
-            None => JsonSyntaxError {
-                message: "Unexpected end of JSON input".to_owned(),
-            },
-            Some(_) => {
-                let c = self.source[self.at..].chars().next().unwrap_or('?');
-                JsonSyntaxError::at(&format!("Unexpected token '{c}'"), self.at)
+    /// The character at the reader, if any.
+    fn current(&self) -> Option<char> {
+        self.source[self.at..].chars().next()
+    }
+
+    /// `message` at the reader, as V8 words an error at a position:
+    /// `<message> in JSON at position <p> (line <l> column <c>)`.
+    fn expected(&self, message: &str) -> JsonSyntaxError {
+        JsonSyntaxError::new(format!("{message} in JSON at {}", self.location()))
+    }
+
+    /// Where the reader is, as V8 gives it: `position <p> (line <l> column
+    /// <c>)`, the position and column in UTF-16 code units, from 0 and 1,
+    /// and the line from 1. JSON breaks lines at `\n` and `\r`, and counts
+    /// `\r\n` as one break.
+    fn location(&self) -> String {
+        let before = &self.text[..self.at];
+        let mut line = 1;
+        let mut line_start = 0;
+        let mut i = 0;
+        while i < before.len() {
+            if before[i] == b'\r' && before.get(i + 1) == Some(&b'\n') {
+                i += 1;
             }
+            if before[i] == b'\r' || before[i] == b'\n' {
+                line += 1;
+                line_start = i + 1;
+            }
+            i += 1;
         }
+        let position = utf16_len(&self.source[..self.at]);
+        let column = 1 + utf16_len(&self.source[line_start..self.at]);
+        format!("position {position} (line {line} column {column})")
+    }
+
+    /// The end of the text where a value or the rest of an escape belongs.
+    fn end_of_input() -> JsonSyntaxError {
+        JsonSyntaxError::new("Unexpected end of JSON input".to_owned())
+    }
+
+    /// The character at the reader where V8 expected something else and has
+    /// no message of its own for the place: the end of the text, a number
+    /// (a digit or `-`), a string (`"`) or any other token.
+    fn unexpected(&self) -> JsonSyntaxError {
+        match self.current() {
+            None => Self::end_of_input(),
+            Some('0'..='9' | '-') => self.expected("Unexpected number"),
+            Some('"') => self.expected("Unexpected string"),
+            Some(_) => self.unexpected_token(),
+        }
+    }
+
+    /// An unexpected token, quoted with the text around it:
+    /// `Unexpected token '<t>', "<text>" is not valid JSON`, the whole text
+    /// when it is shorter than 21 UTF-16 code units, else ten units either
+    /// side of the token, `...` marking each side that is not the text's
+    /// start or end. The token is one UTF-16 code unit. V8 names one of
+    /// [`SPECIAL_TEXTS`] whole instead.
+    fn unexpected_token(&self) -> JsonSyntaxError {
+        if SPECIAL_TEXTS.contains(&self.source) {
+            return JsonSyntaxError::new(format!("\"{}\" is not valid JSON", self.source));
+        }
+        let units: Vec<u16> = self.source.encode_utf16().collect();
+        let at = utf16_len(&self.source[..self.at]);
+        let quote = |start: usize, end: usize| String::from_utf16_lossy(&units[start..end]);
+        let token = quote(at, at + 1);
+        let len = units.len();
+        let context = if len < MIN_LENGTH_FOR_CONTEXT {
+            format!("\"{}\"", self.source)
+        } else if at < CONTEXT {
+            format!("\"{}\"...", quote(0, at + CONTEXT))
+        } else if at < len - CONTEXT {
+            format!("...\"{}\"...", quote(at - CONTEXT, at + CONTEXT))
+        } else {
+            format!("...\"{}\"", quote(at - CONTEXT, len))
+        };
+        JsonSyntaxError::new(format!(
+            "Unexpected token '{token}', {context} is not valid JSON"
+        ))
     }
 
     fn value(&mut self, depth: usize) -> Result<Node, JsonSyntaxError> {
         if depth > MAX_DEPTH {
-            return Err(JsonSyntaxError::at("JSON nests too deeply", self.at));
+            return Err(JsonSyntaxError::new(format!(
+                "JSON nests more than {MAX_DEPTH} levels deep at {}",
+                self.location()
+            )));
         }
         match self.peek() {
             Some(b'{') => self.object(depth),
@@ -224,6 +313,7 @@ impl Reader<'_> {
             Some(b'f') => self.literal("false", Node::Bool(false)),
             Some(b'n') => self.literal("null", Node::Null),
             Some(b'-' | b'0'..=b'9') => self.number(),
+            // Never a number or a string here.
             _ => Err(self.unexpected()),
         }
     }
@@ -233,6 +323,7 @@ impl Reader<'_> {
             self.at += word.len();
             Ok(node)
         } else {
+            // The first character that differs, or the end of the text.
             let mut probe = self.at;
             while probe < self.text.len() && self.text[probe] == word.as_bytes()[probe - self.at] {
                 probe += 1;
@@ -256,16 +347,22 @@ impl Reader<'_> {
             self.at += 1;
         }
         match self.peek() {
-            Some(b'0') => self.at += 1,
+            Some(b'0') => {
+                self.at += 1;
+                if let Some(b'0'..=b'9') = self.peek() {
+                    // A leading zero.
+                    return Err(self.expected("Unexpected number"));
+                }
+            }
             Some(b'1'..=b'9') => {
                 self.digits();
             }
-            _ => return Err(self.unexpected()),
+            _ => return Err(self.expected("No number after minus sign")),
         }
         if self.peek() == Some(b'.') {
             self.at += 1;
             if self.digits() == 0 {
-                return Err(self.unexpected());
+                return Err(self.expected("Unterminated fractional number"));
             }
         }
         if let Some(b'e' | b'E') = self.peek() {
@@ -274,7 +371,7 @@ impl Reader<'_> {
                 self.at += 1;
             }
             if self.digits() == 0 {
-                return Err(self.unexpected());
+                return Err(self.expected("Exponent part is missing a number"));
             }
         }
         Ok(Node::Number(self.source[start..self.at].to_owned()))
@@ -286,7 +383,7 @@ impl Reader<'_> {
             let digit = self
                 .peek()
                 .and_then(|b| (b as char).to_digit(16))
-                .ok_or_else(|| JsonSyntaxError::at("Bad Unicode escape in JSON", self.at))?;
+                .ok_or_else(|| self.expected("Bad Unicode escape"))?;
             value = value * 16 + digit;
             self.at += 1;
         }
@@ -315,39 +412,35 @@ impl Reader<'_> {
                     self.at += 1;
                     self.escape(&mut out)?;
                 }
-                Some(_) => {
-                    return Err(JsonSyntaxError::at(
-                        "Bad control character in string literal in JSON",
-                        self.at,
-                    ))
-                }
-                None => return Err(JsonSyntaxError::at("Unterminated string in JSON", self.at)),
+                Some(_) => return Err(self.expected("Bad control character in string literal")),
+                None => return Err(self.expected("Unterminated string")),
             }
         }
     }
 
+    /// The escape after a backslash. V8 takes the end of the text there as
+    /// the end of the input, and a character past U+00FF as an unexpected
+    /// token.
     fn escape(&mut self, out: &mut String) -> Result<(), JsonSyntaxError> {
-        let Some(b) = self.peek() else {
-            return Err(JsonSyntaxError::at("Unterminated string in JSON", self.at));
+        let c = match self.current() {
+            None => return Err(Self::end_of_input()),
+            Some('"') => '"',
+            Some('\\') => '\\',
+            Some('/') => '/',
+            Some('b') => '\u{8}',
+            Some('f') => '\u{c}',
+            Some('n') => '\n',
+            Some('r') => '\r',
+            Some('t') => '\t',
+            Some('u') => {
+                self.at += 1;
+                out.push(self.unicode_escape()?);
+                return Ok(());
+            }
+            Some(c) if u32::from(c) > 0xFF => return Err(self.unexpected_token()),
+            Some(_) => return Err(self.expected("Bad escaped character")),
         };
         self.at += 1;
-        let c = match b {
-            b'"' => '"',
-            b'\\' => '\\',
-            b'/' => '/',
-            b'b' => '\u{8}',
-            b'f' => '\u{c}',
-            b'n' => '\n',
-            b'r' => '\r',
-            b't' => '\t',
-            b'u' => self.unicode_escape()?,
-            _ => {
-                return Err(JsonSyntaxError::at(
-                    "Bad escaped character in JSON",
-                    self.at - 1,
-                ))
-            }
-        };
         out.push(c);
         Ok(())
     }
@@ -379,15 +472,21 @@ impl Reader<'_> {
             self.at += 1;
             return Ok(Node::Object(members));
         }
+        let mut first = true;
         loop {
             self.skip_space();
             if self.peek() != Some(b'"') {
-                return Err(self.unexpected());
+                return Err(self.expected(if first {
+                    "Expected property name or '}'"
+                } else {
+                    "Expected double-quoted property name"
+                }));
             }
+            first = false;
             let key = self.string()?;
             self.skip_space();
             if self.peek() != Some(b':') {
-                return Err(self.unexpected());
+                return Err(self.expected("Expected ':' after property name"));
             }
             self.at += 1;
             self.skip_space();
@@ -412,7 +511,7 @@ impl Reader<'_> {
                     self.at += 1;
                     return Ok(Node::Object(members));
                 }
-                _ => return Err(self.unexpected()),
+                _ => return Err(self.expected("Expected ',' or '}' after property value")),
             }
         }
     }
@@ -438,7 +537,7 @@ impl Reader<'_> {
                     self.at += 1;
                     return Ok(Node::Array(items));
                 }
-                _ => return Err(self.unexpected()),
+                _ => return Err(self.expected("Expected ',' or ']' after array element")),
             }
         }
     }
@@ -453,6 +552,11 @@ impl Reader<'_> {
         pointer.push_str(&escape_pointer(key));
         pointer
     }
+}
+
+/// The length of text in UTF-16 code units, a JavaScript string's length.
+fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
 }
 
 /// A key as a JSON pointer segment: `~` as `~0`, `/` as `~1`.
