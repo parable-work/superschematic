@@ -3,7 +3,9 @@
 # Beta and Live are cloud environments with a CI identity, and Review
 # extends Beta with a parameter. The names sort in the order the stack
 # deploys them, so the workflow is the same whether the environments come
-# in name or in declaration order.
+# in name or in declaration order. The stack deploys the site shop-web,
+# so each cloud environment has a domain: the fake target's site has a
+# public address before its rollout only under one.
 kind: Stack
 types:
   Shop:
@@ -13,6 +15,7 @@ types:
       deploy:
         - { name: shop-api, kind: API }
         - { name: shop-orders, kind: API }
+        - { name: shop-web, kind: Site }
       expose:
         - service: { name: shop-api, kind: API }
   Orders:
@@ -35,6 +38,7 @@ types:
     environment:
       target: fake
       values: { project: acme-beta, projectNumber: "123456789012", region: us-east1 }
+      domain: beta.acme.dev
       settings:
         - of: { deployable: Orders }
           env: { FULFILLMENT_REGION: { value: us } }
@@ -44,6 +48,7 @@ types:
     environment:
       target: fake
       values: { project: acme-live, projectNumber: "210987654321", region: us-east1, production: true }
+      domain: acme.dev
       settings:
         - of: { service: { name: shop-db, kind: DB } }
           values: { tier: large, highAvailability: true }

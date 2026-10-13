@@ -167,21 +167,7 @@ async function main(): Promise<void> {
 {{- range .APIs }}
 
   // {{ .Service }}: its implementation, built from its Deps, and its routes.
-  const {{ .Deps }}: {{ .Module }}.Deps = {
-{{- if .Config }}
-    config: {{ .Config }},
-{{- end }}
-{{- if .Database }}
-    db: {{ .Database.Var }},
-{{- end }}
-{{- range .Calls }}
-    {{ .Field }}: {{ .Client.Var }},
-{{- end }}
-{{- range .Buckets }}
-    {{ .Field }}: {{ .Bucket.Var }},
-{{- end }}
-    logger: logger.child({ api: {{ tsQuote .Service }} }),
-  };
+  {{ template "ts-deps" . }}
   const {{ .Implementations }} = await construct({{ tsQuote .Service }}, 'implementation', () => {{ .Impl }}.create({{ .Deps }}));
 {{- if .Authenticate }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
@@ -200,8 +186,10 @@ async function main(): Promise<void> {
 {{- if .AnyCORS }}
 
   // A site's browser calls an API here from the site's origin: each API a
-  // site calls answers CORS for the origins its CORS field lists, and no
-  // other, the API a request is by the operations that take it.
+  // site calls answers CORS for the origins its CORS field lists, the API a
+  // request is by the operations that take it, and hands a preflight from
+  // another origin on to the app, so an identity API's CORS still answers
+  // its trusted origins (section 8.10).
   const handle = corsHandler(
     [
 {{- range .APIs }}
@@ -267,14 +255,7 @@ function listenPort(): number {
   return port;
 }
 
-/** Loads an API's configuration, naming the API when it fails. */
-function configure<T>(api: string, load: () => T): T {
-  try {
-    return load();
-  } catch (error) {
-    throw new Error(`configuration of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  }
-}
+{{ template "ts-configure" . }}
 {{- if .Identity }}
 
 /**
@@ -296,65 +277,12 @@ function identityConfig(field: string): IdentityConfig | undefined {
 }
 {{- end }}
 
-/** Builds what an API's implementation exports, naming the API when it fails. */
-async function construct<T>(api: string, what: string, build: () => T | Promise<T>): Promise<T> {
-  try {
-    return await build();
-  } catch (error) {
-    throw new Error(`${what} of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  }
-}
+{{ template "ts-construct" . }}
 {{- if .Databases }}
 
-{{ if .CloudSQL -}}
-/**
- * Opens the pool of the database field named field, which the environment
- * sets as field_URL, a connection string, or as a Cloud SQL connector
- * configuration, which the Cloud SQL Node connector connects with IAM
- * database authentication: an environment of stack {{ .Stack }} places
- * {{ range $i, $db := .CloudSQL }}{{ if $i }}, {{ end }}{{ $db }}{{ end }} on Cloud SQL. The pool connects when it is first used.
- */
-{{- else -}}
-/**
- * Opens the pool of the database field named field, which the environment
- * sets as field_URL, a connection string. The pool connects when it is
- * first used. No environment places a database of the server on Cloud SQL,
- * so it does not depend on the Cloud SQL connector, and a Cloud SQL
- * connector configuration is refused.
- */
+{{ template "ts-connect" . }}
 {{- end }}
-async function connect(service: string, field: string, db: Database): Promise<Pool> {
-{{- if not .CloudSQL }}
-  if ('cloudSql' in db) {
-    throw new Error(
-      `${field} is a Cloud SQL connector configuration, which server {{ .Name }} does not depend on: no environment of stack {{ .Stack }} placed its databases on Cloud SQL when it was built; set ${field}_URL, or build the stack again`
-    );
-  }
-{{- end }}
-  try {
-    return await connectPostgres(db, {
-      onIdleError: error => logger.warn('an idle database connection failed', { database: service, error }),
-    });
-  } catch (error) {
-    throw new Error(`database ${service}, from ${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  }
-}
-{{- end }}
-{{- range .Clients }}
-
-/**
- * Builds the client of {{ .Service }}. The server calls it at endpoint, the
- * field its edge derives, and the client sends the service credential the
- * edge's connector chose (docs/stack-model.md, section 9.6). The end user
- * travels per call: an implementation passes { forward: ctx } with each
- * call it makes for a request, so nothing captures the request's
- * Authorization here, where the Go entrypoint wraps its handler in
- * CaptureAuthorization (section 9.4).
- */
-function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
-  return new {{ .Module }}.{{ .Class }}({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
-}
-{{- end }}
+{{- template "ts-clients" . }}
 
 /**
  * Stops taking requests and gives those in flight SHUTDOWN_TIMEOUT_MS to

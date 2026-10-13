@@ -1,0 +1,13 @@
+# The Rust API deps-rust-shop calls (D57): no database, no settings and no
+# calls, so its Deps holds its config and its span. Its end users are its
+# implementation's to establish, and a webhook provider signs one of its
+# routes, so its Handlers hold an authenticator and the webhook verifiers.
+# The Rust Deps tests in internal/generator build it and its Rust SDK.
+name: deps-rust-pricing
+kind: API
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  sdk:
+    rust: { enabled: true }

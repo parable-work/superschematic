@@ -49,15 +49,17 @@ const (
 
 // Cache-Control of a site's objects. Cloud CDN keeps what Cloud Storage
 // serves as its Cache-Control says (cacheMode USE_ORIGIN_HEADERS). A file
-// is no-cache: the CDN keeps it, and asks the bucket whether it changed
-// before it serves it, since a file of a new build may come under the
-// same path as one of the last, and the switch to a new build shows at
-// once. The config is no-store: a deploy writes it again for the same
-// build when an API's address changes.
-const (
-	siteFileCache   = "no-cache"
-	siteConfigCache = "no-store"
-)
+// whose name holds its content's hash is cached a year, immutable: its
+// name has that content in every build, so a cached copy is right whether
+// the CDN keys it on the path before the URL map's rewrite or after it.
+// Every other file, index.html and the fallback among them, is no-cache:
+// the CDN keeps it, and asks the bucket whether it changed before it
+// serves it, since a file of a new build may come under the same path as
+// one of the last, and the switch to a new build shows at once
+// (ir.SiteFileCacheControl, D55, amended). The config is no-store: a
+// deploy writes it again for the same build when an API's address
+// changes.
+const siteConfigCache = "no-store"
 
 // siteUploads is how many files of a site the publisher uploads at once.
 const siteUploads = 8
@@ -228,6 +230,10 @@ func (p sitePublisher) Publish(ctx context.Context, req registry.SitePublishRequ
 	logf := func(format string, args ...any) { _, _ = fmt.Fprintf(log, "  "+format+"\n", args...) }
 	cloud := p.ext.cloud()
 	hex := strings.TrimPrefix(req.Digest, "sha256:")
+	fallback := ""
+	if d := env.Deployable(req.Site); d.Site != nil {
+		fallback = d.Site.Fallback
+	}
 	where := "gs://" + bucket + "/" + hex + "/"
 	switch _, err := cloud.ReadObject(ctx, bucket, hex+"/"+siteMarker); {
 	case err == nil:
@@ -237,7 +243,7 @@ func (p sitePublisher) Publish(ctx context.Context, req registry.SitePublishRequ
 	case req.Dir == "":
 		return fmt.Errorf("gcp: site %s has no files %s in %s; deploy a build of it, or give the digest of files an earlier deploy published", req.Site, req.Digest, where)
 	default:
-		n, err := uploadSite(ctx, cloud, bucket, hex, req.Dir)
+		n, err := uploadSite(ctx, cloud, bucket, hex, req.Dir, fallback)
 		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("gcp: site %s: %w; the infrastructure step of a deploy of %s creates its bucket", req.Site, err, req.Run.Name())
 		}
@@ -261,8 +267,8 @@ func (p sitePublisher) Publish(ctx context.Context, req registry.SitePublishRequ
 
 // uploadSite puts every file below dir in bucket under hex, siteUploads
 // at a time, and returns how many. It refuses a symbolic link, as the
-// build's digest does.
-func uploadSite(ctx context.Context, cloud Cloud, bucket, hex, dir string) (int, error) {
+// build's digest does. fallback is the site's, relative to dir.
+func uploadSite(ctx context.Context, cloud Cloud, bucket, hex, dir, fallback string) (int, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(p string, entry fs.DirEntry, err error) error {
 		switch {
@@ -294,7 +300,7 @@ func uploadSite(ctx context.Context, cloud Cloud, bucket, hex, dir string) (int,
 		go func() {
 			defer wg.Done()
 			for rel := range work {
-				err := uploadFile(ctx, cloud, bucket, hex, dir, rel)
+				err := uploadFile(ctx, cloud, bucket, hex, dir, rel, fallback)
 				mu.Lock()
 				if err != nil && first == nil {
 					first = err
@@ -311,13 +317,14 @@ func uploadSite(ctx context.Context, cloud Cloud, bucket, hex, dir string) (int,
 	return len(files), first
 }
 
-// uploadFile puts one file of a site, rel below dir, in bucket under hex.
-func uploadFile(ctx context.Context, cloud Cloud, bucket, hex, dir, rel string) error {
+// uploadFile puts one file of a site, rel below dir, in bucket under hex,
+// with the Cache-Control its name and the site's fallback give it.
+func uploadFile(ctx context.Context, cloud Cloud, bucket, hex, dir, rel, fallback string) error {
 	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
 	if err != nil {
 		return err
 	}
-	return cloud.WriteSiteObject(ctx, bucket, hex+"/"+rel, data, siteContentType(rel), siteFileCache)
+	return cloud.WriteSiteObject(ctx, bucket, hex+"/"+rel, data, siteContentType(rel), ir.SiteFileCacheControl(rel, fallback))
 }
 
 // siteContentType is the content type a file of a site is served with,

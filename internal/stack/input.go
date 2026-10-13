@@ -7,7 +7,11 @@
 // puts its result at `<output-root>/stack/<stack>/<environment>/environment.json`.
 package stack
 
-import ir "github.com/parable-work/superschematic/ir"
+import (
+	"path/filepath"
+
+	ir "github.com/parable-work/superschematic/ir"
+)
 
 // Input is what Resolve reads: a stack, the facts of the services it
 // references, and the environment to resolve.
@@ -26,6 +30,30 @@ type Input struct {
 	// `[derived_fields]`, which envgen names the generated fields by. The
 	// zero value is the core's rule.
 	FieldNames ir.DerivedFieldNames
+
+	// SchemasRoot is the absolute schemas root of the checkout the
+	// environment is resolved in, symlinks resolved, which platforms see
+	// as registry.StackEnvironment.SchemasRoot: the local target names its
+	// containers and derives its default ports per checkout by it. Every
+	// build of the CLI sets it (CanonicalSchemasRoot); empty resolves a
+	// local environment for no checkout, as before checkouts were told
+	// apart.
+	SchemasRoot string
+}
+
+// CanonicalSchemasRoot returns the absolute path of a schemas root with
+// its symlinks resolved, as Input.SchemasRoot holds it, so a checkout
+// reached through a link resolves as it does through its own path. A root
+// whose links do not resolve is its absolute path.
+func CanonicalSchemasRoot(root string) (string, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real, nil
+	}
+	return abs, nil
 }
 
 // Service is what resolution needs to know about one service. It is read

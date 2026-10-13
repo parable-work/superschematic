@@ -2,8 +2,11 @@
 //! and the core.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -61,6 +64,66 @@ impl std::fmt::Debug for Engine {
             .field("walk_ceiling", &self.walk_ceiling)
             .field("snapshot_every", &self.snapshot_every)
             .finish_non_exhaustive()
+    }
+}
+
+/// An engine's operations over a storage it borrows rather than its own:
+/// what [`Engine::on`] returns, for a caller that holds its storage only
+/// for a while, as a host holds a transaction for one call. Each operation
+/// is the [`Engine`] operation of the same name, run in one transaction of
+/// the borrowed storage. It is `Copy`, and each operation takes it by
+/// value, so an operation's future borrows only the engine, the storage and
+/// the operation's arguments.
+#[derive(Clone, Copy)]
+pub struct EngineOn<'a> {
+    pub(crate) engine: &'a Engine,
+    pub(crate) storage: &'a dyn Storage,
+}
+
+impl std::fmt::Debug for EngineOn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineOn")
+            .field("engine", self.engine)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Polls a future once, with a waker that does nothing, and returns its
+/// output, or [`Error::Invalid`] when it is not ready yet, dropping it.
+///
+/// An engine operation awaits nothing but its storage (only
+/// [`Engine::run_sweeper`] awaits a timer), so over a storage whose futures
+/// are always ready, such as the fixed layout over a synchronous client,
+/// one poll runs an operation to its end on the calling thread, with no
+/// executor. Over a storage that awaits real IO it is not ready, and is
+/// dropped, which rolls back what it began as dropping any operation does.
+pub fn ready<F: Future>(future: F) -> Result<F::Output, Error> {
+    let mut future = std::pin::pin!(future);
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(output) => Ok(output),
+        Poll::Pending => Err(Error::Invalid(
+            "an operation run synchronously awaited storage that was not ready: run it over a storage \
+             whose futures are always ready, such as the fixed layout over a synchronous client"
+                .to_owned(),
+        )),
+    }
+}
+
+/// The storage of an engine that has none of its own ([`Engine::unbound`]):
+/// every transaction it is asked for fails.
+struct Unbound;
+
+#[async_trait]
+impl Storage for Unbound {
+    async fn begin(&self) -> Result<Box<dyn Tx + '_>, Error> {
+        Err(Error::Invalid(
+            "the engine has no storage of its own: run its operations over a storage it borrows \
+             (Engine::on, Engine::run_on)"
+                .to_owned(),
+        ))
     }
 }
 
@@ -231,6 +294,54 @@ impl Engine {
         })
     }
 
+    /// The engine of the graph `descriptor` describes, as [`Engine::new`]
+    /// reads it, with no storage of its own: its operations run over a
+    /// storage the caller lends for each ([`Engine::on`],
+    /// [`Engine::run_on`]), and the engine's own operations fail with
+    /// [`Error::Invalid`]. A host that runs every operation inside a
+    /// transaction of its own builds its engine so.
+    pub fn unbound(descriptor: &str, options: Options) -> Result<Self, Error> {
+        Engine::new(descriptor, Arc::new(Unbound), options)
+    }
+
+    /// The engine's operations over `storage`, which they borrow for as long
+    /// as the value lives, in place of the engine's own. `storage` need not
+    /// be `'static`: it may borrow a transaction its caller holds.
+    pub fn on<'a>(&'a self, storage: &'a dyn Storage) -> EngineOn<'a> {
+        EngineOn {
+            engine: self,
+            storage,
+        }
+    }
+
+    /// Runs one operation over `storage`, borrowed for the call, on the
+    /// calling thread and without an executor, and returns its result. `op`
+    /// calls one operation of the [`EngineOn`] it is given, and [`ready`]
+    /// polls the operation's future once. So a host that holds a transaction
+    /// runs a graph operation inside it synchronously, over a storage that
+    /// borrows the transaction and whose futures are always ready (the
+    /// fixed layout over a synchronous client). An operation whose storage
+    /// was not ready fails with [`Error::Invalid`].
+    ///
+    /// ```no_run
+    /// # use superschematic_versiongraph_engine::{storage::Storage, Edits, Engine, Error, Ref};
+    /// # fn example(engine: &Engine, storage: &dyn Storage, actor: &str, draft: &Ref, edits: &Edits) -> Result<(), Error> {
+    /// // The operation's future borrows its arguments, so they outlive the closure.
+    /// let saved = engine.run_on(storage, |e| e.save(actor, &draft.id, draft.version, edits))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn run_on<'a, T, F>(
+        &'a self,
+        storage: &'a dyn Storage,
+        op: impl FnOnce(EngineOn<'a>) -> F,
+    ) -> Result<T, Error>
+    where
+        F: Future<Output = Result<T, Error>>,
+    {
+        ready(op(self.on(storage)))?
+    }
+
     /// A copy of the engine over another storage.
     pub fn with_storage(&self, storage: Arc<dyn Storage>) -> Self {
         Engine {
@@ -278,39 +389,14 @@ impl Engine {
 
     /// Creates a primary line of `root`: a ref with no parent.
     pub async fn create_primary(&self, actor: &str, root: &str, name: &str) -> Result<Ref, Error> {
-        let actor = actor_id(actor)?;
-        let root = id("root", root)?;
-        let mut tx = self.storage.begin().await?;
-        let result = tx
-            .create_ref(NewRef {
-                root,
-                parent: None,
-                base: None,
-                name: name.to_owned(),
-                actor,
-            })
-            .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .create_primary(actor, root, name)
+            .await
     }
 
     /// Creates a change set of `from_ref` whose base is `from_ref`'s head.
     pub async fn branch(&self, actor: &str, from_ref: &str, name: &str) -> Result<Ref, Error> {
-        let actor = actor_id(actor)?;
-        let from_ref = id("ref", from_ref)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let from = self.read_ref(&mut *tx, &from_ref, None, false).await?;
-            tx.create_ref(NewRef {
-                root: from.root,
-                parent: Some(from.id),
-                base: from.head,
-                name: name.to_owned(),
-                actor,
-            })
-            .await
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).branch(actor, from_ref, name).await
     }
 
     /// Applies edits to a change set at `version`. It refuses a sealed ref,
@@ -322,16 +408,9 @@ impl Engine {
         version: i64,
         edits: &Edits,
     ) -> Result<SaveResult, Error> {
-        let actor = actor_id(actor)?;
-        let ref_id = id("ref", ref_id)?;
-        for name in edits.keys() {
-            self.kind(name)?;
-        }
-        let mut tx = self.storage.begin().await?;
-        let result = self
-            .save_in(&mut *tx, &actor, &ref_id, version, edits)
-            .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .save(actor, ref_id, version, edits)
+            .await
     }
 
     async fn save_in(
@@ -403,7 +482,8 @@ impl Engine {
         version: i64,
         options: &CommitOptions,
     ) -> Result<CommitResult, Error> {
-        self.commit_ref(actor, ref_id, version, options, false, false)
+        self.on(&*self.storage)
+            .commit(actor, ref_id, version, options)
             .await
     }
 
@@ -416,38 +496,7 @@ impl Engine {
         ref_id: &str,
         version: i64,
     ) -> Result<CommitResult, Error> {
-        self.commit_ref(
-            actor,
-            ref_id,
-            version,
-            &CommitOptions::default(),
-            true,
-            true,
-        )
-        .await
-    }
-
-    async fn commit_ref(
-        &self,
-        actor: &str,
-        ref_id: &str,
-        version: i64,
-        options: &CommitOptions,
-        allow_empty: bool,
-        seal: bool,
-    ) -> Result<CommitResult, Error> {
-        let actor = actor_id(actor)?;
-        let ref_id = id("ref", ref_id)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let r = self.read_draft(&mut *tx, &ref_id, version).await?;
-            let (ref_, commit) = self
-                .commit_and_move(&mut *tx, &r, options, allow_empty, seal, &actor)
-                .await?;
-            Ok(CommitResult { ref_, commit })
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).seal(actor, ref_id, version).await
     }
 
     /// Merges `source`'s head into `target` at `target_version`, against
@@ -464,41 +513,9 @@ impl Engine {
         resolutions: &[Resolution],
         options: &CommitOptions,
     ) -> Result<MergeResult, Error> {
-        let actor = actor_id(actor)?;
-        let source = id("source", source)?;
-        let target = id("target", target)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let t = self
-                .read_ref(tx, &target, Some(target_version), true)
-                .await?;
-            let s = self.read_ref(tx, &source, None, false).await?;
-            if s.root != t.root {
-                return Err(Error::RootMismatch);
-            }
-            if s.id == t.id {
-                return Err(Error::MergeIntoItself);
-            }
-            let conflicts = self.merge_in(tx, &s, &t, resolutions, &actor).await?;
-            if !conflicts.is_empty() {
-                return Ok(MergeResult {
-                    ref_: t,
-                    commit: None,
-                    conflicts,
-                });
-            }
-            let (ref_, commit) = self
-                .commit_and_move(tx, &t, options, true, false, &actor)
-                .await?;
-            Ok(MergeResult {
-                ref_,
-                commit,
-                conflicts: Vec::new(),
-            })
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .merge(actor, source, target, target_version, resolutions, options)
+            .await
     }
 
     /// Moves a change set at `version` onto its parent's head. It merges the
@@ -517,13 +534,9 @@ impl Engine {
         version: i64,
         resolutions: &[Resolution],
     ) -> Result<MergeResult, Error> {
-        let actor = actor_id(actor)?;
-        let draft = id("draft", draft)?;
-        let mut tx = self.storage.begin().await?;
-        let result = self
-            .rebase_in(&mut *tx, &actor, &draft, version, resolutions)
-            .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .rebase(actor, draft, version, resolutions)
+            .await
     }
 
     async fn rebase_in(
@@ -606,26 +619,9 @@ impl Engine {
         version: i64,
         to_commit: &str,
     ) -> Result<CommitResult, Error> {
-        let actor = actor_id(actor)?;
-        let ref_id = id("ref", ref_id)?;
-        let to_commit = id("commit", to_commit)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let r = self.read_draft(tx, &ref_id, version).await?;
-            let commit = tx.read_commit(&to_commit).await?;
-            if commit.root != r.root {
-                return Err(Error::RootMismatch);
-            }
-            let tree = self.materialize_tree(tx, Some(&to_commit)).await?;
-            self.revert_rows(tx, &r, &tree, &actor).await?;
-            let (ref_, commit) = self
-                .commit_and_move(tx, &r, &CommitOptions::default(), true, false, &actor)
-                .await?;
-            Ok(CommitResult { ref_, commit })
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .revert(actor, ref_id, version, to_commit)
+            .await
     }
 
     /// Points `root`'s release at `commit`, a tagged commit of `root`, fenced
@@ -641,122 +637,45 @@ impl Engine {
         commit: &str,
         version: i64,
     ) -> Result<Release, Error> {
-        let actor = actor_id(actor)?;
-        let root = id("root", root)?;
-        let commit = id("commit", commit)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let c = tx.read_commit(&commit).await?;
-            if c.root != root {
-                return Err(Error::RootMismatch);
-            }
-            if c.sequence.is_none() {
-                return Err(Error::NotTagged);
-            }
-            self.ensure_snapshot(tx, &c.id, c.snapshot).await?;
-            tx.write_release(ReleaseWrite {
-                root,
-                commit: c.id,
-                version,
-                actor,
-            })
+        self.on(&*self.storage)
+            .release(actor, root, commit, version)
             .await
-        }
-        .await;
-        finish(tx, result).await
     }
 
     /// Reads `root`'s release pointer and the tree of the commit it names. A
     /// root that has never been released is [`Error::NotFound`].
     pub async fn released(&self, root: &str) -> Result<ReleasedResult, Error> {
-        let root = id("root", root)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let release = tx.read_release(&root).await?;
-            let tree = self.materialize_tree(tx, Some(&release.commit)).await?;
-            let tree = self.order(&tree)?;
-            let tree = self.tree_result(tree, Vec::new())?;
-            Ok(ReleasedResult { release, tree })
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).released(root).await
     }
 
     /// Reads a commit's tree: the nearest snapshot on its chain with each
     /// later commit's patches laid over it, the nearest winning and a
     /// `DELETE` removing the entity.
     pub async fn materialize(&self, commit: &str) -> Result<TreeResult, Error> {
-        let commit = id("commit", commit)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tree = self.materialize_tree(&mut *tx, Some(&commit)).await?;
-            let tree = self.order(&tree)?;
-            self.tree_result(tree, Vec::new())
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).materialize(commit).await
     }
 
     /// Reads a ref's tree: its base commit's tree with the ref's own rows
     /// laid over it.
     pub async fn compose(&self, ref_id: &str) -> Result<TreeResult, Error> {
-        let ref_id = id("ref", ref_id)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let r = self.read_ref(tx, &ref_id, None, false).await?;
-            let (tree, findings, _) = self.compose_ref(tx, &r).await?;
-            self.tree_result(tree, findings)
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).compose(ref_id).await
     }
 
     /// Lists the entities the trees of two commits differ on.
     pub async fn diff(&self, from: &str, to: &str) -> Result<Vec<Change>, Error> {
-        let from = id("commit", from)?;
-        let to = id("commit", to)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let from_tree = self.materialize_tree(tx, Some(&from)).await?;
-            let to_tree = self.materialize_tree(tx, Some(&to)).await?;
-            self.core.diff(&from_tree, &to_tree)
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).diff(from, to).await
     }
 
     /// Lists the commits a ref wrote, newest first.
     pub async fn history(&self, ref_id: &str) -> Result<Vec<Commit>, Error> {
-        let ref_id = id("ref", ref_id)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            let r = self.read_ref(tx, &ref_id, None, false).await?;
-            match &r.head {
-                None => Ok(Vec::new()),
-                Some(head) => tx.ref_commits(&r.id, head, self.walk_ceiling).await,
-            }
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage).history(ref_id).await
     }
 
     /// Soft-deletes a ref at `version`, which frees its name.
     pub async fn discard(&self, actor: &str, ref_id: &str, version: i64) -> Result<(), Error> {
-        let actor = actor_id(actor)?;
-        let ref_id = id("ref", ref_id)?;
-        let mut tx = self.storage.begin().await?;
-        let result = async {
-            let tx = &mut *tx;
-            self.read_ref(tx, &ref_id, Some(version), false).await?;
-            tx.discard_ref(&ref_id, version, &actor).await
-        }
-        .await;
-        finish(tx, result).await
+        self.on(&*self.storage)
+            .discard(actor, ref_id, version)
+            .await
     }
 
     /// Reads a ref. With `expected` set it locks the ref's row and refuses a
@@ -1361,6 +1280,354 @@ impl Engine {
                 .await?;
         }
         Ok(())
+    }
+}
+
+impl<'a> EngineOn<'a> {
+    /// [`Engine::create_primary`], over the borrowed storage.
+    pub async fn create_primary(self, actor: &str, root: &str, name: &str) -> Result<Ref, Error> {
+        let actor = actor_id(actor)?;
+        let root = id("root", root)?;
+        let mut tx = self.storage.begin().await?;
+        let result = tx
+            .create_ref(NewRef {
+                root,
+                parent: None,
+                base: None,
+                name: name.to_owned(),
+                actor,
+            })
+            .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::branch`], over the borrowed storage.
+    pub async fn branch(self, actor: &str, from_ref: &str, name: &str) -> Result<Ref, Error> {
+        let actor = actor_id(actor)?;
+        let from_ref = id("ref", from_ref)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let from = self
+                .engine
+                .read_ref(&mut *tx, &from_ref, None, false)
+                .await?;
+            tx.create_ref(NewRef {
+                root: from.root,
+                parent: Some(from.id),
+                base: from.head,
+                name: name.to_owned(),
+                actor,
+            })
+            .await
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::save`], over the borrowed storage.
+    pub async fn save(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        edits: &Edits,
+    ) -> Result<SaveResult, Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        for name in edits.keys() {
+            self.engine.kind(name)?;
+        }
+        let mut tx = self.storage.begin().await?;
+        let result = self
+            .engine
+            .save_in(&mut *tx, &actor, &ref_id, version, edits)
+            .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::commit`], over the borrowed storage.
+    pub async fn commit(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        options: &CommitOptions,
+    ) -> Result<CommitResult, Error> {
+        self.commit_ref(actor, ref_id, version, options, false, false)
+            .await
+    }
+
+    /// [`Engine::seal`], over the borrowed storage.
+    pub async fn seal(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+    ) -> Result<CommitResult, Error> {
+        self.commit_ref(
+            actor,
+            ref_id,
+            version,
+            &CommitOptions::default(),
+            true,
+            true,
+        )
+        .await
+    }
+
+    /// [`Engine::merge`], over the borrowed storage.
+    pub async fn merge(
+        self,
+        actor: &str,
+        source: &str,
+        target: &str,
+        target_version: i64,
+        resolutions: &[Resolution],
+        options: &CommitOptions,
+    ) -> Result<MergeResult, Error> {
+        let actor = actor_id(actor)?;
+        let source = id("source", source)?;
+        let target = id("target", target)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let t = self
+                .engine
+                .read_ref(tx, &target, Some(target_version), true)
+                .await?;
+            let s = self.engine.read_ref(tx, &source, None, false).await?;
+            if s.root != t.root {
+                return Err(Error::RootMismatch);
+            }
+            if s.id == t.id {
+                return Err(Error::MergeIntoItself);
+            }
+            let conflicts = self
+                .engine
+                .merge_in(tx, &s, &t, resolutions, &actor)
+                .await?;
+            if !conflicts.is_empty() {
+                return Ok(MergeResult {
+                    ref_: t,
+                    commit: None,
+                    conflicts,
+                });
+            }
+            let (ref_, commit) = self
+                .engine
+                .commit_and_move(tx, &t, options, true, false, &actor)
+                .await?;
+            Ok(MergeResult {
+                ref_,
+                commit,
+                conflicts: Vec::new(),
+            })
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::rebase`], over the borrowed storage.
+    pub async fn rebase(
+        self,
+        actor: &str,
+        draft: &str,
+        version: i64,
+        resolutions: &[Resolution],
+    ) -> Result<MergeResult, Error> {
+        let actor = actor_id(actor)?;
+        let draft = id("draft", draft)?;
+        let mut tx = self.storage.begin().await?;
+        let result = self
+            .engine
+            .rebase_in(&mut *tx, &actor, &draft, version, resolutions)
+            .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::revert`], over the borrowed storage.
+    pub async fn revert(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        to_commit: &str,
+    ) -> Result<CommitResult, Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        let to_commit = id("commit", to_commit)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let r = self.engine.read_draft(tx, &ref_id, version).await?;
+            let commit = tx.read_commit(&to_commit).await?;
+            if commit.root != r.root {
+                return Err(Error::RootMismatch);
+            }
+            let tree = self.engine.materialize_tree(tx, Some(&to_commit)).await?;
+            self.engine.revert_rows(tx, &r, &tree, &actor).await?;
+            let (ref_, commit) = self
+                .engine
+                .commit_and_move(tx, &r, &CommitOptions::default(), true, false, &actor)
+                .await?;
+            Ok(CommitResult { ref_, commit })
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::release`], over the borrowed storage.
+    pub async fn release(
+        self,
+        actor: &str,
+        root: &str,
+        commit: &str,
+        version: i64,
+    ) -> Result<Release, Error> {
+        let actor = actor_id(actor)?;
+        let root = id("root", root)?;
+        let commit = id("commit", commit)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let c = tx.read_commit(&commit).await?;
+            if c.root != root {
+                return Err(Error::RootMismatch);
+            }
+            if c.sequence.is_none() {
+                return Err(Error::NotTagged);
+            }
+            self.engine.ensure_snapshot(tx, &c.id, c.snapshot).await?;
+            tx.write_release(ReleaseWrite {
+                root,
+                commit: c.id,
+                version,
+                actor,
+            })
+            .await
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::released`], over the borrowed storage.
+    pub async fn released(self, root: &str) -> Result<ReleasedResult, Error> {
+        let root = id("root", root)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let release = tx.read_release(&root).await?;
+            let tree = self
+                .engine
+                .materialize_tree(tx, Some(&release.commit))
+                .await?;
+            let tree = self.engine.order(&tree)?;
+            let tree = self.engine.tree_result(tree, Vec::new())?;
+            Ok(ReleasedResult { release, tree })
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::materialize`], over the borrowed storage.
+    pub async fn materialize(self, commit: &str) -> Result<TreeResult, Error> {
+        let commit = id("commit", commit)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tree = self
+                .engine
+                .materialize_tree(&mut *tx, Some(&commit))
+                .await?;
+            let tree = self.engine.order(&tree)?;
+            self.engine.tree_result(tree, Vec::new())
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::compose`], over the borrowed storage.
+    pub async fn compose(self, ref_id: &str) -> Result<TreeResult, Error> {
+        let ref_id = id("ref", ref_id)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let r = self.engine.read_ref(tx, &ref_id, None, false).await?;
+            let (tree, findings, _) = self.engine.compose_ref(tx, &r).await?;
+            self.engine.tree_result(tree, findings)
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::diff`], over the borrowed storage.
+    pub async fn diff(self, from: &str, to: &str) -> Result<Vec<Change>, Error> {
+        let from = id("commit", from)?;
+        let to = id("commit", to)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let from_tree = self.engine.materialize_tree(tx, Some(&from)).await?;
+            let to_tree = self.engine.materialize_tree(tx, Some(&to)).await?;
+            self.engine.core.diff(&from_tree, &to_tree)
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::history`], over the borrowed storage.
+    pub async fn history(self, ref_id: &str) -> Result<Vec<Commit>, Error> {
+        let ref_id = id("ref", ref_id)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            let r = self.engine.read_ref(tx, &ref_id, None, false).await?;
+            match &r.head {
+                None => Ok(Vec::new()),
+                Some(head) => tx.ref_commits(&r.id, head, self.engine.walk_ceiling).await,
+            }
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    /// [`Engine::discard`], over the borrowed storage.
+    pub async fn discard(self, actor: &str, ref_id: &str, version: i64) -> Result<(), Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let tx = &mut *tx;
+            self.engine
+                .read_ref(tx, &ref_id, Some(version), false)
+                .await?;
+            tx.discard_ref(&ref_id, version, &actor).await
+        }
+        .await;
+        finish(tx, result).await
+    }
+
+    async fn commit_ref(
+        self,
+        actor: &str,
+        ref_id: &str,
+        version: i64,
+        options: &CommitOptions,
+        allow_empty: bool,
+        seal: bool,
+    ) -> Result<CommitResult, Error> {
+        let actor = actor_id(actor)?;
+        let ref_id = id("ref", ref_id)?;
+        let mut tx = self.storage.begin().await?;
+        let result = async {
+            let r = self.engine.read_draft(&mut *tx, &ref_id, version).await?;
+            let (ref_, commit) = self
+                .engine
+                .commit_and_move(&mut *tx, &r, options, allow_empty, seal, &actor)
+                .await?;
+            Ok(CommitResult { ref_, commit })
+        }
+        .await;
+        finish(tx, result).await
     }
 }
 

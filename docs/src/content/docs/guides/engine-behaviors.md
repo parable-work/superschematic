@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
 sidebar:
   order: 7
 ---
@@ -167,6 +167,185 @@ same.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`.
+
+### In the generated types
+
+The `types` output types what a read returns under `behaviors`. For each
+type that composes behaviors, each language's types write
+`<Type>Behaviors` beside the type itself, which stays the own fields, the
+read's `data`. It has a member per behavior that declares a field, under
+the behavior's name, holding those fields as the type's config narrows
+them, as [`engine-client`](/superschematic/reference/cli/#engine-client---out-filets-schema-file)
+types them: Workflow's status is one of the type's states, Links' targets
+holds each link of the config with its target's schema, Timers' deadlines
+each deadline of the config. A field a read can leave out is optional.
+For the `Task` above, in TypeScript (`types/behaviors.ts`):
+
+```ts
+/** A state of a Task's Workflow. */
+export type TaskState = 'todo' | 'doing' | 'done' | 'dropped';
+
+export interface TaskBehaviors {
+  readonly Workflow: {
+    readonly status: TaskState;
+    readonly enteredAt?: number;
+  };
+  readonly Dependencies: {
+    readonly blocked: boolean;
+  };
+  readonly Links: {
+    readonly targets: {
+      parent?: { id: string; schema: 'tasks' };
+      project: { id: string; schema: 'projects' };
+      spec?: {
+        id: string;
+        latest?: number;
+        revision?: number;
+        schema: 'documents';
+        stale?: boolean;
+      };
+    };
+  };
+}
+```
+
+and in Go (`behaviors.go`), where each object a field holds is a struct
+named by its path:
+
+```go
+type TaskBehaviors struct {
+	Workflow     TaskWorkflow     `json:"Workflow"`
+	Dependencies TaskDependencies `json:"Dependencies"`
+	Links        TaskLinks        `json:"Links"`
+}
+
+type TaskWorkflow struct {
+	Status    TaskState `json:"status"`
+	EnteredAt *int64    `json:"enteredAt,omitempty"`
+}
+```
+
+Rust's `src/behaviors.rs` writes the same structs with serde, and
+Python's `behaviors.py` Pydantic models, with `from_json` and
+`to_json_dict` on `<Type>Behaviors`. Where a language's names cannot hold
+a behavior's name or a config's key, the member takes it in PascalCase,
+each run of letters and digits capitalized and the runs joined
+(`acme.Rating` is `AcmeRating`, a state `in-progress` is `InProgress`),
+snake_case for a Rust or Python field (`acme_rating`), and the JSON keeps
+the exact name. A behavior with no narrowing, an extension's, types its
+fields as any JSON, and so do Go, Rust and Python for a value that is one
+of several types, such as a rollup's (`{ "over": true }` past its limit).
+
+A General schema whose types compose behaviors builds: its types write
+`<Type>Behaviors`, and nothing else of its build reads a behavior. A DB
+schema's builds too, and gets an engine document (below). An API's own
+type cannot compose a behavior, and the API generators do not serve an
+engine type yet, so an API that imports or projects one fails its build,
+naming the first generator that would run
+([`build`](/superschematic/reference/cli/#build-service-dir)).
+
+## Engine types
+
+A type of a DB schema that composes a behavior is an engine type (D58).
+Its instances are the engine's, kept in the engine's own tables: in a
+stack, the DB service's database, under a Postgres schema of the
+engine's (`engine` unless configured), once the generated servers open
+the engine, which they do not yet. So `sql` writes no table for it, `orm`
+no repository, and a migration plan (D27) never creates, alters or drops
+one. Tables and engine types share one schema:
+
+```json
+"Customer": { "name": "Customer", "role": "DBTable", "fields": [ ... ] },
+"Address": { "name": "Address", "role": "DBTable", "jsonField": true, "fields": [ ... ] },
+"Ticket": {
+  "name": "Ticket", "role": "DBTable",
+  "behaviors": [
+    { "name": "Workflow", "config": { "states": ["open", "resolved"], "transitions": [{ "from": "open", "to": "resolved" }] } },
+    { "name": "Links", "config": { "links": { "account": { "schema": "Account", "required": true } } } }
+  ],
+  "fields": [
+    { "name": "title", "typeRef": { "name": "string" }, "required": true },
+    { "name": "shipTo", "typeRef": { "name": "Address" } },
+    { "name": "customerId", "typeRef": { "name": "Identity.UUID" } }
+  ]
+}
+```
+
+An engine type's fields hold primitives, scalars, enums, lists and value
+types: `@jsonField` types, which a table holds as a JSON column too, and
+types a General dependency declares. It reaches another engine type's
+instances through `Links`, which names the type as its schema, and a
+table's row through the row's key in a plain field. The build refuses,
+before its generators run, an engine type that reaches a table or
+another engine type through a field, a table that references an engine
+type, an engine type that declares what only a table has (`@versioned`,
+`@optimistic`, a version graph, the `User` trait, a queue) or a field the
+database generates (`AutoGenerate`: the engine gives each instance its
+id), and a map or a union, which the engine does not validate. Each
+message names the way out.
+
+### The engine document
+
+The `enginedoc` generator writes what a server puts into the engine for
+the DB service: `engine/<service>.json` in its Go types module, which the
+Go types also hold as `EngineDocument`, the TypeScript types as
+`engineDocument` (imported from `<types package>/engine`, so a client of
+the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
+
+```json
+{
+  "version": 1,
+  "namespace": "support-db",
+  "tools": {
+    "invocationPolicy": { "key": "invocationPolicy", "values": ["auto", "ask"], "default": "auto" },
+    "keys": { "scalar": "x-superschematic-scalar", "guidance": "superschematic/operation-guidance", "parameters": [] }
+  },
+  "behaviors": [
+    { "name": "Links", "package": "@superschematic/engine" },
+    { "name": "Workflow", "package": "@superschematic/engine" }
+  ],
+  "schemas": [
+    { "name": "Account", "kind": "General", "types": { "Account": { ... } } },
+    { "name": "Ticket", "kind": "General", "scalars": { ... }, "types": { "Ticket": { ... }, "Address": { ... } } }
+  ],
+  "metaSchema": { "$defs": { ... } }
+}
+```
+
+- **`namespace`** is the engine namespace the documents are defined and
+  published in: `outputs.engine.namespace` in the service's config, else
+  the service's name, which must then be an engine namespace name
+  (lowercase letters, digits and hyphens).
+- **`schemas`** holds one schema-file document per engine type, the form
+  `format --to=json` writes: `kind: General`, named after the type, with
+  the type, the value types it reaches, and the enums and scalars they
+  use, and no imports. A scalar the core's catalog holds is its name and
+  language primitive; any other is its whole definition.
+- **`metaSchema`** is what this binary's `json-schema` prints, so a
+  document that carries an extension's decorators loads; **`tools`** are
+  the invocation policy and the vendor keys the binary registers (D11),
+  the engine's `tools` option; **`behaviors`** names each behavior the
+  types compose and the package that implements it.
+
+With today's TypeScript engine:
+
+```ts
+import { engineDocument } from '@schemas/support-db-types/engine';
+
+const engine = openEngine({
+  path, policy,
+  metaSchema: engineDocument.metaSchema,
+  tools: engineDocument.tools,
+  namespaces: { names: [engineDocument.namespace] },
+});
+const target = { namespace: engineDocument.namespace };
+for (const schema of engineDocument.schemas) engine.schemas.define(system, schema, target);
+for (const schema of engineDocument.schemas) engine.schemas.publish(system, schema.name as string, target);
+```
+
+Every document is defined before any is published, since a link may name
+a type the document defines after it. A generated server will do this
+itself before it reports ready, once the servers open the engine.
 
 ## Display
 

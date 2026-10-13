@@ -191,10 +191,12 @@ python:
 # superscalar's core from the checkout `make setup` stands up, so
 # preserve_order is always on there; its lints and tests run with its
 # schemafile feature and without, and again with arbitrary_precision. The
-# http runtime's run again with its optional http-client feature, and with
-# its identity features, whose store and route tests run on SQLite (and on
-# the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is
-# set).
+# http runtime's run again with its optional http-client feature, with its
+# identity features, whose store and route tests run on SQLite (and on the
+# Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set),
+# and with a stack server's features (D57): postgres, whose tests run on the
+# Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set,
+# and logging.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -202,7 +204,11 @@ rust:
 		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client \
 		&& cargo clippy --all-targets --features identity -- -D warnings \
 		&& cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings \
-		&& cargo test --features identity-postgres,identity-sqlite
+		&& cargo test --features identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features postgres -- -D warnings \
+		&& cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings \
+		&& cargo test --features postgres,identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features logging -- -D warnings && cargo test --features logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -279,19 +285,21 @@ versiongraph-scenarios-ts:
 		test/facade.test.ts test/gained-column.test.ts
 
 # Every version-graph scenario through the Rust engine. First on SQLite
-# (D32): the SQLite adapter over rusqlite (the rusqlite feature), with the
-# adapter's own tests, every canonical vector as a round trip and the SQLite
-# vectors, which need no database server and run with or without a Postgres
-# URL (the URL is unset for them, so the Postgres tests skip here and run
-# below). Then on Postgres: the Postgres adapter, and the crate's other
-# Postgres tests (every canonical vector's rendering, the adapter, the
-# sweeper), against the Postgres that
+# (D32): the SQLite adapter over rusqlite (the rusqlite feature), and its
+# fixed layout inside a host's transaction over plain rusqlite (D58), with
+# the adapter's own tests, every canonical vector as a round trip and the
+# SQLite vectors, which need no database server and run with or without a
+# Postgres URL (the URL is unset for them, so the Postgres tests skip here
+# and run below). Then on Postgres: the Postgres adapter, the fixed layout
+# on Postgres inside a host's transaction over the synchronous postgres
+# client, and the crate's other Postgres tests (every canonical vector's
+# rendering, the adapter, the sweeper), against the Postgres that
 # SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
 # without it. It runs every test target with the feature on, so the SQLite
 # tests run again there, and one build serves both passes.
 versiongraph-scenarios-rust:
 	cd runtime/versiongraph/rust-engine && env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL \
-		cargo test --features rusqlite --test scenarios --test sqlite -- --nocapture
+		cargo test --features rusqlite --test scenarios --test sqlite --test host -- --nocapture
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
 	cd runtime/versiongraph/rust-engine && cargo test --tests --features rusqlite -- --nocapture
@@ -329,13 +337,20 @@ docs:
 # admits them. The engine runs the first eleven documents with its own
 # behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
 # the work-queue package runs the last in
-# runtime/engine-workqueue/typescript/test/package.test.ts.
+# runtime/engine-workqueue/typescript/test/package.test.ts. It builds
+# fixture-behaviors-json, a General schema, and fixture-engine-db-json,
+# whose engine types the sql generator leaves out and whose engine
+# document the build writes (D58).
 cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
 		$(CORE_BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@for s in fixture-db-json fixture-general-yaml; do \
+	@for s in fixture-db-json fixture-general-yaml fixture-engine-db-json fixture-behaviors-json; do \
 		$(CORE_BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+	@grep -q '"namespace": "fixture-engine-db"' /tmp/superschematic-cli-smoke/types/go/fixture-engine-db/engine/fixture-engine-db.json \
+		|| { echo "cli-smoke: the engine fixture's build wrote no engine document"; exit 1; }
+	@! grep -qi 'ticket' /tmp/superschematic-cli-smoke/sql/fixture-engine-db/create.sql \
+		|| { echo "cli-smoke: sql wrote a table for an engine type"; exit 1; }
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \

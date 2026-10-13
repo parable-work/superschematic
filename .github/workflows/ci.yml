@@ -789,8 +789,10 @@ jobs:
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
       # tests run with and without them. The http runtime's run again with
-      # its optional http-client feature, and with its identity features,
-      # whose store and route tests run on SQLite here.
+      # its optional http-client feature, with its identity features, whose
+      # store and route tests run on SQLite here, and with a stack server's
+      # features (D57): postgres, whose tests need a database and skip
+      # here, and logging.
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -804,6 +806,11 @@ jobs:
           cargo clippy --all-targets --features identity -- -D warnings
           cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings
           cargo test --features identity-postgres,identity-sqlite
+          cargo clippy --all-targets --features postgres -- -D warnings
+          cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings
+          cargo test --features postgres,identity-postgres,identity-sqlite
+          cargo clippy --all-targets --features logging -- -D warnings
+          cargo test --features logging
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust
@@ -986,13 +993,13 @@ jobs:
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features rusqlite -- -D warnings
 
-      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite)
+      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite, also inside a host's transaction)
         # The quick tier: no database URL, so the Postgres tests skip; the
         # full tier's step below runs them, and every scenario on Postgres.
         working-directory: runtime/versiongraph/rust-engine
         run: cargo test --features rusqlite
 
-      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres and every canonical vector through the Rust engine, also with serde_json's preserve_order)
+      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres, the fixed layout's on Postgres inside a host's transaction too, and every canonical vector through the Rust engine, also with serde_json's preserve_order)
         # The SQLite pass of make versiongraph-scenarios-rust needs no
         # database; its Postgres pass fails, rather than skips, without one.
         # The second run turns serde_json's preserve_order on, as superscalar

@@ -176,14 +176,20 @@ type (
 	JobRunRequest    = registry.JobRunRequest
 	Credential       = registry.Credential
 
+	// A target's MigrationRunner that is a MigrationPreparer readies what
+	// its phases need, the runner's image on gcp, before a deploy's first
+	// step (D46).
+	MigrationPreparer = registry.MigrationPreparer
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher
 	SitePublishRequest = registry.SitePublishRequest
 
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
-	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack) and
-	// its CIEnvironments with the renderer's CIOptions, to CIFiles. A
+	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack, with
+	// its CISites) and its CIEnvironments with the renderer's CIOptions, to
+	// CIFiles. A
 	// target's CI seam (CIIdentities) gives each environment a CIIdentity
 	// per CIRole, a provisioner's spec lists the CLITools a CI job
 	// installs, and the request names the release's CIArchive for each
@@ -192,6 +198,7 @@ type (
 	CIRequest      = registry.CIRequest
 	CIArchive      = registry.CIArchive
 	CIStack        = registry.CIStack
+	CISite         = registry.CISite
 	CIEnvironment  = registry.CIEnvironment
 	CIOptions      = registry.CIOptions
 	CIFile         = registry.CIFile

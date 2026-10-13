@@ -32,6 +32,18 @@ pub async fn account_sign_up(cx: &Cx, args: crate::api::AccountSignUpArgs) -> Re
         .await
 }
 
+/// account.draftNote (`POST /api/accounts/{id}/drafts`): Draft a note about an account, its text to come: the same input
+pub async fn account_draft_note(cx: &Cx, args: crate::api::AccountDraftNoteArgs) -> Result<types::AccountView, ApiError> {
+    let caller = can_account_draft_note(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .account
+        .draft_note(operations::ACCOUNT_DRAFT_NOTE.context(caller), args)
+        .await
+}
+
 /// account.annotate (`POST /api/accounts/{id}/notes`): Note something about an account.
 pub async fn account_annotate(cx: &Cx, args: crate::api::AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
     let caller = can_account_annotate(cx).await?;
@@ -59,6 +71,13 @@ pub async fn booking_book(cx: &Cx, args: crate::api::BookingBookArgs) -> Result<
 /// Admits the caller of account.signUp as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_account_sign_up(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
+}
+
+/// Admits the caller of account.draftNote as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_account_draft_note(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     let _ = cx;
     Ok(None)
 }

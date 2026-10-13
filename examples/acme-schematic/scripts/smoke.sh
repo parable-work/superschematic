@@ -88,9 +88,10 @@
 #      config acme's authoring package types; json-schema limits behavior
 #      names to the core's and it, and format converts the file to YAML and
 #      to TypeScript;
-#      build refuses the service, naming the types generator, which does
-#      not render behaviors; the core-only binary refuses the behavior by
-#      name;
+#      build writes its TypeScript types with ProductBehaviors, acme.Rating's
+#      fields under its exact name, since every generator of the General
+#      pipeline renders behaviors (D58); the core-only binary refuses the
+#      behavior by name;
 #  19. shop-db's Planogram version graph, declared with the core's
 #      @versionGraph, @graphMember and @conflictUnit and no core edit,
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
@@ -151,7 +152,7 @@ go build -o "$OUT/acme-schematic" ./cmd/acme-schematic
 
 echo "==> describe: the registry the acme binary assembles"
 "$OUT/acme-schematic" describe "$SCHEMAS" | tee "$OUT/describe.txt"
-grep -q '^kinds: API, Catalog, DB, General, Stack$' "$OUT/describe.txt"
+grep -q '^kinds: API, Bucket, Catalog, DB, General, Site, Stack$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
@@ -275,7 +276,7 @@ if "$OUT/superschematic" build "$SCHEMAS/services/shop-catalog" --naming "$OUT/s
   echo "ERROR: the core-only binary built a Catalog service" >&2
   exit 1
 fi
-grep -q 'unknown kind "Catalog" (registered kinds: API, DB, General, Stack)' "$OUT/core-kind.log"
+grep -q 'unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, Site, Stack)' "$OUT/core-kind.log"
 if "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --out "$OUT/core-dist" >"$OUT/core-auth.log" 2>&1; then
   echo "ERROR: the core-only binary accepted auth_provider = \"apikey\"" >&2
   exit 1
@@ -455,8 +456,8 @@ jq -e '.tools[] | select(.name == "product.createProduct") | .parameters.propert
 go_module_compiles "$DIST/orm/shop-db"
 
 echo "==> behaviors: acme.Rating on a data-form General schema"
-# shop-ratings sits outside the schemas root: build-all would refuse it,
-# since no generator renders behaviors yet.
+# shop-ratings sits outside the schemas root: it is a fixture of ext's
+# tests, not one of the shop's services.
 RATINGS="$EXAMPLE_DIR/ext/testdata/services/shop-ratings"
 "$OUT/acme-schematic" build "$RATINGS" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ir.json" >/dev/null
@@ -468,11 +469,9 @@ jq -e '."$defs".BehaviorRef.properties.name.enum == ["Approvals", "Assignment", 
 grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
 "$OUT/acme-schematic" format --to=ts --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.ts"
 grep -qx '@behavior("acme.Rating", { maxStars: 5 })' "$OUT/ratings.schema.ts"
-if "$OUT/acme-schematic" build "$RATINGS" --out "$OUT/ratings-dist" >"$OUT/ratings-build.log" 2>&1; then
-  echo "ERROR: build generated a type whose behavior no generator renders" >&2
-  exit 1
-fi
-grep -q 'generator: types does not render behaviors yet: type Product composes behavior acme.Rating' "$OUT/ratings-build.log"
+"$OUT/acme-schematic" build "$RATINGS" --out "$OUT/ratings-dist" >"$OUT/ratings-build.log"
+grep -q 'export interface ProductBehaviors {' "$OUT/ratings-dist/types/typescript/shop-ratings/types/behaviors.ts"
+grep -q "readonly 'acme.Rating': {" "$OUT/ratings-dist/types/typescript/shop-ratings/types/behaviors.ts"
 if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml" --out "$OUT/core-ratings-dist" >"$OUT/core-ratings.log" 2>&1; then
   echo "ERROR: the core-only binary accepted acme.Rating" >&2
   exit 1

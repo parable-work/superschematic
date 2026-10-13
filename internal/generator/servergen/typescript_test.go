@@ -88,17 +88,32 @@ func tsFakePaths(repoRoot string) naming.LocalPaths {
 	}
 }
 
+// The deployables of ts-shop's job SweepCarts (D52) and its worker
+// RemindShoppers (D53), whose entrypoints the TypeScript builds write beside
+// the servers'.
+const (
+	tsSweepCarts     = "ts-shop-sweep-carts"
+	tsRemindShoppers = "ts-shop-remind-shoppers"
+)
+
 // tsGenerated lists the files of each TypeScript entrypoint the builds of
-// stacks write, by their path under tsGoldenRoot.
+// stacks write, a job's and a worker's included, by their path under
+// tsGoldenRoot, and ts-shop's deps.ts and the scaffold of its
+// implementation, which declare and implement its jobs and workers.
 func tsGenerated(repoRoot string, stacks ...string) map[string]string {
 	files := map[string]string{}
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
-		for _, server := range []string{"ts-pricing", "ts-shop"} {
+		for _, server := range []string{"ts-pricing", "ts-shop", tsSweepCarts, tsRemindShoppers} {
 			for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile, servergen.TypeScriptConfigFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
 		}
+	}
+	files[filepath.Join("api", "ts-shop", "deps.ts")] = filepath.Join(out, "api", "ts-shop", "deps.ts")
+	impl := naming.Default().TypeScriptImplementationDir(repoRoot, "ts-shop")
+	for _, file := range []string{tsrestgen.ImplementationFile, servergen.TypeScriptPackageFile} {
+		files[filepath.Join("typescript", "ts-shop", file)] = filepath.Join(impl, file)
 	}
 	return files
 }
@@ -292,8 +307,57 @@ export const create: Constructor = deps => ({
 // asks for with the client in its Deps. It takes a while over the cart
 // named slow, so a test can stop the server with a request in flight, and
 // answers 501 for the one named unpriced.
+//
+// Its job, SweepCarts, enqueues a CartAbandoned message per SKU of
+// SWEEP_SKUS, each in a transaction of its own that commits, after one in
+// a transaction that rolls back; with SWEEP_FAIL set it fails. Its worker,
+// RemindShoppers, handles a message of the SKU tea at once, fails one of
+// flaky on its first attempt, fails poison on every attempt, and holds slow
+// until the worker stops and its grace is over (D52, D53).
 const tsShopImplementation = `import { notImplemented } from '@superschematic/http-runtime';
-import type { AuthenticatorFactory, Constructor } from '@schemas/ts-shop-api';
+import { enqueue } from '@superschematic/http-runtime/postgres';
+import { cartAbandonedQueue } from '@schemas/ts-db-types/queues';
+import type { CartAbandoned } from '@schemas/ts-db-types';
+import type { AuthenticatorFactory, Constructor, JobsConstructor, WorkersConstructor } from '@schemas/ts-shop-api';
+
+const newCartId = () => crypto.randomUUID() as CartAbandoned['cartId'];
+
+export const createJobs: JobsConstructor = deps => ({
+  async sweepCarts(signal) {
+    if (process.env.SWEEP_FAIL) throw new Error('the sweep failed');
+    const client = await deps.db.connect();
+    try {
+      await client.query('BEGIN');
+      await enqueue(client, cartAbandonedQueue, { cartId: newCartId(), sku: 'rolled-back', tags: [] });
+      await client.query('ROLLBACK');
+      for (const sku of (process.env.SWEEP_SKUS ?? '').split(',').filter(Boolean)) {
+        if (signal.aborted) throw signal.reason;
+        await client.query('BEGIN');
+        await enqueue(client, cartAbandonedQueue, { cartId: newCartId(), sku, tags: ['abandoned', sku] });
+        await client.query('COMMIT');
+      }
+    } finally {
+      client.release();
+    }
+    deps.logger.info('swept', { skus: process.env.SWEEP_SKUS });
+  },
+});
+
+export const createWorkers: WorkersConstructor = deps => {
+  const attempts = new Map<string, number>();
+  return {
+    async remindShoppers(message, signal) {
+      const attempt = (attempts.get(message.sku) ?? 0) + 1;
+      attempts.set(message.sku, attempt);
+      deps.logger.info('reminding', { sku: message.sku, attempt, tags: message.tags.join('+'), region: deps.config.STOREFRONT_REGION });
+      if (message.sku === 'flaky' && attempt === 1) throw new Error('flaky the first time');
+      if (message.sku === 'poison') throw new Error('poison every time');
+      if (message.sku === 'slow') {
+        await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+      }
+    },
+  };
+};
 
 export const create: Constructor = deps => ({
   carts: {
@@ -430,7 +494,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, paths, append(slices.Clone(tsAPIs), "ts-stack")...)
+	// ts-db's TypeScript types export the queue ts-shop's implementation
+	// enqueues on and its worker claims (D53).
+	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack")...)...)
 	names := naming.Default()
 	for service, code := range map[string]string{"ts-pricing": tsPricingImplementation, "ts-shop": tsShopImplementation} {
 		if err := os.WriteFile(filepath.Join(names.TypeScriptImplementationDir(repoRoot, service), "index.ts"), []byte(code), 0o644); err != nil {
@@ -454,7 +520,10 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	tsc := filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc")
 	pricingDir := servergen.ServerDir(out, "ts-stack", "ts-pricing")
 	shopDir := servergen.ServerDir(out, "ts-stack", "ts-shop")
-	for _, dir := range []string{pricingDir, shopDir, names.TypeScriptImplementationDir(repoRoot, "ts-pricing"), names.TypeScriptImplementationDir(repoRoot, "ts-shop")} {
+	for _, dir := range []string{
+		pricingDir, shopDir, servergen.ServerDir(out, "ts-stack", tsSweepCarts), servergen.ServerDir(out, "ts-stack", tsRemindShoppers),
+		names.TypeScriptImplementationDir(repoRoot, "ts-pricing"), names.TypeScriptImplementationDir(repoRoot, "ts-shop"),
+	} {
 		run(dir, tsc, "--noEmit", "-p", "tsconfig.json")
 	}
 
@@ -486,7 +555,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	const siteOrigin = "https://ts-web.acme.dev"
 	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable, "TS_SHOP_CORS_ORIGINS=" + siteOrigin}, edge...)...)
 	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
-	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	// Another origin's preflight goes on to the app, which has no route for
+	// it.
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNotFound, "")
 	checkCORS(t, shop.base, http.MethodGet, "/api/carts/tea", siteOrigin, "", http.StatusOK, siteOrigin)
 	shop.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	shop.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["ts-db"]`)
@@ -609,6 +680,11 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 
 	args := []string{"run", "-d", "-p", "127.0.0.1::8080", "-e", "TS_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/ts_db?connect_timeout=1"}
 	for _, v := range variables(t, "TS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}) {
+		args = append(args, "-e", v)
+	}
+	// ts-shop lists ts-media, on an emulator nothing answers: opening it
+	// makes no request (D54).
+	for _, v := range variables(t, "TS_MEDIA_BUCKET", ir.BucketConnection{Name: "ts-media", Endpoint: "http://127.0.0.1:9"}) {
 		args = append(args, "-e", v)
 	}
 	container := docker(t, append(args, image)...)

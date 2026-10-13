@@ -1,0 +1,11 @@
+# A Go API on a Go server of its own, which reserves stock through
+# rs-stock's Go SDK when an order is placed: a Go server calls a Rust one
+# with the service credential its edge's connector chose (D57).
+name: rs-orders
+kind: API
+calls:
+  - { name: rs-stock, kind: API }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

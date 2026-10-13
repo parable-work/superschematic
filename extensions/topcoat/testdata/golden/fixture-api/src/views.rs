@@ -9,30 +9,54 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{CreateTenantInputRecord, TenantViewRecord};
 use topcoat::view::{View, component, view};
 
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
+
 /// `CreateTenantInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn create_tenant_input_detail(record: CreateTenantInputRecord) -> topcoat::Result<impl View> {
+pub async fn create_tenant_input_detail(record: CreateTenantInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="CreateTenantInput" role="group">
             <dl>
                 <div data-field="name">
                     <dt>"Name"</dt>
-                    <dd>(record.name)</dd>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
                 <div data-field="slug">
                     <dt>"Slug"</dt>
-                    <dd>(record.slug)</dd>
+                    <dd>(text_of(&choices, "slug", &record.slug))</dd>
                 </div>
             </dl>
         </div>
@@ -40,8 +64,16 @@ pub async fn create_tenant_input_detail(record: CreateTenantInputRecord) -> topc
 }
 
 /// `CreateTenantInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>) -> topcoat::Result<impl View> {
+pub async fn create_tenant_input_table(
+    rows: Vec<CreateTenantInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="CreateTenantInput">
             <thead>
@@ -51,10 +83,24 @@ pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>) -> to
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Create tenant input");
                     <tr>
-                        <td data-field="name">(row.name)</td>
-                        <td data-field="slug">(row.slug)</td>
+                        <td data-field="name">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "name", &row.name))
+                            }
+                        </td>
+                        <td data-field="slug">(text_of(&choices, "slug", &row.slug))</td>
                     </tr>
                 }
             </tbody>
@@ -63,22 +109,23 @@ pub async fn create_tenant_input_table(rows: Vec<CreateTenantInputRecord>) -> to
 }
 
 /// `TenantViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn tenant_view_detail(record: TenantViewRecord) -> topcoat::Result<impl View> {
+pub async fn tenant_view_detail(record: TenantViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="TenantView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="name">
                     <dt>"Name"</dt>
-                    <dd>(record.name)</dd>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
                 </div>
                 <div data-field="userCount">
                     <dt>"User count"</dt>
-                    <dd>(record.user_count)</dd>
+                    <dd>(number_of(&choices, "userCount", record.user_count))</dd>
                 </div>
             </dl>
         </div>
@@ -86,8 +133,16 @@ pub async fn tenant_view_detail(record: TenantViewRecord) -> topcoat::Result<imp
 }
 
 /// `TenantViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn tenant_view_table(rows: Vec<TenantViewRecord>) -> topcoat::Result<impl View> {
+pub async fn tenant_view_table(
+    rows: Vec<TenantViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="TenantView">
             <thead>
@@ -98,11 +153,25 @@ pub async fn tenant_view_table(rows: Vec<TenantViewRecord>) -> topcoat::Result<i
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Tenant view");
                     <tr>
-                        <td data-field="id">(row.id)</td>
-                        <td data-field="name">(row.name)</td>
-                        <td data-field="userCount">(row.user_count)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="name">(text_of(&choices, "name", &row.name))</td>
+                        <td data-field="userCount">(number_of(&choices, "userCount", row.user_count))</td>
                     </tr>
                 }
             </tbody>

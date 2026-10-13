@@ -4,6 +4,9 @@
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
+{{ if .Deps -}}
+pub mod deps;
+{{ end -}}
 {{ if .Identity -}}
 pub mod identity;
 {{ end -}}
@@ -20,6 +23,9 @@ pub use {{ .TypesCrateIdent }} as types;
 /// crate that builds on this one with the same version of it.
 pub use {{ .RuntimeCrateIdent }} as runtime;
 
+{{ if .Deps -}}
+pub use deps::{Deps, Handlers};
+{{ end -}}
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, {{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};
 pub use {{ .RuntimeCrateIdent }}::{request_ids, RouterOptions};

@@ -16,7 +16,8 @@ use std::sync::{Arc, Mutex};
 use rusqlite::types::ValueRef;
 use serde_json::Value;
 
-use super::{default_table_name, layout, Adapter, Clock, IdBits, Options, Rusqlite, TABLES};
+use super::{default_table_name, layout, Adapter, Clock, Options, Rusqlite, TABLES};
+use crate::fixed::IdBits;
 use crate::{CommitOptions, Edits, Engine, KindEdits, MergeResult};
 
 const COOK: &str = "Cook";

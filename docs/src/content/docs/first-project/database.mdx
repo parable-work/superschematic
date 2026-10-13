@@ -61,6 +61,9 @@ Then the catalog:
 `Default<boolean, true>` is a default for decoders, not for the database:
 when a JSON or YAML payload leaves `inStock` out, the generated Go and
 TypeScript decoders fill in `true`. The column itself has no SQL default.
+`@index` with `unique` keeps one stock row per product, which `shop-stock`,
+the API that reads and writes it, relies on
+([Indexes](/superschematic/guides/database-tables/#indexes)).
 
 ## Build
 

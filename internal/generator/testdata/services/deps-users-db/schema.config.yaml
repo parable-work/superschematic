@@ -1,0 +1,7 @@
+# The database of deps-rust-shop, its authDb: its User and UserRole tables
+# are the user model's (D50), and the loader adds Session, UserCredential
+# and UserRoleGrant beside them. The Rust Deps tests in internal/generator
+# build its API alone, which needs nothing generated for it.
+name: deps-users-db
+kind: DB
+outputs: {}

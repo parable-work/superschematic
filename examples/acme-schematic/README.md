@@ -186,9 +186,9 @@ r.RegisterKind(registry.KindSpec{
   (`Money`, say) is in.
 
 A schema declares the kind with `kind: "Catalog"` in `schema.config.ts`.
-`SchemaKind` is a closed enum of the core four; `defineConfig` also takes
+`SchemaKind` is a closed enum of the core kinds; `defineConfig` also takes
 any string, and the registry validates it. The core-only binary rejects the
-file with `unknown kind "Catalog" (registered kinds: API, DB, General, Stack)`,
+file with `unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, Site, Stack)`,
 which is one of the smoke's assertions.
 
 ## A generator
@@ -755,11 +755,14 @@ as `returns-api` includes `mcp.ts`.
 `build --emit-ir` prints the behavior in the IR from both forms,
 `json-schema` limits a type's behavior names to `acme.Rating` and checks
 its config, and `format` converts the file to YAML and to TypeScript.
-`build` refuses the service: no generator renders behaviors yet, and the
-error names the `types` generator. The services sit outside `schemas/` so
+`build` writes the TypeScript types with `ProductBehaviors`, the
+behavior's fields under its exact name (`'acme.Rating'`): every generator
+of the General pipeline renders behaviors, acme's manifest generator
+among them, since it lists the types by name and nothing a behavior adds
+(D58). The services are fixtures of `ext`'s tests, outside `schemas/`, so
 `build-all` does not meet them. The core-only binary refuses the behavior
 by name. The smoke asserts each of these (`TestRatingBehavior` covers the
-load).
+load and the build).
 
 What the behavior does when `@superschematic/engine` runs the schema is
 TypeScript: `packages/behaviors` (`@acme/behaviors`) implements it. The

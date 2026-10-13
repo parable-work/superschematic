@@ -43,6 +43,16 @@ pub trait HttpGetter: Send + Sync + 'static {
 
 /// The metadata server's host when `GCE_METADATA_HOST` is not set.
 const METADATA_HOST: &str = "metadata.google.internal";
+
+/// The metadata server's `host[:port]`: `GCE_METADATA_HOST` when it is set,
+/// as Google's client libraries read it, and `metadata.google.internal`
+/// otherwise.
+pub(crate) fn metadata_host() -> String {
+    std::env::var("GCE_METADATA_HOST")
+        .ok()
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| METADATA_HOST.to_string())
+}
 /// A Google ID token is fetched again this long before it expires.
 const GOOGLE_REFRESH_MARGIN_SECONDS: u64 = 5 * 60;
 /// A token file is read again when the token read is this old.
@@ -80,10 +90,7 @@ impl GoogleIdTokenSource {
     pub fn new(audience: impl Into<String>) -> Self {
         Self {
             audience: audience.into(),
-            host: std::env::var("GCE_METADATA_HOST")
-                .ok()
-                .filter(|host| !host.is_empty())
-                .unwrap_or_else(|| METADATA_HOST.to_string()),
+            host: metadata_host(),
             getter: default_getter(),
             clock: Arc::new(SystemTime::now),
         }

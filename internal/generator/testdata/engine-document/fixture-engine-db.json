@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "namespace": "fixture-engine-db",
+  "tools": {
+    "invocationPolicy": {
+      "key": "invocationPolicy",
+      "values": [
+        "auto",
+        "ask"
+      ],
+      "default": "auto"
+    },
+    "keys": {
+      "scalar": "x-superschematic-scalar",
+      "guidance": "superschematic/operation-guidance",
+      "parameters": []
+    }
+  },
+  "behaviors": [
+    {
+      "name": "Comments",
+      "package": "@superschematic/engine"
+    },
+    {
+      "name": "Links",
+      "package": "@superschematic/engine"
+    },
+    {
+      "name": "Timers",
+      "package": "@superschematic/engine"
+    },
+    {
+      "name": "Workflow",
+      "package": "@superschematic/engine"
+    }
+  ],
+  "schemas": [
+    {
+      "name": "Account",
+      "kind": "General",
+      "scalars": {
+        "Identity.Name": {
+          "name": "Identity.Name",
+          "languagePrimitive": "string"
+        },
+        "Identity.UUID": {
+          "name": "Identity.UUID",
+          "languagePrimitive": "string"
+        }
+      },
+      "types": {
+        "Account": {
+          "name": "Account",
+          "description": "A customer's account with the desk: an engine type, which collects comments.",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Comments"
+            }
+          ],
+          "fields": [
+            {
+              "name": "name",
+              "typeRef": {
+                "name": "Identity.Name"
+              },
+              "required": true
+            },
+            {
+              "name": "customerId",
+              "description": "The Customer row the account belongs to, by its key: a plain field, since an engine type reaches no table.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              }
+            },
+            {
+              "name": "address",
+              "typeRef": {
+                "name": "Address"
+              }
+            },
+            {
+              "name": "slug",
+              "typeRef": {
+                "name": "string"
+              },
+              "unique": true
+            }
+          ]
+        },
+        "Address": {
+          "name": "Address",
+          "description": "A postal address, stored as JSON: a table's column and an engine type's field both hold one.",
+          "role": "EmbeddedStruct",
+          "fields": [
+            {
+              "name": "line1",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "city",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "country",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMinLength": 2,
+              "validateMaxLength": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Ticket",
+      "kind": "General",
+      "scalars": {
+        "Contact.Email": {
+          "name": "Contact.Email",
+          "languagePrimitive": "string"
+        },
+        "Temporal.DateTime": {
+          "name": "Temporal.DateTime",
+          "languagePrimitive": "string"
+        }
+      },
+      "types": {
+        "ContactCard": {
+          "name": "ContactCard",
+          "description": "Who to answer, stored as JSON in a ticket.",
+          "role": "EmbeddedStruct",
+          "fields": [
+            {
+              "name": "email",
+              "typeRef": {
+                "name": "Contact.Email"
+              },
+              "required": true
+            },
+            {
+              "name": "phone",
+              "typeRef": {
+                "name": "string"
+              }
+            }
+          ]
+        },
+        "Ticket": {
+          "name": "Ticket",
+          "description": "A support ticket: an engine type that moves from open through waiting to resolved, escalates after four hours open with no answer, collects comments and links to its account.",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "config": {
+                "states": [
+                  "open",
+                  "waiting",
+                  "escalated",
+                  "resolved"
+                ],
+                "transitions": [
+                  {
+                    "from": "open",
+                    "to": "waiting"
+                  },
+                  {
+                    "from": "waiting",
+                    "to": "open"
+                  },
+                  {
+                    "from": "open",
+                    "to": "escalated"
+                  },
+                  {
+                    "from": "escalated",
+                    "to": "open"
+                  },
+                  {
+                    "from": "open",
+                    "to": "resolved"
+                  },
+                  {
+                    "from": "waiting",
+                    "to": "resolved"
+                  },
+                  {
+                    "from": "escalated",
+                    "to": "resolved"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Comments"
+            },
+            {
+              "name": "Timers",
+              "config": {
+                "deadlines": {
+                  "respond": {
+                    "afterMs": 14400000,
+                    "start": {
+                      "enters": "open"
+                    },
+                    "then": {
+                      "transition": "escalated"
+                    },
+                    "until": {
+                      "leaves": "open"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Links",
+              "config": {
+                "links": {
+                  "account": {
+                    "required": true,
+                    "schema": "Account"
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "title",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMaxLength": 200
+            },
+            {
+              "name": "priority",
+              "typeRef": {
+                "name": "TicketPriority"
+              },
+              "required": true,
+              "default": "normal"
+            },
+            {
+              "name": "contact",
+              "typeRef": {
+                "name": "ContactCard"
+              },
+              "required": true
+            },
+            {
+              "name": "tags",
+              "typeRef": {
+                "name": "string",
+                "isArray": true
+              }
+            },
+            {
+              "name": "dueAt",
+              "typeRef": {
+                "name": "Temporal.DateTime"
+              }
+            }
+          ]
+        }
+      },
+      "enums": {
+        "TicketPriority": {
+          "name": "TicketPriority",
+          "description": "How soon a ticket needs an answer; only the Ticket engine type uses it.",
+          "values": [
+            {
+              "name": "Low",
+              "serializedAs": "low"
+            },
+            {
+              "name": "Normal",
+              "serializedAs": "normal"
+            },
+            {
+              "name": "Urgent",
+              "serializedAs": "urgent"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "metaSchema": "<the JSON Schema superschematic json-schema prints>"
+}

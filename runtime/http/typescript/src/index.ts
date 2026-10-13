@@ -16,8 +16,10 @@ entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
 bucket it lists (bucket.ts, D54). ./hono.ts binds it to Hono,
-./postgres.ts opens a database's pg Pool and ./gcs.ts a bucket on GCS;
-nothing in this file imports a framework, pg or a provider's client.
+./postgres.ts opens a database's pg Pool and runs a queue's enqueue and
+claims (queue.ts, D53), ./worker.ts is a worker's claim loop and ./gcs.ts
+opens a bucket on GCS; nothing in this file imports a framework, pg or a
+provider's client.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';

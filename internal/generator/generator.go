@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/enginedoc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -159,6 +160,7 @@ func newRun(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, outputs *registry
 		LoadDependency: memo.loadDependency,
 		APIOutput:      memo.buildAPIOutput,
 		EnvConfig:      memo.buildEnvConfig,
+		EngineDocument: memo.buildEngineDocument,
 		Result:         &registry.Result{Outputs: make(map[string]string)},
 	}}
 	memo.r = r
@@ -199,7 +201,13 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 		}
 		return false
 	})
+	if err := r.refuseEngineTypes(); err != nil {
+		return err
+	}
 	if err := refuseBehaviors(r.Schema, enabled); err != nil {
+		return err
+	}
+	if err := r.refuseImportedEngineTypes(enabled); err != nil {
 		return err
 	}
 	if err := r.refuseMissingDependencyTypes(enabled); err != nil {
@@ -214,15 +222,21 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 }
 
 // refuseBehaviors fails, before any generator runs, when a type of the
-// schema composes a behavior and an enabled generator does not render
+// schema composes a behavior and either the schema is an API, whose own
+// types never compose one, or an enabled generator does not render
 // behaviors (GeneratorSpec.RendersBehaviors): that generator would write
 // the type without the fields and operations its behaviors add. The error
-// names the generator, the type and the behavior. build --emit-ir, format
-// and json-schema run no generator and accept the schema (D16).
+// names the first such generator, the type and the behavior; types, which
+// renders behaviors' fields, and the generators of a DB schema, whose
+// engine types the engine keeps (D58), are never it. build --emit-ir,
+// format and json-schema run no generator and accept the schema (D16).
 func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
 	typeName, behavior, found := schema.FindBehavior()
 	if !found {
 		return nil
+	}
+	if schema.Kind == ir.SchemaKindAPI {
+		return fmt.Errorf("generator: type %s of API %s composes behavior %s, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)", typeName, schema.Name, behavior)
 	}
 	for _, gen := range enabled {
 		if !gen.RendersBehaviors {
@@ -230,6 +244,121 @@ func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error 
 		}
 	}
 	return nil
+}
+
+// hasEngineTypes reports whether the schema's kind keeps its structs in
+// tables, as the DB kind does, so a type of it that composes a behavior is
+// an engine type (D58).
+func (r run) hasEngineTypes() bool {
+	kind, ok := r.Registry.Kind(string(r.Schema.Kind))
+	return ok && kind.StructRole == ir.RoleDBTable && len(codegen.EngineTypes(r.Schema)) > 0
+}
+
+// refuseEngineTypes fails, before any generator runs, with every reason
+// the engine types of a DB schema cannot be engine types
+// (enginedoc.Problems): sql and orm leave them out, so a table that names
+// one, or an engine type that reaches a table, would be written against a
+// table that is not there. It refuses a namespace the engine would refuse
+// too (enginedoc.Namespace), before sql writes anything.
+func (r run) refuseEngineTypes() error {
+	if !r.hasEngineTypes() {
+		return nil
+	}
+	problems := enginedoc.Problems(r.Schema)
+	errs := make([]error, 0, len(problems)+1)
+	for _, problem := range problems {
+		errs = append(errs, fmt.Errorf("generator: %s", problem))
+	}
+	if _, err := enginedoc.Namespace(r.Config.Name, r.Outputs.EngineNamespace()); err != nil {
+		errs = append(errs, fmt.Errorf("generator: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// refuseImportedEngineTypes fails, before any generator runs, when the
+// schema uses a type of a DB service that composes a behavior, an engine
+// type, and an enabled generator does not render behaviors: the API
+// generators do not serve an engine type yet (D58). A type is used when
+// the schema imports it or a type of the schema projects it (@source).
+// The error names the first such generator. A dependency the build cannot
+// load is left to the generators, which report it.
+func (r run) refuseImportedEngineTypes(enabled []registry.GeneratorSpec) error {
+	i := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersBehaviors })
+	if i < 0 {
+		return nil
+	}
+	used := usedDependencyTypes(r.Schema)
+	if len(used) == 0 {
+		return nil
+	}
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return nil
+	}
+	if use, found := findEngineType(used, deps); found {
+		return fmt.Errorf("generator: %s does not render engine types yet: %s %s, which composes behavior %s (D58)", enabled[i].Name, use.how, use.qualified(), use.behavior)
+	}
+	return nil
+}
+
+// dependencyTypeUse is one type of a dependency a schema uses.
+type dependencyTypeUse struct {
+	service, typeName string
+	// how says how the schema uses it, for a message.
+	how      string
+	behavior string
+}
+
+func (u dependencyTypeUse) qualified() string { return u.service + "." + u.typeName }
+
+// usedDependencyTypes lists the types of other services a schema uses:
+// each type an import names, and each @source target, in that order.
+func usedDependencyTypes(schema *ir.Schema) []dependencyTypeUse {
+	var used []dependencyTypeUse
+	for _, imp := range schema.Imports {
+		service := imp.Package
+		if i := strings.LastIndex(service, "/"); i >= 0 {
+			service = service[i+1:]
+		}
+		for _, name := range imp.Types {
+			used = append(used, dependencyTypeUse{service: service, typeName: name, how: fmt.Sprintf("%s imports", schema.Name)})
+		}
+	}
+	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
+		names := make([]string, 0, len(types))
+		for name := range types {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			td := types[name]
+			if td == nil || td.Source == nil {
+				continue
+			}
+			i := strings.LastIndex(td.Source.Target, ".")
+			if i <= 0 {
+				continue
+			}
+			used = append(used, dependencyTypeUse{service: td.Source.Target[:i], typeName: td.Source.Target[i+1:], how: fmt.Sprintf("type %s of %s projects", td.Name, schema.Name)})
+		}
+	}
+	return used
+}
+
+// findEngineType returns the first of used that is an engine type of a DB
+// service among deps.
+func findEngineType(used []dependencyTypeUse, deps map[string]*ir.Schema) (dependencyTypeUse, bool) {
+	for _, use := range used {
+		dep := deps[use.service]
+		if dep == nil || dep.Kind != ir.SchemaKindDB {
+			continue
+		}
+		if td := dep.Types[use.typeName]; codegen.IsEngineType(td) {
+			use.behavior = td.Behaviors[0].Name
+			return use, true
+		}
+	}
+	return dependencyTypeUse{}, false
 }
 
 // refuseMissingDependencyTypes fails, before any generator runs, when a

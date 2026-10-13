@@ -1,0 +1,28 @@
+{
+  "name": "@schemas/ts-cloud-stack-ts-shop-remind-shoppers-server",
+  "version": "0.0.0",
+  "description": "Worker ts-shop-remind-shoppers of stack ts-cloud-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@google-cloud/cloud-sql-connector": "1.12.0",
+    "@google-cloud/storage": "8.3.0",
+    "@schemas/ts-db-types": "workspace:*",
+    "@schemas/ts-pricing-sdk": "workspace:*",
+    "@schemas/ts-shop-api": "workspace:*",
+    "@schemas/ts-shop-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3"
+  }
+}

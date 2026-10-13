@@ -58,10 +58,28 @@ message naming the import, in every build command:
 `schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
 
 A type that composes a behavior (`behaviors` in the data forms) loads,
-and `--emit-ir` prints it, but no generator of a build renders behaviors:
-the build fails and names the first generator that would run, the type and
-the behavior. An engine runs such a schema; `engine-client` (below) types
-the engine's client for it.
+and `--emit-ir` prints it. The `types` generator renders it: each
+language's types write `<Type>Behaviors`, the type's behaviors' fields as
+a read returns them, narrowed by the type's config
+([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
+A General schema with such a type builds. In a DB schema it is an engine
+type, whose instances the engine keeps: `sql` and `orm` leave it out, and
+the `enginedoc` generator writes the schema's engine document,
+`types/go/<service>/engine/<service>.json`, which the types hold as a
+constant too
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+`outputs.engine.namespace` names the engine namespace its documents live
+in, the service's name unless set. The build fails before its generators
+run, one line per problem, when an engine type reaches a table or another
+engine type through a field, a table references an engine type, or an
+engine type declares what only a table has:
+`generator: field Ticket.customer of engine type Ticket is typed as table Customer, but an engine type cannot reach a table: make Customer an engine type too and link to it with the Links behavior (D16), or hold its key in a plain field`.
+An API's own type cannot compose a behavior, and the API generators do
+not serve an engine type yet, so an API that imports or projects one
+fails, naming the first generator that would run:
+`generator: api does not render engine types yet: shop-api imports shop-db.Ticket, which composes behavior Workflow (D58)`.
+An engine runs a General schema's types as they are; `engine-client`
+(below) types the engine's client for it.
 
 A generated package that imports a package the build does not generate
 fails the build:
@@ -129,7 +147,11 @@ method answers 501 until it is implemented. It never writes into a
 directory that holds a Go file. A TypeScript API's is a package at the
 `typescript` template (`typescript/{service}`): `package.json`,
 `tsconfig.json` and an `index.ts` whose `create` is the generated
-`Constructor`, written only while the directory holds no `.ts` file.
+`Constructor`, written only while the directory holds no `.ts` file. A
+Rust API's is a crate at the `rust` template (`rust/{service}`): a
+`Cargo.toml` and a `src/lib.rs` whose `create(deps)` returns the API
+crate's `Handlers`, written only while the directory holds no
+`Cargo.toml`.
 Without the flag a build writes nothing outside the output root, except a
 stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
@@ -158,7 +180,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
-| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API built whose package is missing, at the `[implementation_paths]` template of its language |
+| `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API built whose package is missing, at the `[implementation_paths]` template of its language |
 
 ## `build-all <services-root>`
 
@@ -209,7 +231,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
-| `--scaffold` | false | write the implementation scaffold of each Go or TypeScript API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
+| `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API whose package is missing, as `build --scaffold` does; a cached service whose implementation is missing builds again |
 
 Every service `build-all` builds gets a stamp,
 `<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the
@@ -504,6 +526,77 @@ runs wherever the client does. It is a command of its own rather than a
 `build` target: an engine schema has no service config, and one module
 types schemas that link to each other.
 
+## `stack init [<services-root>]`
+
+Write a Stack service over a tree that already has API services, with a
+local environment, a gcp one when given a project and a region, and the
+ignore rules a stack needs. It writes files and nothing else. The design
+is section 11.1 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
+and D59 records it; [Stacks](/superschematic/guides/stacks/#start-a-stack)
+walks through it.
+
+1. Write each service's sentinel, as a build does, and discover the
+   services under `<services-root>`, `./schemas/services` without one.
+2. Read each API's operations. An API is exposed when an end user or a
+   third party calls one of its operations: one whose service clause,
+   its own or its set's, is none or `@allowService`. An API whose every
+   operation is `@requireService`, or that has none, is internal. Each
+   API a site calls is exposed.
+3. Ask for each value no flag gives, at a terminal.
+4. Write `<services-root>/<name>/`: `package.json` when the first API
+   that has a `tsconfig.json` also has one, `tsconfig.json` extending
+   that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
+   `@stack` deploys every API and every Site service and exposes as step 2
+   decided, with `Dev` on the local target and the gcp environment, and,
+   for a gcp environment, `src/gcp-target.ts`, the gcp target's values and
+   settings types read from the JSON Schemas it registers.
+5. Add the ignore rules to the `.gitignore` that covers the schemas root,
+   the nearest at or above it in its repository, else a new one in the
+   schemas root, anchored there: `/dist/*`, `!/dist/bun.lock` and
+   `/.superschematic/`. A `/dist/` or `/dist` rule there becomes
+   `/dist/*`. When git still ignores the lockfile after them, because a
+   broader rule ignores the output root, it adds `!/dist/`; when another
+   rule ignores the lockfile itself, it names the rule. A rule already
+   there is not added again.
+6. Load the stack and resolve each environment as the `stack` generator
+   does, and print what it wrote and why, each problem that does not
+   resolve yet, and the next commands: `superschematic stack dev
+   --environment Dev` and `superschematic stack bootstrap <environment>`,
+   each naming the stack's directory when the stack commands would not
+   find it on their own.
+
+At a terminal, init asks for the name, whether to add a gcp environment
+and its name, project and region, whether to turn the GitHub workflow on,
+and what to expose. Each question shows its default in brackets: the
+tree's, or the project and region gcloud's active configuration names
+(`project`, then `run/region` or `compute/region`), read with no stdin and
+a ten-second deadline, and skipped without `gcloud`. Without a terminal,
+each value comes from its flag or its default, and a gcp environment needs
+both `--gcp-project` and `--region`.
+
+It refuses a tree with no API service; a tree with a Stack service, unless
+`--force`; a name that is another kind of service's; and a gcp
+environment in a binary that does not link the gcp target, the core
+alone.
+
+```
+superschematic stack init
+superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+superschematic stack init ./schemas/services --name shop-stack --expose shop-api --force
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--name` | the first word the deployed services' names share, then `-stack`; else the naming file's `npm_scope`, then `-stack`; else the project directory's | the Stack service's name and directory |
+| `--gcp-project` | none | the Google Cloud project of a gcp environment |
+| `--region` | none | the gcp environment's region, such as `us-east1` |
+| `--environment` | `Staging` | the gcp environment's name, a class name |
+| `--ci` | none | the CI renderer `outputs.ci` turns on, `github` |
+| `--expose` | the APIs end users and sites call | the API services to expose, comma-separated, or `none` |
+| `--force` | false | write the stack though the tree has one: replace the Stack service of the same name, its config and `src`, or add another |
+| `--naming` | `<services-root>/../superschematic.toml` | naming config file |
+
 ## `stack dev [<stack-service-dir>]`
 
 Run an environment of a stack on the `local` target until Ctrl-C. The
@@ -517,8 +610,14 @@ design is section 8.3 of
    `<out>/stack/<stack>/<environment>/environment.json`: `--environment`,
    or the stack's one environment on the local target.
 3. Start the environment's Postgres container,
-   `superschematic-<stack>-<environment>-postgres`, published on
+   `superschematic-<stack>-<environment>-<checkout>-postgres`, published on
    127.0.0.1 only, and create a database per DB schema it hosts.
+   `<checkout>` is six hexadecimal digits of a hash of the environment's
+   state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`,
+   so each checkout of the repository runs containers of its own, and
+   keeps them from run to run. A container of the environment that an
+   older superschematic named without a checkout is left as it is, with
+   its data: dev prints the `docker rm` that removes it.
 4. Migrate each database to its schema's model: a plan from the model the
    database recorded, applied with `superschematic-migrate`, expand and
    contract back to back. The runner must be on `PATH`, or named by
@@ -535,14 +634,16 @@ design is section 8.3 of
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
    run locally yet, and the environment does not resolve.
 6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
-   the same way, and start it with the servers of its wave: a process with
+   the same way, a TypeScript worker's package needing no build, and start
+   it with the servers of its wave, a TypeScript one as `bun main.ts`: a process with
    no port, ready once it starts, with `WORKER_CONCURRENCY` set to the
    concurrency the environment gives it, each line it prints with its name
    in front. One process runs whatever the worker's `instances`, and none
    for a worker the environment turns off.
 7. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
-   same way, and run each job that has a schedule in the environment on
-   it, in its time zone: never two runs of one job at once, a run stopped
+   same way, a TypeScript job's package needing no build, and run each job
+   that has a schedule in the environment on it, a TypeScript one as `bun
+   main.ts`, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
    prints with its name in front. A job's run never stops the environment.
 7. Build each site once, `bun run <build>` in its package after the same
@@ -557,7 +658,7 @@ Dev stays in the foreground until Ctrl-C or until a server or a worker
 exits, then stops the sites, the servers and the workers, callers first,
 and the containers, which keep their data for the next run: the
 databases, and the buckets' objects. `--remove-data` removes the
-containers and their data instead.
+checkout's containers and their data instead, and no other checkout's.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -580,13 +681,16 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-data` | false | on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
+| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its
 values, Postgres's and the storage emulator's, and a server's port with
 its settings; a port it leaves out comes from a hash of the stack, the
-environment and the server, so it stays the same from run to run:
+environment and the server, shifted by the checkout, so it stays the same
+from run to run and two checkouts run the environment side by side. A
+port the environment sets is the same in every checkout, so only one
+checkout at a time can run an environment that sets one:
 
 ```ts
 @environment({
@@ -607,9 +711,9 @@ API service's name and its class in kebab case,
 
 On the `local` target, run it from another terminal while `stack dev`
 runs the environment. It builds no schema: it reads the environment the
-last build resolved and the program `stack dev` rendered, builds the job's
-binary from its entrypoint module, so a change to the job's code is in
-the run, and runs it with the environment's values, secrets and keys, its
+last build resolved and the program `stack dev` rendered, builds a Go
+job's binary from its entrypoint module, or installs the workspace for a
+TypeScript job's `main.ts`, so a change to the job's code is in the run, and runs it with the environment's values, secrets and keys, its
 timeout and its retries, each line it prints with the job's name in front.
 It refuses an environment whose Postgres container or servers do not
 answer, and a job whose scheduled run goes on; `stack dev`'s schedule
@@ -731,7 +835,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 Build the image of each server and job whose build context changed since
 the image the deploy manifest records, as `stack deploy` would, and deploy
-nothing. A Go or TypeScript server, or a Go job, builds from the Dockerfile
+nothing. A Go or TypeScript server, job or worker builds from the Dockerfile
 `superschematic build-all` writes at
 `<output-root>/server/<stack>/<deployable>/`, with the repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the
@@ -784,6 +888,8 @@ phases.
 A binary built from a checkout names no release of the migration runner
 to build the job's image from: set `SUPERSCHEMATIC_MIGRATE_IMAGE` to an
 image of `superschematic-migrate`, by digest, in the stack's repository.
+A deploy with a migration to run checks for the image, or builds the
+release's, before it changes anything, and refuses to start without one.
 
 ```
 superschematic stack deploy Staging

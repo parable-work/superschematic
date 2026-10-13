@@ -31,8 +31,9 @@ const (
 	// the user model; users-api, public, serves the session routes and a
 	// route of its own over it, and declares a job, PurgeSessions;
 	// users-admin, not public, the administration routes; and users-stack
-	// serves both from one server, Accounts, on the local target. Beside
-	// them, users-ts-api serves the session routes and its own route on a
+	// serves both from one server, Accounts, on the local target, with
+	// users-web, a site that calls users-api (D55). Beside them,
+	// users-ts-api serves the session routes and its own route on a
 	// TypeScript server (D51), its default one in users-ts-stack.
 	identityRoot = "testdata/identity"
 
@@ -49,7 +50,8 @@ const (
 
 	// identityPortalStack's one TypeScript server, identityPortalServer,
 	// serves users-ts-api beside users-ts-notes, a second API over
-	// users-db, and users-ts-ping, an API over no user model.
+	// users-db, and users-ts-ping, an API over no user model; its site,
+	// users-ts-web, calls users-ts-api.
 	identityPortalStack  = "users-ts-portal"
 	identityPortalServer = "Web"
 
@@ -76,7 +78,8 @@ func loadIdentityFixture(t *testing.T) fixture {
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
 	names := append(slices.Clone(identityOrder), identityTSOrder[1:]...)
-	names = append(names, "users-ts-notes", "users-ts-ping", identityPortalStack)
+	// The sites are loaded, not built: their builds write no entrypoint.
+	names = append(names, "users-ts-notes", "users-ts-ping", identityPortalStack, "users-web", "users-ts-web")
 	for _, name := range names {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(identityRoot, name), loader.WithRegistry(reg))
 		if err != nil {
@@ -91,7 +94,9 @@ func loadIdentityFixture(t *testing.T) fixture {
 // identity runtime builds one identity store over their database's pool,
 // from its Go types' descriptor, and each API's identity service from its
 // identity config field, which identity.go reads; neither API's
-// implementation writes an auth middleware. The local environment binds
+// implementation writes an auth middleware. users-web calls users-api, so
+// the server answers CORS for its origin around the routers, whose
+// identity CORS answers the trusted origins. The local environment binds
 // each identity config field to the local platform's config, a cookie
 // without Secure. users-api's job, which serves no request, builds no
 // identity store or service, has no identity.go and binds no identity
@@ -105,7 +110,7 @@ func TestIdentityEntrypointGolden(t *testing.T) {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 
 	files := map[string]string{}
-	for _, file := range []string{servergen.MainFile, servergen.IdentityFile, servergen.ModFile} {
+	for _, file := range []string{servergen.MainFile, servergen.IdentityFile, servergen.CORSFile, servergen.ModFile} {
 		files[filepath.Join("server", identityStack, identityServer, file)] = filepath.Join(servergen.ServerDir(out, identityStack, identityServer), file)
 	}
 	for _, file := range []string{servergen.MainFile, servergen.ModFile} {
@@ -193,7 +198,10 @@ func TestIdentityEntrypointGolden(t *testing.T) {
 // no database up, and answers what needs no database: a protected route
 // refuses a request without a session, and a trusted origin's preflight
 // reaches the API that registers the route it asks about, whose CORS
-// middleware answers it. With the Postgres identityDatabaseEnv names, it
+// middleware answers it, users-api's too, which the site users-web calls:
+// the server answers the site's origin there, and hands the trusted
+// origin's preflight on (D55, amended). With the Postgres
+// identityDatabaseEnv names, it
 // serves users-db's user model: a user registers through users-api and
 // signs in, the session authenticates the project's route, which the
 // scaffold answers, and me, and users-admin, which serves the
@@ -221,10 +229,23 @@ func TestIdentityEntrypointServes(t *testing.T) {
 	identityConfig := `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
 	identity := []string{"USERS_API_IDENTITY=" + identityConfig, "USERS_ADMIN_IDENTITY=" + identityConfig}
 
-	offline := start(t, binary, append([]string{"USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable"}, identity...)...)
+	// The site users-web calls users-api from its origin, which users-api's
+	// CORS field lists; the identity config trusts another.
+	const siteOrigin = "https://users-web.example.com"
+	site := "USERS_API_CORS_ORIGINS=" + siteOrigin
+
+	offline := start(t, binary, append([]string{"USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable", site}, identity...)...)
 	offline.expect(t, http.MethodGet, "/api/greeting", http.StatusUnauthorized)
 	offline.expectPreflight(t, "/api/auth/admin/users", http.MethodGet)
 	offline.expectPreflight(t, "/api/auth/login", http.MethodPost)
+	offline.expectPreflight(t, "/api/greeting", http.MethodGet)
+	// The site's origin gets the site's CORS on users-api's routes, and
+	// none on users-admin's, which no site calls and whose identity config
+	// does not trust it; an origin neither lists gets none.
+	checkCORS(t, offline.base, http.MethodOptions, "/api/auth/login", siteOrigin, http.MethodPost, http.StatusNoContent, siteOrigin)
+	checkCORS(t, offline.base, http.MethodGet, "/api/greeting", siteOrigin, "", http.StatusUnauthorized, siteOrigin)
+	checkCORS(t, offline.base, http.MethodOptions, "/api/auth/admin/users", siteOrigin, http.MethodGet, http.StatusMethodNotAllowed, "")
+	checkCORS(t, offline.base, http.MethodOptions, "/api/auth/login", "https://evil.example", http.MethodPost, http.StatusMethodNotAllowed, "")
 	offline.stop(t)
 
 	// An identity config the runtime refuses stops the server, naming the
@@ -578,6 +599,9 @@ func TestTypeScriptIdentityEntrypointServes(t *testing.T) {
 // another; users-ts-ping, over no user model, answers neither. A
 // preflight goes to the API that registers the method it asks for on the
 // path: users-ts-notes registers POST where users-ts-api registers GET.
+// The site users-ts-web calls users-ts-api, whose routes answer the site's
+// origin too, and still hand a trusted origin's preflight to the identity
+// runtime (D55, amended).
 func TestTypeScriptIdentityCorsStaysWithItsAPI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -608,13 +632,13 @@ func TestTypeScriptIdentityCorsStaysWithItsAPI(t *testing.T) {
 		t.Fatalf("tsc in %s: %v\n%s", dir, err, output)
 	}
 
-	const a, b = "https://a.example.com", "https://b.example.com"
+	const a, b, site = "https://a.example.com", "https://b.example.com", "https://users-ts-web.example.com"
 	trusting := func(api, origin string) string {
 		return ir.IdentityConfigField(api) + `={"trustedOrigins": ["` + origin + `"], "cookie": {"secure": false}}`
 	}
 	server := bunServer(t, bun, dir,
 		"USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable",
-		trusting(identityTSAPI, a), trusting("users-ts-notes", b))
+		trusting(identityTSAPI, a), trusting("users-ts-notes", b), "USERS_TS_API_CORS_ORIGINS="+site)
 	defer server.stop(t)
 	// answer sends method to path from origin, a preflight when requested
 	// names a method, and returns the status and the CORS it got.
@@ -647,6 +671,10 @@ func TestTypeScriptIdentityCorsStaysWithItsAPI(t *testing.T) {
 		{"GET", "/api/greeting", b, "", "401  "},
 		{"GET", "/api/ping", a, "", "501  "},
 		{"GET", "/api/ping", b, "", "501  "},
+		// The site's origin gets users-ts-api's CORS, and no other API's.
+		{"GET", "/api/greeting", site, "", "401 " + site + " true"},
+		{"POST", "/api/greeting", site, "", "401  "},
+		{"GET", "/api/notes", site, "", "401  "},
 		// A preflight is answered by the API that registers the method.
 		{"OPTIONS", "/api/greeting", a, "GET", "204 " + a + " true"},
 		{"OPTIONS", "/api/greeting", b, "POST", "204 " + b + " true"},
@@ -657,6 +685,10 @@ func TestTypeScriptIdentityCorsStaysWithItsAPI(t *testing.T) {
 		{"OPTIONS", "/api/notes", a, "GET", "404  "},
 		{"OPTIONS", "/api/auth/login", b, "POST", "404  "},
 		{"OPTIONS", "/api/ping", a, "GET", "404  "},
+		{"OPTIONS", "/api/greeting", site, "GET", "204 " + site + " true"},
+		{"OPTIONS", "/api/auth/login", site, "POST", "204 " + site + " true"},
+		{"OPTIONS", "/api/greeting", site, "POST", "404  "},
+		{"OPTIONS", "/api/notes", site, "GET", "404  "},
 	} {
 		if got := answer(c.method, c.path, c.origin, c.requested); got != c.want {
 			t.Errorf("%s %s from %s (asking for %q) answered %q, want %q", c.method, c.path, c.origin, c.requested, got, c.want)

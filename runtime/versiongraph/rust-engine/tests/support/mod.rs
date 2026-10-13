@@ -1,7 +1,10 @@
 //! What the Postgres tests share: the database they run against, a schema of
-//! their own that holds the fixture's DDL, and the fixture's descriptor.
+//! their own that holds the fixture's DDL, and the fixture's descriptor; and
+//! the test hosts of the fixed layout's synchronous seam ([`hosts`]).
 
 #![allow(dead_code)]
+
+pub mod hosts;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

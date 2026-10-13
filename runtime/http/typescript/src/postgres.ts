@@ -188,3 +188,9 @@ export async function ping(pool: Pick<Pool, 'query'>, timeoutMs: number): Promis
     clearTimeout(timer);
   }
 }
+
+// The queue client (D53): enqueue in the caller's transaction, and a
+// worker's claims, over the definitions a DB's types package exports from
+// its ./queues entry.
+export { ClaimLostError, enqueue, parseArray, postgresQueue } from './queue.js';
+export type { PostgresQueue, QueueClaim, QueueDefinition, QueueField, QueueQueryable, QueueQueryConfig, QueueStatements } from './queue.js';

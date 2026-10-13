@@ -146,13 +146,18 @@ has the rest.
 
 You write no `main`. A stack, a service of the kind `Stack`, says what
 runs and where. `shop-stack` deploys `shop-api` and `shop-orders`, each on
-a server of its own, and its `Dev` environment runs them on the `local`
-target:
+a Go server of its own, beside the shop's Rust, TypeScript and static
+servers, and its `Dev` environment runs them on the `local` target:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
-With Docker running and the migration runner, `superschematic-migrate`, on
-your `PATH` (see [the runner](/superschematic/reference/migrations/#the-runner)),
+In a tree of your own, `superschematic stack init` writes such a stack
+over your APIs, with `Dev` and the ignore rules, and prints the command
+that runs it ([Start a stack](/superschematic/guides/stacks/#start-a-stack)).
+
+With Docker running, Bun and cargo installed for the storefront's and
+`shop-stock`'s servers, and the migration runner, `superschematic-migrate`,
+on your `PATH` (see [the runner](/superschematic/reference/migrations/#the-runner)),
 run it from `examples/acme-shop`:
 
 ```sh

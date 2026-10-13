@@ -1,8 +1,9 @@
 // Package local is the core's `local` target (docs/stack-model.md,
 // sections 6.3 and 8.3): it runs an environment of a stack on the machine
 // at hand. A server is a process run from its generated entrypoint: a Go
-// server's binary, built from its module, or a TypeScript server's main.ts
-// on Bun (D51). Every database deployable of the environment shares one Postgres
+// server's binary, built from its module, a TypeScript server's main.ts on
+// Bun (D51), or a Rust server's binary, built from its crate with cargo
+// (D57). Every database deployable of the environment shares one Postgres
 // container, with a database per hosted DB schema, a sql edge derives a
 // connection string to that container, and an http edge the callee's
 // loopback URL with a service credential the caller signs with the edge's
@@ -22,8 +23,9 @@
 // target).
 //
 // The platforms and connectors are pure. Provisioner applies their graph:
-// it runs Docker, the migration runner, `go build`, `bun install` and the
-// servers, and creates each bucket through the emulator's API.
+// it runs Docker, the migration runner, `go build`, `bun install`, `cargo
+// build` and the servers, and creates each bucket through the emulator's
+// API.
 package local
 
 import (
@@ -119,9 +121,9 @@ const (
 	TypeKeyPair = "local:serviceauth/keyPair:KeyPair"
 
 	// TypeProcess is a process run from its entrypoint: built from its
-	// module, or run by Bun. A server's listens on its port and is ready
-	// once its readiness path answers; a worker's has no port and is ready
-	// once it starts (ReadinessStarted, D53).
+	// module or its crate, or run by Bun. A server's listens on its port
+	// and is ready once its readiness path answers; a worker's has no port
+	// and is ready once it starts (ReadinessStarted, D53).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -148,6 +150,12 @@ const (
 	// after one `bun install` at the output root, the Bun workspace's root
 	// (D51).
 	LanguageTypeScript = "typescript"
+
+	// LanguageRust is a Rust server, whose crate `cargo build --release`
+	// builds into the program directory's Cargo target directory,
+	// RustTargetDir, and whose binary, the one its Cargo.toml names, runs
+	// from there (D57).
+	LanguageRust = "rust"
 )
 
 // Register adds the local target, its four platforms and six connectors,
@@ -158,7 +166,7 @@ func Register(r *registry.Registry) error {
 		{
 			Name:      ServerPlatform,
 			Kind:      ir.DeployableServer,
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			Settings:  json.RawMessage(serverSettings),
 			// A process serves plain HTTP, where a browser drops a Secure
 			// cookie: the session cookie of an API over the user model
@@ -181,17 +189,20 @@ func Register(r *registry.Registry) error {
 			Lower:           lowerSite,
 		},
 		{
-			Name:      JobPlatform,
-			Kind:      ir.DeployableJob,
-			Languages: []string{registry.APILanguageGo},
+			Name: JobPlatform,
+			Kind: ir.DeployableJob,
+			// Go and TypeScript: no Rust job has an entrypoint yet (D52,
+			// D57).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerJob,
 		},
 		{
-			Name:      WorkerPlatform,
-			Kind:      ir.DeployableWorker,
-			Languages: []string{registry.APILanguageGo},
+			Name: WorkerPlatform,
+			Kind: ir.DeployableWorker,
+			// Go and TypeScript, as for a job (D53, D57).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerWorker,
@@ -352,7 +363,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go", "typescript"]},
+	    "language": {"enum": ["go", "typescript", "rust"]},
 	    "kind": {"enum": ["worker"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
@@ -406,7 +417,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go"]},
+	    "language": {"enum": ["go", "typescript"]},
 	    "api": {"type": "string", "minLength": 1},
 	    "job": {"type": "string", "minLength": 1},
 	    "schedule": {"type": "string", "minLength": 1},

@@ -1,0 +1,32 @@
+name: deps-rust-pricing
+kind: API
+types:
+  Quote:
+    name: Quote
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: currency
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Quotes
+    operations:
+      - name: getQuote
+        typeRef: { name: Quote }
+        required: true
+        httpMethod: GET
+        restPath: quotes/{sku}
+        auth: true
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
+      - name: priceFeed
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: POST
+        restPath: feeds/prices
+        hmacVerifiedProvider: github

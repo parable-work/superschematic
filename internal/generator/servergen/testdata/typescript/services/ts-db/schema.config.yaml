@@ -1,8 +1,10 @@
 # The database of ts-shop, which takes it from its one DB-kind dependency.
-# Its TypeScript server opens a pg Pool on it, so it generates no
-# TypeScript.
+# Its TypeScript server opens a pg Pool on it. Its TypeScript types declare
+# the message of its queue CartAbandoned and export the queue's definition,
+# which ts-shop's worker claims (D53).
 name: ts-db
 kind: DB
 outputs:
   types:
     go: { enabled: true }
+    typescript: { enabled: true }

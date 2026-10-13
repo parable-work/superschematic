@@ -86,8 +86,9 @@ type formField struct {
 	// default for it.
 	Required bool
 
-	// Control is a value's or a row's control: text, email, url, tel,
-	// number, checkbox, select (an enum), password (a secret), date, time,
+	// Control is a value's or a row's control: text, longtext (a textarea
+	// of text, from a maxLength of longText), email, url, tel, number,
+	// checkbox, select (an enum), password (a secret), date, time,
 	// datetime-local, or textarea (JSON text).
 	Control string
 	// Read is the helper that reads the control's value as the input's
@@ -137,11 +138,16 @@ func formsOf(schemas schemaSet, inProcess []declared, log func(format string, ar
 	var forms []form
 	for _, d := range inProcess {
 		input := d.endpoint.Input
-		if input == nil || seen[input.RustType] {
+		if input == nil {
 			continue
 		}
-		seen[input.RustType] = true
+		// One form per type, whether an operation takes it as a required
+		// input or an optional one.
 		name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(input.RustType, "Option<"), "types::"), ">")
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
 		parse, ok := strings.CutPrefix(input.Parse, "types::validators::")
 		if !ok {
 			log("  - topcoat: no form for %s: the service's own types crate does not declare it\n", name)
@@ -219,6 +225,11 @@ const rowActionName = "_action"
 // maxRows is the most rows a form holds of a list without a listMax, or
 // with one above it, the crate's MAX_ROWS.
 const maxRows = 1000
+
+// longText is the maxLength from which a text field or argument is long
+// text, a textarea rather than a one-line input: a reason or a review's
+// body (500, 5000), not a name or a title (120, 200, 255).
+const longText = 500
 
 // formBuilder builds the struct of each object type a form holds.
 type formBuilder struct {
@@ -584,6 +595,11 @@ func (s schemaSet) control(f *formField, field *ir.FieldDef) bool {
 		if maxLength != nil {
 			attrs = append(attrs, fmt.Sprintf("maxlength=%q", strconv.Itoa(*maxLength)))
 		}
+		// Long text is a textarea, which takes the lengths but no pattern:
+		// its pattern is checked when the form is parsed.
+		if f.Control == "text" && maxLength != nil && *maxLength >= longText {
+			f.Control = "longtext"
+		}
 		pattern := field.ValidatePattern
 		if pattern == "" && scalar != nil {
 			pattern = scalar.Pattern
@@ -619,7 +635,7 @@ func (s schemaSet) control(f *formField, field *ir.FieldDef) bool {
 		return false
 	}
 	switch f.Control {
-	case "text", "email", "url", "tel", "number":
+	case "text", "longtext", "email", "url", "tel", "number":
 		f.Choosable = !f.Hidden
 	}
 	if field.Placeholder != "" {

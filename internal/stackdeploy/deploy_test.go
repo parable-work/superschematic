@@ -251,6 +251,68 @@ func TestDeployFailedMigration(t *testing.T) {
 	}
 }
 
+// TestDeployPreparesTheMigrationRunner: a deploy with a migration phase to
+// run readies the target's runner once, before its first step, and stops
+// there when the runner cannot run it; a deploy with nothing to migrate
+// does not ask. A phase with no steps, which runs for a new connecting
+// deployable, counts as one to run (D46).
+func TestDeployPreparesTheMigrationRunner(t *testing.T) {
+	f := newFixture(t)
+	env := f.env(t, "Staging")
+	f.ready(t, env)
+	ctx := context.Background()
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(1))); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Staging"}; !slices.Equal(f.ext.Migrations.Prepared, want) {
+		t.Fatalf("the first deploy readied the runner for %v, want %v", f.ext.Migrations.Prepared, want)
+	}
+
+	// Nothing to migrate: no new steps, the same servers.
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(2))); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ext.Migrations.Prepared) != 1 {
+		t.Errorf("a deploy with nothing to migrate readied the runner: %v", f.ext.Migrations.Prepared)
+	}
+
+	// A runner that cannot run v2's steps stops the deploy before it
+	// changes anything; the manifest stays the last deploy's.
+	f.ext.Migrations.PrepareFail = errors.New("no image of the runner")
+	n := len(f.ext.Provisioner.Calls())
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 2}, images(3))); err == nil ||
+		!strings.Contains(err.Error(), "the migration runner of target "+stacktest.Target+": no image of the runner") {
+		t.Fatalf("deploy = %v", err)
+	}
+	if got := f.calls(n); len(got) > 0 {
+		t.Errorf("a deploy whose runner was not ready ran:\n%s", strings.Join(got, "\n"))
+	}
+	data, err := f.ext.State.ReadManifest(ctx, registry.Run{Environment: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := stackdeploy.UnmarshalManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Status != stackdeploy.StatusDeployed || m.Images["shop-api"] != "shop-api@"+digest(2) {
+		t.Errorf("the manifest after the refusal: %s, shop-api at %s", m.Status, m.Images["shop-api"])
+	}
+
+	// A worker that joins shop-db's connections runs its expand phase with
+	// no steps, so the runner is readied for it.
+	f.ext.Migrations.PrepareFail = nil
+	with := f.workerEnv(t, "Staging")
+	imgs := images(2)
+	imgs[stacktest.FulfilOrdersWorker] = stacktest.FulfilOrdersWorker + "@" + digest(2)
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, with, nil, &planner{to: 1}, imgs)); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Staging", "Staging", "Staging"}; !slices.Equal(f.ext.Migrations.Prepared, want) {
+		t.Errorf("the runner was readied for %v, want %v", f.ext.Migrations.Prepared, want)
+	}
+}
+
 // TestDeploySecrets: the deploy applies the infrastructure, which creates
 // a secret's storage, then needs a value for every secret: it fails
 // without a terminal and asks on one.

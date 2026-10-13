@@ -1,0 +1,22 @@
+-- Generated SQLite DDL for schema: fixture-engine-db
+-- This file is auto-generated. Do not edit manually.
+-- It is the migration plan from an empty database to model 0b8fe9ec2af569345cd2598bd8ced6a6bd279c2a01ea5ffa023dedb6179cdbe4.
+
+CREATE TABLE "agent" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "name" TEXT NOT NULL,
+  "manager_id" TEXT,
+  PRIMARY KEY ("id"),
+  FOREIGN KEY ("manager_id") REFERENCES "agent" ("id") ON DELETE CASCADE
+);
+
+CREATE TABLE "customer" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "name" TEXT NOT NULL,
+  "email" TEXT COLLATE NOCASE NOT NULL,
+  "tier" TEXT NOT NULL,
+  "billing_address" TEXT,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "customer_email_key" ON "customer" ("email");
