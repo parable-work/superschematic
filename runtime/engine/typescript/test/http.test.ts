@@ -13,6 +13,7 @@ import { BehaviorError, OperationParamsError, type AccessPolicy, type AccessRequ
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
 import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown } from './helpers.ts';
+import { appFor, recordedApp, servedApp } from './recorder.ts';
 
 afterEach(cleanup);
 
@@ -48,7 +49,7 @@ interface Served {
 
 function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Served {
   const engine = openTestEngine({ policy, namespaces: NAMESPACES, ...engineOptions });
-  return { engine, app: engineApp(engine, { authenticate, ...options }) };
+  return { engine, app: servedApp(engineApp, engine, { authenticate, ...options }) };
 }
 
 interface Call {
@@ -182,8 +183,8 @@ describe('instances', () => {
 
   test('mounted under a prefix, the routes and the Location header keep it', async () => {
     const engine = openTestEngine({ policy, namespaces: NAMESPACES });
-    const root = new Hono();
-    root.route('/api', engineApp(engine, { authenticate }));
+    const root = recordedApp(new Hono(), { kind: 'mount', engine, mounts: [{ prefix: '/api', kind: 'engine', options: { authenticate } }] });
+    root.route('/api', appFor(engineApp, engine, { authenticate }));
     await data(call(root, 'POST', '/api/namespaces/default/schemas', { body: orderDocument() }));
     await data(call(root, 'POST', '/api/namespaces/default/schemas/Order/publish'));
     const created = await call(root, 'POST', `/api${ORDERS}`, { body: { id: 'o1', data: { title: 'Desk' } } });
@@ -434,7 +435,7 @@ describe('refusals', () => {
 
   test('a failure the engine does not raise goes to the deployment onError, else 500 without its message', async () => {
     const { app, engine } = await withOrders();
-    const mapped = engineApp(engine, { authenticate, onError: () => new HttpProblem(503, 'The store is unavailable', { code: 'store_unavailable' }) });
+    const mapped = servedApp(engineApp, engine, { authenticate, onError: () => new HttpProblem(503, 'The store is unavailable', { code: 'store_unavailable' }) });
     engine.close();
     const body = await problem(call(app, 'GET', ORDERS), 500);
     assert.equal(body.code, 'internal_error');
@@ -470,7 +471,7 @@ describe('authentication and access', () => {
       return true;
     };
     const engine = openTestEngine({ policy: recording, namespaces: NAMESPACES });
-    const app = engineApp(engine, { authenticate });
+    const app = servedApp(engineApp, engine, { authenticate });
     await data(call(app, 'POST', '/namespaces/east/schemas', { token: 'bob', body: noteDocument }));
     await data(call(app, 'POST', '/namespaces/east/schemas/Note/publish', { token: 'bob' }));
     await data(call(app, 'POST', '/namespaces/east/schemas/Note/instances', { token: 'bob', body: { data: { body: 'hi' } } }), 201);

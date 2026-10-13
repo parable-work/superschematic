@@ -16,10 +16,10 @@ import type { Authenticator } from '@superschematic/http-runtime';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { Hono } from 'hono';
 
-import { EngineClient } from '../dist/client/index.js';
+import { EngineClient, EngineProblem } from '../dist/client/index.js';
 import { engineApp } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
-import { isProjectVeto, isTaskVeto, projectClient, specClient, taskClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
+import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
 import { isNoteVeto, notesClient, type NotesClient } from './generated/notes.ts';
 import { cleanup, openTestEngine } from './helpers.ts';
@@ -41,6 +41,9 @@ const corpus = JSON.parse(readFileSync(new URL('../../testdata/client_codegen_pa
 
 /** An editor may publish and review notes. */
 const editor: Principal = { subject: 'editor', permissions: ['notes.publish', 'notes.review'] };
+
+/** An approver signs a Spec off for final. */
+const approver: Principal = { subject: 'ada', permissions: ['specs.approve'] };
 
 const authenticate: Authenticator = async (ctx) => (ctx.bearerToken === 'editor' ? editor : null);
 
@@ -112,11 +115,12 @@ describe('the generated client', () => {
       { id: 't1', behaviors: { Links: { project: 'p1', spec: { id: 's1' } }, Dependencies: { blockers: [{ schema: 'Spec', id: 's1' }] } } }
     );
     engine.instances.create(editor, 'Task', { title: 'Review', kind: 'review', detail: { pullRequest: 7 } }, { id: 't2', behaviors: { Links: { project: 'p1', parent: 't1' } } });
-    engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore' }, { id: 't3', behaviors: { Links: { project: 'p1' } } });
+    engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore', due: '2026-11-02T09:00:00Z' }, { id: 't3', behaviors: { Links: { project: 'p1', related: ['t1', 't2'] } } });
     engine.instances.invoke(editor, 'Task', 't2', 'transition', { to: 'doing' });
     engine.instances.invoke(editor, 'Task', 't3', 'comment', { body: 'Soon' });
     engine.instances.create(editor, 'Spec', { title: 'Ranking' }, { id: 's2', behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } });
     engine.instances.update(editor, 'Spec', 's1', { body: 'Words and vectors.' });
+    engine.instances.invoke(approver, 'Spec', 's1', 'signOff', { state: 'final' });
     engine.instances.create(editor, 'notes', { title: 'Launch' }, { id: 'n1' });
     engine.instances.invoke(editor, 'notes', 'n1', 'comment', { body: 'Ship it' });
 
@@ -147,6 +151,16 @@ describe('the generated client', () => {
     assert.deepEqual(project.Rollups.values, { tasks: 3, byStatus: { todo: 2, doing: 1 }, hours: 3, longest: 3, finished: false });
     const task = engine.instances.get(editor, 'Task', 't1')?.behaviors as Record<string, any>;
     assert.deepEqual(task.Links.targets, { project: { schema: 'Project', id: 'p1' }, spec: { schema: 'Spec', id: 's1', revision: 1, latest: 2, stale: true } });
+    const spec = engine.instances.get(editor, 'Spec', 's1')?.behaviors as Record<string, any>;
+    assert.deepEqual(spec.Approvals.gates, { final: { signedBy: ['ada'] } });
+    const tidy = engine.instances.get(editor, 'Task', 't3')?.behaviors as Record<string, any>;
+    assert.deepEqual(tidy.Timers.deadlines, { overdue: { dueAt: Date.UTC(2026, 10, 2, 9), fired: false } });
+    const started = engine.instances.get(editor, 'Task', 't2')?.behaviors as Record<string, any>;
+    assert.deepEqual(Object.keys(started.Timers.deadlines), ['stuck']);
+    assert.deepEqual(tidy.Links.targets.related, [
+      { schema: 'Task', id: 't1' },
+      { schema: 'Task', id: 't2' },
+    ]);
   });
 
   test('wraps the client with the schemas types, and the engine takes what they allow', async () => {
@@ -173,6 +187,8 @@ describe('the generated client', () => {
     assert.equal((await notes.list({ limit: 5 })).items.length, 1);
 
     await specs.create({ title: 'Search' }, { id: 's1' });
+    assert.deepEqual((await specs.get('s1')).behaviors.Approvals.gates, {});
+    await assert.rejects(specs.transition('s1', { to: 'final' }), (error) => isSpecVeto(error, 'Approvals', 'approvals_missing'));
     await projects.create({ name: 'Launch' }, { id: 'p1' });
     const built: { data: Task; behaviors: TaskBehaviors } = await tasks.create(
       { title: 'Index', kind: 'build', detail: { target: 'index', flags: ['fast'] } },
@@ -187,6 +203,9 @@ describe('the generated client', () => {
     assert.deepEqual(await tasks.listLinked({ name: 'project', id: 'p1' }), { items: [{ id: 't1' }, { id: 't2' }], next: null });
     assert.deepEqual(await tasks.addBlocker('t1', { schema: 'Spec', id: 's1' }), { schema: 'Spec', id: 's1', status: 'draft', open: true });
     await tasks.transition('t2', { to: 'doing' });
+    assert.deepEqual(await tasks.fireTimer('t2', { deadline: 'stuck' }), { fired: false });
+    // The editor lacks tasks.timers, which a snooze needs.
+    await assert.rejects(tasks.snoozeTimer('t2', { deadline: 'overdue', dueAt: 1 }), (error) => error instanceof EngineProblem && error.code === 'forbidden');
     await assert.rejects(tasks.transition('t2', { to: 'done' }), (error) => isTaskVeto(error, 'Dependencies', ['blocked', 'gated']));
     await assert.rejects(tasks.unlink('t1', { name: 'project' }), (error) => isTaskVeto(error, 'Links', 'required_link'));
     assert.equal((await projects.get('p1')).behaviors.Rollups.values.tasks, 2);
@@ -201,7 +220,7 @@ describe('the generated client', () => {
  * it (@ts-expect-error fails the typecheck when it does not), where the
  * untyped client takes it and the engine refuses it at run time.
  */
-export function typos(notes: NotesClient, tasks: TaskClient, jobs: JobsClient, workers: WorkersClient): void {
+export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, jobs: JobsClient, workers: WorkersClient): void {
   // @ts-expect-error titel is not a field of a Note
   void notes.create({ titel: 'Launch' });
   // @ts-expect-error status is not an own field: it is Workflow's, which transition moves
@@ -242,4 +261,8 @@ export function typos(notes: NotesClient, tasks: TaskClient, jobs: JobsClient, w
   void tasks.link('t1', { name: 'owner', id: 'p1' });
   // @ts-expect-error a Task's blocker is a Task or a Spec
   void tasks.addBlocker('t1', { schema: 'Project', id: 'p1' });
+  // @ts-expect-error a Spec's Approvals gate final alone
+  void specs.signOff('s1', { state: 'draft' });
+  // @ts-expect-error late is not a deadline of a Task's Timers
+  void tasks.snoozeTimer('t1', { deadline: 'late', dueAt: 1 });
 }

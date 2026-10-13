@@ -3,9 +3,9 @@
 // a cap or a stuck signature, which moves the status through Workflow only
 // from the from states and then holds the instance; kept results, the best
 // scoring one with keepBest, written to resultField with an update's
-// checks; caps a worker cannot raise for itself; an attempt's detail in its
-// event and its class's hint in its result; and the config rules. Real
-// SQLite, a real engine.
+// checks and guards, StateRules' among them; caps a worker cannot raise
+// for itself; an attempt's detail in its event and its class's hint in
+// its result; and the config rules. Real SQLite, a real engine.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -319,6 +319,21 @@ for (const driver of drivers) {
       assert.equal(thrown(() => attempt(engine, { result: 42 }), InstanceValidationError).code, 'invalid_instance');
       assert.equal(engine.instances.get(alice, 'Job', 'j1')?.seq, seq);
       assert.equal(engine.storage.get('SELECT COUNT(*) AS n FROM bhv_retries__attempts')?.n, 0);
+      attempt(engine, { result: 'built' });
+      assert.equal(dataOf(engine).output, 'built');
+    });
+
+    test("a result StateRules freezes in the instance's state refuses the attempt that would write it, and records nothing", () => {
+      const engine = world({ ...base, resultField: 'output' }, {}, [{ name: 'Lease' }, { name: 'StateRules', config: { states: { queued: { frozen: ['output'] } } } }]);
+      const seq = engine.instances.get(alice, 'Job', 'j1')?.seq;
+      const refused = veto(() => attempt(engine, { result: 'built' }));
+      assert.deepEqual([refused.behavior, refused.action, refused.vetoCode, refused.vetoDetails], ['StateRules', 'update', 'frozen_fields', { state: 'queued', fields: ['output'] }]);
+      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.seq, seq);
+      assert.equal(engine.storage.get('SELECT COUNT(*) AS n FROM bhv_retries__attempts')?.n, 0);
+      // An attempt that keeps no result writes nothing StateRules freezes.
+      assert.equal(attempt(engine, { failure: 'timeout' }).total, 1);
+      invoke(engine, worker, 'acquire');
+      invoke(engine, worker, 'transition', { to: 'running' });
       attempt(engine, { result: 'built' });
       assert.equal(dataOf(engine).output, 'built');
     });

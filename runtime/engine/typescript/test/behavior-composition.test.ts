@@ -12,7 +12,6 @@ import {
   allowAll,
   appliedMigrations,
   defineBehavior,
-  openEngine,
   type BehaviorDeclaration,
   type ConfigChange,
   type Engine,
@@ -30,7 +29,7 @@ import {
   tally,
   type CounterConfig,
 } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, fieldsOf, freshPath, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, clone, drivers, fieldsOf, freshPath, openEngine, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 

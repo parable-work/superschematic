@@ -45,8 +45,12 @@ and the core's behaviors: `Workflow`,
 reach other instances, `Search`, full-text search with vectors an outside
 embedder computes, and a search across a namespace's schemas,
 `Reactions`, which the runner runs, `Constants` and `Variants`, which
-judge the fields a write stores, and `Branches`, a version graph on each
-instance (D32). The plug-in interface has what D32 gives a behavior that
+judge the fields a write stores, `Branches`, a version graph on each
+instance (D32), and the behaviors D56 adds for business records:
+`Timers`, deadlines that move an instance on when nobody does;
+`StateRules`, the fields each Workflow state requires or freezes;
+`Numbering`, a number a person reads on each instance; and `Approvals`,
+sign-offs a move of the type's Workflow waits for. The plug-in interface has what D32 gives a behavior that
 keeps values of other types in its own tables: the schema's other types
 in `parseConfig`, `validate(type, value)` in its contexts, and schedules
 a schema turns off and whose runs write the behavior's own tables; a
@@ -643,8 +647,9 @@ holds and the work no one holds.
   a boolean, as for an index, by its key, or one a behavior lets a list
   filter on (its implementation's `filters`, "The implementation" under
   "Behaviors"), by its qualified name, the behavior's name, a dot and
-  the filter's: `Workflow.status`, and in the work-queue package
-  `Assignment.assignee`, `Lease.holder` and `Retries.exhausted`. An own
+  the filter's: `Workflow.status`, `Numbering.seq` and `Numbering.label`,
+  and in the work-queue package `Assignment.assignee`, `Lease.holder` and
+  `Retries.exhausted`. An own
   field's key holds no dot, so the two never meet. A
   value has the field's JSON type, an integer for an integer scalar, or
   is null; another type, an empty list and a field that is not one of
@@ -659,7 +664,8 @@ holds and the work no one holds.
   past the cursor in position order, at most 100 of them
   (`MAX_FILTER_RANGES`), merged. A unique index answers a combination
   with one instance at most, and a behavior's index serves its filter
-  (`Workflow`'s on `Workflow.status`), null being one more range. An own index
+  (`Workflow`'s on `Workflow.status`, `Numbering`'s on each of its
+  two), null being one more range. An own index
   holds no instance without a value in each of its fields, so it serves
   no member that lists null. With none, the page reads the list index,
   at most 1000 instances past the cursor (`FILTER_SCAN_ROWS`). The
@@ -1259,6 +1265,22 @@ the call named: `name_taken` in the shared namespace does not say which
 namespace holds the name. "Statuses" under "HTTP" gives each code's
 status.
 
+An issue the engine checks with JSON Schema (ajv, draft 2020-12, every
+error and no format checks) carries ajv's message: a behavior's config
+against its `configSchema`, a create's parameters, a call's
+preconditions, an operation's parameters and its result, and the
+parameters of a search across schemas, as well as what the schema-file
+loader's meta-schema refuses in a document. The engine does not keep
+ajv's order, which follows ajv's compiled code: the issues of one check
+come sorted by their JSON pointer, then by the keyword that failed, then
+by message, each compared by Unicode code point (as UTF-8 bytes compare).
+A composite keyword's issue (`must match "then" schema`) sits at the
+shorter pointer, so before the issues inside it. Where a call checks
+several behaviors' entries (a create's parameters, a call's
+preconditions), each entry's issues keep that order and the entries come
+in the order the call gives them, then, for a create, those of the
+type's behaviors it gave none, in the type's order.
+
 A defect in a behavior's code is a `BehaviorError`, not an `EngineError`,
 so a server answers it as an internal error: a result its `resultSchema`
 refuses, a field value that is not JSON, SQL outside its own storage, a
@@ -1307,9 +1329,10 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
-`Rollups`, `Search`, `Reactions`, `Constants` and `Variants`, and the
-work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`,
-`Blueprint`, `Budget` and `Retries`), so its loader refuses any other.
+`Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`,
+`Timers`, `StateRules`, `Numbering` and `Approvals`, and the work-queue
+package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`,
+`Budget` and `Retries`), so its loader refuses any other.
 
 ### The implementation
 
@@ -1320,7 +1343,7 @@ function is synchronous (D16): one that returns a promise is a
 | Member | What it is |
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
-| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types` (their `names`, and `get(name)`, each one's fields, which holds the type to the version's checks: "Other types"), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
+| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), the document's other `types` (their `names`, and `get(name)`, each one's fields, which holds the type to the version's checks: "Other types"), every behavior the type lists with its config, the fields each declares with whether each is volatile (`behaviorFields`: by behavior, `{ name, volatile }` in declaration order), and, when the schema is defined or published, `schemas` ("Other instances") |
 | `configChange(before, after, change)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. `change.instances` says whether an instance of the schema exists, in any namespace that reads the version (every namespace that looks a shared schema up), read at define and again in the publish's transaction, so a change only stored instances could break is refused only while there are some; it is true for an add or a remove, which are asked only then. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
@@ -2193,6 +2216,16 @@ undeclared key (`unknown`), as `schemas.validate` reports it.
 `schemas.behaviors(principal, name)` lists what a version composes, with
 each config and declaration.
 
+A field its declaration marks `"volatile": true` can move without an
+event of its own instance: the engine computes it at the read, from
+other instances, the clock or the config. The core's are
+`Dependencies.blocked`, `Links.targets` (whose `latest` and `stale` read
+the target), `Rollups.values`, and the work queue's `Lease.active` and
+`Budget.meters` (a daily meter starts again at a read). The log holds
+such a field as the instance's last event found it, the describe
+document marks it, and `Reactions`' `changes`, which hears a field
+through its instance's events, refuses it (D56).
+
 A writing operation appends an `operation` event, `{ behavior,
 operation, params, patch }`, its `patch` a merge patch of `{ data,
 behaviors }`: under `data` the own fields its `update()` changed, under
@@ -2238,7 +2271,7 @@ tell a caller its read is stale.
 
 ### Core behaviors
 
-The core declares eleven behaviors the engine implements
+The core declares fifteen behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `src/behaviors/core` and registers
@@ -2317,9 +2350,53 @@ are other types of the document:
     "cover": { "type": "Cover", "singleton": true } } } }
 ```
 
+`StateRules` adds no field, operation or storage: its guard holds a
+transition and an update to the rules of the state the instance moves to
+or is in, and its `validate` a create to its initial state's ("StateRules").
+On a schema of invoices whose sent ones keep their customer and amount,
+and whose paid ones keep every field:
+
+```json
+{ "name": "StateRules", "config": { "states": {
+    "sent": { "required": ["customer", "amount"], "frozen": ["customer", "amount"] },
+    "paid": { "frozen": "all" } },
+  "permission": "invoices.amend" } }
+```
+
+`Approvals` keeps sign-offs in a table of its own, and gates the type's
+Workflow on them as `Dependencies` and `Rollups` do, on an `expenses`
+schema whose claims two approvers sign off before they are approved:
+
+```json
+{ "name": "Approvals", "config": { "gates": {
+    "approved": { "count": 2, "permission": "expenses.approve" },
+    "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] } } } }
+```
+
+`Timers` keeps deadlines in a table of its own, and the runner's
+schedule fires them ("The runner"), each through the instance's
+`fireTimer`, on a `requests` schema whose requests open four hours are
+escalated and whose visits are reminded a day before:
+
+```json
+{ "name": "Timers", "config": { "deadlines": {
+    "respond": { "start": { "enters": "open" }, "afterMs": 14400000, "then": { "transition": "escalated" }, "until": { "leaves": "open" } },
+    "remind": { "start": { "field": "visitAt" }, "afterMs": -86400000 } },
+  "permission": "requests.timers" } }
+```
+
+`Numbering` numbers each instance at its create from the counts it
+keeps in a table of its own, on an `invoices` schema whose invoices
+count per project and per year:
+
+```json
+{ "name": "Numbering", "config": { "format": "INV-{yyyy}-{seq:4}", "scope": { "link": "project" }, "reset": "yearly" } }
+```
+
 Where they number their records, they number from 1 per instance (a
 comment's id, a revision, a proposal's id), so a number says nothing
-about another instance. Their
+about another instance; `Numbering`'s number is the one a person reads
+across them. Their
 list operations are read-only, so the policy is asked for `read` and they
 append no event: they take `limit` (1 to 500, 50 by default) and
 `cursor`, and return `{ items, next }` in the order the records were
@@ -2347,10 +2424,10 @@ A state machine on the instance's `status`.
 | | |
 | --- | --- |
 | Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }`, `outcomes`: by terminal state, `success`, `failure` or `neutral`, optional |
-| Fields | `status`, which a read returns as `behaviors.Workflow.status` and a list filters on (`where: { 'Workflow.status': 'doing' }`), through an index on its column (migration 2) |
+| Fields | `status`, which a read returns as `behaviors.Workflow.status` and a list filters on (`where: { 'Workflow.status': 'doing' }`), through an index on its column (migration 2); `enteredAt`, when the status last changed, in epoch milliseconds (migration 3) |
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
-| Events | `transition`'s operation event, `patch: { behaviors: { Workflow: { status } } }` |
+| Events | `transition`'s operation event, `patch: { behaviors: { Workflow: { status, enteredAt } } }` |
 | `configChange` | every old state stays while the schema has instances, and with none a state may go; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
 
 A new instance starts in `initial`. The status is Workflow's own column,
@@ -2364,6 +2441,14 @@ schema, which the compiler checks too, the engine refuses a config whose
 transition from a state to itself or listed twice. A state no transition
 reaches is allowed: a new version keeps every state an instance may be
 in, one it no longer enters included.
+
+`enteredAt` is the create's time, then each transition's, so a reader
+works out how long an instance has been in its state, and a `Reactions`
+rule that hears `Workflow.status` hears its moves (`enteredAt` itself
+moves with every one, so a rule refuses it). An instance created before
+migration 3 has none until its next transition: a behavior's migration
+and its `afterConfigChange` reach only its own storage, which never held
+the time, and the log that does is pruned by retention (D56).
 
 A state that no transition leaves is terminal. `isTerminalState(config,
 state)`, exported by the package, answers that for a config as a schema
@@ -2491,7 +2576,7 @@ Blockers between instances, which hold up the type's Workflow.
 | | |
 | --- | --- |
 | Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the states of the type's Workflow a transition into waits for every blocker to finish, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes of a blocker's terminal state that finish it (`["success"]` when absent). Requires `Workflow` |
-| Fields | `blocked`: whether a blocker is not finished. A list does not filter on it: it is computed from the blockers at each read, as the caller, and a copy would have to hear every blocker's status ("Filters") |
+| Fields | `blocked`: whether a blocker is not finished, volatile. A list does not filter on it: it is computed from the blockers at each read, as the caller, and a copy would have to hear every blocker's status ("Filters") |
 | Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
 | Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks, against the Workflow's initial state: open until it finishes by `satisfiedBy`, and refused while open when the initial state is gated and no transition leaves it |
 | Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed` (`blocked`), naming the open blockers, details `{ blockers: [{ schema, id, status? }] }` |
@@ -2555,24 +2640,31 @@ Typed links from the instance to instances of other schemas, or its own.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one. `pinned` is `true` or `"revision"`, a revision of the target's `Revisions`; `"release"`, a release of its `Branches`; `false` or absent, nothing |
-| Fields | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, the links the instance holds; absent when it holds none |
-| Operations | `link({ name, id, revision?, release? })` -> `{ name, schema, id, revision?, release? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, release?, latest?, stale? }`, read-only |
-| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision?, release? } }`: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
-| Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`required_target`, by `guardReference`) |
-| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), unlinking a required link (`required_link`), all `vetoed`; unlinking a link the instance does not hold (`invalid_argument`). A create without a required link, and a create's link that `link` would refuse, at `/behaviors/Links` or `/behaviors/Links/<name>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` |
-| Deletes | an optional link's target's delete unlinks it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that points at it, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
-| Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `targets` under `Links` |
-| `configChange` | while the schema has instances, every link keeps its name and schema; `pinned` may change, to the other kind too, a required link may become optional, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned?, many?, max? }`; at least one. `pinned` is `true` or `"revision"`, a revision of the target's `Revisions`; `"release"`, a release of its `Branches`; `false` or absent, nothing. `many: true` holds a list of targets, and needs `max`, from 1 to 100; `max` needs `many` |
+| Fields | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, the links the instance holds, a list of those for a many-valued link in the order its targets were linked; absent when it holds none; volatile, since `latest` and `stale` read the target |
+| Operations | `link({ name, id, revision?, release? })` -> `{ name, schema, id, revision?, release? }`, writes; `unlink({ name, id? })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, release?, latest?, stale? }`, read-only |
+| Create parameters | `{ <name>: id }` or `{ <name>: { id, revision?, release? } }`, a list of them for a many-valued link: the links the instance holds from its create, each set with `link`'s checks; every required link is among them |
+| Guards | the delete of an instance a required link points at, whoever the caller, and of a required many-valued link's last target: `vetoed` (`required_target`, by `guardReference`) |
+| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link not pinned to a revision or past the target's latest, a `release` for one not pinned to a release or past the target's latest, a link pinned to a revision whose schema does not compose Revisions or to a release whose schema does not compose Branches (`invalid_argument`); a target with no revision yet (`no_revision`) or no release yet (`no_release`), a new target of a many-valued link that holds `max` (`too_many`), unlinking a required link or the last target of a required many-valued one (`required_link`), unlinking an `id` the link does not hold (`not_linked`), all `vetoed`; unlinking a link the instance does not hold, and a many-valued link without `id` (`invalid_argument`). A create without a required link, with a list for a link that holds one, one target for a many-valued link, a list past `max`, an empty list for a required one or a target twice, and a create's link that `link` would refuse, at `/behaviors/Links`, `/behaviors/Links/<name>` or `/behaviors/Links/<name>/<index>` (`invalid_argument`), or `vetoed` with action `create`, `link`'s code and details `{ path: '/behaviors/Links/<name>' }` (`<name>/<index>` for an item of a list) |
+| Deletes | a deleted target leaves every link that holds it: its reference, which hears the target's delete alone, invokes `unlink` on each instance that holds it, `{ name }`, or `{ name, id }` for a many-valued link, as the caller, each with its own event; no other change of a target asks Links anything. Deleting an instance deletes its links |
+| Events | a create's event carries the links it gives; `link`'s and `unlink`'s operation events carry `targets` under `Links`, a many-valued link's whole list |
+| `configChange` | while the schema has instances, every link keeps its name and schema and whether it holds a list, and a many-valued link's `max` does not fall; `pinned` may change, to the other kind too, a required link may become optional, `max` may rise, and optional links may be added; a link that becomes required and a new required link are refused, as a field made required is. With no instance in any namespace that reads the schema, any change. Added to a schema with instances, which start with none, unless a link is required; not removed from one |
 
 A link holds one target, an instance of its schema in the same namespace
 (the schema looked up as any name is: the namespace, then the shared
-one); `link` again moves it. A pinned link pins a revision or a release:
+one); `link` again moves it, and `unlink` clears it, or with `id` only
+while it holds that target. A many-valued link (`many`, with `max`)
+holds a list of up to `max` targets, a ticket's reviewers or a stylist's
+services, in the order they were linked: `link` adds a target, or pins
+again one it holds, which keeps its place, and `unlink({ name, id })`
+removes one. A create gives it a list, each target once. A pinned link
+pins a revision or a release:
 
 ```json
 { "name": "Links", "config": { "links": {
     "spec": { "schema": "documents", "pinned": true },
-    "recipe": { "schema": "recipes", "pinned": "release" } } } }
+    "recipe": { "schema": "recipes", "pinned": "release" },
+    "reviewers": { "schema": "people", "many": true, "max": 5 } } } }
 ```
 
 - **What it records.** A link pinned to a revision records the target's
@@ -2583,7 +2675,9 @@ one); `link` again moves it. A pinned link pins a revision or a release:
   column of its own in the row.
 - **What it reports.** `targets` gives the pin, the target's latest of the
   same kind beside it (`latest`), and `stale` when the latest has moved
-  past the pin, so a client shows "pinned 3, latest 5" with one read.
+  past the pin, so a client shows "pinned 3, latest 5" with one read. A
+  many-valued link reports each target so; the latest come from one read
+  per target schema.
 - **The other way round.** `listLinked` answers on the schema: which
   instances point a link at a target, each with its pin and the latest,
   and with `stale: true` only the pinned ones the target has moved past,
@@ -2594,7 +2688,9 @@ A required link is one every instance holds: every create gives it,
 which refuses an instance without it, it can be moved, never unlinked,
 and its target cannot be deleted while it points there; the refusal
 names the linking schema, not the instance, which the caller may not be
-able to read. A required link to the instance's own schema, a task's
+able to read. A required many-valued link holds at least one target: a
+create gives one or more, and its last target can be neither unlinked
+nor deleted, while every other one can. A required link to the instance's own schema, a task's
 parent task say, would leave a root nothing to point at, so a tree makes
 its parent link optional. A pinned link is read as the caller: without
 read on its target's schema, `targets` cannot be read. `stale` is computed
@@ -2602,6 +2698,20 @@ at each read, so a target's new revision or release shows in the next
 read of the instances that link to it, with no event on them. A link made
 before its spec was pinned, or while it was pinned to the other kind,
 records no pin of the kind until it is linked again.
+
+What reads one target of a link refuses a many-valued one, when its
+schema is defined or published and again at run time, since another
+schema's Links config can change after (D56): Reactions' `then.link` and
+the links of `allTerminal`, `anyTerminal` and `holds`, Blueprint's
+`parentLink`, `from.link` and `copyLinks`, Budget's `scope` and Queue's
+`excludeStale`; `linkMany`, exported, reads whether a link of a config,
+as a schema holds it, holds a list, as `linkPin` reads what it pins.
+`listLinked`, Rollups, Reactions' `revised` and Lease's `directOn` read
+across the list: an instance counts toward each target it holds, and
+each target's move reaches the instances that hold it. A file made
+before many-valued links keeps its links: Links' third migration builds
+its table again, keyed by the target as well as the name, with every
+row and its order.
 
 #### Rollups
 
@@ -2611,7 +2721,7 @@ of their schema's `Links` config: a parent's view of its children.
 | | |
 | --- | --- |
 | Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `latest`, `all` or `any`. `countBy`, `sum`, `min`, `max` and `latest` take `field`, the others none; only `all` and `any` take `gatedStates` and `outcomes` |
-| Fields | `values`: `{ <name>: value }`, computed at each read |
+| Fields | `values`: `{ <name>: value }`, computed at each read, so volatile |
 | Operations | none |
 | Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed` (`not_held`), naming the rollup and how many linked instances keep it from holding, details `{ rollup, to, over, linked, counted }`, `linked` and `counted` absent past the bound (`over: true`) |
 | Refusals | at define and publish (`invalid_schema`): a gated state that is not a state of the type's Workflow, or a type without Workflow; a linked schema with no live version, without `Links` or the link, or whose link points at another schema; a `countBy` field that is not a string, enum or boolean field of its type, or `Workflow.status` when it composes Workflow; a `sum`, `min` or `max` field that is not a number or integer field; a `latest` field that is not a field of its type, or `Workflow.status` when it composes Workflow; `all` or `any` over a schema without Workflow. A caller who may not read the linked schema cannot define or publish the rollup (`forbidden`) |
@@ -2931,11 +3041,11 @@ Rules that move Workflow statuses after a change commits.
 
 | | |
 | --- | --- |
-| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
+| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ changes: { field, to?, from? } }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
 | Fields, operations | none |
-| Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `holds`: a change of an instance of the rollup's schema made an `all` or `any` rollup of the type's `Rollups` hold over at least one linked instance. `revised`: the instance `link` points to gained a revision of `Revisions`, or a release of `Branches`. `then` moves this instance, or the one its `link` points to, to the state |
-| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` or a `revised` link the type's Links lacks, or Links absent; a `holds` rollup the type's Rollups lacks, one that is not an `all` or an `any`, or Rollups absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
-| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`, a `revised` link to a schema that composes neither Revisions nor Branches: the subscription retries, then halts |
+| Reactions | `enters`: the instance's status became the state, by a create or a transition. `changes`: a create, an update or an operation of the instance moved `field`, an own field or a behavior's by qualified name with a member path after it allowed, to `to` and from `from` when they are given; a create moves a field from absent, a delete moves nothing. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `holds`: a change of an instance of the rollup's schema made an `all` or `any` rollup of the type's `Rollups` hold over at least one linked instance. `revised`: the instance `link` points to gained a revision of `Revisions`, or a release of `Branches`. `then` moves this instance, or the one its `link` points to, to the state |
+| Refusals at define | a state the type's Workflow lacks, in `enters`, in a `changes` on `Workflow.status` or in a `then` on the instance itself; a `changes` field that is not an own field or a field a behavior of the type declares, a volatile one, and `Workflow.enteredAt`; a `then.link` or a `revised` link the type's Links lacks, or Links absent; a `holds` rollup the type's Rollups lacks, one that is not an `all` or an `any`, or Rollups absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` and `changes` rules on the instance itself whose states cycle; a `then.link`, or an `allTerminal`, `anyTerminal` or `holds` rollup's link of the type or of a live linked schema, that holds a list of targets |
+| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`, a `revised` link to a schema that composes neither Revisions nor Branches, a link a rule reads one target of that holds a list: the subscription retries, then halts |
 | Events | each move is Workflow's `transition` operation event on the target, actor the runner's principal, `cause` the event that set it off |
 | `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
 
@@ -2950,6 +3060,45 @@ looks at the instance the event's instance links to now, and only when
 the event moved its status into a terminal state with a listed outcome
 or moved that link here while its status is one: a later change that
 moves neither, an update say, does not set it off again.
+
+`changes` hears a field of the instance itself move, its own or a
+behavior's, by the field's qualified name (`Comments.commentCount`,
+`acme.Rating.count`), with a member path after it for a field whose
+value is an object (`Lease.ended.reason`): the behavior is the longest of
+the type's behavior names that prefixes it. A rule on `Workflow.status`
+with `to` hears what an `enters` rule does, and one with `from` hears a
+state left. A ticket escalated when its priority turns urgent, and
+triaged at its first comment:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
+    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+```
+
+- A create moves each field it gives from absent, so `to` fires on a
+  create and `from` never does; a delete moves nothing.
+- The event says what moved. An operation's `patch`, and an update's
+  `behaviors` part, are diffs of the instance's fields: a field they
+  leave out has not moved, and a value they replace is the value now. A
+  rule folds the instance before the event (`before`) only for `from`,
+  for a field whose patch is an object, which a diff gives member by
+  member, and for an own field of an update, whose `data` is the
+  caller's patch rather than a diff; it folds once per event, however
+  many rules ask. A value the event keeps in the value store is compared
+  once loaded, never as its ref.
+- `to` and `from` compare as JSON, an object's members in any order. A
+  rule with `to` on the instance itself acts only while the field still
+  holds it, as an `enters` rule acts only while the instance is still in
+  its state; through a `then.link` it acts on the move alone.
+- A volatile field moves at a read with no event of the instance, so a
+  rule could wait for ever on one: `changes` refuses it at define, and
+  `holds`, `allTerminal`, `anyTerminal` and `revised` hear what moves it.
+  `Workflow.enteredAt` moves with every move of the status, which a rule
+  on `Workflow.status` hears, and is refused too.
+- A `changes` rule on `Workflow.status` on the instance itself joins the
+  cycle check `enters` rules have: with `to` it moves on from that state,
+  without it from each state a transition to its state leaves.
 
 A parent that completes when its children all succeed and fails when
 one fails says both on its own schema:
@@ -3322,6 +3471,228 @@ times as UTC date-times; a tree is rows by kind.
   event carries it in its `patch`, a rollback included. `Links` pins a
   release through it, as it pins a revision through `Revisions`'
   `revision`, and `Queue`'s `excludeStale` hears it move.
+
+#### StateRules
+
+The own fields each state of the type's Workflow requires to enter it,
+and the ones it freezes while the instance is in it (D56).
+
+| | |
+| --- | --- |
+| Config | `states`: 1 or more, by a state of the type's Workflow, each `{ required?, frozen? }`, at least one: `required`, 1 to 64 of the type's own top-level fields, by JSON key, the instance must hold to enter the state and keeps while it is in it; `frozen`, 1 to 64 of them that do not change while it is in it, or `"all"`, every own field; `permission`: the permission a caller needs to change a frozen field, optional. Requires `Workflow` |
+| Fields, operations | none |
+| Guards | a Workflow `transition` into a state, whoever asks, while a field the state requires is not held: `vetoed` (`missing_fields`). An update, a caller's or an operation's `update()`, while the instance is in a state: one that clears a field the state requires and the instance held, `vetoed` (`required_fields`), whoever asks; one that changes a frozen field, `vetoed` (`frozen_fields`), unless the caller holds `permission`. Details `{ state, fields }` |
+| Validates | a create, when the Workflow's initial state requires a field it does not give: the rule `required` at the field (`invalid_instance`) |
+| Refusals at define | a state the type's Workflow lacks, a field that is not one of the type's own (`invalid_schema`); a behavior's field is not one |
+| `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
+
+A record's fields mean more as it moves on: an invoice is drafted with
+any amount, sent only with a customer and an amount that then stay, and
+paid with nothing left to change. A `validate` sees the fields and not
+the status, so each rule sits where it reads what it needs:
+
+- **Entering a state.** The guard reads the state a transition moves to
+  from its `to`, as `Dependencies`' gate does, and the fields from the
+  view, so a caller's transition, another behavior's `call()`, another
+  instance's invoke and the runner's moves are held alike, and an
+  operation that updates the fields and moves the status in one call is
+  judged on the fields its `update()` left.
+- **The initial state.** A create starts in the Workflow's initial state,
+  which `parseConfig` reads from the type's Workflow config, so
+  `validate` refuses a create that leaves out a field that state
+  requires, before anything is stored.
+- **In a state.** The update guard reads the instance's status through
+  `Workflow.status`, as the caller, only when a field a rule names
+  changes, and compares the fields before the update with the ones after.
+  Clearing a required field is checked first, since no permission lifts
+  it. A behavior's write is held as a caller's is: a `Retries` result in
+  a frozen field refuses its attempt.
+- **Held.** A field is held when it is neither absent nor null, as a
+  merge patch has it: `""`, `0` and `[]` are held. A value is compared
+  as JSON, so a change inside an object or a list is a change. The
+  fields a veto names are in the order the type lists them for `"all"`
+  and the config's otherwise.
+- **Instances from before.** An instance that predates a requirement
+  keeps working: the update guard refuses clearing only a required field
+  the instance held, so an update that leaves a missing field missing
+  passes, and the requirement binds when the instance next enters the
+  state.
+- **Revisions.** `propose` checks its patch with `validateUpdate()`,
+  which asks no guard, so a proposal that changes a frozen field is
+  accepted and its `approve` is vetoed (`frozen_fields`), whose
+  `update()` the guard asks. The guidance says so on `approve`.
+
+#### Approvals
+
+Sign-offs that gate states of the type's Workflow (D56): a transition
+into a gated state waits until `count` distinct principals holding the
+gate's permission have signed off.
+
+| | |
+| --- | --- |
+| Config | `gates` (at least one, by state of the type's Workflow): each `{ count, permission, from?, excludeCreator? }`, `count` 1 to 100, `from` the states a transition from is gated (every state when absent), `excludeCreator` whether the instance's creator is refused (`true` when absent); `resetOnChange`, whether a change of the own fields consumes every sign-off (`true` when absent); required. Requires `Workflow` |
+| Fields | `gates`: `{ <state>: { signedBy } }`, the subjects whose sign-offs count, in the order they signed; a gate with none is absent, and with none at all it is `{}`. No count: the config holds it, and a publish that changed it writes no event |
+| Operations | `signOff({ state, note? })` -> `{ state, subject, note?, at, signedBy, count }`, writes; `withdrawSignOff({ state })` -> the sign-off, `{ state, subject, note?, at }`, writes; `listSignOffs({ state?, limit?, cursor? })` -> a page of `{ state, subject, note?, at, consumedAt? }`, the consumed ones included, read-only |
+| Guards | a Workflow `transition` of the instance into a gated state, from a state its `from` allows, whoever asks, with fewer sign-offs than `count`: `vetoed` (`approvals_missing`), details `{ state, required, count }`, `required` the gate's count and `count` the sign-offs it has. A move Workflow refuses is left to Workflow's veto, whichever of the two the type lists first |
+| Refusals | `signOff` and `withdrawSignOff` of a state the config does not gate (`no_gate`); `signOff` without the gate's permission (`can`), `forbidden`, as `Revisions`' `approve` is; while the instance is in the state (`in_state`); by the instance's creator, the `created_by` of its row (`sql.instances()`), on a gate that excludes it (`creator_cannot_sign`); by a caller whose sign-off for the state counts already (`already_signed`); `withdrawSignOff` with no such sign-off (`not_signed`); all but `forbidden` `vetoed`. At define, a gated state or a `from` state the type's Workflow lacks, or a gate's own state in its `from` (`invalid_schema`) |
+| Storage | `signoffs`: a row per sign-off, unique among the ones that count per instance, state and subject, with the time it was consumed |
+| Events | `signOff`'s and `withdrawSignOff`'s events carry `gates`; so do the update or operation, and the transition, that consume sign-offs |
+| `configChange` | gates may be added, removed and changed: a removed gate's sign-offs are consumed (`afterConfigChange`), and a gate's new count or permission applies to the sign-offs already given. Added to a schema with instances, which start with none; not removed from one, since its sign-offs would stay behind |
+
+A sign-off counts until it is consumed, and `afterChange` consumes them
+from the instance as the change leaves it, in the change's transaction,
+never from which operation ran:
+
+- **A change of the own fields.** An update, or an operation that changes
+  them with `update()` (a `Revisions` approval, say), consumes every
+  gate's sign-offs, so what was signed is what moves. `resetOnChange:
+  false` keeps them; an operation that changes no own field, a comment or
+  a proposal, consumes none.
+- **Entering a gated state.** An instance in a gated state has that
+  gate's consumed, so a return to the state is signed again. It reads the
+  status, not the operation: a `Reactions` move on the runner, a `Lease`
+  expiry or a `Timers` fire moves the status inside an operation of its
+  own, and consumes them as a caller's transition does.
+
+A sign-off is one principal's, by its subject, so a principal counts once
+toward a gate whatever its permissions; `signOff` asks `can()` for the
+gate's permission at the time it signs. A withdrawal deletes its row, so
+`listSignOffs` shows what was given and consumed, and the log keeps every
+`signOff` and `withdrawSignOff`. Deleting the instance deletes its
+sign-offs. On a type that also composes `Lease`, `signOff` and
+`withdrawSignOff` are writing operations of another principal than the
+holder: `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` belong in
+Lease's `exempt` (`runtime/engine-workqueue/README.md`, "The guard").
+
+#### Numbering
+
+A number a person reads on each instance (D56): an invoice's
+`INV-2026-0042`, a ticket's `T-17`.
+
+| | |
+| --- | --- |
+| Config | `format` (required, 1 to 128 characters): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` and `{yy}`, the UTC year the instance was created in, as often as wanted; `scope: { link }`, a link of the type's `Links` config, required and holding one target, whose each target counts on its own; `reset: "yearly"`, which starts each count again at 1 every UTC year and needs the year in `format` |
+| Fields | `seq`, the number in its count, from 1, and `label`, the number as `format` prints it; both absent until the instance is numbered. A list filters on each (`where: { 'Numbering.label': 'INV-2026-0042' }`, `'Numbering.seq'`), through an index on its column |
+| Operations | `assignNumber()` -> `{ seq, label }`, writes: numbers an instance made before its schema composed `Numbering`; on one numbered already, `unchanged()` |
+| Storage | columns `number` and `label` on the instance, each indexed; `counters(namespace, schema, scope_key, last)`, the last number of each count; `labels(namespace, schema, id, scope_key, label)`, unique on `(namespace, schema, scope_key, label)` |
+| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year in `format`, and a `scope` link that is not a link of the type's `Links`, is optional or holds many targets (`many: true`, read from the `Links` config as the type gives it), all `invalid_schema` |
+| Events | a create's event carries the number under `Numbering`; `assignNumber`'s operation event, `patch: { behaviors: { Numbering: { seq, label } } }` |
+| `configChange` | added to a schema with instances, which hold no number until `assignNumber`; while the schema has instances, `format`, `scope` and `reset` stay, and it is not removed: added again, it would count from 1. With none, any change, and the counts start again at 1 |
+
+The count runs per namespace and schema; with `scope`, per target of
+the link; with `reset`, per UTC year too. A count is a row of the
+behavior's own `counters`, keyed by the target's id and the year, with
+a `/` between, which no id holds.
+
+- **In the create's transaction.** `afterChange` of the create sets the
+  number, after every behavior's `initialize`, so the scope link the
+  create gives is held whatever the list order. A create a later
+  behavior refuses rolls the count back with it, so a refused create
+  takes no number and leaves no gap. A delete leaves one: the next create
+  takes the next number, and the deleted instance's label row goes.
+- **Unique within its scope.** Only `{seq}` varies in width, and it is
+  there once, so a label's length fixes where each token sits: two
+  numbers of one count print two labels, and with the year in the label
+  a yearly count's labels differ across years too. `labels` holds each
+  label unique within its scope key, so a defect that would print one
+  twice fails the write (`BehaviorError`). With `scope`, each target
+  counts from 1, so two targets each have an `INV-2026-0001`, and a list
+  by label returns one instance per target.
+- **The year.** `{yyyy}`, `{yy}` and `reset` read the UTC year of the
+  instance's `createdAt`, read with the scope link's target in one read
+  of the instance (`instances.get`, as the caller), so a number
+  `assignNumber` gives later counts in the year the instance was made.
+- **Nothing changes a number.** No operation writes the columns once
+  set: a create or an update writes own fields only, and `assignNumber`
+  writes them only while they are empty. Moving the scope link keeps the
+  number, counted in the count of the target it was numbered under.
+- **Backfill.** An instance made before the schema composed `Numbering`
+  reads `behaviors.Numbering` as `{}`, and `where: { 'Numbering.seq':
+  null }` lists them; `assignNumber()` numbers one with an operation
+  event, in the count of its year and target. A deployment backfills by
+  invoking it on each in creation order.
+- **The `number` column.** The column that holds `seq` is named `number`,
+  since the relation over the instances (`sql.instances()`) has a `seq`
+  of its own, the instance's event sequence.
+- **Lease.** On a type that composes `Lease`, list
+  `"Numbering.assignNumber"` in Lease's `exempt`, or the backfill of a
+  leased instance is refused for anyone but its holder.
+
+#### Timers
+
+Named deadlines on an instance (D56): a request open four hours without
+an answer is escalated, an order not paid within thirty minutes of its
+create is cancelled, a visit is reminded a day before its time.
+
+| | |
+| --- | --- |
+| Config | `deadlines` (at least one, by name): each `{ start, afterMs?, then?, until? }`. `start`: `{ create: true }`, `{ enters: <state> }`, each entry of the status into a state of the type's Workflow, or `{ field: <key> }`, an own field whose JSON Schema format is `date-time` (`fieldSchemas`). `afterMs`: from the start, in milliseconds, 0 when absent, within 100 years either way, negative for a field start alone. `then: { transition, from? }`: the move a fire makes while the status is one of `from`, the state the deadline starts in when absent (its `enters` state, or the Workflow's initial one for a create start; a field start names `from`). `until`: `{ leaves: <state> }`, the state the deadline starts in, or `{ enters: [states] }`, none of them that state: what cancels a pending deadline. `sweepMs` (5000 when absent, at least 1000); `permission`, to reset or snooze, optional. Requires `Workflow` for `enters`, `then` and `until`, which `parseConfig` checks: a field deadline needs none |
+| Fields | `deadlines`: `{ <name>: { dueAt, fired, firedAt?, outcome? } }`, each started deadline, `outcome` what its `then` met: `moved`, `skipped` (the status was not one of `from`), `vetoed` or `forbidden`; a deadline not started, or cancelled, is absent, and with none at all it is `{}`. Not volatile: nothing in it follows the clock, and a reader works out what is overdue from `dueAt` |
+| Operations | `fireTimer({ deadline })` -> `{ fired, outcome? }`, writes: fires the deadline when it is due and has not fired, else `unchanged()` with `{ fired: false }`; `resetTimer({ deadline })` -> `{ dueAt }`, writes: starts it again from what it starts from now, `unchanged()` when that changes nothing; `snoozeTimer({ deadline, dueAt })` -> `{ dueAt }`, writes: moves a started deadline to `dueAt`, a fired one firing again then |
+| Schedule | `fire`, every `sweepMs`: invokes `fireTimer` on each deadline due and not fired, at most 1000 a run |
+| Refusals | `fireTimer`, `resetTimer` and `snoozeTimer` of a deadline the config does not name (`no_deadline`); `resetTimer` and `snoozeTimer` without `permission` (`can`), `forbidden`, and for everyone when the config names none; `resetTimer` of a deadline with nothing to start from now, an `enters` deadline while the status is another state, or a field deadline whose field holds no date-time, and `snoozeTimer` of one not started or cancelled, and either while `until` holds (`not_armed`); all but `forbidden` `vetoed`. At define, a state the Workflow lacks, a `start.field` that is not an own field or not a date-time one, a negative `afterMs` for another start, a `then` whose `from` state no transition leads from to its state, or that leads to itself, a field start's `then` without `from` and its `until.leaves`, an `until.leaves` other than the state the deadline starts in, an `until.enters` that names it, and an `enters`, `then` or `until` on a type without `Workflow` (`invalid_schema`) |
+| Storage | `deadlines(namespace, schema, id, name, base_at, armed_from, due_at, fired, fired_at, outcome)`: a row per started deadline, the time it starts from, the fact it was armed from, when it is due (null once cancelled), and its fire; a partial index on `(namespace, schema, due_at, id, name)` where `fired = 0` |
+| Events | the change that arms, moves, cancels or fires a deadline carries `deadlines`: a create's event, an update's, a transition's, and `fireTimer`'s, `resetTimer`'s and `snoozeTimer`'s |
+| `configChange` | any; added to and removed from a schema with instances. `afterConfigChange`: a new `afterMs` moves each pending deadline from its start, but a snoozed one; a removed deadline's rows, and those of one whose `start` changes, are deleted; a new field deadline arms every instance from its stored fields; a version without `Timers` deletes every row |
+
+A deadline arms when the fact it starts from changes, which
+`afterChange` reads from the instance as the change leaves it, in its
+transaction, never from which operation ran: a `Lease` expiry, a
+`Reactions` move and a fire move the status as a caller's transition
+does.
+
+- **The fact.** The instance's `createdAt` for a create start;
+  `Workflow.enteredAt`, while the status is the `enters` state, read with
+  `Workflow.status` through `instances.get` as the caller; the field's
+  value, from the context's data. The row keeps it (`armed_from`), and a
+  write that leaves it as it is arms nothing, so a snooze or a reset
+  outlives every later write. A status that left the state and came back
+  within one call has a new `enteredAt`, which arms the deadline again.
+  A create arms whatever the list order, since every `initialize` has
+  run by `afterChange`. A field moved arms its deadline again, unfired;
+  a field cleared cancels it. A due time already past fires at the next
+  sweep. An instance whose status predates `Workflow.enteredAt` arms its
+  `enters` deadlines at its next entry.
+- **`until`.** After arming, a pending deadline whose `until` holds for
+  the status, out of the `leaves` state or in an `enters` one, is
+  cancelled: its row keeps the fact, so only a new one arms it again. A
+  fired deadline is not cancelled. `fireTimer` checks `until` too and
+  cancels instead of firing, so a deadline armed at a publish, or under
+  an `until` a later version added, never fires while it holds.
+- **A fire.** `fireTimer` marks the deadline fired, then, with `then`,
+  calls Workflow's `transition` when the status is one of `from`. A veto
+  of the move (a `StateRules` requirement, say) and a `forbidden` (a
+  transition permission the caller lacks) leave the status as it is, the
+  deadline fired and `outcome` saying which; anything else fails the
+  call. Any principal who may write the instance may call it; on a
+  deadline not due, fired already or not started it is `unchanged()`, so
+  the sweep and a caller never fire one twice.
+- **The sweep.** `fire` runs on each schema in each namespace, as the
+  runner's principal, which needs `read` and `write` on the schema and
+  any permission a `then` transition names. It reads the deadlines due
+  and not fired through the partial index, earliest due first, 100 at a
+  time, a keyset of due time, id and name past each page, and invokes
+  `fireTimer` on each; a veto or a `forbidden` the invoke meets, a
+  `Lease` guard's say, leaves that deadline for the next run, and the
+  keyset moves past it, so a stuck deadline holds none behind it back.
+  An archived namespace fires nothing; unarchived, its overdue deadlines
+  fire, 1000 a run.
+- **Snooze and reset.** `snoozeTimer` sets the due time alone, so a
+  later write keeps it until the fact changes, and a new `afterMs` leaves
+  it. `resetTimer` arms the deadline again from the fact as it is now,
+  undoing a snooze or a fire. Both ask `can()` for `permission`.
+- **New versions.** A new `create` or `enters` deadline arms at each
+  instance's next write, so an instance never written again does not
+  arm it; a new field deadline arms at the publish, with no event, from
+  every instance's stored fields.
+- **Reactions.** `Timers.deadlines` is not volatile, so a `Reactions`
+  rule hears a fire: `{ "when": { "changes": { "field": "Timers.deadlines.respond.fired", "to": true } } }`.
+- **Lease.** On a type that also composes `Lease`, `fireTimer` is a
+  writing operation of another principal than the holder:
+  `"Timers.fireTimer"` belongs in Lease's `exempt`, or the sweep leaves a
+  leased instance's deadline for each next run
+  (`runtime/engine-workqueue/README.md`, "The guard"). Its move is a
+  `call()`, which the guard lets through.
 
 ## Namespaces
 
@@ -3810,12 +4181,14 @@ a schema's live version:
 - `instanceBehaviors` is the JSON Schema of an instance's `behaviors`:
   by behavior name, each behavior on the type that declares a field,
   with its fields `readOnly` and without a type, since a declaration
-  gives a field only a name and a description. Each result that returns
-  an instance carries it beside `data`.
+  gives a field a name, a description and whether it is volatile, and no
+  type. A volatile field says `"volatile": true` there, an annotation as
+  `readOnly` is ("Instances and events"). Each result that returns an
+  instance carries it beside `data`.
 - `behaviors` lists each behavior's config, its `summary`, what its
   guidance says it does under the config ("Guidance", below; absent for
-  a behavior that gives none), its fields, operations and the codes its
-  vetoes carry (`vetoes`).
+  a behavior that gives none), its fields, each with `volatile: true`
+  when it is, operations and the codes its vetoes carry (`vetoes`).
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, `lookup`
   where the instance type has a unique field, then each behavior's
   operations in the type's list order. `list`'s `params` has `where`,
@@ -3966,7 +4339,7 @@ text says which permission a call needs.
 ```json
 {"useWhen": "Use to move status from todo to doing or dropped; from doing to done or dropped.",
  "doNotUseWhen": "Do not use from done or dropped: no transition leaves a terminal state. Do not use to stay where the instance is. Do not move into done while blocked is true.",
- "success": "Returns from and to; status holds to from then on.",
+ "success": "Returns from and to; status holds to from then on, and enteredAt the time of the move.",
  "errors": [{"code": "transition_not_allowed", "description": "Workflow: No transition leads from ...", "commonCorrection": "Read status, then ..."},
             {"code": "blocked", "description": "Dependencies: A move into done while a blocker is open; ...", "commonCorrection": "Wait for ..."}]}
 ```
@@ -3987,17 +4360,21 @@ in `@superschematic/engine-workqueue`):
 
 | Behavior | What it says |
 | --- | --- |
-| `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
+| `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; that `transition` sets `enteredAt`, create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
 | `Comments` | the thread; `comment` and `listComments` |
 | `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
 | `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |
 | `Rollups` | what each rollup computes over which link, and the moves a rollup gates; `not_held` on `transition` |
 | `Search` | the fields and their weights, and the vectors' model, dimensions and permission; that `staleEmbeddings` and `settleEmbeddings` need vectors; `similar` by an id or a draft's text before a `create` |
-| `Reactions` | each rule, what sets it off and the move it makes |
+| `Reactions` | each rule, what sets it off and the move it makes; on `transition`, and on the writes that can move a `changes` rule's field (`create` and `update` for an own field, the writing operations of the behavior whose field it is), that a status may move again after the commit |
 | `Constants` | the fields that keep their create's value, and the permission that changes them |
 | `Variants` | the type the field holds for each value |
 | `Branches` | the kinds and the primary line, the `release` field, and each operation's version-graph refusals |
+| `StateRules` | what each state requires and freezes, and the permission that changes a frozen field; `missing_fields` on `transition`, a create's required fields, `required_fields` and `frozen_fields` on `update` and on `Revisions`' `approve` |
+| `Approvals` | each gate's count, permission and `from`, whether the creator may sign, and what consumes a sign-off; `approvals_missing` on `transition`, and that `update` consumes them |
+| `Numbering` | the format with an example label, what the count runs per; create's number, list's `where` on `Numbering.label` and `Numbering.seq`, that update and a scope link's `link` change no number, and when `assignNumber` is the call |
+| `Timers` | when each deadline is due, the move it makes and what cancels it, how a reader tells one is overdue, the sweep's interval, and who resets and snoozes one; the deadlines `create`, `transition` and `update` start, move or cancel |
 | `Lease` | the length, the heartbeat interval, the longest hold, what an expiry and the last expiry do, the token; its refusals on every write its guard holds |
 | `Assignment` | who may assign whom; `assigned_to_another` on `acquire` and `claim` |
 | `Queue` | the claim states, the order, the match fields, what keeps work out; `claim_required` on `acquire` |
@@ -4405,4 +4782,26 @@ reads the corpus at `testdata/scenarios`, or the directory
 docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine
 SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable' make engine-rust
 docker rm -f engine-pg
+```
+
+### The corpus a second engine replays
+
+D58 moves the engine to Rust; before it does, what this engine does is
+recorded as data under `testdata/`, which the Rust engine, its bindings and
+the servers replay. With `ENGINE_RECORD=<dir>` set, every engine a test
+opens through `test/helpers.ts` records each call the test makes on it, and
+every app a test serves through `test/recorder.ts`'s `servedApp` or
+`recordedApp` records each exchange; each test file's scenarios go to
+`<dir>/scenarios/<file>.json`, or `<dir>/http/<file>.json` when it served
+HTTP. `testdata/scenarios` and `testdata/http` hold a curated set of them,
+which `test/corpus.test.ts` records again under Node.js and holds to the
+committed files; `testdata/sqlite` holds a file the engine wrote with every
+core and work-queue behavior in use, as SQL text, with the reads expected
+from it, which `runtime/engine-workqueue/typescript/test/sqlite-corpus.test.ts`
+holds the same way. Each directory's README gives its format.
+
+```
+ENGINE_RECORD=/tmp/corpus node --test 'test/*.test.ts'   # record every test file
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts   # rewrite testdata/scenarios and testdata/http
+cd ../../engine-workqueue/typescript && UPDATE_ENGINE_CORPUS=1 node --test test/sqlite-corpus.test.ts   # rewrite testdata/sqlite
 ```

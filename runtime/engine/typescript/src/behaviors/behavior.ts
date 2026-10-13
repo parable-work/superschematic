@@ -902,6 +902,14 @@ export interface ConfigTarget {
   readonly types: ConfigTypes;
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
+  /**
+   * The fields each behavior the type lists declares, by behavior name, in
+   * its declaration's order ([] for one that declares none): what a config
+   * that names a behavior's field by qualified name checks it against. A
+   * behavior with no implementation registered with this engine is not
+   * here.
+   */
+  readonly behaviorFields: Readonly<Record<string, readonly ConfigBehaviorField[]>>;
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
   readonly configs: Readonly<Record<string, unknown>>;
   /**
@@ -912,6 +920,17 @@ export interface ConfigTarget {
    * not refused later because another schema changed.
    */
   readonly schemas?: ConfigSchemas;
+}
+
+/** A field a behavior of the type declares, as parseConfig reads it (ConfigTarget.behaviorFields). */
+export interface ConfigBehaviorField {
+  readonly name: string;
+  /**
+   * Whether it can move without an event of its own instance: computed at
+   * a read from other instances, the clock or the config, as its
+   * declaration says (`"volatile": true`).
+   */
+  readonly volatile: boolean;
 }
 
 /**

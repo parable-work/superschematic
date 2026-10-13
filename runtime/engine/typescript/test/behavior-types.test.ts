@@ -34,12 +34,12 @@ const published: Array<readonly ValidationIssue[]> = [];
 /** Types test.Kinds' parseConfig also reads while other schemas are in reach, whatever its config says. */
 const extra = { withSchemas: [] as string[] };
 
-afterEach(() => {
+afterEach((t) => {
   targets.length = 0;
   published.length = 0;
   kept = undefined;
   extra.withSchemas = [];
-  cleanup();
+  cleanup(t);
 });
 
 interface KindsConfig {

@@ -814,7 +814,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name` and `description` |
+| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
@@ -825,9 +825,14 @@ engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
 and as a tool that takes its parameters and no `id` (D16, amended).
 `RegisterBehavior` refuses any other value, and the engine does too.
 
-A field carries only a name and a description. A field's type can depend
-on the behavior's config, and the loader needs only the name to refuse a
-collision.
+A field carries a name, a description and whether it is volatile, no
+type. A field's type can depend on the behavior's config, and the loader
+needs only the name to refuse a collision. A volatile field
+(`"volatile": true`) can move without an event of its own instance: it
+is computed when the instance is read, from other instances, the clock
+or the config, as `Rollups.values` and `Dependencies.blocked` are. No
+event records such a move, so `Reactions`' `changes`, which hears a
+field through its instance's events, refuses one (D56).
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
@@ -946,8 +951,8 @@ The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`,
-`Variants` and `Branches`. It
-declares the work-queue behaviors the optional
+`Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
+`Approvals`. It declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
 (`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
@@ -959,17 +964,21 @@ takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
 `Dependencies` declare a `createParamsSchema`: a create's links by name
 and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
-`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches` and every
-work-queue behavior list the codes of their vetoes. `Constants` and `Variants`
-declare no field, operation, parameter, precondition or code: what they
-refuse is an issue at a field (`invalid_instance`), which the engine's
-implementation returns from its `validate` hook, not a veto. A config a
+`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`, `Timers`,
+`StateRules`, `Approvals`
+and every work-queue behavior list the codes of their
+vetoes. `Constants` and `Variants` declare no field, operation,
+parameter, precondition or code: what they refuse is an issue at a field
+(`invalid_instance`), which the engine's implementation returns from its
+`validate` hook, not a veto. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
 that names a state the config does not list, a Workflow outcome for a
 state a transition leaves, a gated state of `Dependencies` that is not a
-state of the type's Workflow, or a rollup whose linked schema has no
-such link, say);
+state of the type's Workflow, a gate of `Approvals` on a state the
+Workflow lacks, a `Timers` deadline that starts at a field whose values
+are not date-times, or a rollup whose linked schema has no such link,
+say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -981,17 +990,21 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`, `vectors` (`dimensions`, `model`, `permission`); required | none | `search`, `similar`, `staleEmbeddings` and `settleEmbeddings`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `changes` (`field`, `to`, `from`), `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
 | `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | `release` | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
+| `StateRules` | `states` (by a state of the type's Workflow: `required`, `frozen`, a list or `all`), `permission`; required; requires `Workflow` | none | none |
+| `Approvals` | `gates` (by state of the type's Workflow: `count`, `permission`, `from`, `excludeCreator`), `resetOnChange`; required; requires `Workflow` | `gates` | `signOff`, `withdrawSignOff`, the read-only `listSignOffs` |
+| `Numbering` | `format`, `scope` (`link`), `reset` (`yearly`); required | `seq`, `label` | `assignNumber` |
+| `Timers` | `deadlines` (by name: `start`, one of `create`, `enters` and `field`, `afterMs`, `then` (`transition`, `from`), `until`, one of `leaves` and `enters`), `sweepMs`, `permission`; required; `Workflow` for `enters`, `then` and `until` | `deadlines` | `fireTimer`, `resetTimer`, `snoozeTimer` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`revised.link`, `name`, `data`); optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
@@ -1025,6 +1038,30 @@ links, rollups and states are checked by the engine, which sees the
 type's Workflow, Links and Rollups configs. `make cli-smoke` loads
 `fixture-reactions-json`, whose projects start, finish and fail their
 parent, and its TypeScript twin loads to the same IR.
+
+`Approvals` names states of the type's Workflow, each gate's and the
+states it is gated from, which the loader does not check: the engine
+does, when the schema is defined. `make cli-smoke` loads
+`fixture-approvals-json`, whose expense claims wait for sign-offs before
+they are approved and paid, and its TypeScript twin loads to the same IR.
+
+`Numbering` names a link of the type's Links config (`scope`), which the
+loader does not check: the engine refuses one that is not a required,
+single-valued link, a format outside its tokens and a yearly reset whose
+format prints no year, when the schema is defined. It declares no veto
+code: nothing it does after the define is refused. `make cli-smoke`
+loads `fixture-numbering-json`, whose invoices are numbered per project
+and per year, and its TypeScript twin loads to the same IR.
+
+`Timers` names states of the type's Workflow and an own field, which the
+loader does not check: the engine refuses a state the Workflow lacks, a
+field whose JSON Schema format is not `date-time`, and a deadline that
+names a state on a type without `Workflow`, which a declaration's
+`requires` cannot say, since a field deadline needs none, when the
+schema is defined. The engine's runner fires its deadlines (D16,
+amended). `make cli-smoke` loads `fixture-timers-json`, whose support
+requests are escalated or resolved when nobody moves them in time, and
+its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
@@ -1545,7 +1582,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

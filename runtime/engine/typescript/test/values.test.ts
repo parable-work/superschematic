@@ -24,7 +24,6 @@ import {
   allowAll,
   canonicalJSON,
   defineBehavior,
-  openEngine,
   type AccessPolicy,
   type Engine,
   type EngineEvent,
@@ -35,12 +34,12 @@ import {
 } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { counter, openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, freshPath, openTestEngine, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, clone, drivers, freshPath, openEngine, openTestEngine, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
 import { ledger, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 /** The tests' threshold: the least an engine takes. */

@@ -45,6 +45,14 @@ export interface BehaviorConfigs {
   Variants: VariantsConfig;
   /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
   Branches: BranchesConfig;
+  /** Own fields each state of the type's Workflow requires to enter it, or freezes while the instance is in it; it requires Workflow. */
+  StateRules: StateRulesConfig;
+  /** Sign-offs by distinct principals that gate states of the type's Workflow; it requires Workflow. */
+  Approvals: ApprovalsConfig;
+  /** A number a person reads on each instance, set at its create from a count per schema, per scope target and per year. */
+  Numbering: NumberingConfig;
+  /** Named deadlines that start at the create, at an entry into a state of the type's Workflow or at a date-time field, and fire once due, moving the status. */
+  Timers: TimersConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -119,11 +127,31 @@ export interface LinksConfig {
   readonly links: Readonly<Record<string, LinkConfig>>;
 }
 
-/** One link of a Links config. */
-export interface LinkConfig {
+/**
+ * One link of a Links config. It holds one target, or with many a list of
+ * at most max, in the order they were linked.
+ */
+export type LinkConfig = LinkTarget &
+  (
+    | { readonly many?: false }
+    | {
+        /** The link holds a list of targets rather than one. */
+        readonly many: true;
+        /** The most targets it holds, from 1 to 100. */
+        readonly max: number;
+      }
+  );
+
+/** What a link points at and how it holds its target. */
+export interface LinkTarget {
   /** The schema of the instance the link points at. */
   readonly schema: string;
-  /** Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. */
+  /**
+   * Every create gives the link, which can then be moved to another target
+   * but not unlinked, and the delete of its target is refused. A
+   * many-valued link holds at least one target, and only the delete of its
+   * last is refused.
+   */
   readonly required?: boolean;
   /**
    * What the link records of the target, reporting the target's latest
@@ -200,11 +228,20 @@ export interface ReactionRule {
   readonly then: ReactionThen;
 }
 
-/** What sets a rule off: one of enters, allTerminal, anyTerminal, holds and revised. */
+/** What sets a rule off: one of enters, changes, allTerminal, anyTerminal, holds and revised. */
 export type ReactionWhen =
   | {
       /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
       readonly enters: string;
+    }
+  | {
+      /**
+       * The rule fires when a create, an update or an operation of the
+       * instance moves the value of field: to to when it is given, from
+       * from when it is given. A create moves a field from absent; a delete
+       * sets nothing off.
+       */
+      readonly changes: ReactionChanges;
     }
   | {
       /**
@@ -242,6 +279,22 @@ export type ReactionWhen =
        */
       readonly revised: { readonly link: string };
     };
+
+/** The field a changes rule hears, and the values it moves between. */
+export interface ReactionChanges {
+  /**
+   * An own field of the type, by its JSON key, or a field of a behavior
+   * the type lists, by qualified name ("Workflow.status"), a member path
+   * after it allowed ("Lease.ended.reason"). A volatile field, which moves
+   * at a read with no event, and "Workflow.enteredAt", which moves with
+   * the status, are refused.
+   */
+  readonly field: string;
+  /** The value the field moves to; any value when absent. */
+  readonly to?: unknown;
+  /** The value the field moves from; any value when absent. A create moves a field from absent, which from never names. */
+  readonly from?: unknown;
+}
 
 /** The instances an allTerminal or anyTerminal rule hears. */
 export interface ReactionSource {
@@ -330,6 +383,114 @@ export interface BranchesSweep {
   /** Discards a draft with no write for this many milliseconds; none when absent. */
   readonly abandonAfter?: number;
 }
+
+/** StateRules' config. */
+export interface StateRulesConfig {
+  /** The rules, by a state of the type's Workflow. */
+  readonly states: Readonly<Record<string, StateRule>>;
+  /** The permission a caller needs to change a field a state freezes; nobody may when absent. What a state requires holds for every caller. */
+  readonly permission?: string;
+}
+
+/**
+ * One state's rules under StateRules. A field is held when it is neither
+ * absent nor null.
+ */
+export interface StateRule {
+  /**
+   * The type's own top-level fields, by JSON key, an instance must hold to
+   * enter the state, and keeps while it is in it: a transition into the
+   * state without one is refused, a create when the state is the
+   * Workflow's initial one, and an update that clears one while the
+   * instance is in the state.
+   */
+  readonly required?: readonly string[];
+  /** The type's own top-level fields, by JSON key, that do not change while the instance is in the state, or "all", every one of them. */
+  readonly frozen?: readonly string[] | "all";
+}
+
+/** Approvals' config. */
+export interface ApprovalsConfig {
+  /** The gates, by the state of the type's Workflow each gates: a transition into it waits for its sign-offs. */
+  readonly gates: Readonly<Record<string, ApprovalsGate>>;
+  /**
+   * Whether a change of the instance's own fields, an update or an
+   * operation's, consumes every gate's sign-offs; true when absent.
+   */
+  readonly resetOnChange?: boolean;
+}
+
+/** One gate of an Approvals config. */
+export interface ApprovalsGate {
+  /** How many distinct principals must sign off before a transition into the state: 1 to 100. */
+  readonly count: number;
+  /** The permission a caller needs to sign off. */
+  readonly permission: string;
+  /** The states of the type's Workflow a transition from is gated; every state when absent. */
+  readonly from?: readonly string[];
+  /** Whether the principal who created the instance is refused a sign-off; true when absent. */
+  readonly excludeCreator?: boolean;
+}
+
+/** Numbering's config. */
+export interface NumberingConfig {
+  /**
+   * How a number prints: text with {seq}, or {seq:N} zero-padded to N
+   * digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the
+   * instance was created in: "INV-{yyyy}-{seq:4}" prints INV-2026-0042.
+   */
+  readonly format: string;
+  /** Counts per target of a link of the type's Links config, which is required and holds one target. */
+  readonly scope?: NumberingScope;
+  /** "yearly" starts the count again at 1 each UTC year; the format then prints the year. */
+  readonly reset?: "yearly";
+}
+
+/** What a Numbering count runs per. */
+export interface NumberingScope {
+  /** The link's name in the type's Links config. */
+  readonly link: string;
+}
+
+/** Timers' config. */
+export interface TimersConfig {
+  /** The deadlines, by name: a letter, then letters, digits, `_` and `-`. */
+  readonly deadlines: Readonly<Record<string, TimersDeadline>>;
+  /** How often the engine's runner fires the due deadlines, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
+  /** The permission a caller needs to reset or snooze a deadline; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/**
+ * One deadline of a Timers config: due afterMs after what it starts from,
+ * it fires once when it comes due, marked fired whatever its move meets.
+ * A deadline that names a state needs Workflow on the type.
+ */
+export interface TimersDeadline {
+  /** What it starts from: the create, each entry of the status into a state of the type's Workflow, or the time an own date-time field holds. */
+  readonly start: TimersStart;
+  /** How long after its start it is due, in milliseconds; 0 when absent. Negative, before it, for a field start alone. */
+  readonly afterMs?: number;
+  /** Moves the status of the type's Workflow when it fires, while the status is one of from. */
+  readonly then?: TimersThen;
+  /** Cancels it while it is pending: once the status is out of the state it starts in (leaves), or in one of the states given (enters). */
+  readonly until?: TimersUntil;
+}
+
+/** What a Timers deadline starts from: a field start moves with its field, and its field cleared cancels it. */
+export type TimersStart = { readonly create: true } | { readonly enters: string } | { readonly field: string };
+
+/** The move a Timers deadline makes when it fires. */
+export interface TimersThen {
+  /** The state to move to. */
+  readonly transition: string;
+  /** The states it moves from; when absent, the state the deadline starts in, its enters state or the Workflow's initial one. A field start names them. */
+  readonly from?: readonly string[];
+}
+
+/** What cancels a pending Timers deadline: leaves names the state it starts in, which a field start has none of. */
+export type TimersUntil = { readonly leaves: string } | { readonly enters: readonly string[] };
 
 /** Lease's config. */
 export interface LeaseConfig {

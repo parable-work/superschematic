@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -76,6 +77,9 @@ var coreNarrowers = map[string]narrower{
 	"Links":        narrowLinks,
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
+	"Approvals":    narrowApprovals,
+	"Numbering":    narrowNumbering,
+	"Timers":       narrowTimers,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -226,12 +230,16 @@ func setField(n *narrowing, name string, schema map[string]any, present bool) er
 	return nil
 }
 
-// Workflow: the status and transition's states are the config's.
+// Workflow: the status and transition's states are the config's; when the
+// status was entered is absent on an instance from before Workflow kept it.
 func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) error {
 	states := stringsOf(config["states"])
 	state := target.base + "State"
 	n.aliases = append(n.aliases, alias{name: state, doc: fmt.Sprintf("A state of %s's Workflow.", an(target.base)), schema: enumOf(states)})
 	if err := setField(n, "status", ref(state, ""), true); err != nil {
+		return err
+	}
+	if err := setField(n, "enteredAt", integer(), false); err != nil {
 		return err
 	}
 	if err := setOperationProperty(n.params, "transition", nil, "to", ref(state, "")); err != nil {
@@ -341,6 +349,10 @@ type linkSpec struct {
 	// pin is what the link pins of its target, "revision" or "release",
 	// or "" for a link that pins nothing (the engine's linkPin).
 	pin string
+	// many is whether the link holds a list of targets, of at most max
+	// (the engine's linkMany).
+	many bool
+	max  int
 }
 
 func linksOf(config map[string]any) []linkSpec {
@@ -350,7 +362,9 @@ func linksOf(config map[string]any) []linkSpec {
 		spec, _ := links[name].(map[string]any)
 		schema, _ := spec["schema"].(string)
 		required, _ := spec["required"].(bool)
-		out = append(out, linkSpec{name: name, schema: schema, required: required, pin: linkPin(spec["pinned"])})
+		many, _ := spec["many"].(bool)
+		most, _ := spec["max"].(float64)
+		out = append(out, linkSpec{name: name, schema: schema, required: required, pin: linkPin(spec["pinned"]), many: many, max: int(most)})
 	}
 	return out
 }
@@ -371,9 +385,11 @@ func linkPin(pinned any) string {
 // Links: the names are the config's; the create parameters are the
 // engine's narrowing (linksCreateParams): a property per link, the
 // required ones required, the revision or release it records only for a
-// pinned link; the targets field holds each link the instance has, with
-// its target's schema, and for a pinned link its pin, the target's latest
-// of that kind and whether the target has moved past the pin.
+// pinned link, and a list of at most max targets for a many-valued link,
+// at least one when it is required; the targets field holds each link the
+// instance has, with its target's schema, and for a pinned link its pin,
+// the target's latest of that kind and whether the target has moved past
+// the pin, a list of them for a many-valued link.
 func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error {
 	links := linksOf(config)
 	names := make([]string, 0, len(links))
@@ -402,7 +418,7 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 			recordProperties["stale"] = map[string]any{"description": fmt.Sprintf("Whether the target has moved past that %s.", pin), "type": "boolean"}
 			description = fmt.Sprintf("The %s instance %s points at: its id, or an object with its id and the %s to record.", link.schema, link.name, pin)
 		}
-		createProperties[link.name] = map[string]any{
+		entry := map[string]any{
 			"description":          description,
 			"type":                 []any{"string", "object"},
 			"pattern":              idPattern,
@@ -410,13 +426,19 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 			"required":             []any{"id"},
 			"properties":           targetProperties,
 		}
-		fieldProperties[link.name] = map[string]any{
+		record := map[string]any{
 			"description":          fmt.Sprintf("The %s instance %s points at.", link.schema, link.name),
 			"type":                 "object",
 			"additionalProperties": false,
 			"required":             []any{"schema", "id"},
 			"properties":           recordProperties,
 		}
+		if link.many {
+			entry = listOf(entry, fmt.Sprintf("The %s instances %s points at, in order, each once.", link.schema, link.name), link)
+			record = listOf(record, fmt.Sprintf("The %s instances %s points at, in the order they were linked.", link.schema, link.name), link)
+		}
+		createProperties[link.name] = entry
+		fieldProperties[link.name] = record
 		if link.required {
 			required = append(required, link.name)
 		}
@@ -452,6 +474,16 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 		}
 	}
 	return nil
+}
+
+// listOf is a many-valued link's list of what items describes one target
+// with: at most its max, and at least one when it is required.
+func listOf(items map[string]any, description string, link linkSpec) map[string]any {
+	list := map[string]any{"description": description, "type": "array", "maxItems": json.Number(strconv.Itoa(link.max)), "items": items}
+	if link.required {
+		list["minItems"] = json.Number("1")
+	}
+	return list
 }
 
 // Rollups: the values field holds each rollup's value by its function, or
@@ -536,6 +568,47 @@ func narrowVariants(n *narrowing, config map[string]any, target narrowTarget) er
 	return nil
 }
 
+// Numbering: the number and its label are absent on an instance made
+// before its schema composed Numbering, until assignNumber numbers it. The
+// config changes neither's type, so a nil config narrows as any does.
+func narrowNumbering(n *narrowing, _ map[string]any, _ narrowTarget) error {
+	return setFields(n,
+		typedField{"seq", integer(), false},
+		typedField{"label", map[string]any{"type": "string"}, false},
+	)
+}
+
+// timersOutcomes are what a fire's move meets, as a deadline's outcome
+// holds it.
+var timersOutcomes = []string{"moved", "skipped", "vetoed", "forbidden"}
+
+// Timers: the deadlines field holds, by deadline of the config, the ones
+// that have started, so none is required; each has its due time and
+// whether it fired, and once fired when, and with a then its outcome. The
+// operations name a deadline of the config.
+func narrowTimers(n *narrowing, config map[string]any, _ narrowTarget) error {
+	deadlines, _ := config["deadlines"].(map[string]any)
+	names := sortedKeys(deadlines)
+	properties := map[string]any{}
+	for _, name := range names {
+		properties[name] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"dueAt", "fired"},
+			"properties": map[string]any{
+				"dueAt":   integer(),
+				"fired":   boolean(),
+				"firedAt": integer(),
+				"outcome": enumOf(timersOutcomes),
+			},
+		}
+	}
+	for _, op := range []string{"fireTimer", "resetTimer", "snoozeTimer"} {
+		if err := setOperationProperty(n.params, op, nil, "deadline", enumOf(names)); err != nil {
+			return err
+		}
+	}
+	return setField(n, "deadlines", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
+}
+
 // stringScalar reports whether a scalar's values are strings.
 func stringScalar(document *ir.Schema, name string) bool {
 	scalar := document.Scalars[name]
@@ -556,6 +629,31 @@ func enumValues(enum *ir.EnumDef) []string {
 		}
 	}
 	return out
+}
+
+// Approvals: the gates field holds, by gated state, the subjects whose
+// sign-offs count, and no gate with none, so none is required; signOff and
+// withdrawSignOff name a gated state. listSignOffs takes any state, a gate
+// a later version removed included.
+func narrowApprovals(n *narrowing, config map[string]any, _ narrowTarget) error {
+	gates, _ := config["gates"].(map[string]any)
+	states := sortedKeys(gates)
+	properties := map[string]any{}
+	for _, state := range states {
+		properties[state] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"signedBy"},
+			"properties": map[string]any{"signedBy": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+		}
+	}
+	for _, op := range []string{"signOff", "withdrawSignOff"} {
+		if err := setOperationProperty(n.params, op, nil, "state", enumOf(states)); err != nil {
+			return err
+		}
+		if err := setOperationProperty(n.results, op, nil, "state", enumOf(states)); err != nil {
+			return err
+		}
+	}
+	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
 }
 
 // Assignment: the assignee's subject, absent when unassigned.

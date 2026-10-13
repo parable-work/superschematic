@@ -1,7 +1,7 @@
 // Workflow, the core's state machine: its config, the transition operation
 // and its guard, which no caller and no other behavior gets past, its
-// permission gates, its events, its rule for a new version, and the
-// outcomes of its terminal states.
+// permission gates, its events, when the status last changed, its rule
+// for a new version, and the outcomes of its terminal states.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -22,6 +22,7 @@ import {
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { testClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
 
@@ -86,29 +87,47 @@ for (const driver of drivers) {
   }
 
   describe(`Workflow (${driver})`, () => {
-    test('a new instance starts in the initial state, the first state when the config names none', () => {
-      const engine = published();
+    test('a new instance starts in the initial state, the first state when the config names none, entered at its create', () => {
+      const clock = testClock();
+      const engine = published(orderFlow, { clock });
       const order = engine.instances.get(alice, 'Order', 'o1');
-      assert.deepEqual([order?.data, order?.behaviors], [{ title: 'Desk' }, { Workflow: { status: 'draft' } }]);
-      const other = published({ ...orderFlow, initial: 'open' });
+      assert.deepEqual([order?.data, order?.behaviors], [{ title: 'Desk' }, { Workflow: { status: 'draft', enteredAt: clock.now } }]);
+      const other = published({ ...orderFlow, initial: 'open' }, { clock });
       assert.equal(other.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'open');
       assert.deepEqual(
         other.events.read(alice, { schema: 'Order', instanceId: 'o1' }).events.map((event) => event.change),
-        [{ data: { title: 'Desk' }, behaviors: { Workflow: { status: 'open' } } }]
+        [{ data: { title: 'Desk' }, behaviors: { Workflow: { status: 'open', enteredAt: clock.now } } }]
       );
     });
 
-    test('transition moves the status along a listed transition, and its event carries the new status', () => {
-      const engine = published();
+    test('transition moves the status along a listed transition, and its event carries the new status and when it was entered', () => {
+      const clock = testClock();
+      const engine = published(orderFlow, { clock });
+      clock.now += 5_000;
       assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open' }), { from: 'draft', to: 'open' });
       const order = engine.instances.get(alice, 'Order', 'o1');
-      assert.deepEqual([order?.behaviors.Workflow.status, order?.seq], ['open', 2]);
+      assert.deepEqual([order?.behaviors.Workflow, order?.seq], [{ status: 'open', enteredAt: clock.now }, 2]);
       assert.deepEqual(engine.events.read(alice, { schema: 'Order', instanceId: 'o1' }).events.at(-1)?.change, {
         behavior: 'Workflow',
         operation: 'transition',
         params: { to: 'open' },
-        patch: { behaviors: { Workflow: { status: 'open' } } },
+        patch: { behaviors: { Workflow: { status: 'open', enteredAt: clock.now } } },
       });
+      // A write that leaves the status alone leaves enteredAt where it is.
+      const entered = clock.now;
+      clock.now += 5_000;
+      assert.deepEqual(engine.instances.update(alice, 'Order', 'o1', { title: 'Oak desk' }).behaviors.Workflow, { status: 'open', enteredAt: entered });
+    });
+
+    test('an instance from before Workflow kept enteredAt has none until its next transition', () => {
+      const clock = testClock();
+      const engine = published(orderFlow, { clock });
+      // As a row migration 3 found: the column is there, with no time in it.
+      engine.storage.run(`UPDATE engine_instances SET bhv_workflow__entered_at = NULL WHERE schema = 'Order' AND id = 'o1'`);
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow, { status: 'draft' });
+      clock.now += 1_000;
+      engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open' });
+      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow, { status: 'open', enteredAt: clock.now });
     });
 
     test('its guard refuses a state the config lacks, the state it is in, a transition it does not list and a move out of a terminal state', () => {
@@ -145,9 +164,9 @@ for (const driver of drivers) {
     test('transition takes to and nothing else: no alias reaches the guard or the handler', () => {
       const engine = published();
       const alias = thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'transition', { status: 'open' }), OperationParamsError);
-      assert.deepEqual(alias.issues.map((issue) => issue.message).sort(), [
-        'must NOT have additional properties: status',
-        "must have required property 'to'",
+      assert.deepEqual(alias.issues, [
+        { path: '', message: 'must NOT have additional properties: status' },
+        { path: '', message: "must have required property 'to'" },
       ]);
       thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open', status: 'shipped' }), OperationParamsError);
       assert.equal(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'draft');
@@ -175,9 +194,9 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Order', 'o2', 'transition', { to: 'open' });
       // An update writes the own status and leaves Workflow's where it is.
       const desk = engine.instances.update(alice, 'Order', 'o1', { status: 'refunded' });
-      assert.deepEqual([desk.data, desk.behaviors], [{ title: 'Desk', status: 'refunded' }, { Workflow: { status: 'draft' } }]);
+      assert.deepEqual([desk.data, desk.behaviors.Workflow.status], [{ title: 'Desk', status: 'refunded' }, 'draft']);
       const lamp = engine.instances.get(alice, 'Order', 'o2');
-      assert.deepEqual([lamp?.data, lamp?.behaviors], [{ title: 'Lamp', status: 'unpaid' }, { Workflow: { status: 'open' } }]);
+      assert.deepEqual([lamp?.data, lamp?.behaviors.Workflow.status], [{ title: 'Lamp', status: 'unpaid' }, 'open']);
       // A bare key filters on the own field, the qualified name on Workflow's.
       const ids = (where: Record<string, unknown>) => engine.instances.list(alice, 'Order', { where }).items.map((item) => item.id);
       assert.deepEqual(ids({ status: 'unpaid' }), ['o2']);
@@ -187,15 +206,18 @@ for (const driver of drivers) {
     });
 
     test('another behavior moves the status only through transition, whose guard and permission gate run for it too', () => {
-      const engine = open({ metaSchema: openMetaSchema(), behaviors: [dispatch] });
+      const clock = testClock();
+      const engine = open({ clock, metaSchema: openMetaSchema(), behaviors: [dispatch] });
       engine.schemas.define(alice, orderSchema(orderFlow, [{ name: 'test.Dispatch' }]));
       engine.schemas.publish(alice, 'Order');
       engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
 
       const skip = thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'dispatch', { to: 'shipped' }), BehaviorVetoError);
       assert.equal(skip.reason, 'no transition leads from draft to shipped; from draft it can move to open, cancelled');
+      clock.now += 1_000;
       assert.deepEqual(engine.instances.invoke(alice, 'Order', 'o1', 'dispatch', { to: 'open' }), { from: 'draft', to: 'open' });
       assert.equal(thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'dispatch', { to: 'shipped' }), EngineError).code, 'forbidden');
+      clock.now += 1_000;
       assert.deepEqual(engine.instances.invoke(shipper, 'Order', 'o1', 'dispatch', { to: 'shipped' }), { from: 'open', to: 'shipped' });
       // It has no handle on Workflow's column.
       assert.match(thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'forceStatus'), BehaviorError).message, /SQL refused/);
@@ -203,8 +225,8 @@ for (const driver of drivers) {
       assert.deepEqual(
         events.map((event) => event.change),
         [
-          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'open' }, patch: { behaviors: { Workflow: { status: 'open' } } } },
-          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'shipped' }, patch: { behaviors: { Workflow: { status: 'shipped' } } } },
+          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'open' }, patch: { behaviors: { Workflow: { status: 'open', enteredAt: clock.now - 1_000 } } } },
+          { behavior: 'test.Dispatch', operation: 'dispatch', params: { to: 'shipped' }, patch: { behaviors: { Workflow: { status: 'shipped', enteredAt: clock.now } } } },
         ]
       );
     });
