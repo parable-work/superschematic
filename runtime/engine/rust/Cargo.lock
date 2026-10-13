@@ -1373,6 +1373,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-behaviors"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-engine",
+]
+
+[[package]]
 name = "superschematic-engine-storage"
 version = "0.0.0"
 dependencies = [

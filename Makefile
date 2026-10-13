@@ -141,16 +141,21 @@ cloudflare-schemas-check:
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
 # with no extension linked writes into the package that implements it
-# (--package). CI fails when a committed copy differs.
+# (--package). The Rust engine's behaviors crate (D58) carries a copy of the
+# engine package's declarations too, which each behavior embeds with
+# include_str!. CI fails when a committed copy differs.
 ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
 WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 
 behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 
 behaviors-check:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 
 ts:

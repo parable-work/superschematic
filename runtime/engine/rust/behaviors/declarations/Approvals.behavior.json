@@ -1,0 +1,283 @@
+{
+  "name": "Approvals",
+  "description": "Sign-offs that gate states of the type's Workflow. A transition into a gated state, from a state its gate allows, waits until as many distinct principals holding the gate's permission as its count have signed off; the instance's creator cannot sign unless the gate allows it. A change of the instance's own fields consumes every gate's sign-offs, unless the config keeps them, and entering a gated state consumes that gate's, so a return to it signs again. Consumed sign-offs stay listed. Deleting the instance deletes its sign-offs.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "gates": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "description": "How many distinct principals must sign off before a transition into the state.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "excludeCreator": {
+              "description": "Whether the principal who created the instance is refused a sign-off; true when absent.",
+              "type": "boolean"
+            },
+            "from": {
+              "description": "The states of the type's Workflow a transition from is gated; every state when absent.",
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "permission": {
+              "description": "The permission a caller needs to sign off.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "count",
+            "permission"
+          ],
+          "type": "object"
+        },
+        "description": "The gates, by the state of the type's Workflow each gates.",
+        "minProperties": 1,
+        "propertyNames": {
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        },
+        "type": "object"
+      },
+      "resetOnChange": {
+        "description": "Whether a change of the instance's own fields, an update or an operation's, consumes every gate's sign-offs; true when absent.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "gates"
+    ],
+    "type": "object"
+  },
+  "requires": [
+    "Workflow"
+  ],
+  "fields": [
+    {
+      "name": "gates",
+      "description": "The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent."
+    }
+  ],
+  "operations": [
+    {
+      "name": "signOff",
+      "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "description": "Why, for the others.",
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "state": {
+            "description": "The gated state to sign off for.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The sign-off, with the gate's sign-offs after it and the count it needs.",
+        "properties": {
+          "at": {
+            "description": "When, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "count": {
+            "description": "How many the gate needs.",
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "signedBy": {
+            "description": "Every subject whose sign-off for the state is not yet consumed, in the order they signed.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "The gated state.",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The subject of the caller who signed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "subject",
+          "at",
+          "signedBy",
+          "count"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "withdrawSignOff",
+      "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "description": "The gated state whose sign-off to withdraw.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The sign-off withdrawn.",
+        "properties": {
+          "at": {
+            "description": "When it was signed, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "state": {
+            "description": "The gated state.",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The subject of the caller who signed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "subject",
+          "at"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "listSignOffs",
+      "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many sign-offs; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "state": {
+            "description": "Only sign-offs for this state.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "description": "When, in epoch milliseconds.",
+                  "type": "integer"
+                },
+                "consumedAt": {
+                  "description": "When a change of the own fields, entering the state or a new version without its gate consumed it; absent while it counts.",
+                  "type": "integer"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "state": {
+                  "description": "The gated state.",
+                  "type": "string"
+                },
+                "subject": {
+                  "description": "The subject of the caller who signed.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "subject",
+                "at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "approvals_missing",
+      "description": "A transition into a gated state, from a state its gate allows, with fewer sign-offs than its count; details give the state, the count required and the sign-offs it has."
+    },
+    {
+      "code": "already_signed",
+      "description": "signOff by a caller whose sign-off for the state is not yet consumed."
+    },
+    {
+      "code": "creator_cannot_sign",
+      "description": "signOff by the principal who created the instance, on a gate that excludes the creator."
+    },
+    {
+      "code": "in_state",
+      "description": "signOff while the instance is in the gated state."
+    },
+    {
+      "code": "no_gate",
+      "description": "signOff or withdrawSignOff for a state the config does not gate."
+    },
+    {
+      "code": "not_signed",
+      "description": "withdrawSignOff by a caller with no sign-off for the state that is not yet consumed."
+    }
+  ]
+}

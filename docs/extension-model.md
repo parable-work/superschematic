@@ -1111,11 +1111,12 @@ from `acme-schematic behaviors --extension acme`, which acme's smoke runs
 with `--check` (section 10). The core's copies come from
 the core binary, each into the package that implements it: `make
 behaviors` writes `runtime/engine/typescript/src/behaviors/core/declarations`
-with `--package @superschematic/engine` and
+with `--package @superschematic/engine`, the same declarations into the
+Rust engine's `runtime/engine/rust/behaviors/declarations` (D58), and
 `runtime/engine-workqueue/typescript/src/declarations` with `--package
 @superschematic/engine-workqueue`, so each package carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space

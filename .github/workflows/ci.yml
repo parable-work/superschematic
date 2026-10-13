@@ -340,7 +340,7 @@ jobs:
         working-directory: extensions/cloudflare
         run: go run ./internal/tools/providerschemas -check
 
-      - name: Core behavior declarations drift (the engine's and the work-queue package's copies match the core registry)
+      - name: Core behavior declarations drift (the engine's, the Rust engine's and the work-queue package's copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
