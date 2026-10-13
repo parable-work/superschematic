@@ -5,10 +5,11 @@
 //! a storage newer than the build, reopening, and the busy refusal; on
 //! SQLite and, with the variable set, on Postgres.
 //!
-//! milestone 4b: the seeds' checks through instances and the event log
-//! (an update of a seeded instance, its events read back with their causes
-//! and value refs, a lookup by a unique field, a unique conflict, retention
-//! reading from the floor). milestone 5: the checks that publish a schema
+//! The seeds are checked through instances and the event log as well: an
+//! update of a seeded instance at its sequence, its events read back with
+//! their causes and value refs, a large field the next write moves to the
+//! value store, a lookup by a unique field and a unique conflict, and a
+//! read from before a floor. milestone 5: the checks that publish a schema
 //! with a test behavior on the migrated storage and run its operations
 //! (checkOperationEvents, test.Holder's references). milestone 6: the
 //! runner's subscriptions on a migrated storage.
@@ -26,8 +27,9 @@ use superschematic_engine::storage::{
     engine_migrations, Db, Dialect, Lock, Migration, MigrationSet, Sql, SqlValue, Tx, ENGINE_OWNER,
 };
 use superschematic_engine::{
-    Clock, DefineOptions, Engine, EngineErrorCode, Error, NamespaceOrigin, NamespaceRecord,
-    NamespaceState, SchemaTarget,
+    Clock, CreateOptions, DefineOptions, Engine, EngineErrorCode, EngineEvent, Error, EventCause,
+    EventsAfter, GetOptions, InstanceRecord, NamespaceOrigin, NamespaceRecord, NamespaceState,
+    ReadEvents, SchemaTarget, WriteOptions,
 };
 use superschematic_schema_ir::schemafile::load_schema_file;
 use support::{alice, code, count, order_document, refusal, schema_document, targets, texts, with};
@@ -397,6 +399,20 @@ fn check_version_1(engine: &Engine) {
         None
     );
     assert_eq!(count(db, "SELECT COUNT(*) AS n FROM engine_events"), 0);
+    assert!(read_all(engine).is_empty());
+    let created = engine
+        .instances()
+        .create(
+            &alice(),
+            "Order",
+            &json!({"title": "Desk"}),
+            CreateOptions {
+                id: Some("o1"),
+                ..CreateOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(created.version, 1);
     assert_eq!(
         engine
             .schemas()
@@ -406,12 +422,36 @@ fn check_version_1(engine: &Engine) {
         1
     );
     assert_eq!(
-        texts(
-            db,
-            "SELECT kind || ' ' || schema FROM engine_events ORDER BY cursor"
-        ),
-        ["publish Note"]
+        read_all(engine)
+            .iter()
+            .map(|event| (event.kind.as_str(), event.schema.as_str()))
+            .collect::<Vec<_>>(),
+        [("create", "Order"), ("publish", "Note")]
     );
+}
+
+fn read_all(engine: &Engine) -> Vec<EngineEvent> {
+    engine
+        .events()
+        .read(&alice(), &ReadEvents::default())
+        .unwrap()
+        .events
+}
+
+fn update_at(engine: &Engine, patch: Value, seq: i64) -> InstanceRecord {
+    engine
+        .instances()
+        .update(
+            &alice(),
+            "Order",
+            "o1",
+            &patch,
+            WriteOptions {
+                expected_seq: Some(seq),
+                ..WriteOptions::default()
+            },
+        )
+        .unwrap()
 }
 
 fn check_log(engine: &Engine, version: usize) {
@@ -433,12 +473,63 @@ fn check_log(engine: &Engine, version: usize) {
             .as_deref(),
         Some("alice")
     );
-    if version == 8 {
-        // The row reads as it was written, inline.
-        let data = texts(db, "SELECT data FROM engine_instances WHERE id = 'o1'");
-        let stored: Value = serde_json::from_str(&data[0]).unwrap();
-        assert_eq!(stored["lines"], bulk_lines());
+    assert_eq!(
+        read_all(engine)
+            .iter()
+            .map(|event| (event.cursor, event.kind.as_str(), event.seq))
+            .collect::<Vec<_>>(),
+        [(1, "publish", None), (2, "create", Some(1))]
+    );
+    if version != 8 {
+        let updated = update_at(engine, json!({"title": "Lamp"}), 1);
+        assert_eq!(
+            (updated.seq, Value::Object(updated.data)),
+            (2, json!({"title": "Lamp"}))
+        );
+        return;
     }
+    // The row and its create event read as they were written, inline.
+    let data = texts(db, "SELECT data FROM engine_instances WHERE id = 'o1'");
+    let stored: Value = serde_json::from_str(&data[0]).unwrap();
+    let lines = bulk_lines();
+    assert_eq!(stored["lines"], lines);
+    let get = |engine: &Engine| {
+        engine
+            .instances()
+            .get(&alice(), "Order", "o1", GetOptions::default())
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(get(engine).data["lines"], lines);
+    let created = &read_all(engine)[1];
+    assert_eq!(
+        (&created.change["lines"], &created.value_refs),
+        (&lines, &None)
+    );
+    // The row's next write moves the large field to the value store; the
+    // event the seed wrote keeps it inline.
+    update_at(engine, json!({"title": "Bulk order"}), 1);
+    assert_eq!(
+        texts(
+            db,
+            "SELECT value_refs FROM engine_instances WHERE id = 'o1'"
+        ),
+        ["[\"/lines\"]"]
+    );
+    let hash = sha256_hex(&canonical_json(&lines).unwrap());
+    let row: Value =
+        serde_json::from_str(&texts(db, "SELECT data FROM engine_instances WHERE id = 'o1'")[0])
+            .unwrap();
+    assert_eq!(
+        row["lines"],
+        json!({"$value": hash, "bytes": canonical_json(&lines).unwrap().len()})
+    );
+    assert_eq!(get(engine).data["lines"], lines);
+    assert_eq!(
+        engine.values().get(&alice(), &hash, None).unwrap().value,
+        lines
+    );
+    assert_eq!(read_all(engine)[1].change["lines"], lines);
 }
 
 fn check_version_6(engine: &Engine) {
@@ -450,6 +541,25 @@ fn check_version_6(engine: &Engine) {
             ),
             ["1 publish - -", "2 create - -", "3 update test.Ledger -"]
         );
+    // The seed's events read with their causes, the runner's alone having
+    // one.
+    let causes: Vec<Option<EventCause>> = read_all(engine)
+        .into_iter()
+        .map(|event| event.cause)
+        .collect();
+    assert_eq!(
+        causes,
+        [
+            None,
+            None,
+            Some(EventCause {
+                behavior: "test.Ledger".into(),
+                event: Some(2),
+                schedule: None,
+                depth: 1
+            })
+        ]
+    );
     let draft = engine
         .schemas()
         .define(
@@ -524,6 +634,36 @@ fn check_version_9(engine: &Engine) {
         "{duplicate:?}"
     );
     assert_eq!(unique_indexes(db), 1);
+    let lookup = |slug: &str| {
+        engine
+            .instances()
+            .lookup(
+                &alice(),
+                "Model",
+                &json!({"slug": slug}),
+                GetOptions::default(),
+            )
+            .unwrap()
+            .map(|found| found.id)
+    };
+    assert_eq!(lookup(&long_slug()).as_deref(), Some("b"));
+    assert_eq!(lookup("models/plain").as_deref(), Some("a"));
+    let model = |slug: &str, id: &str| {
+        engine.instances().create(
+            &alice(),
+            "Model",
+            &json!({"slug": slug}),
+            CreateOptions {
+                id: Some(id),
+                ..CreateOptions::default()
+            },
+        )
+    };
+    assert_eq!(
+        refusal(model("models/plain", "d")).name(),
+        "UniqueConflictError"
+    );
+    model("models/new", "c").unwrap();
 }
 
 fn check_version_10(engine: &Engine) {
@@ -553,6 +693,39 @@ fn check_version_10(engine: &Engine) {
     assert_eq!(
         engine.namespaces().create(&alice(), "acme").unwrap().origin,
         NamespaceOrigin::Created
+    );
+    // The log is append-only above a namespace's floor and gives way at or
+    // before it, as retention moves it.
+    let sql = |statement: &str| db.write(Lock::Catalog, |tx| tx.run(statement, &[]).map(|_| ()));
+    sql("INSERT INTO engine_log_floors (namespace, floor) VALUES ('default', 2)").unwrap();
+    assert!(sql("DELETE FROM engine_events WHERE cursor = 3")
+        .unwrap_err()
+        .to_string()
+        .contains("engine_events is append-only"));
+    sql("DELETE FROM engine_events WHERE cursor <= 2").unwrap();
+    let after = |cursor| ReadEvents {
+        after: Some(EventsAfter::Cursor(cursor)),
+        ..ReadEvents::default()
+    };
+    assert_eq!(
+        code(engine.events().read(&alice(), &after(1))),
+        EngineErrorCode::CursorExpired
+    );
+    assert_eq!(
+        engine
+            .events()
+            .read(&alice(), &after(2))
+            .unwrap()
+            .events
+            .iter()
+            .map(|event| (event.cursor, event.kind.as_str()))
+            .collect::<Vec<_>>(),
+        [(3, "update")]
+    );
+    let updated = update_at(engine, json!({"title": "Chair"}), 2);
+    assert_eq!(
+        (updated.seq, Value::Object(updated.data)),
+        (3, json!({"title": "Chair"}))
     );
 }
 
@@ -586,6 +759,23 @@ fn check_version_11(engine: &Engine) {
     assert_eq!(
         code(engine.schemas().define(&alice(), order_document(), acme)),
         EngineErrorCode::NamespaceArchived
+    );
+    assert_eq!(
+        engine
+            .instances()
+            .create(
+                &alice(),
+                "Order",
+                &json!({"title": "Desk"}),
+                CreateOptions {
+                    id: Some("o1"),
+                    namespace: Some("beta"),
+                    behaviors: None
+                },
+            )
+            .unwrap()
+            .seq,
+        1
     );
     assert_eq!(
         engine

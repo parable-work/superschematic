@@ -5247,7 +5247,7 @@ Schemas, messages and access:
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | The engine reads schema-file documents and validates instances against their IR in Rust. The schema runtime's Rust crate gains an IR reader and validator and the strict schema-file loader, held to Go's and TypeScript's by `runtime/schema/testdata/validation_parity.json` and `schema_file_parity.json`. JSON Schema, for configs and operations' parameters and results, is the `jsonschema` crate, its messages written as ajv writes them and in one defined order, since clients and agents read them. Numbers are written as JavaScript writes them. | Validators generated per schema, which a schema defined while the engine runs has none of; new wording, which every client that matches a message would see change |
-| Access is a policy the engine reads as data: ordered rules, the first that matches deciding, each naming a permission the principal must hold (`hasAnyPermission`); `allowAll` and `permission`, today's `permissionPolicy`, are shorthands. A deployment that needs more compiles a Rust policy into its engine. What D16's deployment passed as functions, the ids, the clock, the value store's driver and the permission matcher, is config. A `system` principal, which no request can be, publishes when a server starts. | A policy function the host supplies and the engine asks on every call, which a Go or Rust host would answer through a callback across the binding |
+| Access is a policy the engine reads as data: ordered rules, the first that matches deciding (a question no rule matches is refused), each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold (`hasAnyPermission`, `{schema}`, `{action}`, `{namespace}` and `{operation}` standing for the question's) or allowing or refusing outright; `allowAll` and `permission`, today's `permissionPolicy`, are shorthands. A deployment that needs more compiles a Rust policy into its engine. What D16's deployment passed as functions, the ids, the clock, the value store's driver and the permission matcher, is config. A `system` principal, which no request can be, publishes when a server starts. | A policy function the host supplies and the engine asks on every call, which a Go or Rust host would answer through a callback across the binding |
 
 What it serves, and the bindings:
 
@@ -5284,15 +5284,22 @@ Status: not built. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
-the commit notifier; and in `superschematic-engine`, opening an engine
-on its storage and migrating it, the namespaces, the schema registry with
-its validator over `superschematic-schema-ir`, the compatibility rule and
-the display and index checks, the engine's refusals with their codes, the
-principal and the engine's own `system` principal, and JSON written and
-hashed as JavaScript writes it, which CI tests on SQLite and Postgres.
-Every engine still allows every call (milestone 4b reads the access
-policy), and no behavior is registered (milestone 5). Until the Rust
-engine passes the TypeScript suite, `@superschematic/engine` is the
-TypeScript implementation and nothing uses the workspace.
+the commit notifier; in `superschematic-engine`, opening an engine on its
+storage and migrating it, the namespaces, the schema registry with its
+validator over `superschematic-schema-ir`, the compatibility rule and the
+display and index checks, the access policy read as rules (or a Rust
+policy compiled in) with the `system` principal always allowed, the
+instances with their filters, unique indexes and lookups, the event log
+with its reads and its watch on the notifier, the value store with its
+configured driver, the engine's refusals with their codes, the calls by
+name with JSON arguments that the bindings will make, the principal, and
+JSON written and hashed as JavaScript writes it; and
+`superschematic-engine-testkit`, which replays the scenario corpus and
+gives its recorded answers on SQLite and Postgres for every scenario that
+needs no behavior. CI tests the workspace on both databases. No behavior
+is registered yet (milestone 5), and the runner, retention, the tools and
+the routes are milestone 6's. Until the Rust engine passes the TypeScript
+suite, `@superschematic/engine` is the TypeScript implementation and
+nothing uses the workspace.
 
 The rule is reversible until the first release.

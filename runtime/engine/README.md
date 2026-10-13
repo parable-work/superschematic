@@ -13,12 +13,19 @@ the engine. Built there so far: `superschematic-engine-storage`
 and savepoints, one writer per namespace, the write counter, the migration
 ledger and the engine's migrations for both databases, a behavior's own
 storage and the checker its SQL passes, and the notifier a commit wakes;
-and `superschematic-engine` (`rust/engine`): opening an engine and
-migrating its storage, the namespaces, configured or made while it runs
-and archived, the schema registry with its validator, compatibility rule
-and display and index checks, the refusals with this package's codes (and
-`busy`, a lock held past the busy timeout), and JSON written and hashed
-as JavaScript writes it, with every call allowed and no behavior yet.
+`superschematic-engine` (`rust/engine`): opening an engine and migrating
+its storage, the namespaces, configured or made while it runs and
+archived, the schema registry with its validator, compatibility rule and
+display and index checks, the access policy as data (rules a deployment
+configures, the first that matches deciding, or a Rust policy of its
+own), the instances with their filters, unique indexes and lookups, the
+event log, read by namespace and watched through the notifier, the value
+store over `engine_payloads` or a driver the deployment compiles in, the
+refusals with this package's codes (and `busy`, a lock held past the busy
+timeout), the calls by name with JSON arguments the bindings will make,
+and JSON written and hashed as JavaScript writes it, with no behavior
+yet; and `superschematic-engine-testkit` (`rust/testkit`), which replays
+the scenario corpus (`testdata/scenarios`) on both databases.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -4388,10 +4395,11 @@ against an engine, and its `typos()` holds a misspelled field, state,
 link and parameter to a compile error.
 
 The Rust workspace builds and tests with `make engine-rust`, under the
-toolchain `tools.env` pins (`RUSTUP_TOOLCHAIN`). The storage crate's tests
-run on SQLite, and on Postgres too when
-`SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, each test in a
-schema it creates and drops:
+toolchain `tools.env` pins (`RUSTUP_TOOLCHAIN`). Its tests run on SQLite,
+and on Postgres too when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names
+one, each test in a schema it creates and drops; the test kit's replay
+reads the corpus at `testdata/scenarios`, or the directory
+`ENGINE_CORPUS_DIR` names, and says it skipped when there is none:
 
 ```
 docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine

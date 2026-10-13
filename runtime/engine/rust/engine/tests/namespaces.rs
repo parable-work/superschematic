@@ -6,10 +6,11 @@
 //!
 //! What the access policy answers is the TypeScript cases' `managing`
 //! policy: who may create, archive and list, the questions it is asked,
-//! and a refused caller learning nothing. milestone 5: an archived
-//! namespace refusing a behavior's operation, and the tools (milestone 6)
-//! hiding what writes there; milestone 6: the runner, which runs nothing in
-//! an archived namespace.
+//! and a refused caller learning nothing. An archived namespace refuses an
+//! instance's create, update and delete while its instances and events
+//! read on. milestone 5: an archived namespace refusing a behavior's
+//! operation, and the tools (milestone 6) hiding what writes there;
+//! milestone 6: the runner, which runs nothing in an archived namespace.
 
 mod support;
 
@@ -18,9 +19,9 @@ use std::sync::{Arc, Mutex};
 use serde_json::json;
 
 use superschematic_engine::{
-    AccessPolicy, AccessRequest, Clock, DefineOptions, Engine, EngineErrorCode, NamespaceConfig,
-    NamespaceOptions, NamespaceOrigin, NamespaceRecord, NamespaceState, Policy, Principal,
-    SchemaSummary, SchemaTarget,
+    AccessPolicy, AccessRequest, Clock, CreateOptions, DefineOptions, Engine, EngineErrorCode,
+    GetOptions, ListOptions, NamespaceConfig, NamespaceOptions, NamespaceOrigin, NamespaceRecord,
+    NamespaceState, Policy, Principal, ReadEvents, SchemaSummary, SchemaTarget, WriteOptions,
 };
 use support::{alice, code, order_document, refusal, schema_document, targets, with};
 
@@ -356,6 +357,15 @@ impl AccessPolicy for Managing {
     }
 }
 
+/// Allows everything but a write.
+struct NoWrites;
+
+impl AccessPolicy for NoWrites {
+    fn allows(&self, request: &AccessRequest<'_>) -> bool {
+        request.action() != "write"
+    }
+}
+
 fn question(subject: &str, namespace: &str, operation: &str) -> Question {
     (
         subject.to_owned(),
@@ -481,6 +491,27 @@ fn create_list_and_get_and_the_next_engine_on_the_storage_has_them() {
             ),
             EngineErrorCode::NameTaken
         );
+        engine
+            .instances()
+            .create(
+                &ada(),
+                "Note",
+                &json!({"body": "hello"}),
+                CreateOptions {
+                    id: Some("n1"),
+                    namespace: Some("acme"),
+                    behaviors: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .instances()
+                .get(&ada(), "Note", "n1", GetOptions::default())
+                .unwrap(),
+            None,
+            "an instance stays in the namespace that made it"
+        );
         drop(engine);
 
         let reopened =
@@ -496,6 +527,23 @@ fn create_list_and_get_and_the_next_engine_on_the_storage_has_them() {
                 .unwrap()
                 .created_at,
             Some(5_000)
+        );
+        assert_eq!(
+            reopened
+                .instances()
+                .get(
+                    &ada(),
+                    "Note",
+                    "n1",
+                    GetOptions {
+                        namespace: Some("acme"),
+                        value_refs: false
+                    }
+                )
+                .unwrap()
+                .unwrap()
+                .data["body"],
+            "hello"
         );
         assert_eq!(
             reopened
@@ -646,8 +694,26 @@ fn an_archived_namespace_is_read_as_it_was_and_refuses_every_write() {
                 define_in("acme"),
             )
             .unwrap();
+        let acme = Some("acme");
+        engine
+            .instances()
+            .create(
+                &alice(),
+                "Order",
+                &json!({"title": "Desk"}),
+                CreateOptions {
+                    id: Some("o1"),
+                    namespace: acme,
+                    behaviors: None,
+                },
+            )
+            .unwrap();
         engine.namespaces().archive(&alice(), "acme").unwrap();
 
+        let write = WriteOptions {
+            namespace: acme,
+            ..WriteOptions::default()
+        };
         let refusals = [
             (
                 "define",
@@ -661,6 +727,33 @@ fn an_archived_namespace_is_read_as_it_was_and_refuses_every_write() {
                 "publish",
                 refusal(engine.schemas().publish(&alice(), "Order", at("acme"))),
             ),
+            (
+                "create",
+                refusal(engine.instances().create(
+                    &alice(),
+                    "Order",
+                    &json!({"title": "Lamp"}),
+                    CreateOptions {
+                        id: Some("o2"),
+                        namespace: acme,
+                        behaviors: None,
+                    },
+                )),
+            ),
+            (
+                "update",
+                refusal(engine.instances().update(
+                    &alice(),
+                    "Order",
+                    "o1",
+                    &json!({"title": "Lamp"}),
+                    write,
+                )),
+            ),
+            (
+                "delete",
+                refusal(engine.instances().delete(&alice(), "Order", "o1", write)),
+            ),
         ];
         for (what, refused) in refusals {
             assert_eq!(
@@ -672,7 +765,70 @@ fn an_archived_namespace_is_read_as_it_was_and_refuses_every_write() {
                 "{what}"
             );
         }
+        // The policy is asked first: a caller it refuses is forbidden.
+        let guarded = target.fresh();
+        let guarded = guarded.open_with(|options| options.policy = Some(Policy::custom(NoWrites)));
+        guarded.namespaces().create(&alice(), "acme").unwrap();
+        guarded.namespaces().archive(&alice(), "acme").unwrap();
+        assert_eq!(
+            code(guarded.instances().create(
+                &alice(),
+                "Order",
+                &json!({}),
+                CreateOptions {
+                    namespace: acme,
+                    ..CreateOptions::default()
+                }
+            )),
+            EngineErrorCode::Forbidden
+        );
         // Reads go on.
+        let get = GetOptions {
+            namespace: acme,
+            value_refs: false,
+        };
+        assert_eq!(
+            engine
+                .instances()
+                .get(&alice(), "Order", "o1", get)
+                .unwrap()
+                .unwrap()
+                .data["title"],
+            "Desk"
+        );
+        assert_eq!(
+            engine
+                .instances()
+                .list(
+                    &alice(),
+                    "Order",
+                    ListOptions {
+                        namespace: acme,
+                        ..ListOptions::default()
+                    }
+                )
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        assert_eq!(
+            engine
+                .events()
+                .read(
+                    &alice(),
+                    &ReadEvents {
+                        namespace: acme,
+                        ..ReadEvents::default()
+                    }
+                )
+                .unwrap()
+                .events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            ["define", "publish", "define", "create"]
+        );
         assert_eq!(
             engine
                 .schemas()
@@ -703,6 +859,14 @@ fn an_archived_namespace_is_read_as_it_was_and_refuses_every_write() {
 
         // Unarchived, it writes again.
         engine.namespaces().unarchive(&alice(), "acme").unwrap();
+        assert_eq!(
+            engine
+                .instances()
+                .update(&alice(), "Order", "o1", &json!({"title": "Lamp"}), write)
+                .unwrap()
+                .seq,
+            2
+        );
         assert_eq!(
             engine
                 .schemas()

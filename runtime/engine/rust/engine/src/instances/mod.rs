@@ -245,6 +245,9 @@ impl Instances<'_> {
             let Some(row) = row(tx, &namespace, schema, id)? else {
                 return Ok(None);
             };
+            // The read's chain, which milestone 5's field readers run in:
+            // its time is read where the TypeScript engine reads it, so a
+            // replayed clock reads the same times.
             let _chain = Chain::new(principal, &namespace, engine.clock.now());
             Ok(Some(read(engine, tx, &runtime, &row, options.value_refs)?))
         })
@@ -277,6 +280,9 @@ impl Instances<'_> {
             };
             let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
             let runtime = engine.catalog.runtime_of(&record)?;
+            // The read's chain, which milestone 5's field readers run in:
+            // its time is read where the TypeScript engine reads it, so a
+            // replayed clock reads the same times.
             let _chain = Chain::new(principal, &namespace, engine.clock.now());
             let filter = normalized_filter(options.filter, |key, value| {
                 runtime.validator.normalize_field(key, value)
@@ -388,6 +394,9 @@ impl Instances<'_> {
             let Some(found) = found else {
                 return Ok(None);
             };
+            // The read's chain, which milestone 5's field readers run in:
+            // its time is read where the TypeScript engine reads it, so a
+            // replayed clock reads the same times.
             let _chain = Chain::new(principal, &namespace, engine.clock.now());
             Ok(Some(read(
                 engine,
