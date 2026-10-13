@@ -1579,7 +1579,7 @@ impl AccessPolicy for AnswerPolicy {
 /// test files, whose scenarios need no behavior or few, and the core
 /// behaviors' files whose behaviors this engine has (a scenario that also
 /// composes one not ported yet is skipped).
-pub const ENGINE_FILES: [&str; 22] = [
+pub const ENGINE_FILES: [&str; 26] = [
     "access",
     "compat",
     "core-approvals",
@@ -1590,7 +1590,11 @@ pub const ENGINE_FILES: [&str; 22] = [
     "core-links",
     "core-links-many",
     "core-numbering",
+    "core-reactions",
+    "core-reactions-changes",
+    "core-reactions-holds-revised",
     "core-revisions",
+    "core-rollups",
     "core-staterules",
     "core-timers",
     "core-variants",

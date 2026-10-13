@@ -29,9 +29,10 @@
 //! [`Constants`] and [`Variants`]; wave 2 (milestone 9), [`Revisions`],
 //! [`Dependencies`], [`Links`] (with D56's many-valued links, and
 //! [`revised`], what a move of a link's target moves on), [`Numbering`],
-//! and D56's [`StateRules`], [`Approvals`] and [`Timers`]. The other core
-//! behaviors come in the waves after ([`NAMES`] lists the ones [`core`]
-//! registers).
+//! and D56's [`StateRules`], [`Approvals`] and [`Timers`]; wave 3
+//! (milestone 10a), [`Rollups`] and [`Reactions`] (with D56's changes
+//! trigger). The other core behaviors come in the waves after ([`NAMES`]
+//! lists the ones [`core`] registers).
 
 pub mod approvals;
 pub mod comments;
@@ -75,12 +76,14 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 11] = [
+pub const NAMES: [&str; 13] = [
     "Workflow",
     "Comments",
     "Revisions",
     "Dependencies",
     "Links",
+    "Rollups",
+    "Reactions",
     "Constants",
     "Variants",
     "StateRules",
@@ -99,6 +102,8 @@ pub fn core() -> BehaviorSet {
         .with(Revisions)
         .with(Dependencies)
         .with(Links)
+        .with(Rollups)
+        .with(Reactions)
         .with(Constants)
         .with(Variants)
         .with(StateRules)
