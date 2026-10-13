@@ -6016,3 +6016,107 @@ it.
 | `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
 
 Status: built in #334.
+
+## D60. A list operation pages by an opaque cursor when it declares `@paginated`
+
+A list operation answers its whole result. acme's `listOrders` takes a
+`limit` and stops there, with no way to the orders after it, and
+`listReviews` answers every review of a product. The console's list page
+(D44, amended) renders whatever comes back, so it grows with the table,
+and an SDK caller has no next page to ask for. The engine's `list`
+already pages (D16, amended): `limit` and `cursor` in the query, `{items,
+next}` in `data`, `next` an unpadded base64url cursor, null after the last
+page. Of what a generated API has, the Go runtime's envelope declares
+`meta.totalCount` and `links` and the OpenAPI document advertises them,
+but no server writes either, and the Rust SDK pages a list by the `limit`
+and `offset` arguments it finds by name (`<method>_all`).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core operation decorator, `@paginated({ defaultLimit, maxLimit })` from `@superschematic/api`, on a GET operation whose result is a list, `T[]`: one level, not a map, not `Nullable`. Both members are optional: `maxLimit` is 1 to 1000, 100 when unsaid, and `defaultLimit` 1 to `maxLimit`, 20 when unsaid or `maxLimit` when that is less. It writes `FieldDef.Page` (`ir.OperationPage`, JSON `page`), after `filterable`, with both numbers filled in by the loader in every form, so each reader sees the limits the routers apply. IR without it is the same bytes, and no operation pages unless it says so. | A page on every list, which changes every server, SDK and golden at once; arguments the author declares and a marker names, which each operation would spell its own way; offsets or page numbers, which skip and repeat items written between two pages and scan every row they skip |
+| The decorator gives the operation two query parameters that no schema declares. `cursor` is 1 to 1024 characters of the unpadded base64url alphabet (`A-Z a-z 0-9 - _`); `limit` is a whole number from 1 to `maxLimit`, `defaultLimit` when absent. Each runtime reads both with one reader, Go's `paging.Read`, TypeScript's `readPage` and Rust's `PageSpec::query`, whose refusals are the 400 a string or integer query parameter gets (D39, D42), at `cursor` or `limit`. An operation that also declares an argument named `cursor`, `limit` or `page`, or that is `@manualRouteRegistration` or encrypted, is refused. | Arguments the loader adds to `arguments`, which `format` would write back and each server would decode by its own older query rules; the bucket runtimes' `pageToken` and `pageSize`, which the engine's list does not use |
+| `data` is the page, `{"items": [...], "next": "<cursor>"}`, `next` null after the last page, as the engine's `list` answers; `meta` keeps `requestId` alone. A page may hold fewer items than its limit, even none, while `next` is not null. There is no total and no previous cursor. | `meta.nextCursor`, or the Go envelope's `links.next`, which the result type and an MCP tool's result would not carry and every SDK would read beside `data`; a total, a count per page; a previous cursor, a second order every implementation keeps |
+| A cursor is opaque and names a position in the operation's order, never an offset. The implementation chooses the key, the last item's `placedAt` and `id` for orders, and the runtime writes it as the unpadded base64url of its compact JSON (`Cursor::encode`, `paging.EncodeCursor`, `encodeCursor`) and reads it back into the implementation's key type, refusing one it cannot read with 400 `bad_request`, "cursor is not one this operation returned", at `cursor`. A cursor grants nothing: each page runs the operation's caller rule and filters again, so a forged one moves where a page starts. It does not expire; one the implementation can no longer read, after its order changes, is that 400, and the caller starts again. | Signing the cursor, which protects a position that grants nothing; a wrapper the router adds with the operation's name, a second encoding every server must agree on |
+| The order is the operation's own, total and fixed, and a cursor carries no filter. The next page is asked with the same filters; with others it goes on from the position under them, as the engine's filtered pages do. A UI that changes a filter starts at the first page. | Binding a cursor to the filters it was made under, a fingerprint of canonical arguments every server would compute alike, to refuse a request whose answer is already well defined |
+| The implementation takes `page`, the page request (`cursor`, a cursor or none, and `limit`, its default filled in), beside its arguments, and returns a page: Go `ListOrders(ctx, statuses, page paging.Request) (paging.Page[types.OrderView], error)`, TypeScript `args.page` and `Page<OrderView>`, Rust an `Args` field `page: PageRequest` and `Result<Page<types::OrderView>, ApiError>`. `Page::from_rows(rows, limit, key)` takes up to `limit + 1` rows, keeps `limit` and sets `next` to the key of the last one kept when there were more. The router neither trims nor counts the items. | `cursor` and `limit` as two arguments, whose default an in-process caller would fill in itself; a list the router cuts, which loads every row |
+| The in-process call (D43) returns the page, and `Args::check` checks `page` by the route's spec; a caller builds `PageRequest::first(limit)` or `PageRequest::after(cursor, limit)`. A Topcoat procedure's arguments record takes `cursor` and `limit` as records hold them, decoded as the router decodes the query, and answers `<Type>PageRecord { items, next }`. | |
+| Every SDK method of a paged operation takes `cursor` and `limit`, both optional, and returns the page: Go `runtime.Page[T]`, TypeScript `Page<T>`, Python `Page[T]`, Rust `runtime::Page<T>`. Beside it, `<operation>All` (`ListOrdersAll`, `listOrdersAll`, `list_orders_all`) yields the items of every page in turn, asking each with the last page's `next`: a Go `iter.Seq2[T, error]`, a TypeScript `AsyncIterable<T>`, a Python `Iterator[T]` and a Rust `Pager<T>` whose `next().await` yields each item. A page whose `next` is the cursor it was asked with ends the iteration with an error rather than a loop. An operation named `<operation>All` beside a paged one is refused. | Collecting every page into one list, as the Rust SDK's offset `_all` does, which holds the whole table in memory; leaving the loop to each caller |
+| The OpenAPI document gives a paged operation both parameters with their bounds and its `data` the page's schema. Its MCP tool takes both, returns the page, and its description says to pass `next` back as `cursor`. | |
+| A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
+| `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
+
+Status: designed. This batch builds all of it: the IR, the decorator, the
+readers, the JSON Schema and `format`; the OpenAPI document and the tool
+documents; the Go, TypeScript and Rust servers and the in-process call;
+the four SDKs and the vectors; and the Topcoat records, procedures and
+pager. acme's `listOrders`, `listReviews` and a new `listProducts` page.
+Parity is built now because the work per generator is bounded, acme builds
+`shop-orders` on a Go server with all four SDKs, and a server that ignored
+the decorator would answer a list where the others answer a page (D35,
+D42). Until a generator renders the decorator it refuses an operation that
+declares it, naming itself, as generators refused behaviors (D16). Follows:
+a sort argument; a previous cursor; a page size control in the console;
+and removing `meta.totalCount` and `links`, which the Go runtime declares
+and the OpenAPI document advertises and no server writes, a change to every
+golden of its own.
+
+The rule is reversible until the first release.
+
+## D61. A field or argument says what its value refers to with `RefersTo`, and a generated UI lists and names the items
+
+D44's forms and display components show an id as an id. The app supplies
+`Choices` by path, and acme's app keeps a catalog by hand for
+`lines.productId`. D44, amended twice, declined to infer what an id refers
+to from its name or from a source table's foreign key, which an API type
+does not declare, and nothing let an API type declare it: `Relation` is a
+DB schema's, and an argument takes no decorator. Its rules come from type
+wrappers (`QueryParam`, `Validate`).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type wrapper, `RefersTo<T, Target, { options, value, label }>` from `@superschematic/api`, on a field of an API schema's object type, input or output, and on an operation's argument. `T` is the value's own type; a list of them refers element by element. It writes `references: { type, options, value, label }` on `FieldDef`, after `relation`, and on `ArgumentDef`, after `encrypted`, members as written and absent when unsaid. IR without it is the same bytes. | A field decorator, `@references`, which an argument cannot take, and a second spelling for arguments; a decorator target for parameters, which the walker would read for this alone |
+| The target is an object type, the service's or a dependency's, that an operation of the same API lists: the items as the API returns them. | A DB type through `@source`, which an API without a database cannot name and whose rows no page receives; an operation alone, a name with no type behind it |
+| Each member is derived when unsaid, by `ir.ResolveReference`, which the loader and every generator call. `options` is the operation that lists the target, by name or `Set.operation`; unsaid, the API's one GET operation that returns `Target[]`, paged or not, takes no path argument and no required one, and admits an end user (neither `@requireService` nor manual). `value` is the target's field the reference holds, `id` unsaid. `label` is the field that names an item, unsaid the target's `@display` `titleField`, else none, and a UI shows the value. A nullable list query argument of the options operation that refers to its own target by the same value is its lookup (`ids`), which a UI calls with the values it must name. | Deriving the target as well, from `@source` and a `Relation`, which follows; the field a detail's path parameter names, a rule of the console's pages the core does not know |
+| The loader refuses, in every form: a target that is not an object type of the service or its dependencies; a reference outside an API schema, on an operation, on a map or on a list of lists; an `options` that is no such operation or does not list the target, or, unsaid, no operation or several; a `value` that is not a field of the target holding one value of the reference's type (`Identity.UUID` to `Identity.UUID`); and a `label` that is not a single text field, by `titleField`'s rule (D48). A reference is not checked at run time: an implementation refuses an id it cannot find, as it does now. | Checking each value against the options at run time, a read per request for what a foreign key or the implementation already holds |
+| The Topcoat crate gains a `references` module when a form or a record holds a reference. A control whose field or argument refers to a target is a select of the options operation's items, the label as each option's text and the value as its value, from one call per target per request, `PageRequest::first(maxLimit)` when the operation pages. A target with more items than one page holds keeps its text control, since a select would hide the rest. | Every page of the options, without bound; a select of the first page, which hides the item a reader wants |
+| A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of its `listMax`, else the page's `maxLimit`, at most 10 calls; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
+| The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
+
+Status: designed. This batch builds the IR, `RefersTo`, the readers, the
+JSON Schema, `format`, the checks and `ir.ResolveReference`, and the
+Topcoat forms, display components and pages. No server, SDK or OpenAPI
+document changes. acme's `PlaceOrderLine.productId`,
+`OrderLineView.productId` and the `productId` path arguments refer to a
+`ProductView` that `shop-orders` lists in a new `listProducts`, with a
+lookup, and reads in `getProduct`; its app drops its hand-written catalog
+choices. Follows: the target derived from `@source` and a `Relation`; a
+reference to another service's type; a picker that searches (D62) when the
+options do not fit a page; a vendor key in the OpenAPI and tool documents;
+and a breadcrumb step named by the reference of its route parameter.
+
+The rule is reversible until the first release.
+
+## D62. A list operation's search text is a `SearchQuery` argument, and SQLite's FTS5 index stays for later
+
+A table with `@searchField`s gets a `search_text` column (D27), on SQLite a
+`VIRTUAL` column without an index (D27, amended), but no API says that a
+list searches it: acme's `listReviews` filters by rating alone, and a
+console has no box to type into.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type wrapper, `SearchQuery<T>` from `@superschematic/api`, marks an argument as its operation's search text: an optional query parameter, as `QueryParam<Nullable<T>>` is, where `T` is `string` or a scalar whose values are strings, with its own rules (`SearchQuery<Validate<string, { maxLength: 100 }>>`). It writes `search: true` on the `ArgumentDef`, after `references`, with `isQuery` and without `required`. An operation takes one. The loader refuses, in every form, a search argument that is required, has a default, is not text or is a list, sits on an operation that is not a GET, or is a second. | A name the console recognizes (`q`, `search`), which a filter of that name would trip; an operation decorator naming its argument |
+| A search keeps the items whose searchable text contains each of its words, case-insensitively; a word is a run of characters that are not Unicode `White_Space`, the first 8 count, and blank text searches nothing. For a result type sourced (`@source`) from a table with search fields, the searchable text is the table's `search_text`: `ILIKE`, which Postgres's trigram index serves, and `LIKE` on SQLite, which reads every row and folds case in ASCII alone. A search filters and does not rank, so a paged search keeps the operation's order and its cursor (D60). | Ranking by relevance, which a cursor over the operation's order cannot page; the whole text as one substring, which misses "red anvil" in "Anvil, red" |
+| Each server's runtime gives the two steps an implementation needs, the words and each word's pattern (`\`, `%` and `_` escaped with `\`, then wrapped in `%`), for `LIKE ... ESCAPE '\'`: Go's `search.Terms` and `search.LikePattern`, TypeScript's `searchTerms` and `likePattern`, Rust's `search::terms` and `search::like_pattern`. `runtime/http/testdata/search_parity.json` holds Go, TypeScript and Rust to them. | Each implementation escaping its own patterns, where a `%` in a shopper's text matches everything |
+| The console's filter form renders the search argument first, as `<input type="search">` labeled "Search", holding the text sent, with its rules as attributes, and gives the form `role="search"`. A submitted search starts at the first page. | Its argument's name in words as its label, "Q" |
+| SQLite keeps the scan. An FTS5 table with the trigram tokenizer stays for later, for the reasons D27, amended, gave: a virtual table and triggers that the model, the diff and the runner do not know. acme's reviews are few, and a Topcoat app over a SQLite file serves one process. | Building it now, ahead of a SQLite reader that needs search to be fast |
+
+Status: designed. This batch builds the IR, `SearchQuery`, the readers,
+the JSON Schema, `format`, the checks, the helpers in the Go, TypeScript
+and Rust runtimes with their vectors, and the console's search box. acme's
+`listReviews` takes `q`, matched against `Review`'s `search_text` in
+memory, over SQLite and over Postgres. Follows: FTS5; the search in the
+OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
+picker that searches a reference's options (D61).
+
+The rule is reversible until the first release.
