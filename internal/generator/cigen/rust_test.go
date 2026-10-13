@@ -39,8 +39,10 @@ func stockRequest() publicregistry.CIRequest {
 // TestRustServersInCheck: check sets up the Rust release tools.env pins
 // before the build, which brings the output root's Cargo lockfile up to
 // date with it, then checks the lockfile is committed and the build left
-// it as it was, and compiles each Rust server frozen to it (D57). No other
-// job sets up Rust. The golden, which -update rewrites, shows the job.
+// it as it was, and compiles each Rust server frozen to it (D57). Every
+// other job that builds sets up the same release before its build, and
+// a plan, which builds nothing, sets up none. The golden, which -update
+// rewrites, shows the jobs.
 func TestRustServersInCheck(t *testing.T) {
 	files, err := cigen.GitHub().Render(stockRequest())
 	if err != nil {
@@ -86,9 +88,21 @@ func TestRustServersInCheck(t *testing.T) {
 		}
 	}
 	for _, id := range w.order[1:] {
-		if w.jobs[id].step("Set up Rust") != nil {
-			t.Errorf("%s sets up Rust, which only check does", id)
+		j := w.jobs[id]
+		var names []string
+		for _, s := range j.Steps {
+			names = append(names, s.Name)
 		}
+		setup, build := slices.Index(names, "Set up Rust"), slices.Index(names, "Build the services")
+		if build < 0 && setup >= 0 {
+			t.Errorf("%s sets up Rust and builds nothing: %q", id, names)
+		}
+		if build >= 0 && setup != build-1 {
+			t.Errorf("%s builds without setting up Rust first: %q", id, names)
+		}
+	}
+	if w.jobs["deploy-staging"].step("Set up Rust") == nil {
+		t.Error("deploy-staging builds the services without setting up Rust")
 	}
 }
 

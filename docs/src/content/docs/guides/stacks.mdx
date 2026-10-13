@@ -1160,7 +1160,8 @@ The workflow:
   Rust server. For a stack with a Rust server it sets up the Rust release
   `tools.env` pins before the build, fails when `schemas/dist/Cargo.lock`
   is not committed or the build changed it, and compiles each Rust server
-  with `cargo check --locked`. For a stack with a
+  with `cargo check --locked`; every job that builds sets up the same
+  release. For a stack with a
   TypeScript server it then installs `schemas/dist`'s Bun workspace with
   `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
   is not committed or no longer matches the packages the build wrote, and

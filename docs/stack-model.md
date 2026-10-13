@@ -3493,7 +3493,9 @@ The GitHub workflow:
     compiles with `cargo check --locked` (level 2), which checks the
     implementations it depends on. The crates name the runtime checkouts
     `[paths]` names by path, so the CI checkout holds them, as the image's
-    context does.
+    context does. Every preview and deploy job, whose build runs the same
+    update, sets up the same release before it, since the runner's own
+    cargo may be another.
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).

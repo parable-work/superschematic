@@ -390,9 +390,11 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		return job{}, err
 	}
 	param := "--param " + e.Parameters[0] + "=" + prNumber
-	build := g.build()
-	build.cond = notClosed
-	steps = append(steps, build,
+	for _, s := range g.buildSteps() {
+		s.cond = notClosed
+		steps = append(steps, s)
+	}
+	steps = append(steps,
 		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
 		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
 	)
@@ -417,7 +419,8 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, g.build(), step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
+	steps = append(steps, g.buildSteps()...)
+	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
@@ -543,6 +546,18 @@ func setupBun() step {
 // deploy builds the server's image from.
 func (g github) build() step {
 	return step{name: "Build the services", run: "superschematic build-all " + g.req.Stack.ServicesRoot}
+}
+
+// buildSteps are the steps of a cloud job that builds the services before
+// its command: the build, after the Rust release tools.env pins for a
+// stack with a Rust server, so the build's cargo update --workspace runs
+// on the release check ran it on and leaves the lockfile check accepted as
+// it is (D57). The runner's own cargo may be another release.
+func (g github) buildSteps() []step {
+	if len(g.rustServers()) == 0 {
+		return []step{g.build()}
+	}
+	return []step{setupRust(), g.build()}
 }
 
 // stackCommand is one of the stack commands on the stack, which the job
