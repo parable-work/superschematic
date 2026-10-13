@@ -50,6 +50,78 @@ const (
 // API's public address. It is never cached.
 const SiteConfigPath = "/__superschematic/config.json"
 
+// The Cache-Control of a site's files (D55, amended), which the gcp
+// publisher writes on each object and `stack dev`'s file server sends.
+const (
+	// SiteCacheRevalidate is a file a cache may keep but asks the origin
+	// about before it serves it again, so a new build shows at once.
+	SiteCacheRevalidate = "no-cache"
+
+	// SiteCacheImmutable is a file whose name holds its content's hash:
+	// other content comes under another name, so a cache keeps it a year
+	// and never asks.
+	SiteCacheImmutable = "public, max-age=31536000, immutable"
+)
+
+// SiteFileCacheControl returns the Cache-Control of a site's file at rel,
+// a slash-separated path relative to the site's output, whose fallback
+// (relative to the output too) is fallback: SiteCacheImmutable when the
+// file's name holds a content hash (ContentHashedName), unless it is an
+// HTML file or the fallback, which the site serves for paths that name no
+// file; SiteCacheRevalidate otherwise.
+func SiteFileCacheControl(rel, fallback string) string {
+	rel = path.Clean("/" + strings.ReplaceAll(rel, `\`, "/"))
+	ext := strings.ToLower(path.Ext(rel))
+	switch {
+	case ext == ".html" || ext == ".htm":
+	case fallback != "" && rel == path.Clean("/"+strings.ReplaceAll(fallback, `\`, "/")):
+	case ContentHashedName(rel):
+		return SiteCacheImmutable
+	}
+	return SiteCacheRevalidate
+}
+
+// minContentHash is the fewest hex digits a name's content hash has: the
+// 8 a bundler's shortest hashes carry.
+const minContentHash = 8
+
+// ContentHashedName reports whether the base name of a file holds a hash
+// of its content, as a bundler names its output (`app.3f9a2c1d.js`,
+// `vendor-3f9a2c1d.css`, `3f9a2c1d5e7b.png`): the name before its
+// extension, or its last part after a dot or a hyphen, is 8 or more
+// lowercase hex digits, at least one a digit and one a letter, since
+// digits alone are a date or a number, and letters alone a word. A name
+// with no extension holds none. The rule is conservative: a hash in
+// another alphabet, such as Bun's or esbuild's (`index-5psy29er.js`),
+// does not count, since a name written by hand (`og-1200x630.png`) looks
+// as much like one.
+func ContentHashedName(name string) bool {
+	base := path.Base(strings.ReplaceAll(name, `\`, "/"))
+	dot := strings.LastIndexByte(base, '.')
+	if dot <= 0 {
+		return false
+	}
+	stem := base[:dot]
+	if i := strings.LastIndexAny(stem, ".-"); i >= 0 {
+		stem = stem[i+1:]
+	}
+	if len(stem) < minContentHash {
+		return false
+	}
+	var digit, letter bool
+	for _, r := range stem {
+		switch {
+		case r >= '0' && r <= '9':
+			digit = true
+		case r >= 'a' && r <= 'f':
+			letter = true
+		default:
+			return false
+		}
+	}
+	return digit && letter
+}
+
 // WithDefaults returns c with every empty member at its default, and an
 // Output and a Fallback cleaned to slash-separated relative paths.
 func (c SiteConfig) WithDefaults() SiteConfig {

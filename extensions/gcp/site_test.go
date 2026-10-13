@@ -181,9 +181,11 @@ func writeSite(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"index.html":           "<!doctype html><script src=/index-dq37ra8d.js></script>",
-		"index-dq37ra8d.js":    "console.log('shop')",
-		"assets/logo-1a2b.svg": "<svg/>",
+		"index.html":                "<!doctype html><script src=/index-dq37ra8d.js></script>",
+		"index-dq37ra8d.js":         "console.log('shop')",
+		"assets/logo-1a2b.svg":      "<svg/>",
+		"app.3f9a2c1d.js":           "console.log('hashed')",
+		"assets/photo-20261012.jpg": "jpeg",
 	} {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -197,8 +199,9 @@ func writeSite(t *testing.T) string {
 }
 
 // TestSitePublisher publishes shop-web's files to its bucket in Staging:
-// under the digest's hex, each with its content type and no-cache, the
-// marker after them, and the config no-store. A second publish of the same
+// under the digest's hex, each with its content type, a year's immutable
+// cache for a name that holds a hex content hash and no-cache for any
+// other (D55, amended), the marker after them, and the config no-store. A second publish of the same
 // digest puts no file again; a digest with no files and no directory, and
 // a bucket the deploy has not created, are refused.
 func TestSitePublisher(t *testing.T) {
@@ -218,6 +221,8 @@ func TestSitePublisher(t *testing.T) {
 		"index.html":                   {"text/html; charset=utf-8", "no-cache"},
 		"index-dq37ra8d.js":            {"text/javascript; charset=utf-8", "no-cache"},
 		"assets/logo-1a2b.svg":         {"image/svg+xml", "no-cache"},
+		"app.3f9a2c1d.js":              {"text/javascript; charset=utf-8", "public, max-age=31536000, immutable"},
+		"assets/photo-20261012.jpg":    {"image/jpeg", "no-cache"},
 		"__superschematic/files":       {"text/plain; charset=utf-8", "no-store"},
 		"__superschematic/config.json": {"application/json", "no-store"},
 	} {
@@ -243,6 +248,23 @@ func TestSitePublisher(t *testing.T) {
 	req.Dir = dir
 	if err := target.Sites.Publish(ctx, req); err == nil || !strings.Contains(err.Error(), "creates its bucket") {
 		t.Errorf("publish to a bucket that does not exist: %v", err)
+	}
+}
+
+// TestSiteFallbackIsRevalidated: the URL map serves the fallback for
+// every path that names no file, so it is no-cache even when its name
+// holds a content hash.
+func TestSiteFallbackIsRevalidated(t *testing.T) {
+	f := newDeployFixture(t, false)
+	s, services := siteShop("app.3f9a2c1d.js")
+	env := resolve(t, f.reg, s, services, "Staging")
+	target, _ := f.reg.Target(gcp.Target)
+	req := registry.SitePublishRequest{Run: registry.Run{Environment: env}, Site: "shop-web", Digest: siteDigest, Dir: writeSite(t)}
+	if err := target.Sites.Publish(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.cloud.served["acme-staging-shop-web/"+siteHex+"/app.3f9a2c1d.js"][1]; got != "no-cache" {
+		t.Errorf("the fallback is served %q, want no-cache", got)
 	}
 }
 

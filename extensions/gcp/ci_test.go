@@ -83,20 +83,22 @@ func TestCIIdentity(t *testing.T) {
 	}
 }
 
-// TestCIGolden renders the shop's workflow with the core's GitHub Actions
-// renderer, through the public registry, and checks it against the golden
-// file, which -update rewrites: Staging plans and deploys, Preview deploys
-// a member per pull request, and Production names the bootstrap to run.
+// TestCIGolden renders the shop's workflow, with its site, with the
+// core's GitHub Actions renderer, through the public registry, and checks
+// it against the golden file, which -update rewrites: Staging plans and
+// deploys, Preview deploys a member per pull request, and Production names
+// the bootstrap to run. check builds the site, and each job that deploys
+// it installs the Bun workspace first (D55).
 func TestCIGolden(t *testing.T) {
 	reg := assemble(t)
-	s := ciShop()
+	s := stacktest.WithSite(ciShop())
 	renderer, ok := reg.CIRenderer("github")
 	if !ok {
 		t.Fatal("the core registers no github CI renderer")
 	}
 	var envs []registry.CIEnvironment
 	for _, env := range s.Environments {
-		envs = append(envs, reg.CIEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), env.Name)))
+		envs = append(envs, reg.CIEnvironment(resolve(t, reg, s, stacktest.SiteShop(), env.Name)))
 	}
 	files, err := renderer.Render(registry.CIRequest{
 		Stack: registry.CIStack{
@@ -106,6 +108,7 @@ func TestCIGolden(t *testing.T) {
 			SchemasRoot:    "schemas",
 			OutputRoot:     "schemas/dist",
 			PackageManager: registry.PackageManagerBun,
+			Sites:          map[string]registry.CISite{"shop-web": {Dir: "web/shop-web", Build: "build"}},
 		},
 		Environments: envs,
 		Options:      registry.CIOptions{}.WithDefaults(renderer),

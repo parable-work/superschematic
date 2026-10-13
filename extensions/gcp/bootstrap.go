@@ -355,6 +355,20 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return nil, err
 	}
 	logf("state bucket gs://%s: %s", bucket, createdOrKept(created))
+	rule := stateLifecycle()
+	var changed bool
+	err = retry("the state bucket's lifecycle", func() (err error) {
+		changed, err = cloud.EnsureLifecycleRule(ctx, bucket, rule)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	what := "kept"
+	if changed {
+		what = "set"
+	}
+	logf("state bucket lifecycle, which deletes what is under %s after %d days: %s", strings.Join(rule.Prefixes, " and "), rule.AgeDays, what)
 	err = retry("the state key", func() (err error) {
 		created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey)
 		return err

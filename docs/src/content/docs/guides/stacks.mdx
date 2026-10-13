@@ -31,7 +31,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `calls` in an API's config, and a build ordered by output | |
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's; a lifecycle rule for old build contexts and job documents in the state bucket |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
@@ -1087,7 +1087,9 @@ superschematic stack run Staging shop-orders-ship-orders
 
 - **`bootstrap`** runs once per project with an owner's credentials, and
   is safe to run again. It enables the APIs, creates the state bucket
-  `<project>-superschematic-state` and its KMS key, and applies the
+  `<project>-superschematic-state` and its KMS key, gives the bucket a
+  lifecycle rule that deletes build contexts and migration job documents
+  after 30 days, and applies the
   Artifact Registry repository named after the stack, the
   `<stack>-deployer` and read-only `<stack>-planner` accounts, the
   `builder` account Cloud Build runs as, the `migrator` account the
@@ -1145,7 +1147,8 @@ superschematic stack run Staging shop-orders-ship-orders
   type the run's name, or with `--yes`. What the stack's runs in the
   project share stays: bootstrap's resources, the stack's images, its
   migration job `<stack>-migrate`, and the build contexts and job
-  documents in the state bucket. **`outputs`** prints the applied outputs.
+  documents in the state bucket, until its lifecycle rule deletes them.
+  **`outputs`** prints the applied outputs.
 
 A build's context is the repository root, or the directory the naming
 file's
@@ -1169,6 +1172,10 @@ Cloud Build, as the stack's `builder` account, and prints it:
 ```sh
 export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh acme-staging us-east1 shop-stack)"
 ```
+
+A deploy with a migration to run finds or builds the runner's image, or
+checks that the one `SUPERSCHEMATIC_MIGRATE_IMAGE` names exists, before it
+changes anything, and stops there, saying what to set, when it has none.
 
 acme-shop has run this way on a fresh project (milestone 3 of the stack
 model). A failed migration fails its step with the job execution's name
@@ -1222,8 +1229,12 @@ The workflow:
   `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
   is not committed or no longer matches the packages the build wrote, and
   type-checks each TypeScript server and the implementation of each API
-  one serves with `tsc --noEmit`. Every job that sets up Bun installs the
-  release a TypeScript server's image runs on.
+  one serves with `tsc --noEmit`. For a stack with a
+  [static site](/superschematic/guides/static-sites/) it installs the same
+  workspace and builds each site with its build script, as `stack deploy`
+  does, so a site that does not build fails the pull request. Every job
+  that sets up Bun installs the release a TypeScript server's image runs
+  on.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>
@@ -1238,6 +1249,13 @@ The workflow:
   the `Production` environment required reviewers in the repository's
   settings, and each production deploy waits for their approval.
   `workflow_dispatch` runs the same on demand from the branch.
+- A deploy or preview job of an environment with a site sets up Bun,
+  even when the schemas root installs with npm, and installs the
+  workspace from `schemas/dist/bun.lock` after the build, since `stack
+  deploy` builds the site on the runner. Jobs, workers and buckets need
+  nothing more: the deploy builds a job's or a worker's image on the
+  target, as it builds a server's, and a bucket is a resource of the
+  environment's graph.
 - One deploy runs at a time per environment, and one preview job per
   member.
 

@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -359,21 +361,80 @@ func literal(v any, params map[string]string) (string, error) {
 	return "", fmt.Errorf("%v is not a string", v)
 }
 
+var _ registry.MigrationPreparer = migrationRunner{}
+
+// PrepareMigrations readies the runner's image before a deploy that has a
+// migration phase to run changes anything, so the deploy does not stop
+// for want of one after its infrastructure step. An image MigrateImage or
+// SUPERSCHEMATIC_MIGRATE_IMAGE names must be pinned by digest, and, in
+// Artifact Registry, exist; else it is the image of the release the
+// binary is part of, which it finds by its tag or builds, as the deploy
+// builds a server's image before its first step. A binary built from a
+// checkout names no release, so it is refused with what to set.
+func (r migrationRunner) PrepareMigrations(ctx context.Context, run registry.Run, log io.Writer) error {
+	if err := run.Check(); err != nil {
+		return err
+	}
+	env := run.Environment
+	v, err := envValues(env)
+	if err != nil {
+		return err
+	}
+	if log == nil {
+		log = io.Discard
+	}
+	logf := func(format string, args ...any) { _, _ = fmt.Fprintf(log, "  "+format+"\n", args...) }
+	image, from, err := r.ext.namedMigrateImage()
+	switch {
+	case err != nil:
+		return err
+	case image == "":
+		if image, err = r.ext.migrateImage(ctx, env, v, log); err != nil {
+			return err
+		}
+		logf("the migration job runs %s", image)
+		return nil
+	}
+	if _, err := versionResource(image); err != nil {
+		logf("the migration job runs %s, which %s names, outside Artifact Registry, where the deploy cannot find whether it exists", image, from)
+		return nil
+	}
+	switch _, err := r.ext.cloud().ImageDigest(ctx, image); {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("gcp: %s names %s as the migration runner's image, which Artifact Registry does not hold; "+
+			"push an image of the runner to the stack's repository (scripts/migrate-dev-image.sh builds one from a checkout) and set %s to it by digest", from, image, MigrateImageEnv)
+	case err != nil:
+		return fmt.Errorf("gcp: the migration runner's image %s, which %s names: %w", image, from, err)
+	}
+	logf("the migration job runs %s, which %s names", image, from)
+	return nil
+}
+
+// namedMigrateImage returns the runner's image MigrateImage or
+// SUPERSCHEMATIC_MIGRATE_IMAGE names, by digest, and which of them names
+// it, or no image when neither does.
+func (e Extension) namedMigrateImage() (image, from string, err error) {
+	image, from = e.MigrateImage, "gcp.Extension{MigrateImage}"
+	if image == "" {
+		image, from = os.Getenv(MigrateImageEnv), MigrateImageEnv
+	}
+	if image == "" {
+		return "", "", nil
+	}
+	repo, digest, err := stack.SplitImage(image)
+	if err != nil {
+		return "", "", fmt.Errorf("gcp: the migration runner's image, which %s names: %w", from, err)
+	}
+	return repo + "@" + digest, from, nil
+}
+
 // migrateImage returns the runner's image by digest: the one
 // MigrateImage or SUPERSCHEMATIC_MIGRATE_IMAGE names, else the stack's
 // image of the release the binary is part of, which it builds when the
 // release's tag does not exist yet.
 func (e Extension) migrateImage(ctx context.Context, env *ir.ResolvedEnvironment, v values, log io.Writer) (string, error) {
-	image := e.MigrateImage
-	if image == "" {
-		image = os.Getenv(MigrateImageEnv)
-	}
-	if image != "" {
-		repo, digest, err := stack.SplitImage(image)
-		if err != nil {
-			return "", fmt.Errorf("gcp: the migration runner's image: %w", err)
-		}
-		return repo + "@" + digest, nil
+	if image, _, err := e.namedMigrateImage(); err != nil || image != "" {
+		return image, err
 	}
 	version := e.MigrateVersion
 	if version == "" {

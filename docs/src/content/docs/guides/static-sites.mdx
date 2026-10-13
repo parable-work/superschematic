@@ -28,7 +28,7 @@ and D55 in `docs/DECISIONS.md` records the decisions.
 | the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
 | `stack dev`: each site built once and served with its config and its fallback | rebuilding a site while `stack dev` runs |
 | the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
-| the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback | a run against Google Cloud; longer caching for files whose names hold their content's hash |
+| the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback, and a year's caching for files whose names hold a hex hash of their content | a run against Google Cloud |
 
 ## Declare a site
 
@@ -134,8 +134,9 @@ take it, so each API answers only the sites that call it.
 `superschematic stack dev` builds each site once, `bun run build` in its
 package after the workspace's install, and serves its output from a file
 server of its own on `http://127.0.0.1:<port>`: its files, its config with
-each API's loopback URL, and its fallback. HTML files and the config are
-served uncached. The summary prints the site's URL:
+each API's loopback URL, and its fallback. The config is served
+uncached, and every file with the Cache-Control it has on Google Cloud
+(below). The summary prints the site's URL:
 
 ```
   server   shop-api                 http://127.0.0.1:22424
@@ -161,6 +162,13 @@ superschematic stack build Staging
 superschematic stack deploy Staging --site shop-web=sha256:...
 ```
 
+The [generated CI](/superschematic/guides/stacks/#generated-ci) builds each
+site too: its `check` job installs the workspace from
+`schemas/dist/bun.lock` and runs the site's build script, so a site that
+does not build fails the pull request, and each job that deploys the site
+sets up Bun and installs the workspace first, even in a project whose
+schemas root installs with npm.
+
 ### On Google Cloud
 
 The gcp target serves each site from a Cloud Storage bucket of its own,
@@ -177,9 +185,18 @@ one change; `--site` with an earlier digest moves it back.
 | without one | `http://<address>`, the load balancer's address, over HTTP: a certificate needs a host. `stack outputs` holds the address as the `address` of `<site>.address` |
 
 A site with a `fallback` serves it, with 200, for a path that names no
-file. Every file is served `no-cache`, so Cloud CDN checks with the
-bucket before it serves a file again and a deploy shows at once, and the
-config `no-store`.
+file. The config is served `no-store`, and each file by its name:
+
+| File | Cache-Control |
+| --- | --- |
+| a name whose last part before its extension is a hex hash of 8 or more digits, with a digit and a letter: `app.3f9a2c1d.js`, `vendor-3f9a2c1d.css`, `3f9a2c1d5e7b.png` | `public, max-age=31536000, immutable`: the name has that content in every build |
+| `index.html`, any other HTML file, the fallback, and every other file | `no-cache`: Cloud CDN checks with the bucket before it serves the file again, so a deploy shows at once |
+
+The pattern is conservative. A hash in another alphabet does not count,
+since a name written by hand, such as `og-1200x630.png`, looks as much
+like one: Bun's and esbuild's (`index-5psy29er.js`), which the scaffold's
+`bun build` writes, and Rollup's and Vite's unless you set its
+`output.hashCharacters` to `"hex"`. Such files are served `no-cache`.
 
 The bucket is readable by `allUsers`, since the load balancer reads only
 public objects for a browser's request; `nothing-public-unless-exposed`

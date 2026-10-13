@@ -808,6 +808,8 @@ phases.
 A binary built from a checkout names no release of the migration runner
 to build the job's image from: set `SUPERSCHEMATIC_MIGRATE_IMAGE` to an
 image of `superschematic-migrate`, by digest, in the stack's repository.
+A deploy with a migration to run checks for the image, or builds the
+release's, before it changes anything, and refuses to start without one.
 
 ```
 superschematic stack deploy Staging

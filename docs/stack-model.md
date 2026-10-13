@@ -1370,6 +1370,17 @@ again: each step creates what is missing and leaves the rest.
    and the key `pulumi-state` in key ring `superschematic`, in the
    environment's region. Pulumi keeps its state in the bucket, encrypted
    with the key, and the deploy manifests sit beside it (section 11.2).
+   The bucket gets a lifecycle rule, on a bucket that exists already
+   too, which deletes the build contexts under `superschematic/builds/`
+   and the migration job documents and plans under
+   `superschematic/migrations/` once they are 30 days old, live and
+   noncurrent versions alike. A deploy writes each of them just before
+   the build or the execution that reads it, every time it needs one, and
+   never reads one again: it compares a context's digest with the one the
+   manifest records, and the builder finds an image by its tag and
+   uploads a context again for a build it runs (section 11.2), so a
+   deleted context costs nothing. Pulumi's state and the manifests have no
+   rule, and the bucket's other rules stay as they are.
 3. It applies a bootstrap graph through the provisioner, in a Pulumi
    project of its own, `<stack>-bootstrap`, with a Pulumi stack per GCP
    project:
@@ -1848,7 +1859,15 @@ onto distroless static. `runtime/migrate/go` carries no `replace`
 directive, so `go install` takes it. The release is the one the binary is
 part of; a binary built from a checkout names none, and
 `SUPERSCHEMATIC_MIGRATE_IMAGE` names an image of the runner by digest in
-its place, which `scripts/migrate-dev-image.sh` builds from the checkout. The local target runs the runner on the host (section 8.3).
+its place, which `scripts/migrate-dev-image.sh` builds from the checkout.
+A deploy with a phase to run readies the image before anything changes,
+after the plans and the hazard gate (section 11.2): it finds the
+release's image by its tag or builds it, checks that an image
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names in Artifact Registry exists, and
+refuses a binary built from a checkout with no image named, saying what to
+set, so a missing image no longer stops a deploy after its infrastructure
+step. The target's runner does this as a `registry.MigrationPreparer`.
+The local target runs the runner on the host (section 8.3).
 
 ### 8.5 Where the implementation lives
 
@@ -2780,7 +2799,8 @@ config may leave `outputs` out.
   records each site's digest (`sites`).
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
-  fallback, and prints its URL in the summary (section 8.3).
+  fallback and the Cache-Control the gcp target gives each file (below),
+  and prints its URL in the summary (section 8.3).
 - **gcp.** The site platform, `gcp.site`, gives each site a bucket of its
   own, `<project>-<site>`, and the publisher puts each build's files in it
   under the hex of their digest, `<hex>/index.html`, with a marker object
@@ -2797,9 +2817,17 @@ config may leave `outputs` out.
   with 200, through the URL map's `defaultCustomErrorResponsePolicy`;
   since a load balancer with backend buckets alone serves no custom error
   response, the URL map sends one reserved path,
-  `/__superschematic/none`, to a backend service with no backends. Files
-  are served `no-cache`, so the CDN asks the bucket whether a file
-  changed before it serves it, and the config `no-store`. The bucket is
+  `/__superschematic/none`, to a backend service with no backends. A
+  file whose name holds a hash of its content, 8 or more lowercase hex
+  digits with a digit and a letter, as the name's last part before its
+  extension (`app.3f9a2c1d.js`), is served `public, max-age=31536000,
+  immutable`: that name has that content in every build, whichever path
+  the CDN keys it on. Every other file, HTML files and the fallback among
+  them, is served `no-cache`, so the CDN asks the bucket whether it
+  changed before it serves it, and the config `no-store`
+  (`ir.SiteFileCacheControl`, D55, amended). Bun's base-36 hashes
+  (`index-5psy29er.js`) are not hex, so a site the scaffold builds keeps
+  every file `no-cache`. The bucket is
   readable by `allUsers`: a backend bucket reads only public objects for a
   browser's unsigned requests, so a project whose organization policy
   forbids public buckets cannot serve a site. With no domain, the site is
@@ -3414,7 +3442,10 @@ file.
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
    default) that no `--allow` acknowledges, and with `--expect` refuses
-   plans other than the ones `stack plan --out` wrote;
+   plans other than the ones `stack plan --out` wrote; when a migration
+   phase is to run, the target's migration runner then readies what the
+   phases need, on gcp the runner's image (section 8.4), or refuses the
+   deploy;
 3. builds the images it decided to build, through the target's
    `Builder`, before anything changes, and pins every image. A platform
    writes a server's image into the graph as its repository path, and the
@@ -3573,6 +3604,12 @@ The GitHub workflow:
     context does. Every preview and deploy job, whose build runs the same
     update, sets up the same release before it, since the runner's own
     cargo may be another.
+  - For a stack with a site (section 8.10), `check` installs the same
+    workspace from its lockfile, and builds each site with its build
+    script in its package, `bun run <build>`, as `stack deploy` does, so a
+    site that does not build fails the pull request. The ci generator
+    locates each site's package under the repository root, as it locates
+    the TypeScript implementations (`CIStack.Sites`).
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).
@@ -3591,6 +3628,15 @@ The GitHub workflow:
   environment's required reviewers approve it. Reviewers are a setting of
   the repository, not of the stack. `workflow_dispatch` runs `check` and,
   from the branch, the deploys.
+- A `deploy` or `preview` job of an environment with a site sets up Bun,
+  at `tools.env`'s release, even in a project whose schemas root installs
+  with npm, and installs the output root's workspace from its lockfile
+  after the build, since `stack deploy` builds the site on the runner
+  after a frozen install. A `plan` job does neither: `stack plan` builds
+  no site. Jobs, workers and buckets need nothing more of the workflow:
+  the deploy builds a job's or a worker's image through the target's
+  builder, as a server's, and a bucket, a job's schedule and a worker
+  pool are resources of the graph.
 - One deploy at a time per environment, and one preview job per member,
   neither cancelled by the next. A plan job has a group per pull request
   and environment: GitHub keeps one pending job per group and cancels the

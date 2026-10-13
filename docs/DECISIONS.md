@@ -4268,9 +4268,27 @@ its tests fake; its golden job document is
 runner's `job` command, its Cloud SQL dialer and its grants run in its
 tests against Postgres, the dialer replaced by one of a local server and
 Cloud Storage by a fake of its API. None of it has run against Google
-Cloud. Not built: a deploy lock beyond the provisioner's and the
-runner's, and a lifecycle rule that prunes old contexts and job documents
-from the bucket.
+Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
+that exists already too, that deletes the build contexts under
+`superschematic/builds/` and the job documents and plans under
+`superschematic/migrations/` after 30 days, live and noncurrent versions
+alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). A
+deploy with a migration phase to run readies the runner's image after the
+plans and the gate, before any step, through an optional seam of the
+runner, `registry.MigrationPreparer`: gcp's finds the release's image by
+its tag or builds it, checks in Artifact Registry that an image
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names exists (`ImageDigest` now takes an
+image by digest), and refuses a checkout's binary with no image named, so
+a missing image no longer fails the deploy after its infrastructure step
+(`TestMigrationJobNeedsARelease`, `TestDeployPreparesTheMigrationRunner`). Nothing
+reads one after the build or the execution it was written for: a deploy
+compares a context's digest with the manifest's, the builder finds an
+image by its tag and uploads the context again for a build, and each
+execution's documents are written again, so a deleted one costs nothing.
+Pulumi's state and the manifests have no rule.
+`TestStateBucketLifecycle` deletes every object the rule covers after a
+deploy, and the next deploy builds nothing. Not built: a deploy lock
+beyond the provisioner's and the runner's.
 
 ### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
 
@@ -4342,9 +4360,16 @@ Status: built.
   goldens actionlint checks.
 
 The amendments below ship the archives the workflow's builds link and
-pin each generated module to the release. No generated workflow has run
-on GitHub Actions: a run needs a release, a project bootstrapped with a
-GitHub remote, and a repository that turns the workflow on.
+pin each generated module to the release. The workflow builds a stack's
+static sites (D55): `check` installs the output root's Bun workspace and
+builds each site, and the deploy and preview jobs of an environment with
+a site set up Bun, even in an npm project, and install the workspace,
+since `stack deploy` builds the site on the runner (`CIStack.Sites`,
+`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+workflow: the deploy builds their images on the target and applies the
+rest as graph resources. No generated workflow has run on GitHub
+Actions: a run needs a release, a project bootstrapped with a GitHub
+remote, and a repository that turns the workflow on.
 
 Not built:
 - a check that the committed workflow is current;
@@ -5225,6 +5250,29 @@ publisher, `deployer`'s Storage admin role). The gcp, Pulumi render and
 Cloudflare goldens hold the acme shop's site. None of it has run against
 Google Cloud, where the anchor and the rewrite of the root path are the
 first things to check.
+
+The rule is reversible until the first release.
+
+### D55, amended: a file whose name holds a hex hash of its content is cached for a year
+
+The amendment above served every file of a site `no-cache`, since a file
+of a new build may come under the path of one of the last, and Google's
+documentation does not say whether Cloud CDN keys a file on its path
+before or after the URL map's rewrite to the build's prefix. So every
+request for a script or a stylesheet asked the bucket whether it
+changed, though a bundler names those files by their content. This
+replaces that amendment's refusal to tell such files by their names.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A file whose name holds a hash of its content is served `public, max-age=31536000, immutable`, by the gcp publisher on its object and by `stack dev`'s file server alike. Such a name has the same content in every build, so a cached copy is right whichever path the CDN keys it on. `index.html` and every other HTML file, the fallback, which the URL map serves for each path that names no file, and every other file stay `no-cache`; the config and the publisher's marker stay `no-store`. One function decides, `ir.SiteFileCacheControl`. | A long `max-age` for every file but the HTML, which the amendment above refused. A list of long-cached paths in the site's config, a setting for what the names already say. |
+| The pattern is conservative. A name holds a hash when its part before the extension, or that part's last piece after a `.` or a `-`, is 8 or more lowercase hex digits, at least one a digit and one a letter: `app.3f9a2c1d.js`, `vendor-3f9a2c1d.css`, `3f9a2c1d5e7b.png`. Digits alone are a date or a number (`photo-20261012.jpg`), and letters alone a word. A hash in another alphabet does not count: Bun's and esbuild's (`index-5psy29er.js`), and Rollup's, so Vite's, unless its `output.hashCharacters` is `hex`. The scaffold's `bun build` output, acme's among it, stays `no-cache`. | Bun's shape too, 8 lowercase letters and digits after a hyphen, which names written by hand also have (`og-1200x630.png`, `logo-retina2x.png`): such a file changed under its name would be stale for a year. |
+
+Status: built. `TestContentHashedName` and `TestSiteFileCacheControl`
+hold the pattern. gcp's `TestSitePublisher` and
+`TestSiteFallbackIsRevalidated`, and the local target's `TestSiteHandler`,
+serve a hashed file for a year and every other file, a hashed fallback
+too, `no-cache`. None of it has run against Google Cloud.
 
 The rule is reversible until the first release.
 
