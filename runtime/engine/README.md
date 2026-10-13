@@ -4776,7 +4776,7 @@ toolchain `tools.env` pins (`RUSTUP_TOOLCHAIN`). Its tests run on SQLite,
 and on Postgres too when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names
 one, each test in a schema it creates and drops; the test kit's replay
 reads the corpus at `testdata/scenarios`, or the directory
-`ENGINE_CORPUS_DIR` names, and says it skipped when there is none:
+`ENGINE_CORPUS_DIR` names, and fails when there is none:
 
 ```
 docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine

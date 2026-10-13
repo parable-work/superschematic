@@ -223,10 +223,9 @@ rust:
 # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
 # own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
 # each in a schema it creates and drops; without it they skip that pass.
-# The test kit replays milestone 1's scenario corpus
+# The test kit replays the scenario corpus
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
-# names) on the same databases; until the corpus is on the branch the replay
-# says it skipped and passes.
+# names) on the same databases, and fails when the corpus is missing.
 # CI runs the same commands as the engine-rust job, against its Postgres.
 engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
