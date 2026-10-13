@@ -56,6 +56,9 @@ impl AjvError {
 /// A compiled JSON Schema: an object schema, or `true` or `false`.
 pub struct AjvSchema {
     validator: Validator,
+    // The schema as given, whose `type` lists name a failure's types in
+    // their order, as ajv's message does.
+    schema: Value,
 }
 
 impl std::fmt::Debug for AjvSchema {
@@ -71,7 +74,10 @@ impl AjvSchema {
     pub fn compile(schema: &Value) -> Result<Self, String> {
         options()
             .build(schema)
-            .map(|validator| AjvSchema { validator })
+            .map(|validator| AjvSchema {
+                validator,
+                schema: schema.clone(),
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -84,7 +90,7 @@ impl AjvSchema {
     /// jsonschema's order; empty when it holds.
     pub fn errors(&self, instance: &Value) -> Vec<AjvError> {
         let errors: Vec<ValidationError<'_>> = self.validator.iter_errors(instance).collect();
-        ajv_errors(&errors, instance)
+        errors_in(&errors, instance, Some(&self.schema))
     }
 }
 
@@ -99,6 +105,17 @@ pub(crate) fn options() -> jsonschema::ValidationOptions<'static> {
 /// error's own, and for an error inside an `if`'s branch the branch's own
 /// failure, after the last error inside it.
 pub fn ajv_errors(errors: &[ValidationError<'_>], instance: &Value) -> Vec<AjvError> {
+    errors_in(errors, instance, None)
+}
+
+// errors_in is ajv_errors, naming a `type` failure's types in the order
+// the schema lists them when it has the schema: jsonschema keeps them as a
+// set, in an order of its own.
+fn errors_in(
+    errors: &[ValidationError<'_>],
+    instance: &Value,
+    schema: Option<&Value>,
+) -> Vec<AjvError> {
     let marks: Vec<Vec<BranchMark>> = errors.iter().map(branch_marks).collect();
     let mut out: Vec<AjvError> = Vec::new();
     let mut closed: Option<(String, String)> = None;
@@ -126,7 +143,7 @@ pub fn ajv_errors(errors: &[ValidationError<'_>], instance: &Value) -> Vec<AjvEr
             }
             None => {
                 closed = None;
-                out.extend(errors_of(error));
+                out.extend(errors_of(error, schema));
             }
         }
         let next = marks.get(i + 1);
@@ -225,7 +242,7 @@ fn branch_marks(error: &ValidationError<'_>) -> Vec<BranchMark> {
 /// The failures one jsonschema error stands for, each with ajv's keyword
 /// and message: an `anyOf` or a `oneOf` with each branch's failures before
 /// its own, a `propertyNames` with its name's.
-fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
+fn errors_of(error: &ValidationError<'_>, schema: Option<&Value>) -> Vec<AjvError> {
     let path = error.instance_path().to_string();
     match error.kind() {
         ValidationErrorKind::AdditionalProperties { unexpected } => unexpected
@@ -251,7 +268,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
             let mut out: Vec<AjvError> = context
                 .iter()
                 .flatten()
-                .flat_map(|error| errors_of(error))
+                .flat_map(|error| errors_of(error, schema))
                 .collect();
             if matches!(error.kind(), ValidationErrorKind::AnyOf { .. }) {
                 out.push(AjvError::new(
@@ -269,7 +286,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
             out
         }
         ValidationErrorKind::PropertyNames { error: inner } => {
-            let mut out = errors_of(inner);
+            let mut out = errors_of(inner, schema);
             out.push(AjvError::new(
                 &path,
                 "propertyNames",
@@ -280,7 +297,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
         kind => vec![AjvError::new(
             &path,
             &ajv_keyword(kind, error),
-            ajv_message(kind, error),
+            ajv_message(kind, error, schema),
         )],
     }
 }
@@ -328,13 +345,30 @@ fn ajv_keyword(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> Strin
 }
 
 /// ajv's message for one keyword's failure.
-fn ajv_message(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> String {
+fn ajv_message(
+    kind: &ValidationErrorKind,
+    error: &ValidationError<'_>,
+    schema: Option<&Value>,
+) -> String {
     match kind {
         ValidationErrorKind::Type { kind } => {
-            let names: Vec<&str> = match kind {
+            let mut names: Vec<&str> = match kind {
                 TypeKind::Single(single) => vec![single.as_str()],
                 TypeKind::Multiple(set) => set.iter().map(|one| one.as_str()).collect(),
             };
+            // ajv names the types as the schema lists them.
+            let listed = schema
+                .and_then(|schema| schema.pointer(&error.schema_path().to_string()))
+                .and_then(Value::as_array);
+            if let Some(listed) = listed {
+                let order = |name: &&str| {
+                    listed
+                        .iter()
+                        .position(|one| one.as_str() == Some(*name))
+                        .unwrap_or(usize::MAX)
+                };
+                names.sort_by_key(order);
+            }
             format!("must be {}", names.join(","))
         }
         ValidationErrorKind::Required { property } => format!(
@@ -430,6 +464,21 @@ mod tests {
             .collect();
         errors.sort();
         errors
+    }
+
+    #[test]
+    fn a_type_failure_names_the_types_in_the_schemas_order() {
+        let schema = json!({"type": "object", "additionalProperties": {"type": ["string", "object", "array"]}});
+        assert_eq!(
+            listed(schema, json!({"owner": 7})),
+            [(
+                "/owner".to_owned(),
+                "type".to_owned(),
+                "must be string,object,array".to_owned()
+            )]
+        );
+        let items = json!({"type": "array", "items": {"type": ["string", "object"]}});
+        assert_eq!(listed(items, json!([7]))[0].2, "must be string,object");
     }
 
     #[test]

@@ -8,10 +8,12 @@
 use serde_json::{json, Map, Value};
 
 use superschematic_engine::behaviors::{BehaviorGuidance, DescribeTarget};
+use superschematic_engine::json::stringify;
 use superschematic_engine::Behavior;
 use superschematic_engine_behaviors::{
-    Comments, Constants, ConstantsConfig, Revisions, RevisionsConfig, RevisionsReview, Variants,
-    VariantsConfig, Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
+    Comments, Constants, ConstantsConfig, LinkPin, LinkSpec, Links, LinksConfig, Revisions,
+    RevisionsConfig, RevisionsReview, Variants, VariantsConfig, Workflow, WorkflowConfig,
+    WorkflowOutcome, WorkflowTransition,
 };
 
 /// The TypeScript guidance for the configs below.
@@ -399,4 +401,646 @@ fn revisions_guidance_is_the_typescript_engines_text() {
         as_json(&guidance(&Revisions, &review, &target())),
         expected["revisionsReview"]
     );
+}
+
+/// Links' TypeScript guidance and create parameters (`linksGuidance`,
+/// `linksCreateParams`) for a Task: single links, one pinned to a
+/// revision; many-valued ones; a required many-valued one; required links
+/// to its own schema and links pinned to a release; and one plain link.
+const LINKS: &str = r#"{
+  "single": {
+    "guidance": {
+      "summary": "Each Task links to other instances by name: spec to Spec (pinned to a revision), owner to Person (required) and related to Task. Every create gives owner; a required link is moved, never unlinked, and the instance it points at cannot be deleted. A link pinned to a revision records the target's revision; behaviors.Links.targets gives the target's latest beside it and says stale once the target has a newer one.",
+      "operations": {
+        "link": {
+          "useWhen": "Use to point spec, owner or related at an instance of its schema, moving it when it is set. spec records the target's latest revision, or the one given.",
+          "doNotUseWhen": "Do not use at create; give the links in behaviors.Links instead.",
+          "success": "Returns the link: its name, schema, id and the revision or release a pinned link records.",
+          "errors": [
+            {
+              "code": "no_revision",
+              "commonCorrection": "Wait until the target has a revision, or link a target that has one."
+            }
+          ]
+        },
+        "unlink": {
+          "useWhen": "Use to clear spec or related.",
+          "doNotUseWhen": "Do not use on owner: a required link is moved with link, never unlinked.",
+          "success": "Returns the link as it was.",
+          "errors": [
+            {
+              "code": "required_link",
+              "commonCorrection": "Move the link with link instead."
+            }
+          ]
+        },
+        "listLinked": {
+          "useWhen": "Use to find the Task instances whose link points at a target. With stale true, only the pinned ones the target has moved past.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Links gives the links from the create, by name (spec, owner and related): each the target's id, or { id, revision } for spec. owner is required.",
+          "errors": [
+            {
+              "code": "no_revision",
+              "commonCorrection": "Wait until the target has a revision, or link a target that has one."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "description": "The links the instance holds from its create, by name, each held to link's rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spec": {
+          "description": "The Spec instance spec points at: its id, or an object with its id and the revision to record, its latest when absent.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            },
+            "revision": {
+              "description": "The target's revision to record, one it has had.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "owner": {
+          "description": "The Person instance owner points at: its id.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        },
+        "related": {
+          "description": "The Task instance related points at: its id.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        }
+      },
+      "required": [
+        "owner"
+      ]
+    }
+  },
+  "many": {
+    "guidance": {
+      "summary": "Each Task links to other instances by name: owner to Person, reviewers to Person (a list of at most 3) and specs to Spec (pinned to a revision, a list of at most 2). reviewers and specs hold a list of targets in behaviors.Links.targets, in the order they were linked: link adds one and unlink removes the one it names. A link pinned to a revision records the target's revision; behaviors.Links.targets gives the target's latest beside it and says stale once the target has a newer one.",
+      "operations": {
+        "link": {
+          "useWhen": "Use to point owner at an instance of its schema, moving it when it is set. Use to add a target to reviewers or specs, or to pin again one it holds. specs records the target's latest revision, or the one given.",
+          "doNotUseWhen": "Do not use at create; give the links in behaviors.Links instead.",
+          "success": "Returns the link: its name, schema, id and the revision or release a pinned link records.",
+          "errors": [
+            {
+              "code": "no_revision",
+              "commonCorrection": "Wait until the target has a revision, or link a target that has one."
+            },
+            {
+              "code": "too_many",
+              "commonCorrection": "Unlink a target first."
+            }
+          ]
+        },
+        "unlink": {
+          "useWhen": "Use to clear owner. Use with the target's id to remove one target of reviewers or specs.",
+          "success": "Returns the link as it was.",
+          "errors": [
+            {
+              "code": "not_linked",
+              "commonCorrection": "Read behaviors.Links.targets for the targets the link holds."
+            }
+          ]
+        },
+        "listLinked": {
+          "useWhen": "Use to find the Task instances whose link points at a target. With stale true, only the pinned ones the target has moved past.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Links gives the links from the create, by name (owner, reviewers and specs): each the target's id, or { id, revision } for specs. Give reviewers a list of up to 3 and specs a list of up to 2, each target once.",
+          "errors": [
+            {
+              "code": "no_revision",
+              "commonCorrection": "Wait until the target has a revision, or link a target that has one."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "description": "The links the instance holds from its create, by name, each held to link's rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "description": "The Person instance owner points at: its id.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        },
+        "reviewers": {
+          "description": "The Person instances reviewers points at, in order, each once: its id.",
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "description": "One Person instance reviewers points at: its id.",
+            "type": [
+              "string",
+              "object"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "description": "The target's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        },
+        "specs": {
+          "description": "The Spec instances specs points at, in order, each once: its id, or an object with its id and the revision to record, its latest when absent.",
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "description": "One Spec instance specs points at: its id, or an object with its id and the revision to record, its latest when absent.",
+            "type": [
+              "string",
+              "object"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "description": "The target's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              },
+              "revision": {
+                "description": "The target's revision to record, one it has had.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "review": {
+    "guidance": {
+      "summary": "Each Task links to other instances by name: approvers to Person (required, a list of at most 2). approvers holds a list of targets in behaviors.Links.targets, in the order they were linked: link adds one and unlink removes the one it names. Every create gives at least one target of approvers, which keeps one: the last target can be neither unlinked nor deleted.",
+      "operations": {
+        "link": {
+          "useWhen": "Use to add a target to approvers, or to pin again one it holds.",
+          "doNotUseWhen": "Do not use at create; give the links in behaviors.Links instead.",
+          "success": "Returns the link: its name, schema, id and the revision or release a pinned link records.",
+          "errors": [
+            {
+              "code": "too_many",
+              "commonCorrection": "Unlink a target first."
+            }
+          ]
+        },
+        "unlink": {
+          "useWhen": "Use with the target's id to remove one target of approvers.",
+          "doNotUseWhen": "Do not remove the last target of approvers: a required link keeps one.",
+          "success": "Returns the link as it was.",
+          "errors": [
+            {
+              "code": "required_link",
+              "commonCorrection": "Link another target before unlinking the last."
+            },
+            {
+              "code": "not_linked",
+              "commonCorrection": "Read behaviors.Links.targets for the targets the link holds."
+            }
+          ]
+        },
+        "listLinked": {
+          "useWhen": "Use to find the Task instances whose link points at a target.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Links gives the links from the create, by name (approvers): each the target's id. Give approvers a list of up to 2, each target once. approvers is required.",
+          "errors": []
+        }
+      }
+    },
+    "createParams": {
+      "description": "The links the instance holds from its create, by name, each held to link's rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approvers": {
+          "description": "The Person instances approvers points at, in order, each once: its id.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "description": "One Person instance approvers points at: its id.",
+            "type": [
+              "string",
+              "object"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "description": "The target's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "approvers"
+      ]
+    }
+  },
+  "own": {
+    "guidance": {
+      "summary": "Each Task links to other instances by name: parent to Task (required), kids to Task (required, a list of at most 5), recipe to Recipe (pinned to a release) and notes to Note (pinned to a release, a list of at most 4). Every create gives parent; a required link is moved, never unlinked, and the instance it points at cannot be deleted. kids and notes hold a list of targets in behaviors.Links.targets, in the order they were linked: link adds one and unlink removes the one it names. Every create gives at least one target of kids, which keeps one: the last target can be neither unlinked nor deleted. A link pinned to a release records the target's release; behaviors.Links.targets gives the target's latest beside it and says stale once the target has released again.",
+      "operations": {
+        "link": {
+          "useWhen": "Use to point parent or recipe at an instance of its schema, moving it when it is set. Use to add a target to kids or notes, or to pin again one it holds. recipe and notes record the target's latest release, or the one given.",
+          "doNotUseWhen": "Do not use at create; give the links in behaviors.Links instead.",
+          "success": "Returns the link: its name, schema, id and the revision or release a pinned link records.",
+          "errors": [
+            {
+              "code": "no_release",
+              "commonCorrection": "Wait until the target has been released, or link a target that has."
+            },
+            {
+              "code": "too_many",
+              "commonCorrection": "Unlink a target first."
+            }
+          ]
+        },
+        "unlink": {
+          "useWhen": "Use to clear recipe. Use with the target's id to remove one target of kids or notes.",
+          "doNotUseWhen": "Do not use on parent: a required link is moved with link, never unlinked. Do not remove the last target of kids: a required link keeps one.",
+          "success": "Returns the link as it was.",
+          "errors": [
+            {
+              "code": "required_link",
+              "commonCorrection": "Move the link with link instead. Link another target before unlinking the last."
+            },
+            {
+              "code": "not_linked",
+              "commonCorrection": "Read behaviors.Links.targets for the targets the link holds."
+            }
+          ]
+        },
+        "listLinked": {
+          "useWhen": "Use to find the Task instances whose link points at a target. With stale true, only the pinned ones the target has moved past.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Links gives the links from the create, by name (parent, kids, recipe and notes): each the target's id, or { id, release } for recipe and notes. Give kids a list of up to 5 and notes a list of up to 4, each target once. parent and kids are required.",
+          "errors": [
+            {
+              "code": "no_release",
+              "commonCorrection": "Wait until the target has been released, or link a target that has."
+            }
+          ]
+        },
+        "delete": {
+          "doNotUseWhen": "Do not delete an instance that the parent link of another Task points at. Do not delete the last target of the kids link of another Task.",
+          "errors": [
+            {
+              "code": "required_target",
+              "commonCorrection": "Move the required links that point at it first."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "description": "The links the instance holds from its create, by name, each held to link's rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parent": {
+          "description": "The Task instance parent points at: its id.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        },
+        "kids": {
+          "description": "The Task instances kids points at, in order, each once: its id.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "description": "One Task instance kids points at: its id.",
+            "type": [
+              "string",
+              "object"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "description": "The target's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        },
+        "recipe": {
+          "description": "The Recipe instance recipe points at: its id, or an object with its id and the release to record, its latest when absent.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            },
+            "release": {
+              "description": "The target's release to record, one it has had.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "notes": {
+          "description": "The Note instances notes points at, in order, each once: its id, or an object with its id and the release to record, its latest when absent.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "description": "One Note instance notes points at: its id, or an object with its id and the release to record, its latest when absent.",
+            "type": [
+              "string",
+              "object"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "description": "The target's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              },
+              "release": {
+                "description": "The target's release to record, one it has had.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "parent",
+        "kids"
+      ]
+    }
+  },
+  "plain": {
+    "guidance": {
+      "summary": "Each Task links to other instances by name: related to Task.",
+      "operations": {
+        "link": {
+          "useWhen": "Use to point related at an instance of its schema, moving it when it is set.",
+          "doNotUseWhen": "Do not use at create; give the links in behaviors.Links instead.",
+          "success": "Returns the link: its name, schema, id and the revision or release a pinned link records.",
+          "errors": []
+        },
+        "unlink": {
+          "useWhen": "Use to clear related.",
+          "success": "Returns the link as it was.",
+          "errors": []
+        },
+        "listLinked": {
+          "useWhen": "Use to find the Task instances whose link points at a target.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Links gives the links from the create, by name (related): each the target's id.",
+          "errors": []
+        }
+      }
+    },
+    "createParams": {
+      "description": "The links the instance holds from its create, by name, each held to link's rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "related": {
+          "description": "The Task instance related points at: its id.",
+          "type": [
+            "string",
+            "object"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "description": "The target's id.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+// without_empty_errors drops an operation's errors when it lists none: the
+// TypeScript object writes an empty list, which Rust's guidance holds as
+// none, as it holds an absent one.
+fn without_empty_errors(mut guidance: Value) -> Value {
+    if let Some(operations) = guidance["operations"].as_object_mut() {
+        for said in operations.values_mut() {
+            if let Some(said) = said.as_object_mut() {
+                if said
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty)
+                {
+                    said.remove("errors");
+                }
+            }
+        }
+    }
+    guidance
+}
+
+fn link(schema: &str, required: bool, pin: Option<LinkPin>, max: Option<i64>) -> LinkSpec {
+    LinkSpec {
+        schema: schema.to_owned(),
+        required,
+        pin,
+        many: max.is_some(),
+        max,
+    }
+}
+
+#[test]
+fn links_guidance_and_create_parameters_are_the_typescript_engines() {
+    let expected: Value = serde_json::from_str(LINKS).expect("the expected guidance");
+    let configs = [
+        (
+            "single",
+            vec![
+                ("spec", link("Spec", false, Some(LinkPin::Revision), None)),
+                ("owner", link("Person", true, None, None)),
+                ("related", link("Task", false, None, None)),
+            ],
+        ),
+        (
+            "many",
+            vec![
+                ("owner", link("Person", false, None, None)),
+                ("reviewers", link("Person", false, None, Some(3))),
+                (
+                    "specs",
+                    link("Spec", false, Some(LinkPin::Revision), Some(2)),
+                ),
+            ],
+        ),
+        (
+            "review",
+            vec![("approvers", link("Person", true, None, Some(2)))],
+        ),
+        (
+            "own",
+            vec![
+                ("parent", link("Task", true, None, None)),
+                ("kids", link("Task", true, None, Some(5))),
+                (
+                    "recipe",
+                    link("Recipe", false, Some(LinkPin::Release), None),
+                ),
+                (
+                    "notes",
+                    link("Note", false, Some(LinkPin::Release), Some(4)),
+                ),
+            ],
+        ),
+        ("plain", vec![("related", link("Task", false, None, None))]),
+    ];
+    let hooks = Links.hooks();
+    let guidance = hooks.guidance.expect("guidance");
+    let create_params = hooks.create_params_schema.expect("createParamsSchema");
+    let mut task = target();
+    task.schema = "Task".to_owned();
+    task.type_name = "Task".to_owned();
+    for (name, links) in configs {
+        let config = LinksConfig {
+            links: links
+                .into_iter()
+                .map(|(name, link)| (name.to_owned(), link))
+                .collect(),
+        };
+        assert_eq!(
+            as_json(&guidance(&Links, &config, &task)),
+            without_empty_errors(expected[name]["guidance"].clone()),
+            "{name}"
+        );
+        // The members in the TypeScript object's order too: a tool's
+        // parameters are hashed as written.
+        assert_eq!(
+            stringify(&create_params(&Links, &config, &task)),
+            stringify(&expected[name]["createParams"]),
+            "{name}"
+        );
+    }
 }

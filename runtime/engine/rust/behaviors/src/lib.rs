@@ -32,12 +32,16 @@
 pub mod comments;
 pub mod constants;
 mod guidance;
+pub mod links;
+pub mod revised;
 pub mod revisions;
 pub mod variants;
 pub mod workflow;
 
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
+pub use links::{link_many, link_pin, LinkPin, LinkSpec, Links, LinksConfig};
+pub use revised::{linked_to, moved_on, target_move, TargetMove};
 pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
 pub use variants::{Variants, VariantsConfig};
 pub use workflow::{
