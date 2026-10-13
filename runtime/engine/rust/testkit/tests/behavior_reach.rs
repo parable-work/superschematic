@@ -16,17 +16,15 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
-use superschematic_engine::behaviors::{
-    BehaviorMigration, ColumnSpec, Hears, OperationCx, Reference, TableSpec,
-};
-use superschematic_engine::errors::Veto;
+use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec, OperationCx};
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::{
     AccessRequest, Behavior, BehaviorSet, ConfigTarget, CreateOptions, DefineOptions, Engine,
     EngineError, EngineErrorCode, EngineOptions, Error, EventsAfter, GuardRequest, Hooks,
-    InstanceChange, InstanceRecord, NamespaceOptions, Policy, Principal, ReadEvents, Result,
-    SchemaTarget, WriteOptions,
+    InstanceRecord, NamespaceOptions, Policy, Principal, ReadEvents, Result, SchemaTarget,
+    WriteOptions,
 };
+use superschematic_engine_testkit::behaviors::Holder;
 use support::{
     alice, code, defect, fields_of, fixtures, issues_of, named, publish, refusal, schema_document,
     targets, veto, RecordingPolicy, Target,
@@ -47,26 +45,6 @@ fn record_json(record: &InstanceRecord) -> Value {
     json!({ "data": record.data, "behaviors": record.behaviors })
 }
 
-fn reference_json(reference: &Reference) -> Value {
-    let mut out = json!({"schema": reference.schema, "id": reference.id, "key": reference.key});
-    match &reference.hears {
-        None => {}
-        Some(Hears::Delete) => out["hears"] = json!("delete"),
-        Some(Hears::Path { path, crosses }) => {
-            let mut hears = json!({ "path": path });
-            if let Some(crosses) = crosses {
-                hears["crosses"] = if crosses.fract() == 0.0 && crosses.abs() < 9e15 {
-                    json!(*crosses as i64)
-                } else {
-                    json!(crosses)
-                };
-            }
-            out["hears"] = hears;
-        }
-    }
-    out
-}
-
 // The name a TypeScript caller's catch reads.
 fn error_name(error: &Error) -> &'static str {
     match error {
@@ -76,14 +54,6 @@ fn error_name(error: &Error) -> &'static str {
         Error::Usage(_) => "TypeError",
         _ => "Error",
     }
-}
-
-fn instance_key<C>(cx: &OperationCx<'_, C>) -> [SqlValue; 3] {
-    [
-        SqlValue::from(cx.namespace()),
-        SqlValue::from(cx.schema()),
-        SqlValue::from(cx.id()),
-    ]
 }
 
 #[derive(Clone, Debug, Default)]
@@ -306,290 +276,6 @@ impl Behavior for Reader {
                     ))
                 }),
             ],
-            ..Hooks::default()
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct HolderConfig {
-    // The changes of a held instance its guard vetoes.
-    veto: Vec<String>,
-    // Leave the reference behind when a held instance is deleted.
-    leave: bool,
-}
-
-// test.Holder holds references to other instances and notes what happens
-// to them.
-struct Holder;
-
-static HOLDER: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    let target = json!({"schema": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}});
-    let object = |required: Value, properties: Value| json!({"type": "object", "additionalProperties": false, "required": required, "properties": properties});
-    let with = |more: Value| {
-        let mut out = target.clone();
-        for (key, value) in more.as_object().unwrap() {
-            out[key] = value.clone();
-        }
-        out
-    };
-    let no_params = json!({"type": "object", "additionalProperties": false});
-    json!({
-        "name": "test.Holder",
-        "description": "Holds references to other instances and notes what happens to them.",
-        "configSchema": {"type": "object", "additionalProperties": false, "properties": {
-            "veto": {"type": "array", "items": {"enum": ["update", "delete", "operation"]}},
-            "leave": {"type": "boolean"}
-        }},
-        "fields": [{"name": "held", "description": "What the instance holds: schema/id/key."}],
-        "operations": [
-            {"name": "hold", "paramsSchema": object(json!(["schema", "id"]), with(json!({"key": {"type": "string"}, "hears": {}}))), "resultSchema": true, "writes": true},
-            {"name": "release", "paramsSchema": object(json!(["schema", "id"]), with(json!({"key": {"type": "string"}}))), "resultSchema": {"type": "boolean"}, "writes": true},
-            {"name": "note", "paramsSchema": object(json!(["schema", "id", "kind"]), with(json!({"kind": {"type": "string"}}))), "resultSchema": true, "writes": true},
-            {"name": "notes", "paramsSchema": no_params, "resultSchema": {"type": "array", "items": {"type": "string"}}},
-            {"name": "holding", "paramsSchema": no_params, "resultSchema": {"type": "array"}},
-            {"name": "holders", "scope": "schema", "paramsSchema": object(json!(["schema", "id"]), target.clone()), "resultSchema": {"type": "array", "items": {"type": "string"}}},
-            {"name": "releaseAll", "scope": "schema", "paramsSchema": object(json!(["schema", "id"]), target.clone()), "resultSchema": {"type": "integer"}, "writes": true},
-            {"name": "scribble", "scope": "schema", "paramsSchema": no_params, "resultSchema": true},
-            {"name": "tidy", "scope": "schema", "paramsSchema": no_params, "resultSchema": {"type": "integer"}, "writes": true}
-        ]
-    })
-    .to_string()
-});
-
-// hears_of reads what a hold's hears says. JSON has no number past the
-// finite ones, so the string "Infinity" stands for one, to show what the
-// engine says of it.
-fn hears_of(hears: Option<&Value>) -> Option<Hears> {
-    match hears? {
-        Value::String(word) if word == "delete" => Some(Hears::Delete),
-        given => Some(Hears::Path {
-            path: text(given, "path").to_owned(),
-            crosses: match given.get("crosses") {
-                Some(Value::String(word)) if word == "Infinity" => Some(f64::INFINITY),
-                other => other.and_then(Value::as_f64),
-            },
-        }),
-    }
-}
-
-impl Behavior for Holder {
-    type Config = HolderConfig;
-
-    fn declaration(&self) -> &str {
-        &HOLDER
-    }
-
-    fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<HolderConfig> {
-        Ok(HolderConfig {
-            veto: raw
-                .get("veto")
-                .and_then(Value::as_array)
-                .map(|kinds| {
-                    kinds
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            leave: raw.get("leave") == Some(&Value::Bool(true)),
-        })
-    }
-
-    fn hooks(&self) -> Hooks<Self> {
-        Hooks {
-            migrations: vec![BehaviorMigration::new(1, "holds")
-                .table(
-                    TableSpec::new("holds")
-                        .column("namespace", ColumnSpec::text().not_null())
-                        .column("schema", ColumnSpec::text().not_null())
-                        .column("id", ColumnSpec::text().not_null())
-                        .column("target_schema", ColumnSpec::text().not_null())
-                        .column("target_id", ColumnSpec::text().not_null())
-                        .column("key", ColumnSpec::text().not_null())
-                        .primary_key(&[
-                            "namespace",
-                            "schema",
-                            "id",
-                            "target_schema",
-                            "target_id",
-                            "key",
-                        ]),
-                )
-                .table(
-                    TableSpec::new("notes")
-                        .row_id("position")
-                        .column("namespace", ColumnSpec::text().not_null())
-                        .column("schema", ColumnSpec::text().not_null())
-                        .column("id", ColumnSpec::text().not_null())
-                        .column("note", ColumnSpec::text().not_null()),
-                )],
-            operations: vec![
-                ("hold", |_, cx, params| {
-                    let key = params.get("key").and_then(Value::as_str).unwrap_or("");
-                    cx.references().add(
-                        text(params, "schema"),
-                        text(params, "id"),
-                        key,
-                        hears_of(params.get("hears")),
-                    )?;
-                    let table = cx.sql().table("holds")?;
-                    let [namespace, schema, id] = instance_key(cx);
-                    cx.sql().run(
-                        format!("INSERT INTO {table} (namespace, schema, id, target_schema, target_id, key) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"),
-                        &[namespace, schema, id, text(params, "schema").into(), text(params, "id").into(), key.into()],
-                    )?;
-                    Ok(Value::Null)
-                }),
-                ("release", |_, cx, params| {
-                    let key = params.get("key").and_then(Value::as_str).unwrap_or("");
-                    let table = cx.sql().table("holds")?;
-                    let [namespace, schema, id] = instance_key(cx);
-                    cx.sql().run(
-                        format!("DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND target_schema = ? AND target_id = ? AND key = ?"),
-                        &[namespace, schema, id, text(params, "schema").into(), text(params, "id").into(), key.into()],
-                    )?;
-                    Ok(Value::Bool(cx.references().remove(
-                        text(params, "schema"),
-                        text(params, "id"),
-                        key,
-                    )?))
-                }),
-                ("note", |_, cx, params| {
-                    let table = cx.sql().table("notes")?;
-                    let [namespace, schema, id] = instance_key(cx);
-                    let note = format!(
-                        "{} {} {}",
-                        text(params, "kind"),
-                        text(params, "schema"),
-                        text(params, "id")
-                    );
-                    cx.sql().run(
-                        format!(
-                            "INSERT INTO {table} (namespace, schema, id, note) VALUES (?, ?, ?, ?)"
-                        ),
-                        &[namespace, schema, id, note.into()],
-                    )?;
-                    Ok(Value::Null)
-                }),
-                ("notes", |_, cx, _| {
-                    let table = cx.sql().table("notes")?;
-                    let rows = cx.sql().all(
-                        format!("SELECT note FROM {table} WHERE namespace = ? AND schema = ? AND id = ? ORDER BY position"),
-                        &instance_key(cx),
-                    )?;
-                    rows.iter()
-                        .map(|row| Ok(Value::from(row.text("note")?)))
-                        .collect::<Result<Vec<_>>>()
-                        .map(Value::Array)
-                }),
-                ("holding", |_, cx, _| {
-                    Ok(Value::Array(
-                        cx.references().list()?.iter().map(reference_json).collect(),
-                    ))
-                }),
-            ],
-            schema_operations: vec![
-                ("holders", |_, cx, params| {
-                    let table = cx.sql().table("holds")?;
-                    let rows = cx.sql().all(
-                        format!("SELECT id FROM {table} WHERE namespace = ? AND schema = ? AND target_schema = ? AND target_id = ? ORDER BY id"),
-                        &[cx.namespace().into(), cx.schema().into(), text(params, "schema").into(), text(params, "id").into()],
-                    )?;
-                    rows.iter()
-                        .map(|row| Ok(Value::from(row.text("id")?)))
-                        .collect::<Result<Vec<_>>>()
-                        .map(Value::Array)
-                }),
-                ("releaseAll", |_, cx, params| {
-                    let table = cx.sql().table("holds")?;
-                    let rows = cx.sql().all(
-                        format!("SELECT id, key FROM {table} WHERE namespace = ? AND schema = ? AND target_schema = ? AND target_id = ? ORDER BY id"),
-                        &[cx.namespace().into(), cx.schema().into(), text(params, "schema").into(), text(params, "id").into()],
-                    )?;
-                    for row in &rows {
-                        cx.instances().invoke(
-                            cx.schema(),
-                            row.text("id")?,
-                            "release",
-                            &json!({"schema": text(params, "schema"), "id": text(params, "id"), "key": row.text("key")?}),
-                            None,
-                        )?;
-                    }
-                    Ok(Value::from(rows.len()))
-                }),
-                ("scribble", |_, cx, _| {
-                    let table = cx.sql().table("notes")?;
-                    cx.sql().run(format!("DELETE FROM {table}"), &[])?;
-                    Ok(Value::Null)
-                }),
-                ("tidy", |_, cx, _| {
-                    let table = cx.sql().table("notes")?;
-                    let ran = cx.sql().run(
-                        format!("DELETE FROM {table} WHERE namespace = ? AND schema = ?"),
-                        &[cx.namespace().into(), cx.schema().into()],
-                    )?;
-                    Ok(Value::from(ran.changes))
-                }),
-            ],
-            fields: vec![("held", |_, view| {
-                let held: Vec<Value> = view
-                    .references()
-                    .list()?
-                    .iter()
-                    .map(|reference| {
-                        Value::from(format!(
-                            "{}/{}/{}",
-                            reference.schema, reference.id, reference.key
-                        ))
-                    })
-                    .collect();
-                Ok((!held.is_empty()).then_some(Value::Array(held)))
-            })],
-            guard_reference: Some(|_, view, reference, request| {
-                let kind = match request {
-                    GuardRequest::Create { .. } => "create",
-                    GuardRequest::Update { .. } => "update",
-                    GuardRequest::Delete { .. } => "delete",
-                    GuardRequest::Operation { .. } => "operation",
-                };
-                if !view.config().veto.iter().any(|vetoed| vetoed == kind) {
-                    return Ok(None);
-                }
-                let key = if reference.key.is_empty() {
-                    "no key"
-                } else {
-                    reference.key.as_str()
-                };
-                Ok(Some(Veto::from(
-                    format!("{} {} holds it ({key})", view.schema(), view.id()).as_str(),
-                )))
-            }),
-            after_reference_change: Some(|_, cx, reference, change| {
-                // Its own write changed what it holds: noting it now would
-                // be a cycle.
-                if cx.writing() {
-                    return Ok(());
-                }
-                cx.instances().invoke(
-                    cx.schema(),
-                    cx.id(),
-                    "note",
-                    &json!({"schema": reference.schema, "id": reference.id, "kind": change.kind()}),
-                    None,
-                )?;
-                if matches!(change, InstanceChange::Delete) && !cx.config().leave {
-                    cx.instances().invoke(
-                        cx.schema(),
-                        cx.id(),
-                        "release",
-                        &json!({"schema": reference.schema, "id": reference.id, "key": reference.key}),
-                        None,
-                    )?;
-                }
-                Ok(())
-            }),
             ..Hooks::default()
         }
     }

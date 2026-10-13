@@ -38,9 +38,11 @@ pub(crate) struct HookSet {
     pub guard: bool,
     pub validate: bool,
     pub checked_types: bool,
-    #[allow(dead_code)] // milestone 6's describe document reads it
+    // The tools ask the implementation itself (Erased::instance_schema,
+    // Erased::guidance); the flags say which it has, for a reader.
+    #[allow(dead_code)]
     pub instance_schema: bool,
-    #[allow(dead_code)] // milestone 6's describe document reads it
+    #[allow(dead_code)]
     pub guidance: bool,
     pub create_params_schema: bool,
     pub after_change: bool,
@@ -143,12 +145,25 @@ pub(crate) trait Erased: Send + Sync {
         core: &dyn Core,
         config: &ConfigBox,
     ) -> Option<Result<()>>;
-    #[allow(dead_code)] // milestone 6's describe document calls it
     fn create_params_schema(
         &self,
         config: &ConfigBox,
         target: &DescribeTarget,
     ) -> Option<Result<Value>>;
+    /// What a behavior tells a caller about the type under its config.
+    fn guidance(
+        &self,
+        config: &ConfigBox,
+        target: &DescribeTarget,
+    ) -> Option<Result<super::behavior::BehaviorGuidance>>;
+    /// What validate holds the instance's own fields to, in a form, as JSON
+    /// Schemas; `render` writes a type `checked_types` names.
+    fn instance_schema(
+        &self,
+        config: &ConfigBox,
+        form: super::behavior::InstanceSchemaForm,
+        render: &dyn Fn(&str, bool) -> Value,
+    ) -> Option<Result<Vec<Value>>>;
 }
 
 /// Erases a behavior's config type.
@@ -549,6 +564,33 @@ impl<B: Behavior> Erased for Implementation<B> {
         Some(self.config(config).and_then(|config| {
             self.run("createParamsSchema", || {
                 Ok(hook(&self.behavior, config, target))
+            })
+        }))
+    }
+
+    fn guidance(
+        &self,
+        config: &ConfigBox,
+        target: &DescribeTarget,
+    ) -> Option<Result<super::behavior::BehaviorGuidance>> {
+        let hook = self.hooks.guidance?;
+        Some(
+            self.config(config).and_then(|config| {
+                self.run("guidance", || Ok(hook(&self.behavior, config, target)))
+            }),
+        )
+    }
+
+    fn instance_schema(
+        &self,
+        config: &ConfigBox,
+        form: super::behavior::InstanceSchemaForm,
+        render: &dyn Fn(&str, bool) -> Value,
+    ) -> Option<Result<Vec<Value>>> {
+        let hook = self.hooks.instance_schema?;
+        Some(self.config(config).and_then(|config| {
+            self.run("instanceSchema", || {
+                Ok(hook(&self.behavior, config, form, render))
             })
         }))
     }

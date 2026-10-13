@@ -265,6 +265,9 @@ pub enum EngineErrorKind {
     OperationParams { issues: Vec<SchemaIssue> },
     /// `CreateParamsError`.
     CreateParams { issues: Vec<SchemaIssue> },
+    /// `UnknownToolError`: a tool call named a handle the namespace has no
+    /// tool for, as the caller sees it (`not_found`).
+    UnknownTool { tool: String },
 }
 
 /// What a refused request says: its code, the engine's message, and what
@@ -462,6 +465,21 @@ impl EngineError {
         }
     }
 
+    /// A tool call named a handle the namespace has no tool for, as the
+    /// caller sees it.
+    pub fn unknown_tool(tool: &str, namespace: &str) -> Self {
+        EngineError {
+            code: EngineErrorCode::NotFound,
+            message: format!(
+                "namespace {namespace} has no tool {}",
+                crate::json::quote(tool)
+            ),
+            kind: Box::new(EngineErrorKind::UnknownTool {
+                tool: tool.to_owned(),
+            }),
+        }
+    }
+
     pub fn code(&self) -> EngineErrorCode {
         self.code
     }
@@ -493,6 +511,7 @@ impl EngineError {
             EngineErrorKind::Preconditions { .. } => "PreconditionsError",
             EngineErrorKind::OperationParams { .. } => "OperationParamsError",
             EngineErrorKind::CreateParams { .. } => "CreateParamsError",
+            EngineErrorKind::UnknownTool { .. } => "UnknownToolError",
         }
     }
 
@@ -521,7 +540,7 @@ impl EngineError {
     /// carries none.
     pub fn details(&self) -> Option<Value> {
         let value = match &*self.kind {
-            EngineErrorKind::Plain => return None,
+            EngineErrorKind::Plain | EngineErrorKind::UnknownTool { .. } => return None,
             EngineErrorKind::SchemaDocument { issues }
             | EngineErrorKind::Preconditions { issues }
             | EngineErrorKind::OperationParams { issues }

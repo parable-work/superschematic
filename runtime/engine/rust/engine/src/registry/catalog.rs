@@ -185,11 +185,15 @@ pub(crate) struct Catalog {
 }
 
 impl Catalog {
-    pub fn new(loader: SchemaFileLoader, values: Arc<ValueStore>) -> Self {
+    pub fn new(
+        loader: SchemaFileLoader,
+        values: Arc<ValueStore>,
+        invocation: InvocationPolicy,
+    ) -> Self {
         Catalog {
             loader,
             behaviors: RwLock::new(Arc::new(BehaviorRegistry::default())),
-            invocation: InvocationPolicy::default(),
+            invocation,
             values,
             runtimes: Mutex::new(HashMap::new()),
         }

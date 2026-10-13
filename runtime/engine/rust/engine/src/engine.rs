@@ -38,6 +38,8 @@ use crate::registry::document::model_of;
 use crate::registry::{Catalog, Schemas};
 use crate::retention::RetentionOptions;
 use crate::runner::{Runner, RunnerCore, RunnerOptions};
+use crate::tools::options::resolve_tool_options;
+use crate::tools::{ToolOptions, Tools, ToolsCore};
 use crate::values::{ValueOptions, ValueStore, Values};
 
 /// Where the engine keeps its data.
@@ -239,6 +241,10 @@ pub struct EngineOptions {
     /// How long the event log keeps events, pruned on the runner. Without
     /// it the log keeps every event.
     pub retention: Option<RetentionOptions>,
+    /// The invocation policy and the vendor keys the describe and tools
+    /// documents and the MCP tools are written with: the deployment's
+    /// binary's registrations, the core's by default (D11, D58: config).
+    pub tools: ToolOptions,
 }
 
 impl std::fmt::Debug for EngineOptions {
@@ -253,6 +259,7 @@ impl std::fmt::Debug for EngineOptions {
             .field("behaviors", &self.behaviors)
             .field("runner", &self.runner)
             .field("retention", &self.retention)
+            .field("tools", &self.tools)
             .finish_non_exhaustive()
     }
 }
@@ -273,6 +280,7 @@ impl EngineOptions {
             behaviors: BehaviorSet::default(),
             runner: None,
             retention: None,
+            tools: ToolOptions::default(),
         }
     }
 
@@ -426,6 +434,8 @@ pub struct Engine {
     closed: AtomicBool,
     /// The runner's options, state, driver and lease.
     pub(crate) runner: RunnerCore,
+    /// The tools' options and what each published version gives them.
+    pub(crate) tools: ToolsCore,
     /// The engine itself, once [`Engine::shared`] put it in an `Arc`: what
     /// the runner's driver thread and an event stream hold.
     this: OnceLock<Weak<Engine>>,
@@ -468,6 +478,11 @@ impl Engine {
         // Checked before the storage opens, so a bad option leaves nothing
         // open.
         let runner = RunnerCore::new(options.runner.as_ref(), options.retention.as_ref())?;
+        let tools = resolve_tool_options(&options.tools)?;
+        let invocation = crate::behaviors::registry::InvocationPolicy {
+            key: tools.invocation_policy.key.clone(),
+            values: tools.invocation_policy.values.clone(),
+        };
         let db = open_storage(options.storage)?;
         let migrating = Arc::clone(&values);
         db.migrate(
@@ -481,7 +496,7 @@ impl Engine {
             access,
             matcher,
             clock,
-            catalog: Catalog::new(loader, Arc::clone(&values)),
+            catalog: Catalog::new(loader, Arc::clone(&values), invocation),
             values,
             ids: IdSource {
                 ids: options.ids,
@@ -490,6 +505,7 @@ impl Engine {
             poisoned: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             runner,
+            tools: ToolsCore::new(tools),
             this: OnceLock::new(),
         };
         engine.behaviors().register_set(options.behaviors)?;
@@ -522,6 +538,31 @@ impl Engine {
     /// The runner of reactions and schedules, and of retention.
     pub fn runner(&self) -> Runner<'_> {
         Runner { engine: self }
+    }
+
+    /// The describe and tools documents, the tool calls and the behaviors
+    /// the engine runs.
+    pub fn tools(&self) -> Tools<'_> {
+        Tools { engine: self }
+    }
+
+    /// The search across the schemas a namespace reaches that compose
+    /// Search (`engine.search`): it runs on the core's Search behavior,
+    /// which the Rust engine has from milestone 10; until then it is
+    /// `unavailable`.
+    pub fn search(
+        &self,
+        principal: &crate::principal::Principal,
+        _params: &Value,
+        namespace: Option<&str>,
+    ) -> Result<Value> {
+        crate::principal::check_principal(principal)?;
+        self.namespaces().resolve(namespace)?;
+        Err(crate::errors::EngineError::new(
+            crate::errors::EngineErrorCode::Unavailable,
+            "the search across a namespace's schemas runs on the core's Search behavior, which this engine does not run yet",
+        )
+        .into())
     }
 
     /// Stops the runner, ends every event stream and refuses every later

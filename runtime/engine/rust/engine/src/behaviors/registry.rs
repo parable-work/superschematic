@@ -31,9 +31,9 @@ use super::erased::{Erased, HookSet};
 use crate::errors::{Error, Result, SchemaIssue};
 use crate::json;
 
-/// The deployment's invocation policy: the key a tool's policy is written
-/// under and its values. The core's (`invocationPolicy`: auto, ask) until
-/// milestone 6's tool options make it configurable.
+/// The deployment's invocation policy as registration holds a declaration
+/// to it: the key a tool's policy is written under and its values, from
+/// the engine's tool options (`EngineOptions.tools`).
 #[derive(Clone, Debug)]
 pub(crate) struct InvocationPolicy {
     pub key: String,
