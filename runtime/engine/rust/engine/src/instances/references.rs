@@ -12,8 +12,7 @@
 //! the delete alone (`delete`), or one value of the target, at a JSON
 //! pointer into its data, when a change moves it, or moves it across a
 //! number (`crosses`). The order references were recorded in is SQLite's
-//! `rowid` and Postgres's `position` identity. Milestone 5's behaviors add
-//! and hear references; until then only a delete drops a source's.
+//! `rowid` and Postgres's `position` identity.
 
 use serde_json::Value;
 
@@ -22,10 +21,9 @@ use superschematic_engine_storage::{Row, Sql, SqlValue, Tx};
 use crate::errors::Result;
 use crate::json::{self, js_equal};
 
-/// What a reference hears.
+/// What a reference hears besides its target's delete.
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)] // milestone 5's behaviors record references
-pub(crate) enum Hears {
+pub enum Hears {
     /// The delete alone.
     Delete,
     /// One value of the target, at a JSON pointer into its data, when a
@@ -33,10 +31,11 @@ pub(crate) enum Hears {
     Path { path: String, crosses: Option<f64> },
 }
 
-/// A reference to an instance: its target, its key, and what it hears.
+/// A reference a behavior recorded from its instance to another: its
+/// target, its key (the behavior's own label, `""` for none), and what it
+/// hears (every change when `None`).
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)] // milestone 5's behaviors record references
-pub(crate) struct Reference {
+pub struct Reference {
     pub schema: String,
     pub id: String,
     pub key: String,
@@ -45,7 +44,6 @@ pub(crate) struct Reference {
 
 /// Where a reference starts: a behavior on an instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // milestone 5's behaviors record references
 pub(crate) struct ReferenceSource {
     pub schema: String,
     pub id: String,
@@ -54,7 +52,6 @@ pub(crate) struct ReferenceSource {
 
 /// A reference to an instance, as the target's change reads it.
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)] // milestone 5's behaviors hear references
 pub(crate) struct IncomingReference {
     pub schema: String,
     pub id: String,
@@ -95,7 +92,6 @@ fn hears_of(row: &Row) -> Result<Option<Hears>> {
     }))
 }
 
-#[allow(dead_code)] // milestone 5's behaviors record references
 fn columns_of(hears: Option<&Hears>) -> (SqlValue, SqlValue) {
     match hears {
         None => (SqlValue::Null, SqlValue::Null),
@@ -186,7 +182,6 @@ pub(crate) fn moves(before: &Value, after: &Value) -> Vec<Move> {
 /// The references of a namespace's instances.
 pub(crate) struct ReferenceTable;
 
-#[allow(dead_code)] // milestone 5's behaviors record and hear references
 impl ReferenceTable {
     /// Records a reference, or what one that exists hears now.
     pub fn add(

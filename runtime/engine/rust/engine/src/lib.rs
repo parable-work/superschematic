@@ -11,10 +11,13 @@
 //! and compatibility rule, the access policy as data ([`PolicyConfig`]),
 //! the instances ([`Instances`]) with their filters, unique indexes and
 //! the value store that keeps a large member once, the event log
-//! ([`Events`]), the refusals and their codes ([`errors`]), the principal
-//! a call acts for ([`Principal`]), and JSON written as JavaScript writes
-//! it ([`json`]). Until this crate passes the TypeScript engine's suite
-//! through its Node-API addon, `@superschematic/engine` is the engine.
+//! ([`Events`]), the behavior plug-in API ([`behaviors`]: a behavior is a
+//! Rust type that implements [`Behavior`], composed on a schema's instance
+//! type and run with every call on its instances), the refusals and their
+//! codes ([`errors`]), the principal a call acts for ([`Principal`]), and
+//! JSON written as JavaScript writes it ([`json`]). Until this crate passes
+//! the TypeScript engine's suite through its Node-API addon,
+//! `@superschematic/engine` is the engine.
 //!
 //! ```no_run
 //! use serde_json::json;
@@ -40,8 +43,8 @@
 //! ```
 
 mod access;
+pub mod behaviors;
 pub mod calls;
-mod composition;
 mod engine;
 pub mod errors;
 mod events;
@@ -59,6 +62,10 @@ pub use access::{
     ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate, Policy, PolicyAction,
     PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction, ServiceMatch,
 };
+pub use behaviors::{
+    json_config, Behavior, BehaviorSet, Behaviors, ConfigTarget, GuardRequest, Hooks,
+    InstanceChange, InstanceCx, InstanceView, OperationCx, SchemaCx, ValidationRequest,
+};
 pub use engine::{
     seeded_uuid, Clock, Engine, EngineClock, EngineOptions, IdCounter, IdQueue, Ids, MetaSchema,
     Storage, SCENARIO_SEED,
@@ -73,7 +80,8 @@ pub use events::{
 };
 pub use instances::{
     is_instance_id, CreateOptions, GetOptions, InstancePage, InstanceRecord, Instances,
-    ListOptions, WriteOptions, FILTER_SCAN_ROWS, INSTANCE_ID, MAX_FILTER_RANGES, MAX_FILTER_VALUES,
+    ListOptions, OperationOutcome, WriteOptions, FILTER_SCAN_ROWS, INSTANCE_ID, MAX_FILTER_RANGES,
+    MAX_FILTER_VALUES,
 };
 pub use namespaces::{
     is_namespace_name, name_refusal, NamespaceConfig, NamespaceOptions, NamespaceOrigin,

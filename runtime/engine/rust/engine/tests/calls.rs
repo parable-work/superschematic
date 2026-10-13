@@ -92,7 +92,7 @@ fn a_call_takes_json_arguments_and_returns_what_the_typescript_method_returns() 
                 > 0
         );
         assert!(matches!(
-            call(&engine, "instances.invoke", principal, &[]),
+            call(&engine, "runner.runDue", principal, &[]),
             Err(Error::Usage(_))
         ));
         assert!(CALLS.contains(&"instances.lookup"));

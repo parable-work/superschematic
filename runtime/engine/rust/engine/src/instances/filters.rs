@@ -74,10 +74,8 @@ pub(crate) struct Filterable {
     pub spillable: bool,
 }
 
-/// A filter a behavior declares (milestone 5): its column, type, index
-/// and description.
+/// A filter a behavior declares: its column, type, index and description.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // milestone 5's behaviors declare filters
 pub(crate) struct BehaviorFilter {
     pub field: String,
     pub column: String,
@@ -88,10 +86,11 @@ pub(crate) struct BehaviorFilter {
 
 /// A behavior on the type, as [`filterables_of`] reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // milestone 5's behaviors declare filters
 pub(crate) struct FilteringBehavior {
     pub name: String,
     pub prefix: String,
+    /// The database its columns and indexes are named for.
+    pub dialect: Dialect,
     pub filters: Vec<BehaviorFilter>,
 }
 
@@ -130,17 +129,35 @@ pub(crate) fn filterables_of(
                 key: format!("{}.{}", behavior.name, filter.field),
                 scalar: filter.scalar,
                 behavior: Some(behavior.name.clone()),
-                column: Some(format!("{}{}", behavior.prefix, filter.column)),
-                index: filter
-                    .index
-                    .as_ref()
-                    .map(|index| index_name(&behavior.prefix, index)),
+                column: Some(superschematic_engine_storage::behavior::instance_column(
+                    behavior.dialect,
+                    &behavior.prefix,
+                    &filter.column,
+                )),
+                index: filter.index.as_ref().map(|index| {
+                    superschematic_engine_storage::identifier(
+                        behavior.dialect,
+                        &index_name(&behavior.prefix, index),
+                    )
+                    .into_owned()
+                }),
                 description: filter.description.clone(),
                 spillable: false,
             });
         }
     }
     found
+}
+
+/// The JSON type a behavior's filter declares (`string`, `number`,
+/// `integer` or `boolean`, which registration checked).
+pub(crate) fn filter_scalar(kind: &str) -> ScalarType {
+    match kind {
+        "number" => ScalarType::Number,
+        "integer" => ScalarType::Integer,
+        "boolean" => ScalarType::Boolean,
+        _ => ScalarType::String,
+    }
 }
 
 /// A value a filter compares.

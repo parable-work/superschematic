@@ -17,33 +17,58 @@
 //! nothing: no version is minted, no event is appended and the draft is
 //! dropped.
 //!
-//! The runtime of a version, its validator and its behaviors, is built
-//! once and kept per namespace, name and version: a version never changes
-//! once it is published, so the cache is right in every process (D58). A
-//! version whose behaviors this engine cannot run is `unavailable`, and not
-//! kept, so an implementation registered later makes it available.
+//! A schema's instance type may compose behaviors (`behaviors`). Define
+//! and publish check them against the registered implementations, with the
+//! namespace's other schemas in reach of their configs as the caller may
+//! read them (`ConfigTarget::schemas`), and the compatibility rule against
+//! each behavior's rule for its config and the types its configs hold
+//! values to. Publish creates the storage of every behavior the new version
+//! composes, in its transaction, so a publish that fails leaves none behind,
+//! then runs the afterConfigChange of each behavior whose config the version
+//! adds, removes or changes.
+//!
+//! The runtime of a version, its validator, its behaviors bound to their
+//! configs and their storage prefixes, is built once and kept per
+//! namespace, name and version: a version never changes once it is
+//! published, and a behavior's storage key never changes once assigned, so
+//! the cache is right in every process (D58). It is built inside the
+//! caller's transaction, where the keys are read. A version whose behaviors
+//! this engine cannot run is `unavailable`, and not kept, so an
+//! implementation registered later makes it available.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use superschematic_engine_storage::{Row, Sql, SqlValue, Tx};
+use superschematic_engine_storage::behavior::{prefix_of, stored_key};
+use superschematic_engine_storage::{Db, Row, Sql, SqlValue, Tx};
 use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
 use super::compat::incompatible_changes;
 use super::display::display_issues;
 use super::document::{model_of, read_schema, SchemaModel};
 use super::validator::SchemaValidator;
-use crate::composition::{compose, config_changes, BehaviorRegistry, Composition};
+use crate::behaviors::composition::{
+    checked_types, compose, config_changes, config_schema_of, config_transitions, read_types,
+    Composition,
+};
+use crate::behaviors::config::{ConfigSchema, ConfigSchemas};
+use crate::behaviors::erased::Erased;
+use crate::behaviors::publish::{after_config_changes, PublishTarget};
+use crate::behaviors::registry::{ensure_storage, BehaviorRegistry, InvocationPolicy};
+use crate::engine::Engine;
 use crate::errors::{EngineError, EngineErrorCode, Error, Result, SchemaChange};
 use crate::events::{append_schema_event, SchemaEvent};
 use crate::indexes::{
     clash_message, index_issues, ordered_scalar_fields, own_indexes, sync_own_indexes,
     unique_clashes, OwnIndex, ScalarType, UniqueClash,
 };
-use crate::instances::filters::{filterables_of, Filterable};
+use crate::instances::filters::{
+    filter_scalar, filterables_of, BehaviorFilter, Filterable, FilteringBehavior,
+};
 use crate::json::{self, compare_utf16};
 use crate::namespaces::NamespaceView;
 use crate::principal::Actor;
@@ -100,12 +125,14 @@ pub struct PublishResult {
 }
 
 /// What running a published version needs: its validator, its behaviors,
-/// the indexes of its instance type's own fields, the fields they keep
-/// inline in a row, and the fields a list filters on. Milestone 5 adds each
-/// behavior's storage prefix and its filters.
+/// each behavior's storage prefix, the indexes of its instance type's own
+/// fields, the fields they keep inline in a row, and the fields a list
+/// filters on.
 pub(crate) struct VersionRuntime {
     pub validator: Arc<SchemaValidator>,
     pub composition: Composition,
+    /// Each composed behavior's storage prefix, in the composition's order.
+    pub prefixes: Vec<String>,
     /// The indexes of the instance type's own fields (`indexes`).
     pub indexes: Vec<OwnIndex>,
     /// The own fields an index covers, which a row keeps inline whatever
@@ -135,60 +162,111 @@ const DRAFT: i64 = 0;
 const COLUMNS: &str =
     "namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by";
 
+/// A schema document as the loader read it, with what its behaviors
+/// composed with no other schema in reach: what a define or publish holds
+/// each behavior's reads to.
+pub(crate) struct Loaded {
+    pub model: SchemaModel,
+    pub alone: Option<Composition>,
+}
+
+/// The access check a define or publish asks, as its caller, before a
+/// behavior's config reaches another schema: an error refuses.
+pub(crate) type ReadCheck<'a> = &'a dyn Fn(&str) -> Result<()>;
+
 /// The stored schemas, the loader that reads them and the behaviors that
 /// compose on them.
 pub(crate) struct Catalog {
     loader: SchemaFileLoader,
-    behaviors: BehaviorRegistry,
+    behaviors: RwLock<Arc<BehaviorRegistry>>,
+    invocation: InvocationPolicy,
     values: Arc<ValueStore>,
     runtimes: Mutex<HashMap<(String, String, i64), Arc<VersionRuntime>>>,
 }
 
 impl Catalog {
-    pub fn new(
-        loader: SchemaFileLoader,
-        behaviors: BehaviorRegistry,
-        values: Arc<ValueStore>,
-    ) -> Self {
+    pub fn new(loader: SchemaFileLoader, values: Arc<ValueStore>) -> Self {
         Catalog {
             loader,
-            behaviors,
+            behaviors: RwLock::new(Arc::new(BehaviorRegistry::default())),
+            invocation: InvocationPolicy::default(),
             values,
             runtimes: Mutex::new(HashMap::new()),
         }
     }
 
+    /// The behaviors registered now: a snapshot a call composes with.
+    pub fn registry(&self) -> Arc<BehaviorRegistry> {
+        Arc::clone(
+            &self
+                .behaviors
+                .read()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// Registers an implementation, checked, migrating storage it has.
+    pub fn register(&self, implementation: Arc<dyn Erased>, db: &Db, now: i64) -> Result<()> {
+        let mut behaviors = self
+            .behaviors
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let next = behaviors.with(implementation, &self.invocation, db, now)?;
+        *behaviors = Arc::new(next);
+        Ok(())
+    }
+
     /// Loads a schema document from its JSON text, with the engine's rules,
     /// its behaviors' and its display's, and its indexes'.
-    pub fn load(&self, text: &str, source: &str) -> Result<SchemaModel, EngineError> {
-        read_schema(&self.loader, text, source, |candidate| {
+    pub fn load(&self, text: &str, source: &str) -> Result<Loaded> {
+        let registry = self.registry();
+        let alone: RefCell<Option<Composition>> = RefCell::new(None);
+        let failed: RefCell<Option<Error>> = RefCell::new(None);
+        let model = read_schema(&self.loader, text, source, |candidate| {
             // A display is held to the behaviors once they compose.
-            let mut issues = match compose(candidate, &self.behaviors) {
-                Ok(composition) => {
-                    display_issues(&candidate.document, &candidate.instance_type, &composition)
+            let mut issues = match compose(candidate, &registry, None, None) {
+                Ok(Ok(composition)) => {
+                    let issues =
+                        display_issues(&candidate.document, &candidate.instance_type, &composition);
+                    *alone.borrow_mut() = Some(composition);
+                    issues
                 }
-                Err(issues) => issues,
+                Ok(Err(issues)) => issues,
+                Err(error) => {
+                    *failed.borrow_mut() = Some(error);
+                    Vec::new()
+                }
             };
             issues.extend(index_issues(&candidate.document, &candidate.instance_type));
             issues
+        });
+        if let Some(error) = failed.into_inner() {
+            return Err(error);
+        }
+        Ok(Loaded {
+            model: model?,
+            alone: alone.into_inner(),
         })
     }
 
     /// Stores a document as its name's draft in a namespace and appends a
     /// define event with its hash.
+    #[allow(clippy::too_many_arguments)]
     pub fn define(
         &self,
         tx: &Tx<'_>,
         view: &NamespaceView<'_>,
-        model: SchemaModel,
+        loaded: Loaded,
         namespace: &str,
         change: Change<'_>,
         source: &str,
+        reads: ReadCheck<'_>,
     ) -> Result<SchemaRecord> {
         let Change { by, at: now } = change;
+        let Loaded { model, alone } = loaded;
         let hash = json::sha256_hex(&model.canonical);
         check_name_side(tx, view, namespace, &model.name)?;
-        self.compose_reaching(&model, source)?;
+        self.compose_reaching(tx, view, &model, alone.as_ref(), namespace, reads, source)?;
         if let Some(live) = row(tx, namespace, &model.name, Which::Live)? {
             let before = model_of(live.text("document")?)?;
             self.check_compatible(tx, view, namespace, &live, &before, &model)?;
@@ -241,13 +319,16 @@ impl Catalog {
     }
 
     /// Makes the draft of a name the next live version.
+    #[allow(clippy::too_many_arguments)]
     pub fn publish(
         &self,
+        engine: &Engine,
         tx: &Tx<'_>,
         view: &NamespaceView<'_>,
         name: &str,
         namespace: &str,
         change: Change<'_>,
+        reads: ReadCheck<'_>,
     ) -> Result<PublishResult> {
         let Change { by, at: now } = change;
         let Some(draft) = row(tx, namespace, name, Which::Draft)? else {
@@ -258,7 +339,7 @@ impl Catalog {
             .into());
         };
         let source = format!("{namespace}/{name} draft");
-        let model = self.load(draft.text("document")?, &source)?;
+        let Loaded { model, alone } = self.load(draft.text("document")?, &source)?;
         let hash = json::sha256_hex(&model.canonical);
         let live = row(tx, namespace, name, Which::Live)?;
         if let Some(live) = &live {
@@ -287,9 +368,11 @@ impl Catalog {
             }
             None => None,
         };
-        // Milestone 5 creates the storage of each behavior the version
-        // composes, and runs each changed config's afterConfigChange.
-        self.compose_reaching(&model, &source)?;
+        let composition =
+            self.compose_reaching(tx, view, &model, alone.as_ref(), namespace, reads, &source)?;
+        for bound in &composition.behaviors {
+            ensure_storage(tx, &bound.behavior, now)?;
+        }
         // The indexes of the instance type's own fields follow the version:
         // the ones it drops go, and a new unique one the stored instances
         // break refuses it.
@@ -324,6 +407,25 @@ impl Catalog {
                 SqlValue::from(name),
                 SqlValue::Integer(DRAFT),
             ],
+        )?;
+        let transitions = config_transitions(before.as_ref(), &model, &self.registry())?;
+        after_config_changes(
+            engine,
+            tx,
+            &transitions,
+            &PublishTarget {
+                holder: namespace,
+                schema: name,
+                version,
+                now,
+                namespaces: if view.config().shared() == Some(namespace) {
+                    view.names()
+                } else {
+                    vec![namespace.to_owned()]
+                },
+                model: &model,
+                composition: &composition,
+            },
         )?;
         let cursor = append_schema_event(
             tx,
@@ -409,7 +511,7 @@ impl Catalog {
     /// What running a published version needs, built once. It refuses a
     /// draft, and a version that composes a behavior this engine cannot
     /// run (`unavailable`).
-    pub fn runtime_of(&self, record: &SchemaRecord) -> Result<Arc<VersionRuntime>> {
+    pub fn runtime_of(&self, tx: &Tx<'_>, record: &SchemaRecord) -> Result<Arc<VersionRuntime>> {
         let Some(version) = record.version else {
             return Err(EngineError::invalid_argument(format!(
                 "schema {} is a draft; only a published version validates instances",
@@ -422,7 +524,7 @@ impl Catalog {
             return Ok(Arc::clone(runtime));
         }
         let model = model_of(&record.canonical)?;
-        let composition = compose(&model, &self.behaviors).map_err(|issues| {
+        let composition = compose(&model, &self.registry(), None, None)?.map_err(|issues| {
             EngineError::new(
                 EngineErrorCode::Unavailable,
                 format!(
@@ -437,17 +539,51 @@ impl Catalog {
                 ),
             )
         })?;
+        let mut prefixes = Vec::new();
+        for bound in &composition.behaviors {
+            let Some(key) = stored_key(tx, &bound.behavior.name)? else {
+                return Err(Error::internal(format!(
+                    "behavior {} has no storage in {}, though version {version} of {} composes it",
+                    bound.behavior.name,
+                    tx.label(),
+                    record.name
+                )));
+            };
+            prefixes.push(prefix_of(&key));
+        }
         let indexes = own_indexes(&model, &record.namespace);
         let own: Vec<(String, ScalarType)> =
             ordered_scalar_fields(&model.document, &model.instance_type)
                 .into_iter()
                 .map(|(key, field)| (key, field.scalar))
                 .collect();
-        // Milestone 5 passes each behavior's filters, with its prefix.
-        let filters = filterables_of(&own, &indexes, &[]);
+        let filtering: Vec<FilteringBehavior> = composition
+            .behaviors
+            .iter()
+            .zip(&prefixes)
+            .map(|(bound, prefix)| FilteringBehavior {
+                name: bound.behavior.name.clone(),
+                prefix: prefix.clone(),
+                dialect: tx.dialect(),
+                filters: bound
+                    .behavior
+                    .filters
+                    .iter()
+                    .map(|filter| BehaviorFilter {
+                        field: filter.field.clone(),
+                        column: filter.column.clone(),
+                        scalar: filter_scalar(&filter.kind),
+                        index: filter.index.clone(),
+                        description: filter.description.clone(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        let filters = filterables_of(&own, &indexes, &filtering);
         let runtime = Arc::new(VersionRuntime {
             validator: Arc::new(SchemaValidator::new(model)?),
             composition,
+            prefixes,
             inline: indexes
                 .iter()
                 .flat_map(|index| index.keys.iter().cloned())
@@ -466,17 +602,33 @@ impl Catalog {
         self.runtimes.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    // compose_reaching composes a version being defined or published and
-    // refuses it as load does. Milestone 5 puts the namespace's other
-    // schemas in reach of a behavior's parseConfig here, asking read on
-    // each as the caller.
+    // compose_reaching composes a version being defined or published with
+    // the namespace's other schemas in reach of parseConfig, as the caller
+    // reads them, and refuses it as load does, and for a config that reads
+    // other types through ConfigTarget.types with them than load's
+    // composition, with none in reach, read.
+    #[allow(clippy::too_many_arguments)]
     fn compose_reaching(
         &self,
+        tx: &Tx<'_>,
+        view: &NamespaceView<'_>,
         model: &SchemaModel,
+        alone: Option<&Composition>,
+        namespace: &str,
+        reads: ReadCheck<'_>,
         source: &str,
-    ) -> Result<Composition, EngineError> {
-        compose(model, &self.behaviors)
-            .map_err(|issues| EngineError::schema_document(source, issues))
+    ) -> Result<Composition> {
+        let schemas = CatalogSchemas {
+            catalog: self,
+            tx,
+            view,
+            model,
+            namespace,
+            reads,
+            read: RefCell::new(Vec::new()),
+        };
+        compose(model, &self.registry(), Some(&schemas), alone)?
+            .map_err(|issues| EngineError::schema_document(source, issues).into())
     }
 
     // check_compatible holds a new version to the live one: its fields and
@@ -491,9 +643,22 @@ impl Catalog {
         before: &SchemaModel,
         model: &SchemaModel,
     ) -> Result<()> {
-        let mut changes = incompatible_changes(before, model, &[]);
+        let registry = self.registry();
+        let held: Vec<String> = if before.instance_type == model.instance_type {
+            let mut held: Vec<String> = checked_types(before, model, &registry)?;
+            for name in read_types(before, &registry)? {
+                if !held.contains(&name) {
+                    held.push(name);
+                }
+            }
+            held.sort_by(|a, b| compare_utf16(a, b));
+            held
+        } else {
+            Vec::new()
+        };
+        let mut changes = incompatible_changes(before, model, &held);
         if before.instance_type == model.instance_type {
-            changes.extend(config_changes(before, model, &self.behaviors, || {
+            changes.extend(config_changes(before, model, &registry, &|| {
                 has_instances(tx, view, namespace, &model.name)
             })?);
         }
@@ -508,6 +673,44 @@ impl Catalog {
             .into());
         }
         Ok(())
+    }
+}
+
+/// `ConfigTarget::schemas` for a version being defined or published: its
+/// own name is that version; another is its live version, read once, after
+/// the caller's access check allows it.
+struct CatalogSchemas<'a, 't, 'db> {
+    catalog: &'a Catalog,
+    tx: &'t Tx<'db>,
+    view: &'a NamespaceView<'a>,
+    model: &'a SchemaModel,
+    namespace: &'a str,
+    reads: ReadCheck<'a>,
+    read: RefCell<Vec<(String, Option<ConfigSchema>)>>,
+}
+
+impl ConfigSchemas for CatalogSchemas<'_, '_, '_> {
+    fn get(&self, name: &str) -> Result<Option<ConfigSchema>> {
+        if name == self.model.name {
+            return Ok(Some(config_schema_of(self.model)));
+        }
+        if let Some((_, known)) = self.read.borrow().iter().find(|(seen, _)| seen == name) {
+            return Ok(known.clone());
+        }
+        crate::registry::document::check_schema_name(name)?;
+        (self.reads)(name)?;
+        let found =
+            match self
+                .catalog
+                .find(self.tx, self.view, name, self.namespace, Which::Live)?
+            {
+                None => None,
+                Some(record) => Some(config_schema_of(&model_of(&record.canonical)?)),
+            };
+        self.read
+            .borrow_mut()
+            .push((name.to_owned(), found.clone()));
+        Ok(found)
     }
 }
 

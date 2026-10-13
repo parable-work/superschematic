@@ -11,8 +11,11 @@
 //! that is no list. A value is named as JavaScript's `String()` writes it.
 //! A call returns `None` where the TypeScript method returns `undefined`.
 //!
-//! Milestone 5 adds the behaviors' calls (`instances.invoke`, `operate`,
-//! `invokeSchema`, `behaviors.*`), milestone 6 the runner's and the tools'.
+//! The behaviors' calls are here (`instances.invoke`, `operate`,
+//! `invokeSchema`, and `behaviors.has`, `names` and `declaration`);
+//! `behaviors.register` takes an implementation, which JSON cannot carry,
+//! so a host registers through [`crate::Behaviors::register`]. Milestone 6
+//! adds the runner's and the tools'.
 
 use std::borrow::Cow;
 
@@ -31,7 +34,7 @@ use crate::principal::{check_principal, Principal};
 use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions};
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 27] = [
+pub const CALLS: [&str; 33] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -47,6 +50,9 @@ pub const CALLS: [&str; 27] = [
     "instances.lookup",
     "instances.update",
     "instances.delete",
+    "instances.invoke",
+    "instances.operate",
+    "instances.invokeSchema",
     "events.read",
     "events.head",
     "events.floor",
@@ -59,6 +65,9 @@ pub const CALLS: [&str; 27] = [
     "values.get",
     "values.sweep",
     "values.thresholdBytes",
+    "behaviors.has",
+    "behaviors.names",
+    "behaviors.declaration",
 ];
 
 /// Calls a method of the engine by name, as `principal` for a method that
@@ -279,6 +288,53 @@ pub fn call(
                 )?))
             }
         }
+        "instances.invoke" | "instances.operate" => {
+            let principal = who()?;
+            let options = options(4);
+            let namespace = text_member(options, "namespace");
+            let expected_seq = match options.and_then(|options| options.get("expectedSeq")) {
+                None => None,
+                Some(given) => Some(
+                    integer(given)
+                        .filter(|seq| *seq >= 0)
+                        .ok_or_else(|| expected_seq_refusal(&js_string(given)))?,
+                ),
+            };
+            let write = WriteOptions {
+                namespace: namespace.as_deref(),
+                expected_seq,
+                preconditions: options.and_then(|options| options.get("preconditions")),
+            };
+            let empty = Value::Object(Map::new());
+            let outcome = engine.instances().operate(
+                principal,
+                &text(arg(0)),
+                &text(arg(1)),
+                &text(arg(2)),
+                args.get(3).unwrap_or(&empty),
+                write,
+            )?;
+            if method == "instances.invoke" {
+                Ok(outcome.result)
+            } else {
+                to_json(outcome)
+            }
+        }
+        "instances.invokeSchema" => {
+            let principal = who()?;
+            let namespace = text_member(options(3), "namespace");
+            let empty = Value::Object(Map::new());
+            engine.instances().invoke_schema(
+                principal,
+                &text(arg(0)),
+                &text(arg(1)),
+                args.get(2).unwrap_or(&empty),
+                namespace.as_deref(),
+            )
+        }
+        "behaviors.has" => Ok(Value::Bool(engine.behaviors().has(&text(arg(0))))),
+        "behaviors.names" => to_json(engine.behaviors().names()),
+        "behaviors.declaration" => return Ok(engine.behaviors().declaration(&text(arg(0)))),
         "events.read" => {
             let principal = who()?;
             let options = options(0);

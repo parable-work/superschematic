@@ -738,7 +738,7 @@ fn with_the_core_meta_schema_the_loader_itself_refuses_a_behavior_the_core_does_
         assert!(
             found[0]
                 .1
-                .starts_with("must be one of \"Assignment\", \"Blueprint\", \"Branches\""),
+                .starts_with("must be one of \"Approvals\", \"Assignment\", \"Blueprint\""),
             "{}",
             found[0].1
         );

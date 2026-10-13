@@ -120,13 +120,14 @@ pub struct SchemaCapabilities {
     pub publish: bool,
 }
 
-/// A behavior a schema's instance type composes: its name and the type's
-/// config of it, as the schema holds it (`{}` when it gives none).
-/// Milestone 5 adds the behavior's declaration.
+/// A behavior a schema's instance type composes: its name, the type's
+/// config of it, as the schema holds it (`{}` when it gives none), and its
+/// declaration.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ComposedBehavior {
     pub name: String,
     pub config: Value,
+    pub declaration: Value,
 }
 
 /// The schema registry (`engine.schemas`).
@@ -153,21 +154,30 @@ impl Schemas<'_> {
         engine.db.write(Lock::Catalog, |tx| {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = view.resolve(options.namespace)?;
-            let model = engine.catalog.load(&input.text(), source)?;
-            engine
-                .access
-                .require(principal, SchemaAction::Define, &namespace, &model.name)?;
+            let loaded = engine.catalog.load(&input.text(), source)?;
+            engine.access.require(
+                principal,
+                SchemaAction::Define,
+                &namespace,
+                &loaded.model.name,
+            )?;
             view.require_writable(&namespace)?;
+            let reads = |schema: &str| -> Result<()> {
+                Ok(engine
+                    .access
+                    .require(principal, SchemaAction::Read, &namespace, schema)?)
+            };
             engine.catalog.define(
                 tx,
                 &view,
-                model,
+                loaded,
                 &namespace,
                 Change {
                     by: &actor,
                     at: now,
                 },
                 source,
+                &reads,
             )
         })
     }
@@ -191,7 +201,13 @@ impl Schemas<'_> {
                 .access
                 .require(principal, SchemaAction::Publish, &namespace, name)?;
             view.require_writable(&namespace)?;
+            let reads = |schema: &str| -> Result<()> {
+                Ok(engine
+                    .access
+                    .require(principal, SchemaAction::Read, &namespace, schema)?)
+            };
             engine.catalog.publish(
+                engine,
                 tx,
                 &view,
                 name,
@@ -200,6 +216,7 @@ impl Schemas<'_> {
                     by: &actor,
                     at: now,
                 },
+                &reads,
             )
         })
     }
@@ -350,10 +367,13 @@ impl Schemas<'_> {
         name: &str,
         options: ValidateOptions<'_>,
     ) -> Result<Arc<SchemaValidator>> {
-        let record = self.published(principal, name, options)?;
-        Ok(Arc::clone(
-            &self.engine.catalog.runtime_of(&record)?.validator,
-        ))
+        let engine = self.engine;
+        engine.read(|tx| {
+            let record = self.published_in(tx, principal, name, options)?;
+            Ok(Arc::clone(
+                &engine.catalog.runtime_of(tx, &record)?.validator,
+            ))
+        })
     }
 
     /// The behaviors the instance type of a name's live version, or of the
@@ -365,21 +385,26 @@ impl Schemas<'_> {
         name: &str,
         options: ValidateOptions<'_>,
     ) -> Result<Vec<ComposedBehavior>> {
-        let record = self.published(principal, name, options)?;
-        let runtime = self.engine.catalog.runtime_of(&record)?;
-        Ok(runtime
-            .composition
-            .behaviors
-            .iter()
-            .map(|bound| ComposedBehavior {
-                name: bound.behavior.name.clone(),
-                config: bound.json.clone(),
-            })
-            .collect())
+        let engine = self.engine;
+        engine.read(|tx| {
+            let record = self.published_in(tx, principal, name, options)?;
+            let runtime = engine.catalog.runtime_of(tx, &record)?;
+            Ok(runtime
+                .composition
+                .behaviors
+                .iter()
+                .map(|bound| ComposedBehavior {
+                    name: bound.behavior.name.clone(),
+                    config: bound.json.clone(),
+                    declaration: bound.behavior.declaration.json.clone(),
+                })
+                .collect())
+        })
     }
 
-    fn published(
+    fn published_in(
         &self,
+        tx: &superschematic_engine_storage::Tx<'_>,
         principal: &Principal,
         name: &str,
         options: ValidateOptions<'_>,
@@ -389,7 +414,7 @@ impl Schemas<'_> {
         }
         check_principal(principal)?;
         let engine = self.engine;
-        engine.db.read(|tx| {
+        {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = self.readable(&view, principal, name, options.namespace)?;
             let which = options.version.map_or(Which::Live, Which::Version);
@@ -407,7 +432,7 @@ impl Schemas<'_> {
                     .into())
                 }
             }
-        })
+        }
     }
 
     // readable resolves the namespace a read names, checks the schema name

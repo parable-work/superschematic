@@ -5,9 +5,10 @@
 //! its schema (its own namespace's, or the shared one's) and validated by
 //! it; its row records that version. An update is a JSON merge patch
 //! (RFC 7386, [`patch`]), validated after the merge. Each write appends its
-//! event in the same transaction (`events`). A write in an
-//! archived namespace (a create, an update or a delete) is refused
-//! (`namespace_archived`) once the policy has allowed it; reads go on.
+//! event in the same transaction (`events`). A write in an archived
+//! namespace (a create, an update, a delete or a writing operation) is
+//! refused (`namespace_archived`) once the policy has allowed it; reads go
+//! on.
 //!
 //! A write takes its namespace's lock first (the name it was given, or
 //! `default`), then reads the namespaces and resolves its own inside the
@@ -15,12 +16,21 @@
 //! (D58), and asks the policy there: the policy is data, so asking it in
 //! the transaction calls back into no host.
 //!
-//! The behaviors of the live version run with every call (milestone 5):
-//! the write path reaches them at the points `hooks` names, in the
-//! TypeScript engine's order (validate, the create's parameters and the
-//! preconditions, guards, initialize, afterChange, the references' guards
-//! and hooks, the behaviors' fields on every read). `invoke`, `operate` and
-//! `invokeSchema` arrive with the behaviors.
+//! The behaviors of the live version run with every call (`behaviors`): a
+//! create and an update ask their validate about the fields the write
+//! would store once the live version accepts them; a create checks the
+//! parameters it gives them, asks their guards, then runs their initialize,
+//! each with its own parameters, then their afterChange; an update and a
+//! delete ask their guards first, each with its entry of the caller's
+//! preconditions, and run afterChange after. A read adds the fields they
+//! declare beside the instance's own. `invoke` calls one of their
+//! operations: it checks the parameters, asks the policy for write or read
+//! as the operation's declaration says, and runs every guard, then the
+//! handler, in the write transaction for an operation that writes, which
+//! appends an operation event. `invoke_schema` calls a schema-level
+//! operation, which has no instance. Anything that fails rolls the whole
+//! call back. Each call is one chain across every instance its behaviors
+//! reach (`reach`).
 //!
 //! `list` pages through a schema's instances in creation order with an
 //! opaque cursor, each page one indexed range read of at most the page
@@ -39,11 +49,12 @@
 //! so it neither hashes nor rewrites a large value it did not change.
 
 pub(crate) mod filters;
-mod hooks;
 pub mod patch;
+pub(crate) mod reach;
 pub(crate) mod references;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -51,6 +62,12 @@ use serde_json::{Map, Value};
 use superschematic_engine_storage::{Lock, Row, RunResult, SqlValue, Tx};
 
 use crate::access::SchemaAction;
+use crate::behaviors::behavior::{GuardRequest, InstanceChange, ValidationRequest};
+use crate::behaviors::declaration::OperationScope;
+use crate::behaviors::execution::{
+    check_create_params, check_params, check_preconditions, validation_issues, Chain, Execution,
+    Own, Preconditions,
+};
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineErrorCode, Error, Result, ValidationIssue};
 use crate::events::{append_event, next_seq, NewEvent};
@@ -60,12 +77,12 @@ use crate::paging::page_size;
 use crate::principal::{actor_of, check_principal, Principal};
 use crate::registry::document::check_schema_name;
 use crate::registry::{Catalog, NormalizeMode, SchemaRecord, VersionRuntime, Which};
-use crate::values::{refs_of, refs_text, ValueHolder};
+use crate::values::{refs_of, refs_text, Stowed, ValueHolder};
 use filters::{
     filtered_page, lookup_condition, normalized_filter, parse_lookup_key, parse_where, FilterPlan,
 };
-use hooks::{check_create_params, check_preconditions, Chain, Execution, InstanceChange};
 use patch::{diff_patch, merge_patch};
+use reach::{FoundOperation, Reach};
 use references::{moves, ReferenceTable};
 
 pub use filters::{FILTER_SCAN_ROWS, MAX_FILTER_RANGES, MAX_FILTER_VALUES};
@@ -101,8 +118,10 @@ pub struct InstanceRecord {
     pub seq: i64,
     /// The instance's own fields.
     pub data: Map<String, Value>,
-    /// Its behaviors' fields, by behavior name (D16, amended): `{}` until a
-    /// behavior that declares fields composes (milestone 5).
+    /// Its behaviors' fields, by behavior name, in the type's behavior
+    /// order (D16, amended): each an object of the fields the behavior
+    /// declares that have a value. A behavior that declares no field has no
+    /// entry.
     pub behaviors: Map<String, Value>,
     pub created_at: i64,
     pub created_by: String,
@@ -123,6 +142,14 @@ pub struct InstancePage {
     pub next: Option<String>,
 }
 
+/// What an operation returns, with the instance's sequence after it: its
+/// entity tag.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OperationOutcome {
+    pub result: Value,
+    pub seq: i64,
+}
+
 /// What a get or a lookup takes beside the schema and the id or key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GetOptions<'a> {
@@ -140,20 +167,25 @@ pub struct CreateOptions<'a> {
     /// The id; the engine's id source makes one when absent.
     pub id: Option<&'a str>,
     /// The parameters the create gives the type's behaviors, by behavior
-    /// name (milestone 5).
+    /// name, each held to its createParamsSchema and handed to its
+    /// initialize.
     pub behaviors: Option<&'a Value>,
 }
 
-/// What an update or a delete takes beside the schema and the id.
+/// What an update, a delete or an invoke takes beside its other
+/// arguments.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WriteOptions<'a> {
     pub namespace: Option<&'a str>,
-    /// The sequence the caller last read: the write is refused with
+    /// The sequence the caller last read: the call is refused with
     /// `seq_mismatch` unless the instance is still at it, checked inside
-    /// the write's transaction.
+    /// the transaction, before any guard.
     pub expected_seq: Option<i64>,
-    /// Preconditions by behavior, each handed to that behavior's guard
-    /// (milestone 5).
+    /// Preconditions by behavior, such as `{"Lease": {"token": 7}}`: each
+    /// entry names a behavior the type composes that declares a
+    /// preconditionSchema, and holds what that schema accepts, or the call
+    /// is refused (`PreconditionsError`). Each behavior's guard gets its
+    /// own entry.
     pub preconditions: Option<&'a Value>,
 }
 
@@ -172,7 +204,7 @@ pub struct ListOptions<'a> {
     pub filter: Option<&'a Value>,
 }
 
-const COLUMNS: &str = "position, namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs";
+pub(crate) const COLUMNS: &str = "position, namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs";
 
 /// The instance store (`engine.instances`).
 pub struct Instances<'e> {
@@ -181,7 +213,8 @@ pub struct Instances<'e> {
 
 impl Instances<'_> {
     /// Validates `data` against the schema's live version, and the
-    /// behaviors' parameters, and stores the instance under a new id.
+    /// behaviors' parameters, and stores the instance under a new id once
+    /// every guard allows it.
     pub fn create(
         &self,
         principal: &Principal,
@@ -207,16 +240,13 @@ impl Instances<'_> {
             };
             check_id(&id)?;
             let chain = Chain::new(principal, &namespace, engine.clock.now());
-            insert(
+            let reach = Reach {
                 engine,
                 tx,
-                &view,
-                &chain,
-                schema,
-                &id,
-                data,
-                options.behaviors,
-            )
+                view: &view,
+                chain: &chain,
+            };
+            insert(&reach, schema, &id, data, options.behaviors)
         })
     }
 
@@ -230,7 +260,7 @@ impl Instances<'_> {
     ) -> Result<Option<InstanceRecord>> {
         check_principal(principal)?;
         let engine = self.engine;
-        engine.db.read(|tx| {
+        engine.read(|tx| {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = target(
                 engine,
@@ -241,15 +271,25 @@ impl Instances<'_> {
                 options.namespace,
             )?;
             let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(&record)?;
+            let runtime = engine.catalog.runtime_of(tx, &record)?;
             let Some(row) = row(tx, &namespace, schema, id)? else {
                 return Ok(None);
             };
-            // The read's chain, which milestone 5's field readers run in:
-            // its time is read where the TypeScript engine reads it, so a
-            // replayed clock reads the same times.
-            let _chain = Chain::new(principal, &namespace, engine.clock.now());
-            Ok(Some(read(engine, tx, &runtime, &row, options.value_refs)?))
+            let chain = Chain::new(principal, &namespace, engine.clock.now());
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
+            Ok(Some(read_record(
+                &reach,
+                &runtime,
+                &record,
+                &row,
+                None,
+                options.value_refs,
+            )?))
         })
     }
 
@@ -263,7 +303,7 @@ impl Instances<'_> {
     ) -> Result<InstancePage> {
         check_principal(principal)?;
         let engine = self.engine;
-        engine.db.read(|tx| {
+        engine.read(|tx| {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = target(
                 engine,
@@ -279,11 +319,14 @@ impl Instances<'_> {
                 Some(cursor) => decode_cursor(cursor)?,
             };
             let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(&record)?;
-            // The read's chain, which milestone 5's field readers run in:
-            // its time is read where the TypeScript engine reads it, so a
-            // replayed clock reads the same times.
-            let _chain = Chain::new(principal, &namespace, engine.clock.now());
+            let runtime = engine.catalog.runtime_of(tx, &record)?;
+            let chain = Chain::new(principal, &namespace, engine.clock.now());
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
             let filter = normalized_filter(options.filter, |key, value| {
                 runtime.validator.normalize_field(key, value)
             });
@@ -346,7 +389,7 @@ impl Instances<'_> {
             };
             let items = rows
                 .iter()
-                .map(|row| read(engine, tx, &runtime, row, options.value_refs))
+                .map(|row| read_record(&reach, &runtime, &record, row, None, options.value_refs))
                 .collect::<Result<_>>()?;
             Ok(InstancePage { items, next })
         })
@@ -364,7 +407,7 @@ impl Instances<'_> {
     ) -> Result<Option<InstanceRecord>> {
         check_principal(principal)?;
         let engine = self.engine;
-        engine.db.read(|tx| {
+        engine.read(|tx| {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = target(
                 engine,
@@ -375,7 +418,7 @@ impl Instances<'_> {
                 options.namespace,
             )?;
             let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(&record)?;
+            let runtime = engine.catalog.runtime_of(tx, &record)?;
             let key = normalized_filter(Some(key), |name, value| {
                 runtime.validator.normalize_field(name, value)
             })
@@ -394,15 +437,19 @@ impl Instances<'_> {
             let Some(found) = found else {
                 return Ok(None);
             };
-            // The read's chain, which milestone 5's field readers run in:
-            // its time is read where the TypeScript engine reads it, so a
-            // replayed clock reads the same times.
-            let _chain = Chain::new(principal, &namespace, engine.clock.now());
-            Ok(Some(read(
+            let chain = Chain::new(principal, &namespace, engine.clock.now());
+            let reach = Reach {
                 engine,
                 tx,
+                view: &view,
+                chain: &chain,
+            };
+            Ok(Some(read_record(
+                &reach,
                 &runtime,
+                &record,
                 &found,
+                None,
                 options.value_refs,
             )?))
         })
@@ -440,115 +487,21 @@ impl Instances<'_> {
                 .into());
             };
             let chain = Chain::new(principal, &namespace, engine.clock.now());
-            let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(&record)?;
-            let preconditions =
-                check_preconditions(&runtime.composition, schema, options.preconditions)?;
-            let row = existing(tx, &namespace, schema, id)?;
-            match_seq(&row, options.expected_seq)?;
-            let current = own_of(engine, tx, &row)?;
-            // The patch's values as the version stores them; an update
-            // fills no default. The event and the guards get the patch as
-            // stored.
-            let normalized = runtime.validator.normalize(patch, NormalizeMode::Patch);
-            let given = object_of(json::js_copy(&normalized.value));
-            let merged = object_of(merge_patch(
-                &Value::Object(current.clone()),
-                &Value::Object(given.clone()),
-            ));
-            validate(
-                &namespace,
-                &record,
-                &runtime,
-                &Value::Object(merged.clone()),
-                normalized.issues,
-            )?;
-            let execution = Execution::new(&runtime.composition);
-            let change = InstanceChange::Update {
-                patch: &given,
-                before: &current,
-                after: &merged,
-            };
-            validate_behaviors(&chain, &record, &execution, &change)?;
-            if js_equal(
-                &Value::Object(merged.clone()),
-                &Value::Object(current.clone()),
-            ) {
-                return read(engine, tx, &runtime, &row, false);
-            }
-            execution.guard(&change, true, preconditions.as_ref())?;
-            let before = execution.fields();
-            let seq = row.i64("seq")? + 1;
-            write_own(
+            let reach = Reach {
                 engine,
                 tx,
-                &runtime,
-                &namespace,
-                schema,
-                id,
-                &merged,
-                &given.keys().cloned().collect(),
-            )?;
-            tx.run(
-                "UPDATE engine_instances
-           SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
-           WHERE namespace = ? AND schema = ? AND id = ?",
-                &[
-                    SqlValue::from(record.version),
-                    SqlValue::from(record.namespace.as_str()),
-                    SqlValue::Integer(seq),
-                    SqlValue::Integer(chain.now),
-                    SqlValue::from(principal.subject.as_str()),
-                    SqlValue::from(namespace.as_str()),
-                    SqlValue::from(schema),
-                    SqlValue::from(id),
-                ],
-            )?;
-            execution.after_change(&change)?;
-            let after = execution.fields();
-            let logged = engine.values.stow_change(
-                tx,
-                "",
-                Some(&given),
-                Some(&diff_patch(&before, &after)),
-                false,
-                &BTreeSet::new(),
-            )?;
-            append_event(
-                tx,
-                &NewEvent {
-                    kind: "update",
-                    namespace: &namespace,
-                    schema,
-                    instance_id: Some(id),
-                    seq: Some(seq),
-                    version: record.version,
-                    actor: &actor_of(principal),
-                    at: chain.now,
-                    change: Some(json::stringify(&Value::Object(logged.value.clone()))),
-                    cause: chain.cause.as_ref(),
-                    values: Some((&engine.values, &logged)),
-                },
-            )?;
-            let updated = to_instance(
-                &existing(tx, &namespace, schema, id)?,
-                merged.clone(),
-                after.clone(),
-            )?;
-            let mut was = Map::new();
-            was.insert("data".into(), Value::Object(current.clone()));
-            was.insert("behaviors".into(), Value::Object(before));
-            let mut now = Map::new();
-            now.insert("data".into(), Value::Object(merged.clone()));
-            now.insert("behaviors".into(), Value::Object(after));
-            execution.referenced(&change, &moves(&Value::Object(was), &Value::Object(now)))?;
-            Ok(updated)
+                view: &view,
+                chain: &chain,
+            };
+            chain.write(schema, id, || update(&reach, schema, id, patch, options))
         })
     }
 
     /// Removes an instance and appends its delete event; false when there
     /// is none. With an expected sequence, the instance must still be at
-    /// it. The references its behaviors recorded go with it.
+    /// it. The references its behaviors recorded go with it; a reference to
+    /// it that a referencing behavior's hook leaves behind refuses the
+    /// delete.
     pub fn delete(
         &self,
         principal: &Principal,
@@ -570,51 +523,594 @@ impl Instances<'_> {
             )?;
             check_expected_seq(options.expected_seq)?;
             let chain = Chain::new(principal, &namespace, engine.clock.now());
-            let record = live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(&record)?;
-            let preconditions =
-                check_preconditions(&runtime.composition, schema, options.preconditions)?;
-            let Some(row) = row(tx, &namespace, schema, id)? else {
-                return Ok(false);
-            };
-            match_seq(&row, options.expected_seq)?;
-            let execution = Execution::new(&runtime.composition);
-            let change = InstanceChange::Delete;
-            execution.guard(&change, true, preconditions.as_ref())?;
-            execution.deleting()?;
-            tx.run(
-                "DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?",
-                &[
-                    SqlValue::from(namespace.as_str()),
-                    SqlValue::from(schema),
-                    SqlValue::from(id),
-                ],
-            )?;
-            execution.after_change(&change)?;
-            ReferenceTable::drop_source(tx, &namespace, schema, id)?;
-            engine
-                .values
-                .release(tx, &namespace, schema, "instance", id, Some(""))?;
-            append_event(
+            let reach = Reach {
+                engine,
                 tx,
-                &NewEvent {
-                    kind: "delete",
-                    namespace: &namespace,
-                    schema,
-                    instance_id: Some(id),
-                    seq: Some(row.i64("seq")? + 1),
-                    version: Some(row.i64("version")?),
-                    actor: &actor_of(principal),
-                    at: chain.now,
-                    change: None,
-                    cause: chain.cause.as_ref(),
-                    values: None,
-                },
-            )?;
-            execution.referenced(&change, &[])?;
-            Ok(true)
+                view: &view,
+                chain: &chain,
+            };
+            chain.write(schema, id, || delete(&reach, schema, id, options))
         })
     }
+
+    /// Calls a behavior operation on an instance and returns its result.
+    /// It asks the policy for write when the operation's declaration says
+    /// it writes, and read otherwise, with the operation's name; an
+    /// operation that writes runs in a transaction and appends an operation
+    /// event, which moves the instance's seq, unless the handler says it
+    /// changed nothing (`unchanged()`) and wrote no row. A schema or
+    /// operation the namespace does not have is `not_found` to a principal
+    /// that may read the schema, and `forbidden` to one that may not; so is
+    /// a schema-level operation, which [`Instances::invoke_schema`] calls.
+    pub fn invoke(
+        &self,
+        principal: &Principal,
+        schema: &str,
+        id: &str,
+        operation: &str,
+        params: &Value,
+        options: WriteOptions<'_>,
+    ) -> Result<Value> {
+        Ok(self
+            .operate(principal, schema, id, operation, params, options)?
+            .result)
+    }
+
+    /// [`Instances::invoke`], returning the result with the instance's
+    /// sequence after the call: the next one for an operation that writes,
+    /// the one it read for one that does not or a call that changed
+    /// nothing.
+    pub fn operate(
+        &self,
+        principal: &Principal,
+        schema: &str,
+        id: &str,
+        operation: &str,
+        params: &Value,
+        options: WriteOptions<'_>,
+    ) -> Result<OperationOutcome> {
+        check_principal(principal)?;
+        let engine = self.engine;
+        // A read-only operation runs in a read; a writing one in a write
+        // of its namespace, found again there.
+        let read = engine.read(|tx| {
+            let view = NamespaceView::load(&engine.namespaces, tx)?;
+            let namespace = view.resolve(options.namespace)?;
+            check_schema_name(schema)?;
+            let chain = Chain::new(principal, &namespace, 0);
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
+            let found = reach.find_operation(schema, operation, OperationScope::Instance)?;
+            if found.spec().writes {
+                return Ok(None);
+            }
+            Ok(Some(start_operation(
+                &reach, &namespace, principal, &found, id, params, options,
+            )?))
+        })?;
+        if let Some(outcome) = read {
+            return Ok(outcome);
+        }
+        engine.write(lock_of(options.namespace), |tx| {
+            let view = NamespaceView::load(&engine.namespaces, tx)?;
+            let namespace = view.resolve(options.namespace)?;
+            let chain = Chain::new(principal, &namespace, 0);
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
+            let found = reach.find_operation(schema, operation, OperationScope::Instance)?;
+            start_operation(&reach, &namespace, principal, &found, id, params, options)
+        })
+    }
+
+    /// Calls a schema-level operation, which has no instance, and returns
+    /// its result. It asks the policy as invoke does, runs the handler in a
+    /// transaction when the operation writes, and appends no event: what it
+    /// changes, it changes through the operations it invokes, whose events
+    /// record it.
+    pub fn invoke_schema(
+        &self,
+        principal: &Principal,
+        schema: &str,
+        operation: &str,
+        params: &Value,
+        target_namespace: Option<&str>,
+    ) -> Result<Value> {
+        check_principal(principal)?;
+        let engine = self.engine;
+        let read = engine.read(|tx| {
+            let view = NamespaceView::load(&engine.namespaces, tx)?;
+            let namespace = view.resolve(target_namespace)?;
+            check_schema_name(schema)?;
+            let chain = Chain::new(principal, &namespace, 0);
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
+            let found = reach.find_operation(schema, operation, OperationScope::Schema)?;
+            if found.spec().writes {
+                return Ok(None);
+            }
+            start_schema_operation(&reach, &namespace, principal, &found, params).map(Some)
+        })?;
+        if let Some(result) = read {
+            return Ok(result);
+        }
+        engine.write(lock_of(target_namespace), |tx| {
+            let view = NamespaceView::load(&engine.namespaces, tx)?;
+            let namespace = view.resolve(target_namespace)?;
+            let chain = Chain::new(principal, &namespace, 0);
+            let reach = Reach {
+                engine,
+                tx,
+                view: &view,
+                chain: &chain,
+            };
+            let found = reach.find_operation(schema, operation, OperationScope::Schema)?;
+            start_schema_operation(&reach, &namespace, principal, &found, params)
+        })
+    }
+}
+
+// start_operation runs an instance operation a caller invokes, once found:
+// the policy, an archived namespace, the expected sequence, the parameters
+// and preconditions, then the operation, on the chain of the call (its
+// clock read here).
+fn start_operation(
+    probe: &Reach<'_, '_>,
+    namespace: &str,
+    principal: &Principal,
+    found: &FoundOperation,
+    id: &str,
+    params: &Value,
+    options: WriteOptions<'_>,
+) -> Result<OperationOutcome> {
+    let engine = probe.engine;
+    let spec = found.spec();
+    let schema = found.record.name.as_str();
+    engine.access.require_operation(
+        principal,
+        if spec.writes {
+            SchemaAction::Write
+        } else {
+            SchemaAction::Read
+        },
+        namespace,
+        schema,
+        Some(&spec.name),
+    )?;
+    if spec.writes {
+        probe.view.require_writable(namespace)?;
+    }
+    check_expected_seq(options.expected_seq)?;
+    let checked = check_params(&found.bound().behavior, spec, params)?;
+    let preconditions =
+        check_preconditions(&found.runtime.composition, schema, options.preconditions)?;
+    let chain = Chain::new(principal, namespace, engine.clock.now());
+    let reach = Reach {
+        engine,
+        tx: probe.tx,
+        view: probe.view,
+        chain: &chain,
+    };
+    if !spec.writes {
+        let row = existing(reach.tx, namespace, schema, id)?;
+        match_seq(&row, options.expected_seq)?;
+        let execution = Execution::new(
+            reach,
+            Arc::clone(&found.runtime),
+            schema,
+            found.record.version.unwrap_or_default(),
+            id,
+            Own::Row(row.clone()),
+            false,
+        );
+        let result =
+            execution.invoke(found.bound(), spec, &checked, None, preconditions.as_ref())?;
+        return Ok(OperationOutcome {
+            result,
+            seq: row.i64("seq")?,
+        });
+    }
+    let (result, seq) = run_operation(
+        &reach,
+        found,
+        id,
+        &checked,
+        options.expected_seq,
+        preconditions.as_ref(),
+    )?;
+    Ok(OperationOutcome { result, seq })
+}
+
+// start_schema_operation runs a schema-level operation a caller invokes,
+// once found.
+fn start_schema_operation(
+    probe: &Reach<'_, '_>,
+    namespace: &str,
+    principal: &Principal,
+    found: &FoundOperation,
+    params: &Value,
+) -> Result<Value> {
+    let engine = probe.engine;
+    let spec = found.spec();
+    engine.access.require_operation(
+        principal,
+        if spec.writes {
+            SchemaAction::Write
+        } else {
+            SchemaAction::Read
+        },
+        namespace,
+        &found.record.name,
+        Some(&spec.name),
+    )?;
+    if spec.writes {
+        probe.view.require_writable(namespace)?;
+    }
+    let checked = check_params(&found.bound().behavior, spec, params)?;
+    let chain = Chain::new(principal, namespace, engine.clock.now());
+    let reach = Reach {
+        engine,
+        tx: probe.tx,
+        view: probe.view,
+        chain: &chain,
+    };
+    reach.run_schema_operation(found, &checked)
+}
+
+/// Runs a writing operation on an instance inside the call's transaction:
+/// every guard, the handler, each afterChange, the next seq and the
+/// operation event, then the hooks of the behaviors that refer to the
+/// instance. The result, with the instance's sequence after it.
+pub(crate) fn run_operation(
+    reach: &Reach<'_, '_>,
+    found: &FoundOperation,
+    id: &str,
+    checked: &Value,
+    expected_seq: Option<i64>,
+    preconditions: Option<&Preconditions>,
+) -> Result<(Value, i64)> {
+    let chain = reach.chain;
+    let namespace = chain.namespace.as_str();
+    let record = &found.record;
+    let schema = record.name.as_str();
+    let spec = found.spec();
+    let bound = found.bound();
+    chain.write(schema, id, || {
+        let row = existing(reach.tx, namespace, schema, id)?;
+        match_seq(&row, expected_seq)?;
+        // The own fields load only when a behavior reads them, so an
+        // operation that changes only its columns loads no large value.
+        let execution = Execution::new(
+            *reach,
+            Arc::clone(&found.runtime),
+            schema,
+            record.version.unwrap_or_default(),
+            id,
+            Own::Row(row.clone()),
+            true,
+        );
+        let before = execution.fields(None)?;
+        let (result, unchanged) =
+            execution.operate(bound, spec, checked, None, preconditions)?;
+        // A call that says it changed nothing, and wrote nothing, writes
+        // nothing more: no afterChange, no seq, no event, no hook.
+        if unchanged {
+            return Ok((result, row.i64("seq")?));
+        }
+        let own = execution.own_before()?;
+        let own_after = match &own {
+            Some(_) => Some(execution.data()?),
+            None => None,
+        };
+        let change = InstanceChange::Operation {
+            behavior: &bound.behavior.name,
+            operation: &spec.name,
+            params: checked,
+            before: own.as_deref(),
+        };
+        execution.after_change(&change)?;
+        let after = execution.fields(None)?;
+        let seq = row.i64("seq")? + 1;
+        reach.tx.run(
+            "UPDATE engine_instances SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
+         WHERE namespace = ? AND schema = ? AND id = ?",
+            &[
+                SqlValue::from(record.version),
+                SqlValue::from(record.namespace.as_str()),
+                SqlValue::Integer(seq),
+                SqlValue::Integer(chain.now),
+                SqlValue::from(chain.principal.subject.as_str()),
+                SqlValue::from(namespace),
+                SqlValue::from(schema),
+                SqlValue::from(id),
+            ],
+        )?;
+        let values = &reach.engine.values;
+        let params = values.stow(
+            reach.tx,
+            &object_of(checked.clone()),
+            "/params",
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )?;
+        let own_patch = match (&own, &own_after) {
+            (Some(own), Some(own_after)) => Some(diff_patch(own, own_after)),
+            _ => None,
+        };
+        let patch = values.stow_change(
+            reach.tx,
+            "/patch",
+            own_patch.as_ref(),
+            Some(&diff_patch(&before, &after)),
+            false,
+            &BTreeSet::new(),
+        )?;
+        let mut base = Map::new();
+        base.insert("behavior".into(), Value::from(bound.behavior.name.as_str()));
+        base.insert("operation".into(), Value::from(spec.name.as_str()));
+        let logged = Stowed::join(
+            base,
+            vec![("params".to_owned(), params), ("patch".to_owned(), patch)],
+        );
+        append_event(
+            reach.tx,
+            &NewEvent {
+                kind: "operation",
+                namespace,
+                schema,
+                instance_id: Some(id),
+                seq: Some(seq),
+                version: record.version,
+                actor: &actor_of(&chain.principal),
+                at: chain.now,
+                change: Some(json::stringify(&Value::Object(logged.value.clone()))),
+                cause: chain.cause.as_ref(),
+                values: Some((values, &logged)),
+            },
+        )?;
+        let moved = match (&own, &own_after) {
+            (Some(own), Some(own_after)) => moves(
+                &record_fields(Some((**own).clone()), before),
+                &record_fields(Some((**own_after).clone()), after),
+            ),
+            _ => moves(&record_fields(None, before), &record_fields(None, after)),
+        };
+        reach.referenced(schema, id, &change, &moved)?;
+        Ok((result, seq))
+    })
+}
+
+// record_fields is what a read returns of an instance, { data, behaviors },
+// or only its behaviors when its own fields did not change.
+fn record_fields(data: Option<Map<String, Value>>, behaviors: Map<String, Value>) -> Value {
+    let mut out = Map::new();
+    if let Some(data) = data {
+        out.insert("data".into(), Value::Object(data));
+    }
+    out.insert("behaviors".into(), Value::Object(behaviors));
+    Value::Object(out)
+}
+
+// update applies a caller's merge patch inside the call's transaction.
+fn update(
+    reach: &Reach<'_, '_>,
+    schema: &str,
+    id: &str,
+    patch: &Value,
+    options: WriteOptions<'_>,
+) -> Result<InstanceRecord> {
+    let engine = reach.engine;
+    let tx = reach.tx;
+    let chain = reach.chain;
+    let namespace = chain.namespace.as_str();
+    let record = reach.live(schema)?;
+    let runtime = reach.runtime(&record)?;
+    let version = record.version.unwrap_or_default();
+    let preconditions = check_preconditions(&runtime.composition, schema, options.preconditions)?;
+    let row = existing(tx, namespace, schema, id)?;
+    match_seq(&row, options.expected_seq)?;
+    let current = own_of(engine, tx, &row)?;
+    // The patch's values as the version stores them; an update fills no
+    // default. The event and the guards get the patch as stored.
+    let normalized = runtime.validator.normalize(patch, NormalizeMode::Patch);
+    let given = object_of(json::js_copy(&normalized.value));
+    let merged = object_of(merge_patch(
+        &Value::Object(current.clone()),
+        &Value::Object(given.clone()),
+    ));
+    validate(
+        namespace,
+        &record,
+        &runtime,
+        &Value::Object(merged.clone()),
+        normalized.issues,
+    )?;
+    validate_behaviors(
+        reach,
+        &record,
+        &runtime,
+        id,
+        &ValidationRequest::Update {
+            before: &current,
+            after: &merged,
+            caller: None,
+        },
+    )?;
+    if js_equal(
+        &Value::Object(merged.clone()),
+        &Value::Object(current.clone()),
+    ) {
+        return read_record(reach, &runtime, &record, &row, None, false);
+    }
+    let execution = Execution::new(
+        *reach,
+        Arc::clone(&runtime),
+        schema,
+        version,
+        id,
+        Own::Loaded(current.clone()),
+        true,
+    );
+    execution.guard(
+        &GuardRequest::Update {
+            patch: &given,
+            after: &merged,
+            caller: None,
+            precondition: None,
+        },
+        true,
+        preconditions.as_ref(),
+    )?;
+    let before = execution.fields(None)?;
+    let seq = row.i64("seq")? + 1;
+    write_own(
+        engine,
+        tx,
+        &runtime,
+        namespace,
+        schema,
+        id,
+        &merged,
+        &given.keys().cloned().collect(),
+    )?;
+    tx.run(
+        "UPDATE engine_instances
+           SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
+           WHERE namespace = ? AND schema = ? AND id = ?",
+        &[
+            SqlValue::from(record.version),
+            SqlValue::from(record.namespace.as_str()),
+            SqlValue::Integer(seq),
+            SqlValue::Integer(chain.now),
+            SqlValue::from(chain.principal.subject.as_str()),
+            SqlValue::from(namespace),
+            SqlValue::from(schema),
+            SqlValue::from(id),
+        ],
+    )?;
+    execution.set_data(merged.clone());
+    let change = InstanceChange::Update {
+        patch: &given,
+        before: &current,
+    };
+    execution.after_change(&change)?;
+    let after = execution.fields(None)?;
+    let logged = engine.values.stow_change(
+        tx,
+        "",
+        Some(&given),
+        Some(&diff_patch(&before, &after)),
+        false,
+        &BTreeSet::new(),
+    )?;
+    append_event(
+        tx,
+        &NewEvent {
+            kind: "update",
+            namespace,
+            schema,
+            instance_id: Some(id),
+            seq: Some(seq),
+            version: record.version,
+            actor: &actor_of(&chain.principal),
+            at: chain.now,
+            change: Some(json::stringify(&Value::Object(logged.value.clone()))),
+            cause: chain.cause.as_ref(),
+            values: Some((&engine.values, &logged)),
+        },
+    )?;
+    let updated = to_instance(
+        &existing(tx, namespace, schema, id)?,
+        merged.clone(),
+        after.clone(),
+    )?;
+    reach.referenced(
+        schema,
+        id,
+        &change,
+        &moves(
+            &record_fields(Some(current.clone()), before),
+            &record_fields(Some(merged), after),
+        ),
+    )?;
+    Ok(updated)
+}
+
+// delete removes an instance inside the call's transaction.
+fn delete(
+    reach: &Reach<'_, '_>,
+    schema: &str,
+    id: &str,
+    options: WriteOptions<'_>,
+) -> Result<bool> {
+    let engine = reach.engine;
+    let tx = reach.tx;
+    let chain = reach.chain;
+    let namespace = chain.namespace.as_str();
+    let record = reach.live(schema)?;
+    let runtime = reach.runtime(&record)?;
+    let preconditions = check_preconditions(&runtime.composition, schema, options.preconditions)?;
+    let Some(row) = row(tx, namespace, schema, id)? else {
+        return Ok(false);
+    };
+    match_seq(&row, options.expected_seq)?;
+    let execution = Execution::new(
+        *reach,
+        Arc::clone(&runtime),
+        schema,
+        record.version.unwrap_or_default(),
+        id,
+        Own::Row(row.clone()),
+        true,
+    );
+    execution.guard(
+        &GuardRequest::Delete { precondition: None },
+        true,
+        preconditions.as_ref(),
+    )?;
+    execution.deleting()?;
+    tx.run(
+        "DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?",
+        &[
+            SqlValue::from(namespace),
+            SqlValue::from(schema),
+            SqlValue::from(id),
+        ],
+    )?;
+    execution.after_change(&InstanceChange::Delete)?;
+    ReferenceTable::drop_source(tx, namespace, schema, id)?;
+    engine
+        .values
+        .release(tx, namespace, schema, "instance", id, Some(""))?;
+    append_event(
+        tx,
+        &NewEvent {
+            kind: "delete",
+            namespace,
+            schema,
+            instance_id: Some(id),
+            seq: Some(row.i64("seq")? + 1),
+            version: Some(row.i64("version")?),
+            actor: &actor_of(&chain.principal),
+            at: chain.now,
+            change: None,
+            cause: chain.cause.as_ref(),
+            values: None,
+        },
+    )?;
+    reach.referenced(schema, id, &InstanceChange::Delete, &[])?;
+    Ok(true)
 }
 
 // lock_of is the lock a write in a namespace takes: the namespace's, by the
@@ -644,7 +1140,7 @@ fn target(
     Ok(namespace)
 }
 
-fn live(
+pub(crate) fn live(
     catalog: &Catalog,
     tx: &Tx<'_>,
     view: &NamespaceView<'_>,
@@ -665,116 +1161,126 @@ fn live(
 // insert creates an instance in the chain's namespace inside the chain's
 // transaction: validate the data against the live version, then the
 // behaviors' validate, and the behaviors' parameters; insert; every guard,
-// every initialize, every afterChange; then the create event. The policy
-// has been asked.
-#[allow(clippy::too_many_arguments)]
-fn insert(
-    engine: &Engine,
-    tx: &Tx<'_>,
-    view: &NamespaceView<'_>,
-    chain: &Chain<'_>,
+// every initialize, every afterChange; then the create event, which records
+// the chain's cause. The policy has been asked.
+pub(crate) fn insert(
+    reach: &Reach<'_, '_>,
     schema: &str,
     id: &str,
     data: &Value,
     behaviors: Option<&Value>,
 ) -> Result<InstanceRecord> {
-    let namespace = chain.namespace.as_str();
-    let subject = chain.principal.subject.as_str();
-    let record = live(&engine.catalog, tx, view, namespace, schema)?;
-    let runtime = engine.catalog.runtime_of(&record)?;
-    // What the create stores: each value as its scalar's parse makes it,
-    // each absent field's default filled.
-    let normalized = runtime.validator.normalize(data, NormalizeMode::Create);
-    validate(
-        namespace,
-        &record,
-        &runtime,
-        &normalized.value,
-        normalized.issues,
-    )?;
-    let own = object_of(json::js_copy(&normalized.value));
-    let execution = Execution::new(&runtime.composition);
-    validate_behaviors(
-        chain,
-        &record,
-        &execution,
-        &InstanceChange::Create {
-            data: &own,
-            params: &Map::new(),
-        },
-    )?;
-    let params = check_create_params(&runtime.composition, schema, behaviors)?;
-    let seq = next_seq(tx, namespace, schema, id)?;
-    let stowed = engine
-        .values
-        .stow(tx, &own, "", &BTreeSet::new(), &runtime.inline)?;
-    let inserted = unique(namespace, schema, &runtime, &own, tx.run(
-        "INSERT INTO engine_instances
+    let engine = reach.engine;
+    let tx = reach.tx;
+    let chain = reach.chain;
+    chain.write(schema, id, || {
+        let namespace = chain.namespace.as_str();
+        let subject = chain.principal.subject.as_str();
+        let record = reach.live(schema)?;
+        let runtime = reach.runtime(&record)?;
+        // What the create stores: each value as its scalar's parse makes it,
+        // each absent field's default filled.
+        let normalized = runtime.validator.normalize(data, NormalizeMode::Create);
+        validate(
+            namespace,
+            &record,
+            &runtime,
+            &normalized.value,
+            normalized.issues,
+        )?;
+        let own = object_of(json::js_copy(&normalized.value));
+        validate_behaviors(
+            reach,
+            &record,
+            &runtime,
+            id,
+            &ValidationRequest::Create { data: &own },
+        )?;
+        let params = check_create_params(&runtime.composition, schema, behaviors)?;
+        let seq = next_seq(tx, namespace, schema, id)?;
+        let stowed = engine
+            .values
+            .stow(tx, &own, "", &BTreeSet::new(), &runtime.inline)?;
+        let inserted = unique(namespace, schema, &runtime, &own, tx.run(
+            "INSERT INTO engine_instances
            (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (namespace, schema, id) DO NOTHING",
-        &[
-            SqlValue::from(namespace),
-            SqlValue::from(schema),
-            SqlValue::from(id),
-            SqlValue::from(record.namespace.as_str()),
-            SqlValue::from(record.version),
-            SqlValue::Integer(seq),
-            SqlValue::from(json::stringify(&Value::Object(stowed.value.clone()))),
-            SqlValue::Integer(chain.now),
-            SqlValue::from(subject),
-            SqlValue::Integer(chain.now),
-            SqlValue::from(subject),
-            SqlValue::from(refs_text(&stowed.refs)),
-        ],
-    ))?;
-    if inserted.changes == 0 {
-        return Err(EngineError::new(
-            EngineErrorCode::Conflict,
-            format!("{schema} {id} already exists in namespace {namespace}"),
-        )
-        .into());
-    }
-    if !stowed.hashes.is_empty() {
-        engine
-            .values
-            .hold(tx, &row_holder(namespace, schema, id), &stowed.hashes)?;
-    }
-    let change = InstanceChange::Create {
-        data: &own,
-        params: &params,
-    };
-    // Nothing refers to a new instance, so no reference's guard is asked.
-    execution.guard(&change, false, None)?;
-    execution.initialize(&params)?;
-    execution.after_change(&change)?;
-    let fields = execution.fields();
-    let instance = to_instance(&existing(tx, namespace, schema, id)?, own, fields.clone())?;
-    // The event's instance is what a read returns, { data, behaviors }: its
-    // own fields keep the row's refs, and a large field of a behavior's
-    // goes to the store as an own field does.
-    let known: BTreeSet<String> = stowed.refs.iter().map(|at| format!("/data{at}")).collect();
-    let logged =
-        engine
-            .values
-            .stow_change(tx, "", Some(&stowed.value), Some(&fields), true, &known)?;
-    append_event(
-        tx,
-        &NewEvent {
-            kind: "create",
-            namespace,
+            &[
+                SqlValue::from(namespace),
+                SqlValue::from(schema),
+                SqlValue::from(id),
+                SqlValue::from(record.namespace.as_str()),
+                SqlValue::from(record.version),
+                SqlValue::Integer(seq),
+                SqlValue::from(json::stringify(&Value::Object(stowed.value.clone()))),
+                SqlValue::Integer(chain.now),
+                SqlValue::from(subject),
+                SqlValue::Integer(chain.now),
+                SqlValue::from(subject),
+                SqlValue::from(refs_text(&stowed.refs)),
+            ],
+        ))?;
+        if inserted.changes == 0 {
+            return Err(EngineError::new(
+                EngineErrorCode::Conflict,
+                format!("{schema} {id} already exists in namespace {namespace}"),
+            )
+            .into());
+        }
+        if !stowed.hashes.is_empty() {
+            engine
+                .values
+                .hold(tx, &row_holder(namespace, schema, id), &stowed.hashes)?;
+        }
+        let execution = Execution::new(
+            *reach,
+            Arc::clone(&runtime),
             schema,
-            instance_id: Some(id),
-            seq: Some(seq),
-            version: record.version,
-            actor: &actor_of(chain.principal),
-            at: chain.now,
-            change: Some(json::stringify(&Value::Object(logged.value.clone()))),
-            cause: chain.cause.as_ref(),
-            values: Some((&engine.values, &logged)),
-        },
-    )?;
-    Ok(instance)
+            record.version.unwrap_or_default(),
+            id,
+            Own::Loaded(own.clone()),
+            true,
+        );
+        // Nothing refers to a new instance, so no guardReference is asked.
+        execution.guard(
+            &GuardRequest::Create {
+                data: &own,
+                behaviors: &params,
+            },
+            false,
+            None,
+        )?;
+        execution.initialize(&params)?;
+        execution.after_change(&InstanceChange::Create)?;
+        let fields = execution.fields(None)?;
+        let instance = to_instance(&existing(tx, namespace, schema, id)?, own, fields.clone())?;
+        // The event's instance is what a read returns, { data, behaviors }:
+        // its own fields keep the row's refs, and a large field of a
+        // behavior's goes to the store as an own field does.
+        let known: BTreeSet<String> = stowed.refs.iter().map(|at| format!("/data{at}")).collect();
+        let logged =
+            engine
+                .values
+                .stow_change(tx, "", Some(&stowed.value), Some(&fields), true, &known)?;
+        append_event(
+            tx,
+            &NewEvent {
+                kind: "create",
+                namespace,
+                schema,
+                instance_id: Some(id),
+                seq: Some(seq),
+                version: record.version,
+                actor: &actor_of(&chain.principal),
+                at: chain.now,
+                change: Some(json::stringify(&Value::Object(logged.value.clone()))),
+                cause: chain.cause.as_ref(),
+                values: Some((&engine.values, &logged)),
+            },
+        )?;
+        Ok(instance)
+    })
 }
 
 // validate refuses what the live version refuses in data, or, when it
@@ -804,40 +1310,54 @@ fn validate(
 // write would store, which the live version accepts; their issues refuse
 // the write as the live version's do.
 fn validate_behaviors(
-    chain: &Chain<'_>,
+    reach: &Reach<'_, '_>,
     record: &SchemaRecord,
-    execution: &Execution<'_>,
-    change: &InstanceChange<'_>,
+    runtime: &Arc<VersionRuntime>,
+    id: &str,
+    request: &ValidationRequest<'_>,
 ) -> Result<()> {
-    let issues = execution.validation_issues(change);
+    let version = record.version.unwrap_or_default();
+    let issues = validation_issues(reach, runtime, &record.name, version, id, request)?;
     if issues.is_empty() {
         return Ok(());
     }
-    Err(EngineError::instance_validation(
-        &chain.namespace,
-        &record.name,
-        record.version.unwrap_or_default(),
-        issues,
+    Err(
+        EngineError::instance_validation(&reach.chain.namespace, &record.name, version, issues)
+            .into(),
     )
-    .into())
 }
 
-// read returns a stored instance with its behaviors' fields. Its own
-// fields have their values back, or with value_refs the refs.
-fn read(
-    engine: &Engine,
-    tx: &Tx<'_>,
-    runtime: &VersionRuntime,
+/// A stored instance with its behaviors' fields: every one, or the ones
+/// named. Its own fields have their values back, or with `value_refs` the
+/// refs.
+pub(crate) fn read_record(
+    reach: &Reach<'_, '_>,
+    runtime: &Arc<VersionRuntime>,
+    record: &SchemaRecord,
     row: &Row,
+    fields: Option<&[&str]>,
     value_refs: bool,
 ) -> Result<InstanceRecord> {
     let own = if value_refs {
         object_of(parse(row.text("data")?)?)
     } else {
-        own_of(engine, tx, row)?
+        own_of(reach.engine, reach.tx, row)?
     };
-    let fields = Execution::new(&runtime.composition).fields();
-    let mut instance = to_instance(row, own, fields)?;
+    let behaviors = if !runtime.composition.has_fields() || fields.is_some_and(<[&str]>::is_empty) {
+        Map::new()
+    } else {
+        Execution::new(
+            *reach,
+            Arc::clone(runtime),
+            &record.name,
+            record.version.unwrap_or_default(),
+            row.text("id")?,
+            Own::Row(row.clone()),
+            false,
+        )
+        .fields(fields)?
+    };
+    let mut instance = to_instance(row, own, behaviors)?;
     if value_refs {
         let refs = refs_of(row.opt_text("value_refs")?)?;
         if !refs.is_empty() {
@@ -847,8 +1367,8 @@ fn read(
     Ok(instance)
 }
 
-// own_of is a row's own fields with their values back.
-fn own_of(engine: &Engine, tx: &Tx<'_>, row: &Row) -> Result<Map<String, Value>> {
+/// A row's own fields with their values back.
+pub(crate) fn own_of(engine: &Engine, tx: &Tx<'_>, row: &Row) -> Result<Map<String, Value>> {
     let stored = parse(row.text("data")?)?;
     let refs = refs_of(row.opt_text("value_refs")?)?;
     Ok(object_of(engine.values.fill(tx, &stored, &refs)?))
@@ -859,7 +1379,7 @@ fn own_of(engine: &Engine, tx: &Tx<'_>, row: &Row) -> Result<Map<String, Value>>
 // keeps the ref the row holds, so it is neither hashed nor written again.
 // A unique index the new values break refuses the write.
 #[allow(clippy::too_many_arguments)]
-fn write_own(
+pub(crate) fn write_own(
     engine: &Engine,
     tx: &Tx<'_>,
     runtime: &VersionRuntime,
@@ -957,7 +1477,7 @@ fn unique(
     }
 }
 
-fn row(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Option<Row>> {
+pub(crate) fn row(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Option<Row>> {
     Ok(tx.get(
         format!(
             "SELECT {COLUMNS} FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?"
@@ -970,7 +1490,7 @@ fn row(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Option<Ro
     )?)
 }
 
-fn existing(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Row> {
+pub(crate) fn existing(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Row> {
     row(tx, namespace, schema, id)?.ok_or_else(|| not_found(namespace, schema, id).into())
 }
 
@@ -1070,7 +1590,7 @@ fn match_seq(row: &Row, expected: Option<i64>) -> Result<()> {
     Ok(())
 }
 
-fn check_id(id: &str) -> Result<(), EngineError> {
+pub(crate) fn check_id(id: &str) -> Result<(), EngineError> {
     if is_instance_id(id) {
         return Ok(());
     }

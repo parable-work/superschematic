@@ -17,7 +17,8 @@
 //! thread that makes it.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,7 +28,7 @@ use superschematic_engine_storage::{engine_migrations, Db, Dialect, Lock, Sql, T
 use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
 use crate::access::{Access, DottedPermissions, PermissionMatcher, Policy};
-use crate::composition::BehaviorRegistry;
+use crate::behaviors::{BehaviorSet, Behaviors};
 use crate::errors::{Error, Result};
 use crate::events::Events;
 use crate::indexes::{clash_message, own_indexes, sync_own_indexes};
@@ -223,6 +224,11 @@ pub struct EngineOptions {
     /// The value store: its threshold, its driver, its cache and the
     /// longest value it keeps (D58: the driver is config).
     pub values: ValueOptions,
+    /// The behavior implementations this engine runs, registered when it
+    /// opens in order (D58: a value the project's build assembles);
+    /// `engine.behaviors().register` adds more later. A schema that
+    /// composes a behavior without one is refused.
+    pub behaviors: BehaviorSet,
 }
 
 impl std::fmt::Debug for EngineOptions {
@@ -234,6 +240,7 @@ impl std::fmt::Debug for EngineOptions {
             .field("ids", &self.ids)
             .field("clock", &self.clock)
             .field("values", &self.values)
+            .field("behaviors", &self.behaviors)
             .finish_non_exhaustive()
     }
 }
@@ -251,6 +258,7 @@ impl EngineOptions {
             clock: Clock::default(),
             meta_schema: None,
             values: ValueOptions::default(),
+            behaviors: BehaviorSet::default(),
         }
     }
 
@@ -391,12 +399,16 @@ pub struct Engine {
     pub(crate) db: Db,
     pub(crate) namespaces: NamespaceConfig,
     pub(crate) access: Access,
-    #[allow(dead_code)] // a behavior's can() asks it (milestone 5)
+    /// Answers a behavior's `can()` and a rule's required permission.
     pub(crate) matcher: Arc<dyn PermissionMatcher>,
     pub(crate) clock: EngineClock,
     pub(crate) catalog: Catalog,
     pub(crate) values: Arc<ValueStore>,
     ids: IdSource,
+    /// Set when a panic escaped the engine's own code while a transaction
+    /// was held: the engine refuses every later call, so its host fails
+    /// its readiness (D58).
+    poisoned: AtomicBool,
 }
 
 impl std::fmt::Debug for Engine {
@@ -413,10 +425,6 @@ impl Engine {
     /// engine's migrations. A bad option is refused before the storage
     /// opens.
     pub fn open(options: EngineOptions) -> Result<Engine> {
-        Self::open_with(options, BehaviorRegistry::default())
-    }
-
-    pub(crate) fn open_with(options: EngineOptions, behaviors: BehaviorRegistry) -> Result<Engine> {
         let Some(policy) = &options.policy else {
             return Err(Error::usage(
                 "an engine needs an access policy (policy); pass allowAll for tests and local use",
@@ -444,19 +452,33 @@ impl Engine {
             clock.now(),
         )?;
         values.settle(&db);
-        Ok(Engine {
+        let engine = Engine {
             db,
             namespaces,
             access,
             matcher,
             clock,
-            catalog: Catalog::new(loader, behaviors, Arc::clone(&values)),
+            catalog: Catalog::new(loader, Arc::clone(&values)),
             values,
             ids: IdSource {
                 ids: options.ids,
                 next: AtomicU64::new(0),
             },
-        })
+            poisoned: AtomicBool::new(false),
+        };
+        engine.behaviors().register_set(options.behaviors)?;
+        Ok(engine)
+    }
+
+    /// The behaviors the engine runs: registered, and registered later.
+    pub fn behaviors(&self) -> Behaviors<'_> {
+        Behaviors { engine: self }
+    }
+
+    /// Whether a panic escaped the engine's code while it held a
+    /// transaction: every later call is refused.
+    pub fn poisoned(&self) -> bool {
+        self.poisoned.load(Ordering::SeqCst)
     }
 
     /// The schema registry.
@@ -494,9 +516,46 @@ impl Engine {
         lock: Lock<'_>,
         f: impl FnOnce(&Tx<'_>) -> Result<T>,
     ) -> Result<T> {
-        let result = self.db.write(lock, f);
+        self.usable()?;
+        let result = self.guarded(|| self.db.write(lock, f));
         self.values.settle(&self.db);
         result
+    }
+
+    /// Runs `f` in a read-only transaction: the reads that run behaviors'
+    /// field readers go through it.
+    pub(crate) fn read<T>(&self, f: impl FnOnce(&Tx<'_>) -> Result<T>) -> Result<T> {
+        self.usable()?;
+        self.guarded(|| self.db.read(f))
+    }
+
+    fn usable(&self) -> Result<()> {
+        if self.poisoned() {
+            return Err(Error::internal(
+                "the engine panicked inside a transaction and refuses every call; restart it",
+            ));
+        }
+        Ok(())
+    }
+
+    // guarded runs a transaction, and poisons the engine when a panic
+    // escapes it: a hook's own panic is caught where the engine calls it,
+    // so one that reaches here is the engine's.
+    fn guarded<T>(&self, run: impl FnOnce() -> Result<T>) -> Result<T> {
+        match catch_unwind(AssertUnwindSafe(run)) {
+            Ok(result) => result,
+            Err(payload) => {
+                self.poisoned.store(true, Ordering::SeqCst);
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "a panic".to_owned());
+                Err(Error::internal(format!(
+                    "the engine panicked inside a transaction: {message}"
+                )))
+            }
+        }
     }
 
     /// The engine's storage.

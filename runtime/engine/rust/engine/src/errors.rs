@@ -634,8 +634,12 @@ pub enum Error {
     Storage(superschematic_engine_storage::Error),
     /// An option or argument the engine cannot take, which the TypeScript
     /// engine throws as a TypeError: a namespace option that is no name, a
-    /// meta-schema without its parts.
+    /// meta-schema without its parts, an implementation that cannot
+    /// register.
     Usage(String),
+    /// A config a behavior's `parse_config` refuses (the TypeScript
+    /// engine's BehaviorConfigError): the schema is refused at that config.
+    Config(String),
     /// A defect of the engine's own, or a stored row it cannot read, which
     /// the TypeScript engine throws as a plain Error.
     Internal(String),
@@ -667,6 +671,36 @@ impl Error {
         Error::Usage(message.into())
     }
 
+    /// A config a behavior's `parse_config` refuses, with why.
+    pub fn config(message: impl Into<String>) -> Self {
+        Error::Config(message.into())
+    }
+
+    /// A defect in a behavior's code: not a refusal, so a server answers it
+    /// as an internal error, and the call rolls back.
+    pub fn behavior(behavior: &str, message: impl Into<String>) -> Self {
+        Error::Behavior(BehaviorError {
+            behavior: behavior.to_owned(),
+            message: message.into(),
+        })
+    }
+
+    /// A behavior's refusal of a create, an update, a delete or an
+    /// operation (`action`) of an instance: `vetoed`, with the veto's
+    /// reason, code and details. A handler, initialize and afterChange
+    /// refuse with it; a code the behavior's declaration does not list is
+    /// a defect.
+    pub fn veto(behavior: &str, action: &str, schema: &str, id: &str, veto: Veto) -> Self {
+        Error::Engine(EngineError::behavior_veto(
+            behavior, action, schema, id, veto,
+        ))
+    }
+
+    /// Whether this is a behavior's veto.
+    pub fn is_veto(&self) -> bool {
+        self.code() == Some(EngineErrorCode::Vetoed)
+    }
+
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Error::Internal(message.into())
     }
@@ -678,7 +712,9 @@ impl fmt::Display for Error {
             Error::Engine(error) => error.fmt(f),
             Error::Behavior(error) => error.fmt(f),
             Error::Storage(error) => error.fmt(f),
-            Error::Usage(message) | Error::Internal(message) => f.write_str(message),
+            Error::Usage(message) | Error::Config(message) | Error::Internal(message) => {
+                f.write_str(message)
+            }
         }
     }
 }

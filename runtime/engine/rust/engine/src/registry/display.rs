@@ -25,7 +25,7 @@ use superschematic_schema_ir::{
 use super::document::{
     array_depth, field_name, flag, is_map, ref_kind, scalar_key, text, type_name, types_of, RefKind,
 };
-use crate::composition::Composition;
+use crate::behaviors::composition::Composition;
 use crate::errors::SchemaIssue;
 use crate::json::{self, compare_utf16};
 
@@ -320,16 +320,17 @@ fn type_label(field: &Value) -> String {
 }
 
 // The display checks of display.test.ts, which compose Workflow and
-// Comments: their implementations arrive in milestone 5, so these tests
-// register stand-ins that add the fields the real ones declare, and the
-// Workflow config a display reads is the schema's.
+// Comments: their implementations arrive with the core behaviors
+// (milestones 8 and 9), so these tests register stand-ins that add the
+// fields the real ones declare and take any config, and the Workflow config
+// a display reads is the schema's.
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use serde_json::{json, Value};
 
-    use crate::composition::{BehaviorRegistry, RegisteredBehavior};
+    use crate::behaviors::{Behavior, BehaviorSet, ConfigTarget, Hooks};
     use crate::engine::{Engine, EngineOptions};
-    use crate::errors::Error;
+    use crate::errors::{Error, Result};
     use crate::principal::Principal;
     use crate::registry::DefineOptions;
 
@@ -344,6 +345,33 @@ mod tests {
         }
     }
 
+    // A stand-in with a core behavior's name and fields.
+    struct StandIn(&'static str);
+
+    impl Behavior for StandIn {
+        type Config = Value;
+
+        fn declaration(&self) -> &str {
+            self.0
+        }
+
+        fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<Value> {
+            Ok(raw.clone())
+        }
+
+        fn hooks(&self) -> Hooks<Self> {
+            let none: crate::behaviors::FieldFn<Self> = |_, _| Ok(None);
+            Hooks {
+                fields: ["status", "commentCount"]
+                    .into_iter()
+                    .filter(|name| self.0.contains(name))
+                    .map(|name| (name, none))
+                    .collect(),
+                ..Hooks::default()
+            }
+        }
+    }
+
     fn open() -> Open {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -353,16 +381,16 @@ mod tests {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut behaviors = BehaviorRegistry::default();
-        for (name, field) in [("Workflow", "status"), ("Comments", "commentCount")] {
-            behaviors.register(RegisteredBehavior {
-                name: name.into(),
-                fields: vec![field.into()],
-            });
-        }
         let mut options = EngineOptions::sqlite(dir.join("engine.db"));
         options.policy = Some(crate::Policy::allow_all());
-        let engine = Engine::open_with(options, behaviors).unwrap();
+        options.behaviors = BehaviorSet::new()
+            .with(StandIn(
+                r#"{"name": "Workflow", "configSchema": {"type": "object"}, "fields": [{"name": "status"}]}"#,
+            ))
+            .with(StandIn(
+                r#"{"name": "Comments", "configSchema": {"type": "object"}, "fields": [{"name": "commentCount"}]}"#,
+            ));
+        let engine = Engine::open(options).unwrap();
         Open { engine, dir }
     }
 

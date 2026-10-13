@@ -37,7 +37,7 @@ use serde_json::Value;
 use superschematic_engine_storage::{Row, Sql, SqlValue, Tx};
 
 use crate::access::SchemaAction;
-use crate::composition::is_behavior_name;
+use crate::behaviors::declaration::is_behavior_name;
 use crate::engine::Engine;
 use crate::errors::{EngineError, Error, Result};
 use crate::json;
