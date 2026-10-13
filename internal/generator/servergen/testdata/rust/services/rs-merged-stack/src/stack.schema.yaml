@@ -1,0 +1,27 @@
+# One declared Rust server, Warehouse, serves rs-catalog and rs-pricing,
+# and hands each request to the API whose operations take it. Built into
+# rs-stack's output root, its crate joins the same Cargo workspace. Its one
+# environment, Local, runs on the local target.
+kind: Stack
+types:
+  Warehouse:
+    name: Warehouse
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: rs-catalog, kind: API }
+        - { name: rs-pricing, kind: API }
+  Merged:
+    name: Merged
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: rs-catalog, kind: API }
+        - { name: rs-pricing, kind: API }
+      expose:
+        - deployable: Warehouse
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

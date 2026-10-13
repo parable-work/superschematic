@@ -3,22 +3,28 @@
 # that the code the docs site shows builds and behaves.
 #
 #   examples/acme-shop/scripts/check.sh            check
-#   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/
-#                                                  and schemas/dist/bun.lock
+#   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/,
+#                                                  schemas/dist/bun.lock and
+#                                                  schemas/dist/Cargo.lock
 #
 # Needs what `make setup` stands up (the superscalar checkout and archive,
 # the version-graph archive, the runtime installs and the Python schema
 # runtime's uv environment), the pinned Go and Rust toolchains, bun and jq. Generated output goes to the example's schemas/dist
-# (gitignored), but for the lockfile of its Bun workspace, schemas/dist/bun.lock,
-# which is committed (D51, amended) and which every step here keeps.
+# (gitignored), but for the lockfiles of its Bun and Cargo workspaces,
+# schemas/dist/bun.lock and schemas/dist/Cargo.lock, which are committed
+# (D51, amended; D57) and which every step here keeps, and Cargo's target
+# directory there, which keeps the compiled crates from run to run.
 #
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first, and the stack, shop-stack, last of
 #      the services it deploys, which writes the entrypoint of each server
-#      and of shop-orders' job and worker;
+#      and of shop-orders' job and worker, and brings the Cargo workspace's
+#      lockfile up to date, which fails the check when that changes it;
 #   2. every generated Go module builds and vets, the entrypoints of
-#      shop-stack's servers, job and worker included;
+#      shop-stack's Go servers, job and worker included, and shop-stack's
+#      Rust server, shop-stock, checks with its implementation in
+#      rust-impl/shop-stock, frozen to the committed lockfile;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
@@ -40,16 +46,19 @@
 #      server reads too, and check they print the same; and, when Docker
 #      runs, `superschematic stack dev` runs shop-stack's Dev environment,
 #      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
-#      servers and the storefront's TypeScript server on Bun, each on its
-#      generated entrypoint, shop-orders' worker and the site shop-web, and
-#      the test calls each Go API through its SDK and the storefront over
+#      servers, shop-stock's Rust server, which cargo builds, and the
+#      storefront's TypeScript server on Bun, each on its generated
+#      entrypoint, shop-orders' worker and the site shop-web, and the test
+#      calls each Go and Rust API through its Go SDK and the storefront over
 #      HTTP, uploads a product's image to shop-media through the URL
-#      shop-api signs and reads it back (D54), sees shop-orders' worker
-#      fulfil each order placed from shop-db's queue (D53), reads the site
-#      and its config, and checks shop-api's CORS for the site's origin
-#      (milestones 1 and 7 of docs/stack-model.md), then sees shop-orders'
-#      job ship an order with `superschematic stack run` and on the
-#      every-minute schedule stack dev runs (D52);
+#      shop-api signs and reads it back (D54), sets a product's stock and
+#      sees an order reserve it on shop-stock through shop-orders' service
+#      credential, and an order beyond it refused (D57), sees shop-orders'
+#      worker fulfil each order placed from shop-db's queue (D53), reads
+#      the site and its config, and checks shop-api's CORS for the site's
+#      origin (milestones 1 and 7 of docs/stack-model.md), then sees
+#      shop-orders' job ship an order with `superschematic stack run` and
+#      on the every-minute schedule stack dev runs (D52);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password, and its pages call shop-orders in-process
 #      through the crate the Topcoat extension writes into
@@ -59,11 +68,15 @@
 #   5. the storefront's tests call the generated TypeScript router over its
 #      implementation through the generated TypeScript SDK, and the clients'
 #      type tests decode the generated types;
-#   6. build-all with --cache skips every service on a second run and
-#      restores every service once dist is gone;
+#   6. build-all with --cache skips every service on a second run and,
+#      once dist is gone, restores every service whose key reads nothing a
+#      build recorded there (D41), and builds the others again;
 #   7. the copies under testdata/generated/ match this run byte for byte:
 #      the generated files the docs site quotes, and under logs/ the output
-#      of the commands it shows.
+#      of the commands it shows; but for the ports and the checkout's
+#      discriminator in shop-stack's Dev environment.json, which name this
+#      checkout's containers and differ from checkout to checkout (D30,
+#      amended).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -98,10 +111,11 @@ capture() {
   (cd "$EXAMPLE_DIR" && "$@") | sed "s|$EXAMPLE_DIR/|.../|g" >"$OUT/logs/$name"
 }
 
-# Empties schemas/dist but for the committed lockfile of its Bun workspace.
+# Empties schemas/dist but for the committed lockfiles of its Bun and Cargo
+# workspaces, and Cargo's target directory.
 clean_dist() {
   if [[ -d "$DIST" ]]; then
-    find "$DIST" -mindepth 1 -maxdepth 1 ! -name bun.lock -exec rm -rf {} +
+    find "$DIST" -mindepth 1 -maxdepth 1 ! -name bun.lock ! -name Cargo.lock ! -name target -exec rm -rf {} +
   fi
 }
 
@@ -116,9 +130,15 @@ echo "==> core binary (no extension)"
 
 echo "==> build-all"
 clean_dist
+# The committed lockfile of the Cargo workspace (D57), which the stack's
+# build brings up to date with `cargo update --workspace`.
+COMMITTED_CARGO_LOCK="$OUT/Cargo.lock.committed"
+if [[ -f "$DIST/Cargo.lock" ]]; then
+  cp "$DIST/Cargo.lock" "$COMMITTED_CARGO_LOCK"
+fi
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 8 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 9 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -129,11 +149,30 @@ built_before() {
 built_before shop-common shop-storefront
 built_before shop-db shop-api
 built_before shop-db shop-orders
+built_before shop-db shop-stock
+built_before shop-stock shop-orders
 built_before shop-api shop-stack
 built_before shop-orders shop-stack
+built_before shop-stock shop-stack
 built_before shop-api shop-web
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
+
+echo "==> schemas/dist/Cargo.lock is the one committed"
+# The lockfile is committed (D57), as bun.lock is: the build may bring it
+# up to date, but a build that changes it, as after a change to a generated
+# or runtime Cargo.toml, fails here, with the committed one put back.
+# UPDATE=1 keeps the build's instead.
+if [[ "${UPDATE:-}" == 1 ]]; then
+  test -f "$DIST/Cargo.lock"
+elif [[ ! -f "$COMMITTED_CARGO_LOCK" ]]; then
+  echo "schemas/dist/Cargo.lock is missing: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+elif ! diff -u "$COMMITTED_CARGO_LOCK" "$DIST/Cargo.lock" >&2; then
+  cp "$COMMITTED_CARGO_LOCK" "$DIST/Cargo.lock"
+  echo "the build changed schemas/dist/Cargo.lock: rerun with UPDATE=1 and commit it" >&2
+  exit 1
+fi
 
 echo "==> rust-server/identity.sql holds shop-db's identity tables"
 # The Rust server, the Topcoat app in memory and the Go test of the Rust
@@ -163,8 +202,8 @@ capture price-ir.json sh -c "\"$OUT/superschematic\" build schemas/services/shop
 
 echo "==> generated Go modules compile"
 for module in \
-  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders \
-  orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders; do
+  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders types/go/shop-stock \
+  orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders sdk/go/shop-stock; do
   echo "    $module"
   go_module_compiles "$DIST/$module"
 done
@@ -175,6 +214,14 @@ for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-fulfi
   echo "    server/shop-stack/$entrypoint"
   (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
+
+echo "==> the Rust server's crate checks, frozen to the committed lockfile"
+# shop-stock's server, the one member of schemas/dist's Cargo workspace,
+# with the generated API crate and the implementation in rust-impl/shop-stock
+# it depends on by path, as stack dev, the image and the generated CI build
+# it (D57).
+echo "    server/shop-stack/shop-stock"
+(cd "$DIST" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" cargo check --locked --workspace -q)
 
 echo "==> TypeScript: the generated packages, the storefront's entrypoint and implementation, and the clients type-check"
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
@@ -305,12 +352,17 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 8
-# The stack's references to the APIs it deploys are recorded under dist
-# (D41), so once dist is gone it builds again, and is cached under its new
-# key; every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 7
-grep -q '^  OK: shop-stack (built, cached)$' "$OUT/logs/build-all-restore.txt"
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 9
+# A schema's references to other services in its decorators' arguments
+# are recorded under dist (D41): the stack's to the APIs it deploys, and
+# shop-stock's to shop-orders, the one caller its reservations admit. So
+# once dist is gone, both build again, and so does shop-orders, whose key
+# covers shop-stock's, the API it calls; each is cached under its new key,
+# and every other service is restored.
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 6
+for service in shop-stock shop-orders shop-stack; do
+  grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
+done
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"
 
@@ -319,6 +371,24 @@ echo "==> testdata/generated/ matches this run"
 # committed copies. A change that alters one fails here until the copy is
 # refreshed with UPDATE=1.
 COPIES="$EXAMPLE_DIR/testdata/generated"
+# The build resolves the local environment Dev for this checkout: its
+# containers carry the checkout's discriminator, a hash of the path of its
+# state directory, and each default port is shifted by it (D30, amended).
+# So this run's environment.json is compared with the copy with every port
+# and the discriminator masked, and the copy stays as it is while they
+# match that way, whichever checkout wrote it.
+ENVIRONMENT=stack/shop-stack/Dev/environment.json
+mask_checkout() {
+  sed -E \
+    -e 's/(superschematic-shop-stack-dev-)[0-9a-f]{6}-/\1CHECKOUT-/g' \
+    -e 's/("superschematic\.checkout": ")[0-9a-f]{6}"/\1CHECKOUT"/g' \
+    -e 's/(127\.0\.0\.1:)[0-9]+/\1PORT/g' \
+    -e 's/("(hostPort|port)": )[0-9]+/\1PORT/g' \
+    "$1"
+}
+if [[ -f "$COPIES/$ENVIRONMENT" ]] && cmp -s <(mask_checkout "$OUT/quoted/$ENVIRONMENT") <(mask_checkout "$COPIES/$ENVIRONMENT"); then
+  cp "$COPIES/$ENVIRONMENT" "$OUT/quoted/$ENVIRONMENT"
+fi
 if [[ "${UPDATE:-}" == 1 ]]; then
   rm -rf "$COPIES"
   cp -R "$OUT/quoted" "$COPIES"

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -193,6 +194,12 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	e.emitStackDeclarations(def)
 
+	// A class with no fields of its own, such as each class of a Stack
+	// schema, closes on its line, as the @job and @worker classes do.
+	if !slices.ContainsFunc(def.Fields, func(fd *ir.FieldDef) bool { return fd.InheritedFrom == "" }) {
+		fmt.Fprintf(&e.body, "export abstract class %s%s {}\n", e.ident(def.Name, "type"), e.heritageClause(def))
+		return
+	}
 	fmt.Fprintf(&e.body, "export abstract class %s%s {\n", e.ident(def.Name, "type"), e.heritageClause(def))
 
 	first := true

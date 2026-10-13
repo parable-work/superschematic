@@ -18,8 +18,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -217,9 +219,29 @@ type ModuleOutput struct {
 	// when the schema has no User table.
 	IdentityDescriptor string
 
+	// EngineDocument is the schema's engine document (D58), the object
+	// literal engine.ts exports as engineDocument, which package.json
+	// exports as "./engine" and index.ts does not re-export, so a client
+	// of the types does not load it. Empty when no type of the DB schema
+	// composes a behavior.
+	EngineDocument string
+
+	// Queues are the schema's queues (D53), which queues.ts writes as data
+	// the HTTP runtime's queue client reads, and package.json exports as
+	// "./queues". A queue whose message the client cannot hold yet is
+	// left out, with why.
+	Queues []QueueInfo
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
+
+	// Behaviors are the types that compose behaviors (D58), and
+	// BehaviorsSource the declarations types/behaviors.ts holds for them:
+	// each <T>Behaviors and the aliases its fields refer to. Nil and ""
+	// when no type composes one.
+	Behaviors       []behaviortypes.Type
+	BehaviorsSource string
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -293,6 +315,16 @@ type Options struct {
 	// fall back to naming.Default().
 	Naming naming.Naming
 
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields types/behaviors.ts types; a schema that composes none needs
+	// none.
+	Registry *registry.Registry
+
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which engine.ts exports.
+	// Nil writes no engine.ts.
+	EngineDocument []byte
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -363,6 +395,16 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
+		return nil, err
+	}
+	output.EngineDocument = strings.TrimSuffix(string(opts.EngineDocument), "\n")
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
+	}
+	if len(output.Behaviors) > 0 {
+		output.BehaviorsSource = renderBehaviors(output.Behaviors)
+	}
+	if output.Queues, err = TypeScriptQueues(schema); err != nil {
 		return nil, err
 	}
 

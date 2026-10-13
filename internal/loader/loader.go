@@ -319,9 +319,12 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 // authDBFor reads the schema the config's authDb names, which an API's
 // user model route sets read their users from (D50): through the
 // dependency loader (WithDependencyLoader), or as the service of that name
-// beside this one. It reads nothing for a schema without a route set, one
-// that is not an API, one whose config names no authDb, or the load of an
-// authDb itself; the verification pass refuses the ones that need it.
+// beside this one. It also reads it for an API with an @envVars field that
+// takes the name of its identity config field, which the field is when the
+// authDb has a User table (verify.TakesIdentityConfigField). It reads
+// nothing for any other schema, one that is not an API, one whose config
+// names no authDb, or the load of an authDb itself; the verification pass
+// refuses the ones that need it.
 func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
 	if o.authDBRead || schema.Kind != ir.SchemaKindAPI || schema.AuthDB == "" || schema.AuthDB == schema.Name {
 		return nil, nil
@@ -330,8 +333,12 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 	for _, set := range schema.OperationSets {
 		declared = declared || set.IsIdentityRoutes()
 	}
+	reads := "whose User table the user model's routes read"
 	if !declared {
-		return nil, nil
+		if !verify.TakesIdentityConfigField(schema) {
+			return nil, nil
+		}
+		reads = "whose User table decides whether an @envVars field collides with " + ir.IdentityConfigField(schema.Name) + ", the identity config field"
 	}
 	load := o.loadDependency
 	if load == nil {
@@ -344,7 +351,7 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 	}
 	authDB, err := load(schema.AuthDB)
 	if err != nil {
-		return nil, fmt.Errorf("%s: reading the authDb %s, whose User table the user model's routes read: %w", schema.Name, schema.AuthDB, err)
+		return nil, fmt.Errorf("%s: reading the authDb %s, %s: %w", schema.Name, schema.AuthDB, reads, err)
 	}
 	return authDB, nil
 }

@@ -15,8 +15,9 @@ import (
 )
 
 // The jobs of a local environment (docs/stack-model.md, section 8.7, D52).
-// A rollout step builds each job's entrypoint module with go build, as it
-// builds a server's. While stack dev waits on the environment, each job
+// A rollout step builds each Go job's entrypoint module with go build, as
+// it builds a server's, and runs a TypeScript job's main.ts on Bun after
+// installing the output root's workspace, as it runs a server's. While stack dev waits on the environment, each job
 // with a schedule runs on it, in its time zone: never two runs of one job
 // at once, each line of a run's output with the job's name in front, a run
 // stopped at the job's timeout and run again up to its retries when it
@@ -33,11 +34,13 @@ import (
 // holds each job's lock file.
 const JobsDir = "jobs"
 
-// builtJob is a job a rollout built: its binary, its module directory and
-// its whole environment.
+// builtJob is a job a rollout built: the command that runs it, a Go job's
+// binary or Bun with main.ts, its module directory and its whole
+// environment.
 type builtJob struct {
 	job    *Job
 	binary string
+	args   []string
 	module string
 	env    []string
 }
@@ -80,8 +83,9 @@ func (p *Provisioner) jobEnviron(req registry.ProvisionRequest, prog *Program, j
 	return env, nil
 }
 
-// buildJob builds a job's entrypoint module into the program's bin
-// directory and returns it with its environment.
+// buildJob builds a Go job's entrypoint module into the program's bin
+// directory, or installs the output root's Bun workspace for a TypeScript
+// one, and returns the job with its command and its environment.
 func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionRequest, prog *Program, j *Job) (*builtJob, error) {
 	if req.OutputRoot == "" {
 		return nil, errors.New("local: the request names no output root, where the build wrote each job's entrypoint module")
@@ -90,11 +94,21 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 	if info, err := os.Stat(module); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("local: job %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.7)", j.Deployable, module)
 	}
-	binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(j.Binary)))
+	env, err := p.jobEnviron(req, prog, j)
 	if err != nil {
 		return nil, err
 	}
-	env, err := p.jobEnviron(req, prog, j)
+	if j.Language == LanguageTypeScript {
+		bun, err := p.lookPath("bun")
+		if err != nil {
+			return nil, err
+		}
+		if err := p.installWorkspace(ctx, req.OutputRoot, bun); err != nil {
+			return nil, err
+		}
+		return &builtJob{job: j, binary: bun, args: []string{TypeScriptEntrypoint}, module: module, env: env}, nil
+	}
+	binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(j.Binary)))
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +298,7 @@ func (p *Provisioner) runOnce(ctx context.Context, b *builtJob) error {
 	stdout, stderr := c.writer(j.Deployable), c.writer(j.Deployable)
 	defer stdout.Flush()
 	defer stderr.Flush()
-	proc, err := p.runner().Start(Command{Path: b.binary, Dir: b.module, Env: b.env, Stdout: stdout, Stderr: stderr})
+	proc, err := p.runner().Start(Command{Path: b.binary, Args: b.args, Dir: b.module, Env: b.env, Stdout: stdout, Stderr: stderr})
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}

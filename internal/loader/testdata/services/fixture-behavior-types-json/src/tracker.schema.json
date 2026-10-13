@@ -1,0 +1,200 @@
+{
+  "kind": "General",
+  "name": "tracker",
+  "description": "The types generator's fixture for behavior fields (D58): types that compose the core's behaviors, each narrowing by its config, and acme.Rating, an extension's behavior with no narrowing, which internal/generator/behaviortypes/behaviortypestest registers. Load it with that registry; the core alone refuses acme.Rating.",
+  "types": {
+    "Ticket": {
+      "name": "Ticket",
+      "role": "EmbeddedStruct",
+      "description": "A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["open", "in-progress", "done", "dropped"],
+            "transitions": [
+              { "from": "open", "to": "in-progress" },
+              { "from": "in-progress", "to": "open" },
+              { "from": "in-progress", "to": "done", "permission": "tracker.finish" },
+              { "from": "open", "to": "dropped" },
+              { "from": "in-progress", "to": "dropped" }
+            ]
+          }
+        },
+        { "name": "Comments" },
+        { "name": "Revisions", "config": { "review": { "permission": "tracker.review" } } },
+        { "name": "Dependencies", "config": { "schemas": ["tickets"], "gatedStates": ["done"] } },
+        {
+          "name": "Links",
+          "config": {
+            "links": {
+              "spec": { "schema": "documents", "pinned": true },
+              "reviewers": { "schema": "people", "many": true, "max": 3 },
+              "project": { "schema": "projects", "required": true }
+            }
+          }
+        },
+        {
+          "name": "Timers",
+          "config": {
+            "deadlines": {
+              "respond": { "start": { "enters": "open" }, "afterMs": 14400000, "until": { "leaves": "open" } },
+              "close": { "start": { "create": true }, "afterMs": 604800000, "then": { "transition": "dropped" }, "until": { "enters": ["done", "dropped"] } }
+            },
+            "permission": "tracker.timers"
+          }
+        },
+        { "name": "Approvals", "config": { "gates": { "done": { "count": 1, "permission": "tracker.approve" } } } },
+        { "name": "Numbering", "config": { "format": "TCK-{seq:4}" } },
+        { "name": "acme.Rating", "config": { "maxStars": 5 } }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "body", "typeRef": { "name": "string" } }
+      ]
+    },
+    "Job": {
+      "name": "Job",
+      "role": "EmbeddedStruct",
+      "description": "A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["queued", "running", "done", "failed"],
+            "transitions": [
+              { "from": "queued", "to": "running" },
+              { "from": "running", "to": "queued" },
+              { "from": "running", "to": "done" },
+              { "from": "running", "to": "failed" },
+              { "from": "queued", "to": "failed" }
+            ]
+          }
+        },
+        {
+          "name": "Lease",
+          "config": {
+            "ttlMs": 30000,
+            "maxHoldField": "timeLimitMs",
+            "onExpiry": { "transition": "queued", "from": ["running"] },
+            "maxExpiries": 3,
+            "escalate": { "transition": "failed", "from": ["running"] },
+            "overridePermission": "tracker.override"
+          }
+        },
+        { "name": "Assignment", "config": { "permission": "tracker.assign" } },
+        {
+          "name": "Queue",
+          "config": { "claim": { "from": ["queued"], "to": "running" }, "priorityField": "priority", "match": ["topic"] }
+        },
+        {
+          "name": "Budget",
+          "config": {
+            "meters": {
+              "cpuSeconds": { "limit": 3600, "reserve": 600, "reset": "daily" },
+              "calls": {}
+            },
+            "limitPermission": "tracker.budget"
+          }
+        },
+        {
+          "name": "Retries",
+          "config": {
+            "classes": { "timeout": { "attempts": 3 }, "invalidOutput": { "attempts": 2 }, "rejected": "terminal" },
+            "totalAttempts": 4,
+            "exhaustedState": "failed"
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "topic", "typeRef": { "name": "string" } },
+        { "name": "priority", "typeRef": { "name": "number" } },
+        { "name": "timeLimitMs", "typeRef": { "name": "number" } }
+      ]
+    },
+    "Worker": {
+      "name": "Worker",
+      "role": "EmbeddedStruct",
+      "description": "A worker that beats while it runs; one that misses its beats gives up its jobs' leases.",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["idle", "busy", "missing"],
+            "transitions": [
+              { "from": "idle", "to": "busy" },
+              { "from": "busy", "to": "idle" },
+              { "from": "idle", "to": "missing" },
+              { "from": "busy", "to": "missing" },
+              { "from": "missing", "to": "idle" }
+            ]
+          }
+        },
+        {
+          "name": "Presence",
+          "config": {
+            "ttlMs": 30000,
+            "principalField": "subject",
+            "onMissed": { "transition": "missing", "from": ["idle", "busy"] },
+            "onBeat": { "transition": "idle", "from": ["missing"] },
+            "releaseLeases": ["jobs"]
+          }
+        }
+      ],
+      "fields": [
+        { "name": "subject", "typeRef": { "name": "string" }, "required": true }
+      ]
+    },
+    "Batch": {
+      "name": "Batch",
+      "role": "EmbeddedStruct",
+      "description": "A batch stamped into steps, which counts its jobs.",
+      "behaviors": [
+        {
+          "name": "Blueprint",
+          "config": {
+            "schema": "steps",
+            "parentLink": "batch",
+            "keyField": "step",
+            "steps": { "fetch": {}, "index": { "after": ["fetch"] } },
+            "copyFields": ["topic"]
+          }
+        },
+        {
+          "name": "Rollups",
+          "config": {
+            "rollups": {
+              "jobs": { "schema": "jobs", "link": "batch", "function": "count" },
+              "jobsByStatus": { "schema": "jobs", "link": "batch", "function": "countBy", "field": "Workflow.status" }
+            }
+          }
+        },
+        { "name": "Constants", "config": { "fields": ["topic"] } }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true },
+        { "name": "topic", "typeRef": { "name": "string" } }
+      ]
+    },
+    "Note": {
+      "name": "Note",
+      "role": "EmbeddedStruct",
+      "description": "A note whose behaviors add no field: its behaviors' type has no member.",
+      "behaviors": [
+        { "name": "Search", "config": { "fields": ["text"] } }
+      ],
+      "fields": [
+        { "name": "text", "typeRef": { "name": "string" }, "required": true }
+      ]
+    },
+    "Person": {
+      "name": "Person",
+      "role": "EmbeddedStruct",
+      "description": "A type with no behavior, which gets no behaviors' type.",
+      "fields": [
+        { "name": "name", "typeRef": { "name": "string" }, "required": true }
+      ]
+    }
+  }
+}

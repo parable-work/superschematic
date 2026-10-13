@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
@@ -62,7 +63,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.parallel, "parallel", false, "build independent schemas concurrently within each dependency phase")
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
-	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go or TypeScript API whose package is missing, at the [implementation_paths] template of its language")
+	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go, TypeScript or Rust API whose package is missing, at the [implementation_paths] template of its language")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.depsCopy, "deps-copy", "", "also write the dependency graph to this path (default: [deps] copy in the naming file, relative to the repository root)")
 	return cmd
@@ -577,6 +578,8 @@ func needsImplementationScaffold(service buildplan.Service, repoRoot string, nam
 		exists, err = apigen.ImplementationExists(names.GoImplementationDir(repoRoot, service.Name))
 	case registry.APILanguageTypeScript:
 		exists, err = tsrestgen.ImplementationExists(names.TypeScriptImplementationDir(repoRoot, service.Name))
+	case registry.APILanguageRust:
+		exists, err = rustrestgen.ImplementationExists(names.RustImplementationDir(repoRoot, service.Name))
 	default:
 		return false
 	}

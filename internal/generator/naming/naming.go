@@ -247,6 +247,10 @@ type ImplementationPathsConfig struct {
 	// "typescript/{service}" (D51).
 	TypeScript string `toml:"typescript"`
 
+	// Rust is the Rust implementation's crate directory: "rust/{service}"
+	// (D57).
+	Rust string `toml:"rust"`
+
 	// Site is a Site service's package directory, its code: "web/{service}"
 	// (D55). It is a member of the Bun workspace, as a TypeScript
 	// implementation is, and the build writes the site's typed browser
@@ -280,6 +284,27 @@ func (n Naming) TypeScriptImplementationDir(repoRoot, service string) string {
 // implementation (D51).
 func (n Naming) TypeScriptImplementationGlob() string {
 	return strings.ReplaceAll(n.typeScriptImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+// RustImplementationDir resolves the Rust implementation crate's
+// directory of service against repoRoot (D57).
+func (n Naming) RustImplementationDir(repoRoot, service string) string {
+	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(n.rustImplementationTemplate(), ServicePathPlaceholder, service)))
+}
+
+// RustImplementationGlob is the [implementation_paths] rust template with
+// `*` for the service, slash-separated and relative to the repository
+// root: the pattern a Rust server's image context takes every Rust
+// implementation in by (D57).
+func (n Naming) RustImplementationGlob() string {
+	return strings.ReplaceAll(n.rustImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+func (n Naming) rustImplementationTemplate() string {
+	if n.ImplementationPaths.Rust != "" {
+		return n.ImplementationPaths.Rust
+	}
+	return Default().ImplementationPaths.Rust
 }
 
 func (n Naming) typeScriptImplementationTemplate() string {
@@ -320,7 +345,7 @@ func (n Naming) siteImplementationTemplate() string {
 // functions would join under the root, and one without the service,
 // which would put every service's implementation in one package.
 func (c ImplementationPathsConfig) check() error {
-	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}, {"site", c.Site}} {
+	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}, {"rust", c.Rust}, {"site", c.Site}} {
 		if t.template == "" {
 			continue
 		}
@@ -669,6 +694,7 @@ func Default() Naming {
 		ImplementationPaths: ImplementationPathsConfig{
 			Go:         "go/" + ServicePathPlaceholder,
 			TypeScript: "typescript/" + ServicePathPlaceholder,
+			Rust:       "rust/" + ServicePathPlaceholder,
 			Site:       "web/" + ServicePathPlaceholder,
 		},
 		AuthoringPackages: []string{
@@ -727,6 +753,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.DerivedFields.Bucket, d.DerivedFields.Bucket)
 	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
 	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
+	fill(&n.ImplementationPaths.Rust, d.ImplementationPaths.Rust)
 	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
@@ -922,6 +949,23 @@ func (n Naming) RustSDKCrate(schemaName string) string {
 // RustAPICrate returns the crate name of a schema's generated Rust server.
 func (n Naming) RustAPICrate(schemaName string) string {
 	return n.RustCratePrefix + schemaName + "-api"
+}
+
+// RustImplementationCrate returns the crate name the scaffold gives an API
+// service's Rust implementation (D57), which the engineer may rename.
+func (n Naming) RustImplementationCrate(schemaName string) string {
+	return n.RustCratePrefix + schemaName + "-implementation"
+}
+
+// RustServerCrate returns the crate name of the entrypoint of a Rust server
+// of a stack (D57): the stack's name and the server's, as NpmServerPackage
+// spells them, and a suffix of its own. Two stacks of one output root may
+// each have a server of one name, and the crates of both are members of
+// the output root's Cargo workspace, which names each package once; the
+// crate's binary is the server's name.
+func (n Naming) RustServerCrate(stack, server string) string {
+	npm := n.NpmServerPackage(stack, server)
+	return n.RustCratePrefix + strings.TrimPrefix(npm, n.NpmScope+"/")
 }
 
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the

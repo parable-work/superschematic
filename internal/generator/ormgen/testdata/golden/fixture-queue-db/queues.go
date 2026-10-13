@@ -36,29 +36,37 @@ import (
 // another worker may hold it.
 var ErrClaimLost = errors.New("the claim on the message is lost: it expired, and another worker may hold the message")
 
-// queueTable is a queue's table and its arguments.
+// queueTable is a queue's table, its arguments and its statements on
+// Postgres, which the TypeScript types' queues.ts carries too, so the two
+// claim alike.
 type queueTable struct {
 	name string
-	// columns are the message's columns, of the row aliased q, in field
-	// order.
-	columns string
 	// retries is how many times a failed message is handled again; backoff
 	// is how long it then waits.
-	retries int
-	backoff time.Duration
+	retries    int
+	backoff    time.Duration
+	statements queueStatements
+}
+
+// queueStatements are a queue's statements on Postgres: insert begins an
+// enqueue; expire marks dead each message whose last attempt's claim
+// expired; claim claims up to $1 due messages for $2 seconds; complete,
+// fail, extend and release change message $1 while token $2 claims it.
+type queueStatements struct {
+	insert, expire, claim, complete, fail, extend, release string
 }
 
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
 // none.
 func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
-	sql := "INSERT INTO " + t.name + " DEFAULT VALUES"
+	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
 		placeholders := make([]string, len(columns))
 		for i := range columns {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
 		}
-		sql = "INSERT INTO " + t.name + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
+		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
@@ -73,26 +81,10 @@ func (t queueTable) claim(ctx context.Context, pool *pgxpool.Pool, n int, lease 
 	if n <= 0 {
 		return nil
 	}
-	if _, err := pool.Exec(ctx, `UPDATE `+t.name+` SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
-		last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
-		WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`, t.retries); err != nil {
+	if _, err := pool.Exec(ctx, t.statements.expire, t.retries); err != nil {
 		return fmt.Errorf("claim on %s: %w", t.name, err)
 	}
-	columns := ""
-	if t.columns != "" {
-		columns = ", " + t.columns
-	}
-	rows, err := pool.Query(ctx, `WITH due AS (
-		SELECT id FROM `+t.name+`
-		WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())
-		ORDER BY due_at, id
-		LIMIT $1
-		FOR UPDATE SKIP LOCKED
-	)
-	UPDATE `+t.name+` AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
-		claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
-	FROM due WHERE q.id = due.id
-	RETURNING q.id::text, q.claim_token::text, q.attempts`+columns, n, lease.Seconds())
+	rows, err := pool.Query(ctx, t.statements.claim, n, lease.Seconds())
 	if err != nil {
 		return fmt.Errorf("claim on %s: %w", t.name, err)
 	}
@@ -110,7 +102,7 @@ func (t queueTable) claim(ctx context.Context, pool *pgxpool.Pool, n int, lease 
 
 // complete marks a claimed message done.
 func (t queueTable) complete(ctx context.Context, pool *pgxpool.Pool, id, token string) error {
-	return t.update(ctx, pool, "complete", id, token, `state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()`)
+	return t.update(ctx, pool, "complete", t.statements.complete, id, token)
 }
 
 // fail records cause on a claimed message and makes it due again after the
@@ -118,12 +110,7 @@ func (t queueTable) complete(ctx context.Context, pool *pgxpool.Pool, id, token 
 // the message is dead.
 func (t queueTable) fail(ctx context.Context, pool *pgxpool.Pool, id, token, cause string) (bool, error) {
 	var state string
-	err := pool.QueryRow(ctx, `UPDATE `+t.name+` SET
-		state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-		due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
-		last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
-		WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
-		RETURNING state`, id, token, t.retries, t.backoff.Seconds(), cause).Scan(&state)
+	err := pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause).Scan(&state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("fail message %s on %s: %w", id, t.name, ErrClaimLost)
 	}
@@ -135,19 +122,19 @@ func (t queueTable) fail(ctx context.Context, pool *pgxpool.Pool, id, token, cau
 
 // extend holds a claimed message for lease from now.
 func (t queueTable) extend(ctx context.Context, pool *pgxpool.Pool, id, token string, lease time.Duration) error {
-	return t.update(ctx, pool, "extend", id, token, `claim_expires_at = now() + make_interval(secs => $3), updated_at = now()`, lease.Seconds())
+	return t.update(ctx, pool, "extend", t.statements.extend, id, token, lease.Seconds())
 }
 
 // release gives a claimed message back, ready and due at once, without
 // counting the attempt: its handler did not finish, and did not fail.
 func (t queueTable) release(ctx context.Context, pool *pgxpool.Pool, id, token string) error {
-	return t.update(ctx, pool, "release", id, token, `state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()`)
+	return t.update(ctx, pool, "release", t.statements.release, id, token)
 }
 
-// update sets set on the message id while token claims it.
-func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, id, token, set string, args ...any) error {
-	tag, err := pool.Exec(ctx, `UPDATE `+t.name+` SET `+set+`
-		WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`, append([]any{id, token}, args...)...)
+// update runs statement, which changes the message id while token claims
+// it.
+func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statement, id, token string, args ...any) error {
+	tag, err := pool.Exec(ctx, statement, append([]any{id, token}, args...)...)
 	if err != nil {
 		return fmt.Errorf("%s message %s on %s: %w", what, id, t.name, err)
 	}
@@ -160,9 +147,37 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, id, to
 // orderPlacedQueue is the table of the queue OrderPlaced.
 var orderPlacedQueue = queueTable{
 	name:    `order_placed_queue`,
-	columns: `q.order_id, q.placed_at, q.priority, q.quantity, q.note, q.ship_to, q.tags`,
 	retries: 3,
 	backoff: 60 * time.Second,
+	statements: queueStatements{
+		insert: `INSERT INTO order_placed_queue`,
+		expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT id FROM order_placed_queue
+  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())
+  ORDER BY due_at, id
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE order_placed_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.placed_at, q.priority, q.quantity, q.note, q.ship_to, q.tags`,
+		complete: `UPDATE order_placed_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE order_placed_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE order_placed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+	},
 }
 
 // OrderPlacedLease is how long a claim on a message of OrderPlaced holds it: a
@@ -289,9 +304,37 @@ func (q *OrderPlacedQueue) Release(ctx context.Context, id, token string) error 
 // pingQueue is the table of the queue Ping.
 var pingQueue = queueTable{
 	name:    `ping_queue`,
-	columns: `q.sent_at`,
 	retries: 5,
 	backoff: 30 * time.Second,
+	statements: queueStatements{
+		insert: `INSERT INTO ping_queue`,
+		expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT id FROM ping_queue
+  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())
+  ORDER BY due_at, id
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at`,
+		complete: `UPDATE ping_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE ping_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE ping_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+	},
 }
 
 // PingLease is how long a claim on a message of Ping holds it: a

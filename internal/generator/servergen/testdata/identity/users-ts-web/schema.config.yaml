@@ -1,0 +1,8 @@
+# A static site whose browser code calls users-ts-api (D55): Web answers
+# CORS for the site's origin on users-ts-api's routes, and hands a
+# preflight from another origin on to the app, where each identity API's
+# CORS answers its config's trusted origins (D55, amended).
+name: users-ts-web
+kind: Site
+calls:
+  - { name: users-ts-api, kind: API }

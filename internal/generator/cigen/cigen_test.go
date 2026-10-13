@@ -288,6 +288,24 @@ func TestGoldenWorkflow(t *testing.T) {
 	if s := check.step("Build the services"); s == nil || s.Run != "superschematic build-all schemas/services" {
 		t.Errorf("check builds with %+v", s)
 	}
+	// check builds the site in its package under the repository root,
+	// after it installs the workspace, as stack deploy does (D55).
+	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
+	if s := check.step("Build site shop-web"); s == nil || s.Run != "bun run build" || s.WorkingDirectory != "web/shop-web" {
+		t.Errorf("check builds site shop-web with %+v", s)
+	}
+	if i, j := check.index(install), check.index("Build site shop-web"); i < 0 || i > j {
+		t.Errorf("check installs the workspace at step %d, after it builds the site at step %d", i, j)
+	}
+	for _, id := range []string{"preview-review", "deploy-beta", "deploy-live"} {
+		j := w.jobs[id]
+		if i, k := j.index(install), j.index("Build the services"); i < 0 || i < k {
+			t.Errorf("%s installs the workspace at step %d, before the build at step %d", id, i, k)
+		}
+	}
+	if w.jobs["plan-beta"].step(install) != nil {
+		t.Error("plan-beta installs the workspace, though stack plan builds no site")
+	}
 	// check links the servers against the release's archives for the
 	// runner's platform, checked against the digest the binary names,
 	// before it compiles them; no other job compiles a server.
@@ -771,6 +789,87 @@ func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
 				t.Error("check sets up Go for a stack with no Go server")
 			}
 		})
+	}
+}
+
+// TestSitesInTheWorkflow: stack deploy builds a site with Bun (D55), so in
+// a project whose schemas root installs with npm, check sets up Bun at the
+// release tools.env pins, installs the output root's workspace and builds
+// the site; each deploy and preview job sets up Bun and installs the
+// workspace after the build; a plan job, which builds no site, does
+// neither. A stack whose environment deploys a site it does not locate is
+// refused.
+func TestSitesInTheWorkflow(t *testing.T) {
+	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
+	env := func(name string, params ...string) *ir.ResolvedEnvironment {
+		return &ir.ResolvedEnvironment{Stack: "web-stack", Environment: name, Target: stacktest.Target, Parameters: params, Deployables: []*ir.ResolvedDeployable{
+			{Name: "shop-web", Kind: ir.DeployableSite, Site: &ir.ResolvedSite{Dir: "web/shop-web", Build: "bundle", Output: "dist"}},
+		}}
+	}
+	req := publicregistry.CIRequest{
+		Stack: publicregistry.CIStack{
+			Name: "web-stack", Dir: "schemas/services/web-stack", ServicesRoot: "schemas/services", SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			PackageManager: publicregistry.PackageManagerNPM,
+			Sites:          map[string]publicregistry.CISite{"shop-web": {Dir: "apps/web/shop-web", Build: "bundle"}},
+		},
+		Options: publicregistry.CIOptions{Branch: "main"},
+		Version: version,
+		Environments: []publicregistry.CIEnvironment{
+			{Environment: env("Staging"), HasSeam: true, Planner: identity, Deployer: identity},
+			{Environment: env("Preview", "pr"), HasSeam: true, Planner: identity, Deployer: identity},
+		},
+	}
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "web-stack.yml")
+	if err := os.WriteFile(path, files[0].Data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+
+	w := parseWorkflow(t, files[0].Data)
+	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
+	names := func(id string) []string {
+		var out []string
+		for _, s := range w.jobs[id].Steps {
+			out = append(out, s.Name)
+		}
+		return out
+	}
+	if got, want := names("check"), []string{"Check out", "Install superschematic " + version, "Set up Bun", "Set up Node.js",
+		"Install the schemas root's packages", "Build the services", install, "Build site shop-web"}; !slices.Equal(got, want) {
+		t.Errorf("check's steps:\n%q\nwant:\n%q", got, want)
+	}
+	if s := w.jobs["check"].step("Build site shop-web"); s.WorkingDirectory != "apps/web/shop-web" || s.Run != "bun run bundle" {
+		t.Errorf("check builds the site with %+v", s)
+	}
+	if got, want := names("deploy-staging"), []string{"Check out", "Install superschematic " + version, "Set up Node.js",
+		"Install the schemas root's packages", "Set up Bun", "Sign in to Google Cloud as deployer", "Build the services", install, "Deploy Staging"}; !slices.Equal(got, want) {
+		t.Errorf("deploy-staging's steps:\n%q\nwant:\n%q", got, want)
+	}
+	for _, id := range []string{"check", "deploy-staging", "preview-preview"} {
+		if s := w.jobs[id].step("Set up Bun"); s == nil || s.With["bun-version"] != servergen.BunVersion {
+			t.Errorf("%s sets up Bun with %+v, want tools.env's %s", id, s, servergen.BunVersion)
+		}
+	}
+	preview := w.jobs["preview-preview"]
+	if s := preview.step(install); s == nil || s.If != "github.event.action != 'closed'" {
+		t.Errorf("preview-preview installs the workspace with %+v", s)
+	}
+	if i, j := preview.index(install), preview.index("Deploy Preview for the pull request"); i < 0 || i > j {
+		t.Errorf("preview-preview installs the workspace at step %d, after it deploys at step %d", i, j)
+	}
+	plan := w.jobs["plan-staging"]
+	if plan.step("Set up Bun") != nil || plan.step(install) != nil {
+		t.Error("plan-staging sets up Bun or installs the workspace, though stack plan builds no site")
+	}
+
+	unlocated := req
+	unlocated.Stack.Sites = nil
+	if _, err := cigen.GitHub().Render(unlocated); err == nil || !strings.Contains(err.Error(), "environment Staging deploys site shop-web, whose package the stack does not locate") {
+		t.Errorf("a site the stack does not locate: %v", err)
 	}
 }
 

@@ -51,6 +51,20 @@ func TestLabelsAndIDs(t *testing.T) {
 		"userID":      "User ID",
 		"postal_code": "Postal code",
 		"Free":        "Free",
+		// A number that ends a word is a word of its own, unless an
+		// acronym or a single letter holds it or letters follow it.
+		"line1":        "Line 1",
+		"addressLine2": "Address line 2",
+		"line1Text":    "Line 1 text",
+		"Tier10":       "Tier 10",
+		"step_2":       "Step 2",
+		"awsS3Bucket":  "Aws S3 bucket",
+		"HTTP2Enabled": "HTTP2 enabled",
+		"userID2":      "User ID2",
+		"v2":           "V2",
+		"x509Cert":     "X509 cert",
+		"md5sum":       "Md5sum",
+		"2faCode":      "2fa code",
 	} {
 		if got := humanize(name); got != want {
 			t.Errorf("humanize(%q) = %q, want %q", name, got, want)

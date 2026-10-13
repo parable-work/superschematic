@@ -64,6 +64,44 @@ func TestEnvVarsFieldsThatCollideWithDerivedFields(t *testing.T) {
 		t.Errorf("an API without a service clause has no callers field: %+v", r.Errors)
 	}
 
+	identity := ir.NewSchema("shop-api", ir.SchemaKindAPI)
+	identity.AuthDB = "shop-db"
+	identity.Types["ShopConfig"] = &ir.TypeDef{Name: "ShopConfig", EnvVars: true, Fields: []*ir.FieldDef{
+		{Name: "SHOP_API_IDENTITY"}, {Name: "SHOP_API_IDENTITY_TTL"}, {Name: "SHOP_API_IDENTITIES"},
+	}}
+	users := ir.NewSchema("shop-db", ir.SchemaKindDB)
+	users.Types["User"] = &ir.TypeDef{Name: "User", User: &ir.UserTrait{Login: "email"}}
+	r = &Result{}
+	checkDerivedFields(identity, Input{AuthDB: users}, r)
+	got = nil
+	for _, d := range r.Errors {
+		got = append(got, d.Msg)
+	}
+	want = []string{
+		"@envVars field SHOP_API_IDENTITY of ShopConfig collides with SHOP_API_IDENTITY, the identity config field of shop-api, whose authDb shop-db has a User table; a stack's platform sets it, so rename the setting",
+		"@envVars field SHOP_API_IDENTITY_TTL of ShopConfig collides with SHOP_API_IDENTITY, the identity config field of shop-api, whose authDb shop-db has a User table; a stack's platform sets it, so rename the setting",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("an API whose authDb has a User table: errors = %q, want %q", got, want)
+	}
+	if !TakesIdentityConfigField(identity) {
+		t.Error("TakesIdentityConfigField = false for SHOP_API_IDENTITY")
+	}
+	r = &Result{}
+	checkDerivedFields(identity, Input{AuthDB: ir.NewSchema("shop-db", ir.SchemaKindDB)}, r)
+	if len(r.Errors) != 0 {
+		t.Errorf("an authDb without a User table gives no identity config field: %+v", r.Errors)
+	}
+	r = &Result{}
+	checkDerivedFields(identity, Input{}, r)
+	if len(r.Errors) != 0 {
+		t.Errorf("an authDb the load did not read is not checked: %+v", r.Errors)
+	}
+	identity.Types["ShopConfig"].Fields = []*ir.FieldDef{{Name: "SHOP_API_IDENTITIES"}}
+	if TakesIdentityConfigField(identity) {
+		t.Error("TakesIdentityConfigField = true for SHOP_API_IDENTITIES, which only shares a prefix")
+	}
+
 	general := ir.NewSchema("shop-config", ir.SchemaKindGeneral)
 	general.Dependencies = []ir.ServiceRef{{Name: "shop-db", Kind: ir.SchemaKindDB}}
 	general.Types["ShopConfig"] = &ir.TypeDef{Name: "ShopConfig", EnvVars: true, Fields: []*ir.FieldDef{{Name: "SHOP_DB_DATABASE"}}}

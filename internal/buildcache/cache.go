@@ -18,6 +18,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 const (
@@ -339,7 +340,26 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 	// The services the schema's decorator arguments name, from the depfile
 	// its last build wrote (references.go).
 	ih.writeReferences(h, service.Name)
+	// A stack resolves each local environment for the checkout it builds
+	// in, whose containers and ports environment.json then names (D30,
+	// amended), so a stack's entry is its checkout's alone.
+	if service.Config.Kind == ir.SchemaKindStack {
+		_, _ = fmt.Fprintf(h, "|checkout:%s", ih.checkout())
+	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// checkout is the schemas root the hasher's services build in, absolute
+// with its symlinks resolved, as a stack's resolution reads it.
+func (ih *InputHasher) checkout() string {
+	root, err := filepath.Abs(filepath.Join(ih.repoRoot, SchemasDir))
+	if err != nil {
+		return filepath.Join(ih.repoRoot, SchemasDir)
+	}
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		return real
+	}
+	return root
 }
 
 // withCalls adds the surface of each API service calls to its surface. A

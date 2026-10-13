@@ -286,7 +286,14 @@ for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route
 that needs an end user also declares `AuthenticatorFactory`, the type of
-its `authenticate`, which builds the `Authenticator` from `Deps`.
+its `authenticate`, which builds the `Authenticator` from `Deps`. An API
+with [jobs](/superschematic/guides/stacks/#jobs) declares `Jobs`, a method
+per job, `shipOrders(signal: AbortSignal): Promise<void>`, and
+`JobsConstructor`, the type of the implementation's `createJobs`; one with
+[workers](/superschematic/guides/queues/) declares `Workers`, a method
+per worker that handles one message of its queue,
+`fulfilOrders(message: OrderPlaced, signal: AbortSignal): Promise<void>`,
+and `WorkersConstructor`, the type of its `createWorkers`.
 `config.ts` declares `EnvConfig` and `loadEnvConfig()`, which reads the
 `@envVars` settings through the types package's loader, and the fields a
 [stack](/superschematic/guides/stacks/) derives for the API's edges through
@@ -305,9 +312,11 @@ API its servers serve, and so do `build --scaffold` and
 (`@schemas/<service>-implementation`), `tsconfig.json`, and an `index.ts`
 whose `create` is a `Constructor` and whose methods throw the runtime's
 `notImplemented()`, which answers 501, with an `authenticate` that
-establishes no end user and a verifier for each `@hmacVerified` provider
-that refuses every request. It never writes into a directory that holds
-a `.ts` file.
+establishes no end user, a verifier for each `@hmacVerified` provider
+that refuses every request, and a `createJobs` and a `createWorkers`
+whose methods throw it too. It never writes into a directory that holds
+a `.ts` file, so an implementation that predates its jobs or workers
+fails the stack's build, which says what to add.
 
 In a [stack](/superschematic/guides/stacks/), the build writes each
 TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
@@ -317,7 +326,9 @@ SDKs of the APIs called, a `main.ts` that builds each implementation from
 its `Deps` with `create(deps)` and `authenticate(deps)`, mounts each
 router on one Hono app and serves it with `Bun.serve` beside `/healthz`
 and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
-`bun main.ts` after one `bun install` in `schemas/dist`.
+`bun main.ts` after one `bun install` in `schemas/dist`. Each job and
+worker of the API gets a package of its own beside it, whose `main.ts`
+builds the same `Deps` and runs the job once, or the worker's claim loop.
 
 An operation without an input type reads its other arguments from the JSON
 body object (on `GET`, from the query string). Each body argument is the

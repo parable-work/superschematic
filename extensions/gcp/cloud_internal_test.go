@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/run/apiv2/runpb"
+	"cloud.google.com/go/storage"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -71,6 +73,34 @@ func TestTagResource(t *testing.T) {
 	} {
 		if _, err := tagResource(bad); err == nil {
 			t.Errorf("tagResource(%s) is accepted", bad)
+		}
+	}
+}
+
+// TestVersionResource names an image given by digest in Artifact
+// Registry, which ImageDigest reads to find whether it exists.
+func TestVersionResource(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	got, err := versionResource("us-east1-docker.pkg.dev/acme-staging/shop/superschematic-migrate@" + digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "projects/acme-staging/locations/us-east1/repositories/shop/packages/superschematic-migrate/versions/" + digest; got != want {
+		t.Errorf("versionResource = %s, want %s", got, want)
+	}
+	got, err = versionResource("europe-west1-docker.pkg.dev/p/r/a/b@" + digest)
+	if err != nil || got != "projects/p/locations/europe-west1/repositories/r/packages/a%2Fb/versions/"+digest {
+		t.Errorf("a nested image: %s, %v", got, err)
+	}
+	for _, bad := range []string{
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders",
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:abc",
+		"us-east1-docker.pkg.dev/acme-staging/shop/orders:1@" + digest,
+		"docker.io/acme/orders@" + digest,
+		"us-east1-docker.pkg.dev/acme-staging/orders@" + digest,
+	} {
+		if _, err := versionResource(bad); err == nil {
+			t.Errorf("versionResource(%s) is accepted", bad)
 		}
 	}
 }
@@ -255,5 +285,50 @@ func TestUntilEnabled(t *testing.T) {
 	disabled := errors.New("the API has not been used in project 100000 before or it is disabled")
 	if err := untilEnabled(ctx, logf, "x", func() error { calls++; return disabled }); err != disabled || calls != 1 {
 		t.Errorf("past the window: %v after %d calls, want the refusal at once", err, calls)
+	}
+}
+
+// TestWithLifecycleRule: the rule joins a bucket's lifecycle after its
+// other rules, which it keeps; it takes the place of a rule that deletes
+// under the same prefixes, in any order, and of every copy of one; and a
+// lifecycle that holds it already is unchanged.
+func TestWithLifecycleRule(t *testing.T) {
+	rule := LifecycleRule{Prefixes: []string{"b/", "a/"}, AgeDays: 30}
+	want := storage.LifecycleRule{
+		Action:    storage.LifecycleAction{Type: storage.DeleteAction},
+		Condition: storage.LifecycleCondition{AgeInDays: 30, MatchesPrefix: []string{"a/", "b/"}},
+	}
+	theirs := storage.LifecycleRule{
+		Action:    storage.LifecycleAction{Type: storage.DeleteAction},
+		Condition: storage.LifecycleCondition{DaysSinceNoncurrentTime: 90, Liveness: storage.Archived},
+	}
+	other := storage.LifecycleRule{
+		Action:    storage.LifecycleAction{Type: storage.SetStorageClassAction, StorageClass: "NEARLINE"},
+		Condition: storage.LifecycleCondition{AgeInDays: 7, MatchesPrefix: []string{"a/", "b/"}},
+	}
+	older := want
+	older.Condition.AgeInDays = 7
+	older.Condition.MatchesPrefix = []string{"b/", "a/"}
+	reordered := want
+	reordered.Condition.MatchesPrefix = []string{"b/", "a/"}
+	for _, tc := range []struct {
+		name    string
+		rules   []storage.LifecycleRule
+		want    []storage.LifecycleRule
+		changed bool
+	}{
+		{"none", nil, []storage.LifecycleRule{want}, true},
+		{"another rule", []storage.LifecycleRule{theirs, other}, []storage.LifecycleRule{theirs, other, want}, true},
+		{"an older age", []storage.LifecycleRule{older, theirs}, []storage.LifecycleRule{want, theirs}, true},
+		{"two copies", []storage.LifecycleRule{want, theirs, older}, []storage.LifecycleRule{want, theirs}, true},
+		{"held", []storage.LifecycleRule{theirs, want}, []storage.LifecycleRule{theirs, want}, false},
+		{"held in another order", []storage.LifecycleRule{reordered}, []storage.LifecycleRule{reordered}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := withLifecycleRule(tc.rules, rule)
+			if changed != tc.changed || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("withLifecycleRule = %+v, %v; want %+v, %v", got, changed, tc.want, tc.changed)
+			}
+		})
 	}
 }

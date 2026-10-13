@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, Relation, User as UserTrait, UserRole, key, unique } from "@superschematic/db";
+import { AutoGenerate, Relation, User as UserTrait, UserRole, index, key, unique } from "@superschematic/db";
 
 // Timestamps every table carries.
 export abstract class Auditable {
@@ -55,7 +55,8 @@ export abstract class Product extends Auditable {
   imageObject: Nullable<Validate<string, { maxLength: 1024 }>>;
 }
 
-// How many units of a product the warehouse holds.
+// How many units of a product the warehouse holds, one row per product.
+@index<StockLevel>(["product"], { unique: true, name: "one_per_product" })
 export abstract class StockLevel extends Auditable {
   @key
   id: AutoGenerate<Identity.UUID>;

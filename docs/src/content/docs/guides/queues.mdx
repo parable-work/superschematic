@@ -23,7 +23,8 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
-| `@worker` on an API, Go's `Workers` and `NewWorkers`, the `worker` deployable, its entrypoint and image | a TypeScript or Rust worker |
+| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements | a `POINT` or `INTERVAL` column in a TypeScript queue's message |
+| `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, the `worker` deployable, its entrypoint and image | a Rust worker |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
 
 D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
@@ -78,6 +79,45 @@ and its lines, then enqueues the order's message in the same transaction:
 A field reaches its column as a table's field does through the ORM, and
 an optional field you leave unset takes its column's default.
 
+### From TypeScript
+
+There is no TypeScript ORM, so the DB service's TypeScript types package
+carries each queue as data in its `./queues` entry: `orderPlacedQueue`,
+the queue's table, its arguments, the column each field writes, and the
+statements the Go ORM runs, written from one place, so a message one
+language enqueues the other claims alike. Enable the database's
+TypeScript types (`outputs.types` for TypeScript), and enqueue with the
+HTTP runtime's `enqueue`, which takes the client of the transaction you
+write in:
+
+```ts
+import { enqueue } from '@superschematic/http-runtime/postgres';
+import { orderPlacedQueue } from '@acme/shop-db-types/queues';
+
+const client = await deps.db.connect();
+try {
+  await client.query('BEGIN');
+  const orderId = await placeOrder(client, input); // your writes, on the same client
+  await enqueue(client, orderPlacedQueue, { orderId });
+  await client.query('COMMIT');
+} catch (error) {
+  await client.query('ROLLBACK');
+  throw error;
+} finally {
+  client.release();
+}
+```
+
+`enqueue` is typed by the definition: the message is `OrderPlaced` from
+the database's types. A field writes its column as the Go ORM writes
+it: a JSON field its JSON text, an unset optional field or list nothing,
+and an unset enum its schema default. A message whose fields hold a
+`POINT` or an `INTERVAL` column, a `Geo.Location` or a
+`Temporal.Duration`, stays out of `./queues` for now, which says so;
+hold such a value in a `@jsonField` type. The implementation's
+`package.json` depends on the database's types package by its name, with
+`workspace:*`; the scaffold adds it for an API with workers.
+
 ## Write a worker
 
 Put `@worker` from `@superschematic/api` on a class of an API's schema,
@@ -104,16 +144,29 @@ type Workers interface {
 type WorkersConstructor func(deps Deps) (Workers, error)
 ```
 
-The scaffold writes `NewWorkers`, and each method returns the
-not-implemented error, which fails every message, until you write it. A
-build never writes into an implementation that exists, so one that
-predates its workers fails the stack's build, which says what to add.
-The acme shop's worker marks the order fulfilled:
+A TypeScript API's `deps.ts` declares the same, a method per worker in
+camel case, its message typed from the database's TypeScript types, which
+the API's build then needs, and a signal for Go's context:
+
+```ts
+export interface Workers {
+  fulfilOrders(message: OrderPlaced, signal: AbortSignal): Promise<void>;
+}
+
+export type WorkersConstructor = (deps: Deps) => Workers | Promise<Workers>;
+```
+
+The scaffold writes `NewWorkers`, or exports `createWorkers` in
+TypeScript, and each method returns the not-implemented error, or throws
+it, which fails every message, until you write it. A build never writes
+into an implementation that exists, so one that predates its workers
+fails the stack's build, which says what to add. The acme shop's worker
+marks the order fulfilled:
 
 <Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
 
-A method that returns nil completes its message. One that returns an
-error, or panics, fails it: the message is due again after the queue's
+A method that returns nil, or resolves, completes its message. One that
+returns an error, or panics, or rejects, fails it: the message is due again after the queue's
 backoff, until its retries are spent, and then it is dead, where its
 last error stays. Delivery is at least once: a worker that dies holding
 a message gives it back when its claim expires, and another worker
@@ -131,7 +184,9 @@ it. It rolls out after the migrations and after its callees.
 The build writes each worker an entrypoint module beside the servers',
 `server/shop-stack/shop-orders-fulfil-orders/`, whose `main` builds the
 API's `Deps`, calls your `NewWorkers`, and claims and handles messages
-until it is stopped:
+until it is stopped. A TypeScript worker's is a package with a `main.ts`,
+which calls your `createWorkers` and runs the HTTP runtime's `runWorker`
+(`@superschematic/http-runtime/worker`) over the claims, the same loop:
 
 - it claims for its free slots, as many as its concurrency, with
   `FOR UPDATE SKIP LOCKED`, so workers that claim at once take different
@@ -140,13 +195,15 @@ until it is stopped:
 - it logs each message's outcome;
 - on SIGTERM it claims no more, lets the running methods finish within
   the grace, then cancels them and gives their messages back, due at once
-  for another worker, and exits.
+  for another worker, and exits. A TypeScript method's signal aborts when
+  the grace is over; one that ignores it cannot be stopped, but its
+  message is given back all the same, and the process exits.
 
 Its Dockerfile builds an image as a server's does, and `stack build` and
 `stack deploy` build and pin it beside the servers'.
 
-`stack dev` runs each worker as a process with no port, started with the
-servers of its wave, each line of its output with its name in front. Its
+`stack dev` runs each worker as a process with no port, a TypeScript one
+as `bun main.ts`, started with the servers of its wave, each line of its output with its name in front. Its
 exit stops the environment, as a server's does:
 
 ```text
@@ -179,14 +236,14 @@ export abstract class Dev {}
 The worker's entrypoint reads its concurrency from `WORKER_CONCURRENCY`,
 which the platform sets.
 
-The claims run on Postgres, the Go ORM's dialect, so an environment that
-places the queue's database on a platform of another dialect does not
-resolve.
+The claims run on Postgres, the dialect of the Go ORM and of the
+TypeScript client, so an environment that places the queue's database on
+a platform of another dialect does not resolve.
 
 ## On gcp
 
-The gcp target runs a worker as a Cloud Run worker pool,
-`gcp.cloudrunworker`, named after the worker as its service account is:
+The gcp target runs a worker, in Go or TypeScript, as a Cloud Run worker
+pool, `gcp.cloudrunworker`, named after the worker as its service account is:
 no port, no URL and nothing that calls it, scaled by hand to the worker's
 `instances`, with `WORKER_CONCURRENCY` set to its concurrency. Its config,
 secrets, Cloud SQL volume and egress are a server's of its API, and its

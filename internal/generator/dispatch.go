@@ -141,6 +141,8 @@ type runMemo struct {
 	apiOutputReady    bool
 	envConfig         *envgen.ConfigOutput
 	envConfigReady    bool
+	engineDocument    []byte
+	engineDocReady    bool
 }
 
 // buildEnvConfig resolves the schema's @envVars contract once per run for
@@ -217,6 +219,10 @@ func (r run) generateGoTypes() error {
 		return err
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	var output *typegen.ModuleOutput
 	if err := r.measure("output.types-go.generate", func() error {
 		var err error
@@ -227,6 +233,8 @@ func (r run) generateGoTypes() error {
 			DependencyModules: depModules,
 			ModuleClosure:     closure,
 			Naming:            r.Options.Naming,
+			Registry:          r.Registry,
+			EngineDocument:    engineDocument,
 			Clock:             r.Options.Clock,
 		})
 		return err
@@ -270,6 +278,10 @@ func (r run) generateTSTypes() error {
 		return err
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	var output *tsgen.ModuleOutput
 	if err := r.measure("output.types-typescript.generate", func() error {
 		var err error
@@ -278,6 +290,8 @@ func (r run) generateTSTypes() error {
 			Dependencies:       deps,
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
+			Registry:           r.Registry,
+			EngineDocument:     engineDocument,
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -339,6 +353,7 @@ func (r run) generatePyTypes() error {
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
 		Naming:       r.Options.Naming,
+		Registry:     r.Registry,
 		Clock:        r.Options.Clock,
 	})
 	if err != nil {
@@ -369,11 +384,17 @@ func (r run) generateRustTypes() error {
 		depCrates[name] = r.Options.Naming.RustTypesCrate(name)
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	output, err := rustgen.Generate(r.Schema, rustgen.Options{
 		SchemaName:       r.Config.Name,
 		Dependencies:     deps,
 		DependencyCrates: depCrates,
 		Naming:           r.Options.Naming,
+		Registry:         r.Registry,
+		EngineDocument:   engineDocument,
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {
@@ -681,6 +702,13 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db
+		pkg, err := r.typeScriptQueuesPackage(db)
+		if err != nil {
+			return deps, err
+		}
+		deps.DatabaseTypesPackage = pkg
+	} else if len(r.Schema.Workers) > 0 {
+		return deps, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
 	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {
@@ -705,6 +733,38 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
 	}
 	return deps, nil
+}
+
+// typeScriptQueuesPackage is the TypeScript types package of db, the
+// database of the TypeScript API, when the API declares a worker (D53): it
+// declares the queues' messages, which the API's Workers take, and their
+// definitions, which the worker claims with and the implementation
+// enqueues with. Each worker must handle a queue of db, whose TypeScript
+// types must be generated. An API with no worker loads no database here,
+// and its implementation adds the types' dependency itself to enqueue.
+func (r run) typeScriptQueuesPackage(db string) (string, error) {
+	if len(r.Schema.Workers) == 0 {
+		return "", nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return "", fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle: %w", db, r.Config.Name, err)
+	}
+	if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
+		return "", err
+	}
+	if r.Options.DependencyConfig != nil {
+		if cfg, ok := r.Options.DependencyConfig(db); ok {
+			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+			if err != nil {
+				return "", fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangTypeScript) {
+				return "", fmt.Errorf("generator: the TypeScript workers of %s handle the queues of %s, whose TypeScript types declare the messages and the queues' definitions, and %s generates none; enable outputs.types.%s in %s's config (D53)", r.Config.Name, db, db, LangTypeScript, db)
+			}
+		}
+	}
+	return r.Options.Naming.NpmTypesPackage(db), nil
 }
 
 // scaffoldTypeScriptImplementation writes the scaffold of the API's
@@ -1083,27 +1143,32 @@ func toGoPackageName(service string) string {
 // operations, their Args structs and result types from here instead of
 // deriving them again.
 func RustAPIOf(c registry.GenerateContext) (*rustrestgen.APIOutput, error) {
-	return run{c}.rustAPI()
+	output, _, err := run{c}.rustAPI()
+	return output, err
 }
 
-// rustAPI is the Rust REST API crate of the run's schema, nil without
-// operations.
-func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
+// rustAPI is the Rust REST API crate of the run's schema, with its Deps,
+// and the env config it writes beside it, src/config.rs: the @envVars
+// settings and every field a stack sets for the API, its derived fields,
+// its callers field, its CORS field and, for an API over the user model,
+// its identity config field (D57). It is nil without operations. A stack's
+// build reads the same output for each API its Rust servers serve.
+func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	var apiOutput *apigen.APIOutput
 	if err := r.measure("output.api.prepare", func() error {
 		var err error
 		apiOutput, err = r.APIOutput()
 		return err
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	authDB, err := r.authDB()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	output, err := rustrestgen.Generate(r.Schema, apiOutput, rustrestgen.Options{
 		SchemaName:   r.Config.Name,
@@ -1116,21 +1181,88 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, error) {
 		AuthDB:       authDB,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
+		return nil, nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if output.HasEnvConfig, err = r.hasEnvConfig(); err != nil {
-		return nil, err
+	rustDeps, err := r.rustDeps()
+	if err != nil {
+		return nil, nil, err
 	}
-	return output, nil
+	if err := output.SetDeps(rustDeps); err != nil {
+		return nil, nil, fmt.Errorf("generator: %w", err)
+	}
+	envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+		Derived:      true,
+		Callers:      true,
+		CORS:         true,
+		Identity:     output.Identity != nil,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+	output.HasEnvConfig = envOutput != nil
+	return output, envOutput, nil
 }
 
-// generateRustAPI emits the Rust REST API server and route scaffolds. The
-// Rust writer does not emit env config; the standalone env path covers it.
+// rustDeps returns what the Rust API's Deps holds beside its config and
+// its span (D57): a Postgres pool for the API's database, its authDb or
+// its one DB-kind dependency, and a client of each calls entry's Rust SDK,
+// which the API crate depends on by path. A callee whose config the build
+// has must generate that SDK; the database needs nothing generated, since
+// the pool is the runtime's. A Rust server builds no bucket, so an API
+// that lists one is refused.
+func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
+	var deps rustrestgen.DepsInfo
+	if len(r.Schema.Buckets) > 0 {
+		var buckets []string
+		for _, b := range r.Schema.Buckets {
+			buckets = append(buckets, b.Name)
+		}
+		return deps, fmt.Errorf("generator: the Rust server of %s holds the buckets it lists (%s) in its Deps, and buckets from a Rust server are not built (D57); serve %s in Go or TypeScript, or remove its buckets", r.Config.Name, strings.Join(buckets, ", "), r.Config.Name)
+	}
+	if db, _, ok := r.Schema.Database(); ok {
+		deps.Database = db
+	}
+	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
+	for _, call := range r.Schema.Calls {
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(call.Name); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, fmt.Errorf("generator: schema config for %s: %w", call.Name, err)
+				}
+				if !outputs.SDKEnabled(LangRust) {
+					return deps, fmt.Errorf("generator: the Rust server of %s holds a client of %s in its Deps, and %s generates none; enable outputs.sdk.%s in %s's config", r.Config.Name, call.Name, call.Name, LangRust, call.Name)
+				}
+			}
+		}
+		path, err := naming.RelPath(apiDir, SDKDir(r.Options.OutputRoot, LangRust, call.Name))
+		if err != nil {
+			return deps, fmt.Errorf("generator: the Rust SDK of %s from %s: %w", call.Name, r.Config.Name, err)
+		}
+		deps.Calls = append(deps.Calls, rustrestgen.DepsCall{
+			Service: call.Name,
+			Field:   rustrestgen.DepsField(call.Name),
+			Crate:   r.Options.Naming.RustSDKCrate(call.Name),
+			Path:    path,
+			Client:  rustsdkgen.SDKStructName(call.Name),
+		})
+	}
+	return deps, nil
+}
+
+// generateRustAPI emits the Rust REST API crate, its src/config.rs (the
+// @envVars loader and the EnvConfig its Deps holds, D57) and its route
+// scaffolds, and under Options.ImplementationRoot it scaffolds a missing
+// implementation crate. A schema without operations gets its env loader
+// from the standalone path.
 func (r run) generateRustAPI() error {
-	output, err := r.rustAPI()
+	output, envOutput, err := r.rustAPI()
 	if err != nil {
 		return err
 	}
@@ -1146,6 +1278,20 @@ func (r run) generateRustAPI() error {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	r.Done("api-rust", dir)
+	if envOutput != nil {
+		if err := envgen.WriteRustConfig(envOutput, dir); err != nil {
+			return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+		}
+		r.Done("env-config", dir)
+	}
+
+	if r.Options.ImplementationRoot != "" {
+		if err := r.measure("output.api.scaffold-implementation", func() error {
+			return r.scaffoldRustImplementation(output, r.Options.ImplementationRoot)
+		}); err != nil {
+			return err
+		}
+	}
 
 	if subdir := r.Outputs.API.ScaffoldsOutputDir; subdir != "" {
 		scaffoldsDir := filepath.Join(r.Options.ServicePath, subdir)
@@ -1156,32 +1302,29 @@ func (r run) generateRustAPI() error {
 		r.Logf("  + api scaffolds: %d created, %d skipped (existing) in %s\n",
 			len(scaffolds.Generated), len(scaffolds.Skipped), scaffoldsDir)
 	}
-	return r.generateEnvConfig(LangRust)
+	return nil
 }
 
-// hasEnvConfig reports whether generateEnvConfig writes a loader: whether
-// the schema, or a dependency it imports, declares an @envVars type.
-func (r run) hasEnvConfig() (bool, error) {
-	deps, err := r.loadDependencySchemas()
+// scaffoldRustImplementation writes the scaffold of the API's Rust
+// implementation crate under repoRoot, at the naming file's
+// [implementation_paths] rust template, when that crate is missing (D57).
+func (r run) scaffoldRustImplementation(output *rustrestgen.APIOutput, repoRoot string) error {
+	dir := r.Options.Naming.RustImplementationDir(repoRoot, output.SchemaName)
+	written, err := rustrestgen.WriteImplementationScaffold(output, dir, APIDir(r.Options.OutputRoot, output.SchemaName), r.Options.Paths, r.Options.Naming)
 	if err != nil {
-		return false, err
+		return fmt.Errorf("generator: implementation scaffold for %s: %w", output.SchemaName, err)
 	}
-	output, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
-		SchemaName:   r.Config.Name,
-		Dependencies: deps,
-		Naming:       r.Options.Naming,
-	})
-	if err != nil {
-		return false, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	if written {
+		r.Logf("  + implementation scaffold of %s written to %s\n", output.SchemaName, dir)
 	}
-	return output != nil, nil
+	return nil
 }
 
 // generateEnvConfig emits the standalone env-var loader for schemas whose API
-// path does not write it: env-only schemas (no operations) and Rust API
-// schemas. lang is the loader's language, LangGo or LangRust; "" writes the
-// values schema alone (see envLoaderLanguage). Silently does nothing when
-// the schema declares no @envVars type.
+// path does not write it: env-only schemas (no operations). lang is the
+// loader's language, LangGo or LangRust; "" writes the values schema alone
+// (see envLoaderLanguage). Silently does nothing when the schema declares
+// no @envVars type.
 func (r run) generateEnvConfig(lang string) error {
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
@@ -1298,6 +1441,7 @@ func (r run) generateTypeScriptSDK() error {
 			Dependencies:       deps,
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
+			Registry:           r.Registry,
 			Clock:              r.Options.Clock,
 		})
 		return err

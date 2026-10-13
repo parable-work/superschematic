@@ -3,8 +3,9 @@
 //! name and a discarded ref's name free again, the history it writes, STRICT
 //! tables and foreign keys, two graphs in one file, the name function, the
 //! clock, its ids, the write lock a second connection waits on, a dropped
-//! transaction, the caller's transaction, the canonical vectors as a round
-//! trip, and the rusqlite binding: the Rust port of the TypeScript package's
+//! transaction, the caller's transaction, an operation run over a storage
+//! it borrows with no executor, the canonical vectors as a round trip, and
+//! the rusqlite binding: the Rust port of the TypeScript package's
 //! test/sqlite-cases.ts. Then the shared SQLite vectors (testdata/sqlite):
 //! the layout, and a database the TypeScript adapter wrote, read back
 //! through this adapter. Every case runs on SQLite through rusqlite and
@@ -1963,6 +1964,79 @@ async fn a_transaction_that_fails_rolls_back_and_one_inside_the_callers_is_a_sav
         Err(Error::NotFound)
     ));
     assert_eq!(ref_names(&s.client).await, vec!["after", "kept", "kept"]);
+}
+
+/// With no executor at all, an engine that has no storage of its own runs
+/// operations over a storage it borrows for each, one poll each: the
+/// rusqlite binding's futures are ready at once on a connection no other
+/// operation holds. Its own operations fail, and a future that is not ready
+/// is refused.
+#[test]
+fn run_on_runs_an_operation_over_a_storage_it_borrows_with_no_executor() {
+    use superschematic_versiongraph_engine::ready;
+
+    let client = Rusqlite::new(memory());
+    let adapter =
+        Arc::new(sqlite::Adapter::new(&descriptor(), options()).expect("the fixture's adapter"));
+    ready(adapter.create_tables(&client))
+        .expect("one poll")
+        .expect("create the layout");
+    let storage = ready(adapter.storage(client))
+        .expect("one poll")
+        .expect("bind the client");
+    let engine = Engine::unbound(
+        &descriptor(),
+        Options {
+            schema_epoch: 1,
+            snapshot_every: 3,
+            ..Options::default()
+        },
+    )
+    .expect("the engine");
+    let main = engine
+        .run_on(&storage, |e| e.create_primary(COOK, BREAD, "main"))
+        .expect("create the primary line");
+    let draft = engine
+        .run_on(&storage, |e| e.branch(COOK, &main.id, "draft"))
+        .expect("branch");
+    let edits = upserts(&[(
+        "step",
+        vec![step_row(Some("Mix"), "Mix", json!({"position": 1}))],
+    )]);
+    let saved = engine
+        .run_on(&storage, |e| e.save(COOK, &draft.id, draft.version, &edits))
+        .expect("save");
+    // The operation's future borrows its arguments, so they outlive the
+    // closure.
+    let options = CommitOptions::default();
+    let committed = engine
+        .run_on(&storage, |e| {
+            e.commit(COOK, &draft.id, saved.ref_.version, &options)
+        })
+        .expect("commit");
+    let tree = engine
+        .run_on(&storage, |e| e.compose(&draft.id))
+        .expect("compose");
+    assert_eq!(tree.tree["step"].len(), 1, "{:?}", tree.tree);
+    assert_eq!(
+        committed.commit.expect("a commit").content_hash,
+        tree.content_hash
+    );
+    // An operation's error is its own.
+    let stale = engine.run_on(&storage, |e| e.save(COOK, &draft.id, draft.version, &edits));
+    assert!(matches!(stale, Err(Error::VersionConflict)), "{stale:?}");
+    // The engine has no storage of its own.
+    refused(
+        "an unbound engine's own operation",
+        "no storage of its own",
+        &ready(engine.compose(&draft.id)).expect("one poll"),
+    );
+    // A future that is not ready is refused, and dropped.
+    refused(
+        "a future that is not ready",
+        "not ready",
+        &ready(std::future::pending::<()>()),
+    );
 }
 
 #[tokio::test]

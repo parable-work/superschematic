@@ -263,6 +263,12 @@ func (r *formRenderer) control(indent int, f *formField, value string, field, id
 		r.line(indent, "<textarea "+open+` rows="4" spellcheck="false"`+req+described+invalid+">("+value+".clone())</textarea>")
 	default:
 		input := "<input " + open + " type=" + rustString(f.Control) + req + attrs + " value=(" + value + ".clone())" + invalid + ">"
+		if f.Control == "longtext" {
+			// A browser drops a newline right after a textarea's start tag,
+			// so one is written there: a value that starts with a newline
+			// renders as it was sent.
+			input = "<textarea " + open + ` rows="6"` + req + attrs + invalid + `>"\n"(` + value + ".clone())</textarea>"
+		}
 		if !f.Choosable {
 			r.line(indent, input)
 			return

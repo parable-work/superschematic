@@ -197,19 +197,25 @@ func envValue(env []string, name string) string {
 	return value
 }
 
-// fixture is a resolved local environment with its program rendered, a
-// model written for each hosted DB schema, an entrypoint module directory
-// per server, and a secrets file.
+// fixture is a local environment resolved in a checkout of its own, with
+// its program rendered, a model written for each hosted DB schema, an
+// entrypoint module directory per server, and a secrets file in the
+// checkout's state directory. pgName and stName are the names of its
+// containers, which the checkout's discriminator names (D30, amended).
 type fixture struct {
-	env     *ir.ResolvedEnvironment
-	req     registry.ProvisionRequest
-	runner  *fakeRunner
-	prov    *local.Provisioner
-	out     *bytes.Buffer
-	pgPort  int
-	stPort  int
-	apiPort int
-	ordPort int
+	env         *ir.ResolvedEnvironment
+	req         registry.ProvisionRequest
+	runner      *fakeRunner
+	prov        *local.Provisioner
+	out         *bytes.Buffer
+	schemasRoot string
+	checkout    string
+	pgPort      int
+	stPort      int
+	apiPort     int
+	ordPort     int
+	pgName      string
+	stName      string
 }
 
 // ledgerModel is the model the runner's compiler vectors start from,
@@ -246,7 +252,15 @@ func newFixture(t *testing.T, envName string) *fixture {
 // any, the output root's Bun workspace holds.
 func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	t.Helper()
-	resolved := resolve(t, assemble(t), s, stacktest.AcmeShop(), envName)
+	return newFixtureWith(t, s, stacktest.AcmeShop(), envName)
+}
+
+// newFixtureWith is newFixtureOf over services.
+func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName string) *fixture {
+	t.Helper()
+	root := t.TempDir()
+	schemasRoot := filepath.Join(root, "schemas")
+	resolved := resolveIn(t, assemble(t), schemasRoot, s, services, envName)
 	data, err := stack.Marshal(resolved)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +269,6 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
 	dir := filepath.Join(root, "program")
 	outputRoot := filepath.Join(root, "dist")
 	for _, d := range env.Deployables {
@@ -278,7 +291,7 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	if err := os.WriteFile(filepath.Join(dir, local.ModelsDir, "shop-db.json"), model, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), env.Stack, env.Environment)
+	stateDir, err := local.EnsureStateDir(schemasRoot, env.Stack, env.Environment)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +300,8 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	}
 	runner := &fakeRunner{}
 	out := new(bytes.Buffer)
-	senv := registry.StackEnvironment{Stack: env.Stack, Name: env.Environment, Values: env.Values}
+	senv := registry.StackEnvironment{Stack: env.Stack, Name: env.Environment, Values: env.Values, SchemasRoot: schemasRoot}
+	checkout := local.Checkout(schemasRoot, env.Stack, env.Environment)
 	// The containers' published ports take connections once they run.
 	runner.inUse = []int{local.PostgresPort(senv), local.StoragePort(senv)}
 	prov := &local.Provisioner{Runner: runner, Out: out, ReadyTimeout: time.Second, PollInterval: time.Millisecond}
@@ -295,16 +309,25 @@ func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 		t.Fatal(err)
 	}
 	return &fixture{
-		env:     env,
-		req:     registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)},
-		runner:  runner,
-		prov:    prov,
-		out:     out,
-		pgPort:  local.PostgresPort(senv),
-		stPort:  local.StoragePort(senv),
-		apiPort: local.ServerPort(senv, *env.Deployable("shop-api")),
-		ordPort: local.ServerPort(senv, *env.Deployable("Orders")),
+		env:         env,
+		req:         registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)},
+		runner:      runner,
+		prov:        prov,
+		out:         out,
+		schemasRoot: schemasRoot,
+		checkout:    checkout,
+		pgPort:      local.PostgresPort(senv),
+		stPort:      local.StoragePort(senv),
+		apiPort:     local.ServerPort(senv, *env.Deployable("shop-api")),
+		ordPort:     local.ServerPort(senv, *env.Deployable("Orders")),
+		pgName:      local.ContainerName(env.Stack, env.Environment, checkout),
+		stName:      local.StorageContainerName(env.Stack, env.Environment, checkout),
 	}
+}
+
+// senv is the environment as the platforms saw it when they resolved it.
+func (f *fixture) senv() registry.StackEnvironment {
+	return registry.StackEnvironment{Stack: f.env.Stack, Name: f.env.Environment, Values: f.env.Values, SchemasRoot: f.schemasRoot}
 }
 
 // keys applies the environment's key pairs alone, as its infrastructure
@@ -346,11 +369,18 @@ func inspectOf(name string) string {
 // Pinned's two containers, each running its image on its port: Postgres
 // on pgImage, and the storage emulator (D54).
 func (f *fixture) runningContainers(pgImage string) []rule {
-	env := strings.ToLower(f.env.Environment)
 	return []rule{
-		{prefix: inspectOf("superschematic-" + f.env.Stack + "-" + env + "-postgres"), out: fmt.Sprintf(`true|%s|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", pgImage, f.pgPort)},
-		{prefix: inspectOf("superschematic-" + f.env.Stack + "-" + env + "-storage"), out: fmt.Sprintf(`true|%s|{"4443/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", local.DefaultStorageImage, f.stPort)},
+		{prefix: inspectOf(f.pgName), out: fmt.Sprintf(`true|%s|{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", pgImage, f.pgPort)},
+		{prefix: inspectOf(f.stName), out: fmt.Sprintf(`true|%s|{"4443/tcp":[{"HostIp":"127.0.0.1","HostPort":"%d"}]}`+"\n", local.DefaultStorageImage, f.stPort)},
 	}
+}
+
+// listContainers is the line that lists the containers of the fixture's
+// environment, to find the ones an older superschematic named for no
+// checkout.
+func (f *fixture) listContainers() string {
+	return "/bin/docker container ls --all --filter label=superschematic.stack=" + f.env.Stack +
+		" --filter label=superschematic.environment=" + f.env.Environment + ` --format {{.Names}}|{{.State}}|{{.Label "superschematic.checkout"}}`
 }
 
 // TestApplyFromNothing applies Dev to a machine with no container: it
@@ -363,8 +393,8 @@ func TestApplyFromNothing(t *testing.T) {
 	f := newFixture(t, "Dev")
 	f.runner.notReady = 1
 	f.runner.rules = []rule{
-		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: superschematic-shop-stack-dev-postgres"},
-		{prefix: "/bin/docker exec superschematic-shop-stack-dev-postgres pg_isready", times: 1, stderr: "no response"},
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: "/bin/docker exec " + f.pgName + " pg_isready", times: 1, stderr: "no response"},
 		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
 		{prefix: "/bin/superschematic-migrate apply", out: "applied 2 steps\n"},
 	}
@@ -374,15 +404,19 @@ func TestApplyFromNothing(t *testing.T) {
 
 	dir := f.req.Dir
 	url := local.DatabaseURL(f.pgPort, "shop_db")
+	checkout := f.checkout
 	want := []string{
-		inspectPrefix + " {{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}} superschematic-shop-stack-dev-postgres",
-		fmt.Sprintf("/bin/docker run --detach --name superschematic-shop-stack-dev-postgres --label superschematic.environment=Dev --label superschematic.stack=shop-stack --env POSTGRES_HOST_AUTH_METHOD=trust --publish 127.0.0.1:%d:5432 postgres:16-alpine", f.pgPort),
-		inspectPrefix + " {{.State.Running}}|{{.Config.Image}}|{{json .HostConfig.PortBindings}} superschematic-shop-stack-dev-storage",
-		fmt.Sprintf("/bin/docker run --detach --name superschematic-shop-stack-dev-storage --label superschematic.environment=Dev --label superschematic.stack=shop-stack --publish 127.0.0.1:%[1]d:4443 %[2]s -scheme http -host 0.0.0.0 -port 4443 -backend filesystem -filesystem-root /storage -public-host 127.0.0.1:%[1]d -external-url http://127.0.0.1:%[1]d", f.stPort, local.DefaultStorageImage),
-		"/bin/docker exec superschematic-shop-stack-dev-postgres pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
-		"/bin/docker exec superschematic-shop-stack-dev-postgres pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
-		"/bin/docker exec superschematic-shop-stack-dev-postgres psql --host 127.0.0.1 --port 5432 --username postgres --dbname postgres --tuples-only --no-align --command SELECT 1 FROM pg_database WHERE datname = 'shop_db'",
-		"/bin/docker exec superschematic-shop-stack-dev-postgres createdb --host 127.0.0.1 --port 5432 --username postgres shop_db",
+		inspectOf(f.pgName),
+		fmt.Sprintf("/bin/docker run --detach --name %s --label superschematic.checkout=%s --label superschematic.environment=Dev --label superschematic.stack=shop-stack --env POSTGRES_HOST_AUTH_METHOD=trust --publish 127.0.0.1:%d:5432 postgres:16-alpine", f.pgName, checkout, f.pgPort),
+		inspectOf(f.stName),
+		fmt.Sprintf("/bin/docker run --detach --name %[3]s --label superschematic.checkout=%[4]s --label superschematic.environment=Dev --label superschematic.stack=shop-stack --publish 127.0.0.1:%[1]d:4443 %[2]s -scheme http -host 0.0.0.0 -port 4443 -backend filesystem -filesystem-root /storage -public-host 127.0.0.1:%[1]d -external-url http://127.0.0.1:%[1]d", f.stPort, local.DefaultStorageImage, f.stName, checkout),
+		// It looks for a container an older superschematic named for no
+		// checkout, of which there is none (D30, amended).
+		f.listContainers(),
+		"/bin/docker exec " + f.pgName + " pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
+		"/bin/docker exec " + f.pgName + " pg_isready --host 127.0.0.1 --port 5432 --username postgres --quiet",
+		"/bin/docker exec " + f.pgName + " psql --host 127.0.0.1 --port 5432 --username postgres --dbname postgres --tuples-only --no-align --command SELECT 1 FROM pg_database WHERE datname = 'shop_db'",
+		"/bin/docker exec " + f.pgName + " createdb --host 127.0.0.1 --port 5432 --username postgres shop_db",
 		migrateStatus + " --database-url " + url,
 		"/bin/superschematic-migrate apply --plan DIR/migrations/shop-db.plan.json --phase all --database-url " + url,
 		"/bin/go build -o DIR/bin/shop-api .",
@@ -524,7 +558,7 @@ func TestApplyFromNothing(t *testing.T) {
 	if _, ok := outputs["shop-orders-fulfil-orders.process"]; ok {
 		t.Error("the worker's process has outputs; it has no port and no URL")
 	}
-	if got := f.runner.lines(dir); len(got) != 4 || got[1] != "/bin/docker stop superschematic-shop-stack-dev-postgres" || got[3] != "/bin/docker stop superschematic-shop-stack-dev-storage" {
+	if got := f.runner.lines(dir); len(got) != 4 || got[1] != "/bin/docker stop "+f.pgName || got[3] != "/bin/docker stop "+f.stName {
 		t.Errorf("Destroy ran %v", got)
 	}
 	out := f.out.String()
@@ -545,14 +579,13 @@ func TestApplyFromNothing(t *testing.T) {
 func TestApplyRunsATypeScriptServer(t *testing.T) {
 	f := newFixtureOf(t, storefront(), "Dev")
 	f.runner.rules = []rule{
-		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: superschematic-storefront-stack-dev-postgres"},
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
 		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
 	}
 	if err := f.applyAll(t); err != nil {
 		t.Fatalf("%v\n%s", err, f.out)
 	}
-	senv := registry.StackEnvironment{Stack: f.env.Stack, Name: f.env.Environment, Values: f.env.Values}
-	port := local.ServerPort(senv, *f.env.Deployable("shop-storefront"))
+	port := local.ServerPort(f.senv(), *f.env.Deployable("shop-storefront"))
 	module := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, "shop-storefront"))
 	var installs []local.Command
 	var bun *fakeProcess
@@ -612,7 +645,7 @@ func TestApplyRunsATypeScriptServer(t *testing.T) {
 	if count != 1 {
 		t.Errorf("bun install ran %d times, want once", count)
 	}
-	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-storefront-stack-dev-postgres"}}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
 	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
 		t.Fatal(err)
 	}
@@ -667,6 +700,206 @@ func TestApplyRefusesATypeScriptServerItCannotRun(t *testing.T) {
 	}
 }
 
+// writeCrate writes the Cargo.toml of a Rust server's crate into its
+// entrypoint module.
+func (f *fixture) writeCrate(t *testing.T, server, manifest string) {
+	t.Helper()
+	path := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, server), "Cargo.toml")
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// crate is a Cargo.toml whose package, and so whose binary, is name.
+func crate(name string) string {
+	return "[package]\nname = \"" + name + "\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n"
+}
+
+// rollout applies each rollout step of the fixture's environment up to
+// and including the one that starts id, and returns the first error.
+func (f *fixture) rollout(t *testing.T, id string) error {
+	t.Helper()
+	for _, step := range f.env.DeployOrder {
+		if step.Step != ir.StepRollout {
+			continue
+		}
+		if err := f.prov.Apply(context.Background(), f.req, *step); err != nil {
+			return err
+		}
+		if slices.Contains(step.Resources, id) {
+			return nil
+		}
+	}
+	t.Fatalf("no rollout step starts %s", id)
+	return nil
+}
+
+// TestApplyRunsARustServer applies Dev of the shop with shop-api in Rust
+// (D57): its wave builds its crate with cargo in its module, into the
+// program directory's Cargo target directory, and runs the binary its
+// Cargo.toml names from target/release with the environment a Go server
+// gets, its database included; Orders still builds with go.
+// Applying the wave again builds into the same target directory and
+// restarts the server.
+func TestApplyRunsARustServer(t *testing.T) {
+	f := newFixtureWith(t, rustStack(), rustShop(), "Dev")
+	f.writeCrate(t, "shop-api", crate("shop-api-server"))
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: superschematic-rust-stack-dev-postgres"},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	module := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, "shop-api"))
+	target, err := filepath.Abs(filepath.Join(f.req.Dir, local.RustTargetDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cargo []local.Command
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" {
+			cargo = append(cargo, cmd)
+		}
+	}
+	want := "build --release --locked --quiet --target-dir " + target
+	if len(cargo) != 1 || strings.Join(cargo[0].Args, " ") != want || cargo[0].Dir != module {
+		t.Fatalf("cargo ran %+v, want once, %q in %s", cargo, want, module)
+	}
+	var api *fakeProcess
+	for _, p := range f.runner.started {
+		if strings.HasSuffix(p.cmd.Path, "shop-api-server") {
+			api = p
+		}
+	}
+	if binary := filepath.Join(target, "release", "shop-api-server"); api == nil || api.cmd.Path != binary || api.cmd.Dir != module {
+		t.Fatalf("shop-api started as %+v, want %s in %s", api, binary, module)
+	}
+	if got := envValue(api.cmd.Env, "PORT"); got != fmt.Sprint(f.apiPort) {
+		t.Errorf("shop-api's PORT = %q, want %d", got, f.apiPort)
+	}
+	for name, value := range map[string]string{
+		"SHOP_DB_DATABASE_URL": local.DatabaseURL(f.pgPort, "shop_db"),
+		"STRIPE_KEY":           "sk_test_123",
+		"LOG_LEVEL":            "info",
+	} {
+		if got := envValue(api.cmd.Env, name); got != value {
+			t.Errorf("shop-api's %s = %q, want %q", name, got, value)
+		}
+	}
+	lines := f.runner.lines(f.req.Dir)
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "/bin/go build -o DIR/bin/orders") }) {
+		t.Errorf("Orders was not built with go:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, want := range []string{
+		"build shop-api: cargo build --release --locked in server/rust-stack/shop-api",
+		fmt.Sprintf("[shop-api] listening on %d\n", f.apiPort),
+		"shop-api is ready at " + local.ServerURL(f.apiPort),
+	} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, f.out)
+		}
+	}
+
+	if err := f.rollout(t, "shop-api.process"); err != nil {
+		t.Fatal(err)
+	}
+	if !api.stopped {
+		t.Error("applying shop-api's wave again did not restart it")
+	}
+	count := 0
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" && strings.Join(cmd.Args, " ") == want {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("cargo built shop-api %d times into %s, want twice", count, target)
+	}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-rust-stack-dev-postgres"}}
+	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestApplyRefusesARustServerItCannotRun: without cargo on PATH, without a
+// crate, with a build that fails, or with a crate whose binary cargo would
+// not name alone, shop-api's wave fails and says why. A failed build's
+// diagnostics are in the error.
+func TestApplyRefusesARustServerItCannotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		services []stack.Service
+		setup    func(t *testing.T, f *fixture)
+		want     string
+	}{
+		{
+			name:  "no cargo",
+			setup: func(t *testing.T, f *fixture) { f.runner.missing = []string{"cargo"} },
+			want:  "cargo is not on PATH; the local target builds each Rust server with cargo build",
+		},
+		{
+			name:  "no crate",
+			setup: func(t *testing.T, f *fixture) {},
+			want:  "local: server shop-api: no Cargo.toml in ",
+		},
+		{
+			name: "a build that fails",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api"))
+				f.runner.rules = []rule{{prefix: "/bin/cargo build", stderr: "error[E0425]: cannot find value `pool` in this scope"}}
+			},
+			want: "local: build server shop-api: /bin/cargo build --release --locked --quiet --target-dir ",
+		},
+		{
+			name: "two binaries",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api")+"\n[[bin]]\nname = \"a\"\npath = \"src/a.rs\"\n\n[[bin]]\nname = \"b\"\npath = \"src/b.rs\"\n")
+			},
+			want: "declares 2 binaries; a server's crate builds one",
+		},
+		{
+			name: "a binary name cargo refuses",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api")+"\n[[bin]]\nname = \"api/../x\"\n")
+			},
+			want: `names no binary cargo builds: its [package] name, or its one [[bin]]'s, is "api/../x"`,
+		},
+		{
+			name:     "two servers naming one binary",
+			services: stacktest.InRust(stacktest.WithoutBuckets(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop()))), "shop-api", "shop-orders"),
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("server"))
+				f.writeCrate(t, "Orders", crate("server"))
+			},
+			want: "local: servers shop-api and Orders both build a binary named server into one Cargo target directory, target; name each crate's binary after its server",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			services := tc.services
+			if services == nil {
+				services = rustShop()
+			}
+			f := newFixtureWith(t, rustStack(), services, "Dev")
+			f.keys(t)
+			tc.setup(t, f)
+			err := f.rollout(t, "shop-api.process")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			if tc.name == "a build that fails" && !strings.Contains(err.Error(), "error[E0425]: cannot find value `pool` in this scope") {
+				t.Errorf("the error lacks the build's diagnostics: %v", err)
+			}
+			for _, p := range f.runner.started {
+				if strings.Contains(p.cmd.Path, local.RustTargetDir) {
+					t.Errorf("a Rust server started: %s", p.cmd.Path)
+				}
+			}
+			_ = f.prov.Destroy(context.Background(), f.req)
+		})
+	}
+}
+
 // TestApplyAgain applies Dev to a machine where the containers run, the
 // database holds the model already and the emulator keeps the bucket:
 // nothing is created, and the migration is up to date.
@@ -677,7 +910,7 @@ func TestApplyAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.runner.rules = append(f.runningContainers("postgres:16-alpine"),
-		rule{prefix: "/bin/docker exec superschematic-shop-stack-dev-postgres psql", out: "1\n"},
+		rule{prefix: "/bin/docker exec " + f.pgName + " psql", out: "1\n"},
 		rule{prefix: migrateStatus, out: string(model) + "\n"},
 	)
 	f.runner.buckets = []string{"shop-media"}
@@ -710,10 +943,66 @@ func TestApplyAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := f.runner.lines(f.req.Dir)
-	if got, want := strings.Join(lines[len(lines)-3:], "\n"), "/bin/docker rm --force --volumes superschematic-shop-stack-dev-postgres\n"+
-		inspectOf("superschematic-shop-stack-dev-storage")+"\n"+
-		"/bin/docker rm --force --volumes superschematic-shop-stack-dev-storage"; got != want {
+	if got, want := strings.Join(lines[len(lines)-3:], "\n"), "/bin/docker rm --force --volumes "+f.pgName+"\n"+
+		inspectOf(f.stName)+"\n"+
+		"/bin/docker rm --force --volumes "+f.stName; got != want {
 		t.Errorf("Purge ran\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestContainersOfNoCheckout: where an older superschematic left the
+// environment's containers under the names of no checkout, applying it
+// runs the checkout's own and says how to remove each old one, running or
+// not; a container of another checkout gets no word. Purge removes the
+// checkout's containers alone (D30, amended).
+func TestContainersOfNoCheckout(t *testing.T) {
+	f := newFixture(t, "Dev")
+	model, err := ledgerModel(t, "shop-db").CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	others := strings.Join([]string{
+		"superschematic-shop-stack-dev-postgres|exited|",
+		"superschematic-shop-stack-dev-storage|running|",
+		"superschematic-shop-stack-dev-abcdef-postgres|running|abcdef",
+		f.pgName + "|running|" + f.checkout,
+		f.stName + "|running|" + f.checkout,
+	}, "\n") + "\n"
+	f.runner.rules = append(f.runningContainers("postgres:16-alpine"),
+		rule{prefix: f.listContainers(), out: others},
+		rule{prefix: "/bin/docker exec " + f.pgName + " psql", out: "1\n"},
+		rule{prefix: migrateStatus, out: string(model) + "\n"},
+	)
+	f.runner.buckets = []string{"shop-media"}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	out := f.out.String()
+	for _, want := range []string{
+		"container superschematic-shop-stack-dev-postgres of stack shop-stack environment Dev names no checkout: an older superschematic created it, and this checkout runs its own containers instead; docker rm --force --volumes superschematic-shop-stack-dev-postgres removes the old one and its data",
+		"container superschematic-shop-stack-dev-storage of stack shop-stack environment Dev names no checkout: an older superschematic created it, and it still runs, maybe for another checkout's stack dev; this checkout runs its own containers, and once nothing uses the old one, docker rm --force --volumes superschematic-shop-stack-dev-storage removes it and its data",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, name := range []string{"superschematic-shop-stack-dev-abcdef-postgres", f.pgName + " of stack", f.stName + " of stack"} {
+		if strings.Contains(out, "container "+name) {
+			t.Errorf("output names %s, a checkout's container:\n%s", name, out)
+		}
+	}
+
+	if err := f.prov.Purge(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+	var removed []string
+	for _, line := range f.runner.lines(f.req.Dir) {
+		if name, ok := strings.CutPrefix(line, "/bin/docker rm --force --volumes "); ok {
+			removed = append(removed, name)
+		}
+	}
+	if want := []string{f.pgName, f.stName}; !slices.Equal(removed, want) {
+		t.Errorf("Purge removed %v, want the checkout's containers alone, %v", removed, want)
 	}
 }
 
@@ -721,7 +1010,7 @@ func TestApplyAgain(t *testing.T) {
 // database and the bucket, migrates, and starts each server.
 func TestPlan(t *testing.T) {
 	f := newFixture(t, "Dev")
-	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-shop-stack-dev-postgres"}}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
 	changes, err := f.prov.Plan(context.Background(), f.req)
 	if err != nil {
 		t.Fatal(err)
@@ -897,7 +1186,7 @@ func TestWaitReportsAnExit(t *testing.T) {
 	if err := f.prov.Wait(context.Background(), f.req); err == nil || !strings.Contains(err.Error(), "server Orders exited: exit status 1") {
 		t.Errorf("Wait = %v, want Orders' exit", err)
 	}
-	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-shop-stack-dev-postgres"}}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
 	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
 		t.Fatal(err)
 	}

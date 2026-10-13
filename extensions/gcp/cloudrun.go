@@ -185,7 +185,9 @@ type workload struct {
 //   - the image's repository path, which the deploy pins to a digest
 //     (section 11.2), and the cpu and memory settings;
 //   - the Cloud SQL volume, holding the instances its connections name,
-//     mounted where the Cloud SQL connector's sockets go (section 7.4);
+//     mounted at /cloudsql, where Cloud Run puts each instance's socket:
+//     a Rust entrypoint, whose language has no Cloud SQL connector, dials
+//     it there as its IAM database user (section 7.4, D57);
 //   - for a deployable that calls a server other than itself, Direct VPC
 //     egress through the environment's network (networkNodes): a call to
 //     the callee's run.app URL from the VPC counts as internal, which an

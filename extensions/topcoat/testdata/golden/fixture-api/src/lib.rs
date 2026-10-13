@@ -15,10 +15,13 @@
 //! `fixture_api` puts each route's traffic controls in front of its
 //! procedure.
 //! `views` renders each record as a description list and as a table.
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod choices;
 pub mod forms;
 pub mod operations;
 pub mod procedures;

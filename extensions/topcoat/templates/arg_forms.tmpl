@@ -113,13 +113,10 @@ impl {{ .Name }} {
         Ok(args)
     }
 
-    /// Parses the form, then calls the operation in-process
-    /// (`operations::{{ .Call }}`). A refusal, the form's or the
-    /// operation's (`FormErrors::from_api`), is the form's errors, which a
-    /// page renders the form again with.
-    pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, FormErrors> {
+    {{ doc4 (printf "Parses the form, then calls the operation in-process (`operations::%s`). A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
+    pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, Refusal> {
         let args = self.parse()?;
-        operations::{{ .Call }}(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+        operations::{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 {{- if .Rows }}
 

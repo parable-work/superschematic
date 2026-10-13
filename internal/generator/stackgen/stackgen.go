@@ -63,13 +63,21 @@ func Generate(c registry.GenerateContext) error {
 }
 
 // Resolve resolves every environment of st over services, in declaration
-// order. When any fails to resolve it returns none of them, and every
-// failing environment's problems together.
+// order, in the checkout c.Options.SchemasRoot names. When any fails to
+// resolve it returns none of them, and every failing environment's
+// problems together.
 func Resolve(c registry.GenerateContext, st *ir.Stack, services []stack.Service) ([]*ir.ResolvedEnvironment, error) {
+	schemasRoot := ""
+	if c.Options.SchemasRoot != "" {
+		var err error
+		if schemasRoot, err = stack.CanonicalSchemasRoot(c.Options.SchemasRoot); err != nil {
+			return nil, fmt.Errorf("stack %s: %w", st.Name, err)
+		}
+	}
 	var resolved []*ir.ResolvedEnvironment
 	var failures []error
 	for _, env := range st.Environments {
-		out, err := stack.Resolve(c.Registry, stack.Input{Stack: st, Services: services, Environment: env.Name})
+		out, err := stack.Resolve(c.Registry, stack.Input{Stack: st, Services: services, Environment: env.Name, SchemasRoot: schemasRoot})
 		if err != nil {
 			failures = append(failures, err)
 			continue

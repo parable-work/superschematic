@@ -21,11 +21,13 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -302,6 +304,17 @@ type ModuleOutput struct {
 	// IdentityDescriptor in identity.go. Nil when the schema has no User
 	// table.
 	Identity *DescriptorFile
+
+	// Engine is the schema's engine document (D58), written as the
+	// constant EngineDocument in engine.go; the enginedoc generator writes
+	// the same document as engine/<schema>.json beside the types. Nil when
+	// no type of the DB schema composes a behavior.
+	Engine *DescriptorFile
+
+	// Behaviors are the types that compose behaviors, each with its
+	// <T>Behaviors and the structs and enums its behaviors' fields hold
+	// (D58), written as behaviors.go. Nil when no type composes one.
+	Behaviors []behaviortypes.Type
 }
 
 // DescriptorFile is one descriptor document written beside the types.
@@ -317,6 +330,13 @@ type DescriptorFile struct {
 // its trailing newline.
 func (d *DescriptorFile) Text() string {
 	return strings.TrimSuffix(string(d.JSON), "\n")
+}
+
+// GoLiteral is Text as a Go string literal: a raw string, with each
+// backquote the text holds, which a raw string cannot, spliced in as an
+// interpreted string.
+func (d *DescriptorFile) GoLiteral() string {
+	return "`" + strings.ReplaceAll(d.Text(), "`", "` + \"`\" + `") + "`"
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -354,6 +374,15 @@ type Options struct {
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	// Empty fields fall back to naming.Default().
 	Naming naming.Naming
+
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields behaviors.go types; a schema that composes none needs none.
+	Registry *registry.Registry
+
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which engine.go holds as
+	// a constant. Nil writes no engine.go.
+	EngineDocument []byte
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -484,6 +513,13 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		}
 		output.Identity = &DescriptorFile{FileName: name, JSON: descriptor}
 	}
+	if opts.EngineDocument != nil {
+		name := opts.SchemaName
+		if name == "" {
+			name = schema.Name
+		}
+		output.Engine = &DescriptorFile{FileName: name, JSON: opts.EngineDocument}
+	}
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	for _, typeInfo := range output.Types {
@@ -492,6 +528,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 				output.HasInputFieldWrappers = true
 			}
 		}
+	}
+
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
 	}
 
 	return output, nil

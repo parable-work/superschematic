@@ -64,6 +64,12 @@ This package includes custom scalar types with built-in validation:
 ## Enums
 
 {{range .Enums}}- `{{.Name}}`
+{{end}}{{end}}{{if .Behaviors}}
+## Behaviors
+
+`{{.PythonModuleName}}/behaviors.py` holds, for each type that composes behaviors, `<Type>Behaviors`: each behavior's fields as a read returns them under `behaviors`, narrowed by the type's config.
+
+{{range .Behaviors}}- `{{.BehaviorsName}}`
 {{end}}{{end}}
 ---
 

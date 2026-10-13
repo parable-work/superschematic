@@ -84,6 +84,21 @@ type CIStack struct {
 	// root's Bun workspace from its lockfile, which the project commits
 	// (D51, amended).
 	TypeScriptImplementations map[string]string
+
+	// Sites are the stack's static sites (D55), by name: the directory of
+	// each one's package and its build script. `stack deploy` builds each
+	// site with Bun after a frozen install of the output root's workspace,
+	// so a job that deploys a site sets up Bun and installs the workspace,
+	// and a check job builds each site.
+	Sites map[string]CISite
+}
+
+// CISite is a static site a CI job builds: its package's directory,
+// relative to the repository root, and the package.json script that
+// builds it.
+type CISite struct {
+	Dir   string
+	Build string
 }
 
 // The package managers CIStack.PackageManager names.

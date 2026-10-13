@@ -1,0 +1,19 @@
+# A Rust API on a Rust server of its own (D57): its database is its
+# authDb, rs-db, over whose User table the identity runtime authenticates
+# its end users; it calls rs-pricing, holds one setting in its @envVars
+# type, serves the session routes, lets anyone list its stock, lets staff
+# with stock.write set a level, and lets only rs-orders' server reserve
+# stock. rs-orders calls it through its Go SDK, and the site rs-web from
+# the browser.
+name: rs-stock
+kind: API
+authDb: rs-db
+calls:
+  - { name: rs-pricing, kind: API }
+outputs:
+  types:
+    go: { enabled: true }
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  sdk:
+    go: { enabled: true }

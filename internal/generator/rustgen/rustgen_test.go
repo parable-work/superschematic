@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -38,13 +40,22 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-optimistic-db"},
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
+		// Types that compose behaviors: src/behaviors.rs (D58).
+		{service: behaviortypestest.Service},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {
-			schema, err := loader.LoadService(filepath.Join(fixturesDir, tc.service))
-			if err != nil {
-				t.Fatalf("load %s: %v", tc.service, err)
+			var reg *registry.Registry
+			var schema *ir.Schema
+			if tc.service == behaviortypestest.Service {
+				reg = behaviortypestest.Registry(t)
+				schema = behaviortypestest.Schema(t, reg)
+			} else {
+				var err error
+				if schema, err = loader.LoadService(filepath.Join(fixturesDir, tc.service)); err != nil {
+					t.Fatalf("load %s: %v", tc.service, err)
+				}
 			}
 
 			deps := map[string]*ir.Schema{}
@@ -59,6 +70,7 @@ func TestWriteTypesGolden(t *testing.T) {
 			output, err := Generate(schema, Options{
 				SchemaName:   tc.service,
 				Dependencies: deps,
+				Registry:     reg,
 				Clock:        fixedClock,
 			})
 			if err != nil {

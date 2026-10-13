@@ -104,6 +104,16 @@ type SQLOutputConfig struct {
 	Dialects []string `json:"dialects,omitempty"`
 }
 
+// EngineOutputConfig configures a DB service's engine document (D58): the
+// document the enginedoc generator writes when a type of the schema
+// composes a behavior, an engine type, whose instances the engine keeps.
+// The generator's OutputSchema refuses a key it does not have.
+type EngineOutputConfig struct {
+	// Namespace is the engine namespace the schema's engine types are
+	// defined and published in. Empty is the service's name.
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // SQL dialects outputs.sql.dialects may list (the SqlDialect type in
 // @superschematic/schema-config), in the order messages name them.
 const (
@@ -160,6 +170,9 @@ type Outputs struct {
 	// CI holds the options of each CI renderer a Stack service's workflow
 	// is written by, keyed by the renderer's name (D47).
 	CI map[string]CIOptions `json:"ci,omitempty"`
+
+	// Engine configures a DB service's engine document (D58).
+	Engine *EngineOutputConfig `json:"engine,omitempty"`
 
 	// Raw holds every key of the block verbatim so extension generators can
 	// decode their own section with DecodeOutput.
@@ -323,6 +336,15 @@ func (o *Outputs) SQLMigrationsDir() string {
 		return ""
 	}
 	return o.SQL.MigrationsDir
+}
+
+// EngineNamespace returns outputs.engine.namespace ("" when unset, which
+// is the service's name).
+func (o *Outputs) EngineNamespace() string {
+	if o == nil || o.Engine == nil {
+		return ""
+	}
+	return o.Engine.Namespace
 }
 
 // SQLViewOwner returns outputs.sql.viewOwner ("" when unset).

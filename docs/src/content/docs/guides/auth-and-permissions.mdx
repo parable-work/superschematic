@@ -221,34 +221,32 @@ the operation's user clause (`@auth`, `@requirePermission`,
 `from` lists the services by the handles of the APIs they serve. Without
 it, every server with a `calls` edge to this API is listed; at run time,
 that is every caller the server's service auth config lists
-([below](#say-who-the-calling-service-is)). A stock API that
-`shop-orders`' server calls might declare:
+([below](#say-who-the-calling-service-is)). The acme shop's stock API,
+`shop-stock`, which `shop-orders`' server calls as it places an order
+(D57), admits only that server to its reservations, forwarding a shopper
+who may place the order:
+
+<Snippet file="schemas/services/shop-stock/src/stock.schema.ts" symbol="StockReservations" />
+
+The other two rules would read, on operations the shop does not have:
 
 ```ts
 import { HttpMethod, allowService, requirePermission, requireService, rest } from "@superschematic/api";
 import { ShopOrders } from "@acme/shop-orders";
 
-export class StockMutations {
-  // Only shop-orders' server, placing an order for a shopper who may.
-  @requirePermission(["stock.reserve"])
-  @requireService({ from: [ShopOrders] })
-  @rest(HttpMethod.POST, "stock/reservations")
-  reserveStock(sku: string): Reservation {
-    throw new Error("schema declaration only");
-  }
-
+export class StockMaintenance {
   // A shopper who may, or shop-orders' server on its own.
   @requirePermission(["stock.write"])
   @allowService({ from: [ShopOrders] })
   @rest(HttpMethod.POST, "stock/reservations/{id}/release")
-  releaseReservation(id: string): Reservation {
+  releaseReservation(id: string): StockView {
     throw new Error("schema declaration only");
   }
 
   // Any server with a calls edge to this API, and no end user.
   @requireService()
   @rest(HttpMethod.POST, "stock/reindex")
-  reindexStock(): StockRun {
+  reindexStock(): StockView[] {
     throw new Error("schema declaration only");
   }
 }
@@ -312,13 +310,16 @@ and the APIs it serves. An identity the config does not list is no caller:
 }
 ```
 
-In a [stack](/superschematic/guides/stacks/), each inbound edge's
-connector is to derive this config for the callee. That is not built yet:
-the Go server entrypoint a stack's build writes has no service
-authenticator to give an API with a service clause, so that server
-refuses to start. Outside a stack, you supply the config yourself. A
-deployment whose credential the config cannot express passes its own
-authenticator in the same place.
+In a [stack](/superschematic/guides/stacks/#service-callers), the
+connector of each http edge to the API derives the issuer its caller signs
+as, and the build merges them into the API's callers field,
+`<API>_CALLERS`, from which the Go and Rust entrypoints build the standard
+authenticator. On the `local` target, each caller signs with an Ed25519
+key pair `stack dev` makes for its edge, so `shop-stock`'s server admits
+`shop-orders`' and refuses a shopper's session sent without it, 401
+`service_unauthorized`, as `TestStackDevRunsTheShop` checks. Outside a
+stack, you supply the config yourself. A deployment whose credential the
+config cannot express passes its own authenticator in the same place.
 
 On a Go API that is neither `public` nor over the user model, an `@auth`
 route checks nothing ([above](#turn-it-on-the-user-model)), so an

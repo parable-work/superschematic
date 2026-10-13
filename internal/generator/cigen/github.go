@@ -167,6 +167,13 @@ func (g github) render() ([]byte, error) {
 		deploys = append(deploys, deploy)
 		previous = deploy.id
 	}
+	for _, env := range g.req.Environments {
+		for _, d := range env.Environment.Deployables {
+			if _, ok := st.Sites[d.Name]; d.Kind == ir.DeployableSite && !ok {
+				return nil, fmt.Errorf("environment %s deploys site %s, whose package the stack does not locate", env.Environment.Environment, d.Name)
+			}
+		}
+	}
 	jobs := append([]job{g.check()}, plans...)
 	jobs = append(jobs, previews...)
 	jobs = append(jobs, deploys...)
@@ -227,15 +234,24 @@ func (g github) header(w *yamlWriter, notes []string) {
 
 // check is the job that builds the stack and compiles its servers, with
 // no credentials: levels 1 to 3 of section 10. A Go server compiles; for
-// the TypeScript servers it installs the output root's Bun workspace from
-// the lockfile the project commits, which fails when the lockfile is
-// missing or does not match the packages the build wrote, and type-checks
-// each TypeScript server and the implementation of each API one serves
-// (D51, amended).
+// the TypeScript servers and the sites it installs the output root's Bun
+// workspace from the lockfile the project commits, which fails when the
+// lockfile is missing or does not match the packages the build wrote,
+// type-checks each TypeScript server and the implementation of each API
+// one serves (D51, amended), and builds each site with its build script,
+// as `stack deploy` does, so a site that does not build fails the pull
+// request (D55). For the Rust servers it sets up the Rust release
+// tools.env pins before the build, which brings the output root's Cargo
+// lockfile up to date with it, refuses a lockfile git does not track or
+// the build changed, and checks each Rust server, with the implementations
+// it depends on, frozen to the lockfile (D57).
 func (g github) check() job {
 	st := g.req.Stack
 	servers := g.servers()
 	tsServers := g.typeScriptServers()
+	rustServers := g.rustServers()
+	sites := slices.Sorted(maps.Keys(st.Sites))
+	workspace := len(tsServers) > 0 || len(sites) > 0
 	steps := []step{g.checkout(), g.install()}
 	if len(servers) > 0 && g.req.Version != "" {
 		steps = append(steps, g.archives())
@@ -247,8 +263,11 @@ func (g github) check() job {
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
 	}
+	if len(rustServers) > 0 {
+		steps = append(steps, setupRust())
+	}
 	packages := g.packages()
-	if len(tsServers) > 0 && st.PackageManager != registry.PackageManagerBun {
+	if workspace && st.PackageManager != registry.PackageManagerBun {
 		packages = append([]step{setupBun()}, packages...)
 	}
 	steps = append(steps, packages...)
@@ -260,8 +279,10 @@ func (g github) check() job {
 			run:  "go build -mod=mod -o /dev/null .",
 		})
 	}
-	if len(tsServers) > 0 {
+	if workspace {
 		steps = append(steps, g.typeScriptWorkspace())
+	}
+	if len(tsServers) > 0 {
 		for _, server := range tsServers {
 			steps = append(steps, step{
 				name: "Type-check server " + server,
@@ -277,7 +298,59 @@ func (g github) check() job {
 			})
 		}
 	}
+	if len(rustServers) > 0 {
+		steps = append(steps, g.rustLockfile())
+		for _, server := range rustServers {
+			steps = append(steps, step{
+				name: "Compile server " + server,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				run:  rustCheck,
+			})
+		}
+	}
+	for _, site := range sites {
+		steps = append(steps, step{
+			name: "Build site " + site,
+			dir:  st.Sites[site].Dir,
+			run:  "bun run " + st.Sites[site].Build,
+		})
+	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
+}
+
+// rustCheck compiles a Rust server's crate and every crate it depends on,
+// the implementations among them, frozen to the workspace's lockfile.
+const rustCheck = "cargo check --locked"
+
+// setupRust installs the Rust release tools.env pins,
+// servergen.RustVersion, the one a Rust server's image builds with, as the
+// default toolchain: the build's cargo update --workspace and the
+// compiles run on it (D57). The runner's rustup installs it.
+func setupRust() step {
+	v := servergen.RustVersion
+	return step{name: "Set up Rust", run: fmt.Sprintf("rustup toolchain install %s --profile minimal\nrustup default %s", v, v)}
+}
+
+// rustLockfile checks the output root's Cargo lockfile, which the project
+// commits (D57). The build brings it up to date with cargo update
+// --workspace, so a lockfile the build changed was stale, and one git does
+// not track is missing; the compiles after it build frozen to it.
+func (g github) rustLockfile() step {
+	out := g.req.Stack.OutputRoot
+	lock := path.Join(out, servergen.RustLockfileName)
+	fix := fmt.Sprintf("build every service (superschematic build-all), which brings %s up to date, and commit it", lock)
+	return step{
+		name: "Check the Rust workspace's lockfile " + lock,
+		dir:  out,
+		run: strings.Join([]string{
+			"if ! git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then",
+			fmt.Sprintf(`  echo "::error file=%s::%s is not committed; %s" && exit 1`, lock, lock, fix),
+			"fi",
+			"git diff --quiet -- Cargo.lock || {",
+			fmt.Sprintf(`  echo "::error file=%s::%s does not match the crates the build wrote; %s" && git --no-pager diff -- Cargo.lock && exit 1`, lock, lock, fix),
+			"}",
+		}, "\n"),
+	}
 }
 
 // typeCheck type-checks a TypeScript package with the compiler its
@@ -337,9 +410,16 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		return job{}, err
 	}
 	param := "--param " + e.Parameters[0] + "=" + prNumber
-	build := g.build()
-	build.cond = notClosed
-	steps = append(steps, build,
+	for _, s := range g.buildSteps() {
+		s.cond = notClosed
+		steps = append(steps, s)
+	}
+	if hasSite(env) {
+		workspace := g.typeScriptWorkspace()
+		workspace.cond = notClosed
+		steps = append(steps, workspace)
+	}
+	steps = append(steps,
 		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
 		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
 	)
@@ -364,7 +444,11 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, g.build(), step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
+	steps = append(steps, g.buildSteps()...)
+	if hasSite(env) {
+		steps = append(steps, g.typeScriptWorkspace())
+	}
+	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
@@ -378,11 +462,15 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 }
 
 // cloudSetup is the steps a cloud job takes before its command: the
-// checkout, superschematic, the schemas root's packages, the provisioner's
-// tools, and the sign-in as role.
+// checkout, superschematic, the schemas root's packages, Bun for a
+// deployer of an environment with a site, the provisioner's tools, and
+// the sign-in as role.
 func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, error) {
 	steps := []step{g.checkout(), g.install()}
 	steps = append(steps, g.packages()...)
+	if role == registry.CIDeployer && hasSite(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
+		steps = append(steps, setupBun())
+	}
 	for _, tool := range env.Tools {
 		s, err := toolStep(tool)
 		if err != nil {
@@ -484,12 +572,35 @@ func setupBun() step {
 	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}}}
 }
 
+// hasSite reports whether env deploys a static site, which `stack deploy`
+// builds on the runner with Bun after a frozen install of the output
+// root's workspace (D55): its deploy and preview jobs set up Bun and
+// install the workspace from the committed lockfile first. A job, a
+// worker or a bucket needs nothing of the workflow: the deploy builds
+// their images on the target, as a server's, and a bucket is a node of
+// the graph.
+func hasSite(env registry.CIEnvironment) bool {
+	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.Kind == ir.DeployableSite })
+}
+
 // build builds every service of the services root, the stack's included,
 // to the default output root: it resolves every environment and checks its
 // graph, and writes each server's entrypoint and Dockerfile, which a
 // deploy builds the server's image from.
 func (g github) build() step {
 	return step{name: "Build the services", run: "superschematic build-all " + g.req.Stack.ServicesRoot}
+}
+
+// buildSteps are the steps of a cloud job that builds the services before
+// its command: the build, after the Rust release tools.env pins for a
+// stack with a Rust server, so the build's cargo update --workspace runs
+// on the release check ran it on and leaves the lockfile check accepted as
+// it is (D57). The runner's own cargo may be another release.
+func (g github) buildSteps() []step {
+	if len(g.rustServers()) == 0 {
+		return []step{g.build()}
+	}
+	return []step{setupRust(), g.build()}
 }
 
 // stackCommand is one of the stack commands on the stack, which the job
@@ -506,6 +617,10 @@ func (g github) servers() []string { return g.serversIn(registry.APILanguageGo) 
 // typeScriptServers are the stack's TypeScript servers, whose entrypoint
 // packages the build writes into the output root's Bun workspace, sorted.
 func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
+
+// rustServers are the stack's Rust servers, whose crates the build writes
+// into the output root's Cargo workspace, sorted (D57).
+func (g github) rustServers() []string { return g.serversIn(registry.APILanguageRust) }
 
 // serversIn are the stack's servers in language, sorted.
 func (g github) serversIn(language string) []string {

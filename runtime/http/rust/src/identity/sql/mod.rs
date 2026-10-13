@@ -16,6 +16,8 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
+#[cfg(all(feature = "identity-postgres", feature = "postgres"))]
+pub use client::PostgresPool;
 #[cfg(feature = "identity-sqlite")]
 pub use client::Rusqlite;
 #[cfg(feature = "identity-postgres")]

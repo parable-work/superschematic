@@ -479,7 +479,13 @@ returns each operation's value, throws its error, and has no `runSweeper`;
 `initSync` instantiates the core it runs on without awaiting. The
 Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
 traits, with its Postgres adapter in module `postgres` and the canonical
-rules in module `canonical`. The Python engine, storage protocol and
+rules in module `canonical`. Its operations are `async`; `Engine::on` runs
+them over a storage the caller lends, which may borrow a transaction the
+caller holds, and `Engine::run_on` runs one synchronously, polling it once
+(`ready`), over a storage whose futures are always ready, as the fixed
+layout's inside a host's transaction are (below). That is the Rust
+engine's counterpart of `SyncEngine`, which D58's engine runs Branches
+with. The Python engine, storage protocol and
 Postgres adapter are the modules `engine`, `storage` and `postgres` of
 `python/superschematic_versiongraph`. Every Postgres adapter takes the
 sweep lock under the same key, so sweepers in different languages exclude
@@ -728,12 +734,45 @@ engine as `typescript.json`, with nothing of one graph read through
 another's; and the script that wrote `typescript.sql`, run through it with
 the same clock and seeded ids, writes `typescript.sql` byte for byte.
 
+The Rust adapter is module `fixed`'s layout on SQLite (`sqlite::Adapter`
+is `fixed::FixedLayout`), and the layout runs on Postgres too
+(`Dialect::Postgres`, D58): the same nine tables and stored forms, with
+no trigger, which a D16 behavior may not create, so D58's Branches keeps
+its graphs in its own tables on either database. Its Postgres statements
+are SQLite's but where the two word them differently: `BIGINT` and
+`TEXT COLLATE "C"` (bytes compare as SQLite's do) without `STRICT`, and
+the ref's keys to its commits added after the commit table; lists read
+with `jsonb_array_elements` where SQLite uses `json_each` and
+`json_extract`; a snapshot or tag flag as `CASE WHEN ... THEN 1 ELSE 0
+END`; a cast to `BIGINT` for a parameter Postgres would type `integer`;
+a taken name as an insert that does nothing on the conflict, since an
+error aborts a Postgres transaction; a prune with no batch as a null
+`LIMIT`; and no version check or foreign keys pragma. Every parameter
+there is `TEXT` or `BIGINT` and every column read text or an integer. As
+on SQLite, the layout has one writer per graph, which on Postgres its
+caller keeps. A host that holds a synchronous transaction implements
+`fixed::HostTx` over it (statements with `?` placeholders, rows of SQL
+values, and around each operation nothing by default, as
+`callerTransaction`, or a savepoint), and `fixed::HostClient` makes it
+the layout's client, whose futures are ready at once. The Rust tests run
+every scenario through it inside a host's transaction, on SQLite over
+plain rusqlite and on Postgres over the synchronous `postgres` crate, with
+`Engine::run_on` and no executor.
+
 ## Scenarios
 
 `testdata/scenarios` holds one scenario per file, named by its `name`:
 `{"name", "description", "roots", "steps": [step, ...]}`. A runner runs on
 one backend. The backends a scenario may name are `postgres` and `sqlite`;
-every runner runs on `postgres`, and every runner on `sqlite` too.
+every runner runs on `postgres`, and every runner on `sqlite` too. A
+backend names a layout: `postgres` the sql generator's tables, and
+`sqlite` the SQLite adapter's fixed layout, which the Rust runner also
+runs every scenario on inside a host's transaction, on SQLite and on
+Postgres, each as `sqlite`; on Postgres it runs an sql step's `sqlite`
+statement with its placeholders numbered `$1`, a member SQLite reads with
+`json_extract(data, '$.name')` as `CAST(data AS JSONB) ->> 'name'`, and a
+truth it writes with `CASE a = b WHEN 1 THEN 'true' WHEN 0 THEN 'false'
+END` as the boolean cast to text.
 On Postgres a runner applies `testdata/fixture/create.sql` to an empty
 schema and builds its engine and Postgres adapter from
 `testdata/fixture/recipe.json`; on SQLite the TypeScript, Rust and Python
@@ -867,7 +906,7 @@ UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review t
 UPDATE_SQLITE_VECTORS=1 bun test test/sqlite-vectors.test.ts  # in typescript/, after bun run build: rewrite testdata/sqlite; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the SQLite adapter, with the adapter's tests and the SQLite vectors, then through the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through SyncEngine and the SQLite adapter, and the SQLite vectors, then through the TypeScript engine and its Postgres adapter, each operation replayed through SyncEngine; a gained column end to end on each backend
-make versiongraph-scenarios-rust  # every scenario through the Rust engine and its SQLite adapter, with the adapter's tests and the SQLite vectors; then every scenario and canonical vector through its Postgres adapter
+make versiongraph-scenarios-rust  # every scenario through the Rust engine and its SQLite adapter, also inside a host's transaction, with the adapter's tests and the SQLite vectors; then every scenario and canonical vector through its Postgres adapter, and every scenario on the fixed layout on Postgres inside a host's transaction
 make versiongraph-scenarios-python  # every scenario through the Python engine and its SQLite adapter, and the SQLite vectors, then every scenario and canonical vector through its Postgres adapter
 ```
 

@@ -202,5 +202,17 @@ func templateFuncs() template.FuncMap {
 		"trimIDSuffix": func(s string) string {
 			return strings.TrimSuffix(s, "ID")
 		},
+		"goRawString": goRawString,
 	}
+}
+
+// goRawString is s as a Go raw string literal, which holds it as it is, its
+// newlines included. A queue's statement holds no backquote, since its
+// identifiers are snake case; one that did is refused rather than written
+// wrong.
+func goRawString(s string) (string, error) {
+	if strings.Contains(s, "`") {
+		return "", fmt.Errorf("ormgen: the statement %q holds a backquote, which a raw string cannot", s)
+	}
+	return "`" + s + "`", nil
 }

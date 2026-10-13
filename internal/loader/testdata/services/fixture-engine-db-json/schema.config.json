@@ -1,0 +1,12 @@
+{
+  "name": "fixture-engine-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "go": { "enabled": true },
+      "typescript": { "enabled": true },
+      "rust": { "enabled": true }
+    },
+    "sql": { "dialects": ["postgres", "sqlite"] }
+  }
+}
