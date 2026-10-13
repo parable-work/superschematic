@@ -550,22 +550,20 @@ impl Engine {
     }
 
     /// The search across the schemas a namespace reaches that compose
-    /// Search (`engine.search`): it runs on the core's Search behavior,
-    /// which the Rust engine has from milestone 10; until then it is
-    /// `unavailable`.
+    /// Search (`engine.search`, [`crate::search`]): every one the principal
+    /// may read, each ranked by its own search as the principal, the
+    /// rankings fused by reciprocal rank. It runs on the core's Search
+    /// behavior, which the engine reaches by name; an engine that does not
+    /// run it answers `unavailable`.
     pub fn search(
         &self,
         principal: &crate::principal::Principal,
-        _params: &Value,
+        params: &Value,
         namespace: Option<&str>,
     ) -> Result<Value> {
         crate::principal::check_principal(principal)?;
-        self.namespaces().resolve(namespace)?;
-        Err(crate::errors::EngineError::new(
-            crate::errors::EngineErrorCode::Unavailable,
-            "the search across a namespace's schemas runs on the core's Search behavior, which this engine does not run yet",
-        )
-        .into())
+        let namespace = self.namespaces().resolve(namespace)?;
+        crate::search::search_schemas(self, principal, params, &namespace)
     }
 
     /// Stops the runner and ends every event stream, as the TypeScript

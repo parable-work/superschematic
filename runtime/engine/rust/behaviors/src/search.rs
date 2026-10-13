@@ -116,14 +116,9 @@ pub struct SearchConfig {
     pub vectors: Option<SearchVectors>,
 }
 
-/// Reciprocal rank fusion's constant: a hit scores 1 / (RRF_K + its place)
-/// in each ranking it is in.
-pub const RRF_K: i64 = 60;
-
-/// How far into each ranking fusion reads: a search with both a query and
-/// a vector, and similar, fuse the first RRF_WINDOW of each ranking they
-/// fuse.
-pub const RRF_WINDOW: i64 = 200;
+/// Reciprocal rank fusion's constant and window, the engine's, which its
+/// search across schemas fuses with too (`superschematic_engine::search`).
+pub use superschematic_engine::search::{RRF_K, RRF_WINDOW};
 
 /// The words of an instance's text that similar searches for, at most: its
 /// longest.
