@@ -59,6 +59,7 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 		{Condition: len(output.Enums) > 0, Template: "enums.tmpl", Filename: "enums.py"},
 		{Condition: hasTypes, Template: "types.tmpl", Filename: "types.py"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.py"},
+		{Condition: len(output.Behaviors) > 0, Template: "behaviors.tmpl", Filename: "behaviors.py"},
 	}
 	if err := codegen.WriteConditionalFiles(moduleFiles, moduleDir, func(templateName, outputPath string) error {
 		return generateFile(templateName, outputPath, data, output)

@@ -341,6 +341,7 @@ func (r run) generatePyTypes() error {
 		SchemaName:   r.Config.Name,
 		Dependencies: deps,
 		Naming:       r.Options.Naming,
+		Registry:     r.Registry,
 		Clock:        r.Options.Clock,
 	})
 	if err != nil {
