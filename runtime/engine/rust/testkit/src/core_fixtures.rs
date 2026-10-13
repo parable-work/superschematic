@@ -4,14 +4,15 @@
 //!
 //! - `test/core-staterules.test.ts`: [`Recorder`];
 //! - `test/core-timers.test.ts`: [`Bounce`] and its own test.Hold,
-//!   [`FireHold`].
+//!   [`FireHold`];
+//! - `test/core-search.test.ts`: [`Tripwire`].
 
 use std::sync::LazyLock;
 
 use serde_json::{json, Value};
 
 use superschematic_engine::errors::Veto;
-use superschematic_engine::{Behavior, ConfigTarget, GuardRequest, Hooks, Result};
+use superschematic_engine::{Behavior, ConfigTarget, Error, GuardRequest, Hooks, Result};
 
 /// test.Recorder (`test/core-staterules.test.ts`): writes the fields it is
 /// given with `update()`, as a behavior applies a result on a caller's
@@ -169,6 +170,36 @@ impl Behavior for FireHold {
                     code: Some("held".to_owned()),
                     details: None,
                 }))
+            }),
+            ..Hooks::default()
+        }
+    }
+}
+
+/// test.Tripwire (`test/core-search.test.ts`): listed after Search, its
+/// afterChange fails for a title of `Boom` once Search's has run, so the
+/// write rolls back, the index with it. It fails as a plain `Error`, as
+/// the TypeScript fixture throws one.
+pub struct Tripwire;
+
+impl Behavior for Tripwire {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        r#"{"name": "test.Tripwire"}"#
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            after_change: Some(|_, cx, _| {
+                if cx.data()?.get("title").and_then(Value::as_str) == Some("Boom") {
+                    return Err(Error::Internal("tripped".to_owned()));
+                }
+                Ok(())
             }),
             ..Hooks::default()
         }

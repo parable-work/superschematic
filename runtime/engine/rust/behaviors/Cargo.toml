@@ -20,6 +20,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 # members' order.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
+# Search's similar picks an instance's words as the TypeScript engine's
+# /[\p{L}\p{N}]+/u does: runs of letters and numbers by general category.
+unicode-general-category = "1.1.0"
 
 [lints]
 workspace = true
