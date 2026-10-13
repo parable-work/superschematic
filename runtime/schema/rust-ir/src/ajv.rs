@@ -108,6 +108,17 @@ pub fn ajv_errors(errors: &[ValidationError<'_>], instance: &Value) -> Vec<AjvEr
     errors_in(errors, instance, None)
 }
 
+/// [`ajv_errors`] with the schema the errors came from, whose `type` lists,
+/// `items` and `dependentRequired` ajv's messages name.
+#[cfg(feature = "schemafile")]
+pub(crate) fn ajv_errors_in(
+    errors: &[ValidationError<'_>],
+    instance: &Value,
+    schema: Option<&Value>,
+) -> Vec<AjvError> {
+    errors_in(errors, instance, schema)
+}
+
 // errors_in is ajv_errors, naming a `type` failure's types in the order
 // the schema lists them when it has the schema: jsonschema keeps them as a
 // set, in an order of its own.
@@ -307,6 +318,7 @@ fn errors_of(error: &ValidationError<'_>, schema: Option<&Value>) -> Vec<AjvErro
 fn ajv_keyword(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> String {
     match kind {
         ValidationErrorKind::Type { .. } => "type",
+        ValidationErrorKind::Required { .. } if is_dependent_required(error) => "dependentRequired",
         ValidationErrorKind::Required { .. } => "required",
         ValidationErrorKind::Constant { .. } => "const",
         ValidationErrorKind::Minimum { .. } => "minimum",
@@ -371,12 +383,23 @@ fn ajv_message(
             }
             format!("must be {}", names.join(","))
         }
-        ValidationErrorKind::Required { property } => format!(
-            "must have required property '{}'",
-            property
+        ValidationErrorKind::Required { property } => {
+            let missing = property
                 .as_str()
-                .map_or_else(|| property.to_string(), str::to_owned)
-        ),
+                .map_or_else(|| property.to_string(), str::to_owned);
+            match dependent_of(error, &missing, schema) {
+                Some((present, deps)) => format!(
+                    "must have {} {} when property {present} is present",
+                    if deps.len() == 1 {
+                        "property"
+                    } else {
+                        "properties"
+                    },
+                    deps.join(", ")
+                ),
+                None => format!("must have required property '{missing}'"),
+            }
+        }
         ValidationErrorKind::Constant { .. } => "must be equal to constant".to_owned(),
         ValidationErrorKind::Minimum { limit } => format!("must be >= {}", limit_text(limit)),
         ValidationErrorKind::Maximum { limit } => format!("must be <= {}", limit_text(limit)),
@@ -425,6 +448,44 @@ fn ajv_message(
         | ValidationErrorKind::AdditionalItems { .. } => "must NOT have more items".to_owned(),
         _ => error.to_string(),
     }
+}
+
+/// Whether a `required` failure is a `dependentRequired`'s: jsonschema
+/// reports a missing dependency as a missing property at the keyword.
+fn is_dependent_required(error: &ValidationError<'_>) -> bool {
+    error
+        .schema_path()
+        .to_string()
+        .ends_with("/dependentRequired")
+}
+
+/// The property whose presence a `dependentRequired` failure is about and
+/// every property it requires, in the schema's order, which ajv's message
+/// names (`params.property` and `params.deps`): the first property the
+/// object holds that requires the missing one. `None` for any other
+/// failure, or when the schema is not at hand.
+fn dependent_of(
+    error: &ValidationError<'_>,
+    missing: &str,
+    schema: Option<&Value>,
+) -> Option<(String, Vec<String>)> {
+    if !is_dependent_required(error) {
+        return None;
+    }
+    let dependencies = schema?
+        .pointer(&error.schema_path().to_string())?
+        .as_object()?;
+    let held = error.instance().as_object()?;
+    dependencies.iter().find_map(|(present, deps)| {
+        let deps: Vec<String> = deps
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
+        (held.contains_key(present) && deps.iter().any(|dep| dep == missing))
+            .then(|| (present.clone(), deps))
+    })
 }
 
 /// The types a `uniqueItems`' sibling `items` names, which choose ajv's
@@ -598,6 +659,30 @@ mod tests {
         assert_eq!(
             message(objects, json!([{"a": 1}, {"a": 1.0}])),
             "must NOT have duplicate items (items ## 0 and 1 are identical)"
+        );
+    }
+
+    #[test]
+    fn a_missing_dependency_is_named_with_the_property_that_requires_it() {
+        let schema = json!({
+            "type": "object",
+            "dependentRequired": {"vector": ["model", "text"], "model": ["vector"]}
+        });
+        assert_eq!(
+            listed(schema.clone(), json!({"vector": [1], "text": "x"})),
+            [(
+                String::new(),
+                "dependentRequired".to_owned(),
+                "must have properties model, text when property vector is present".to_owned()
+            )]
+        );
+        assert_eq!(
+            listed(schema, json!({"model": "m"})),
+            [(
+                String::new(),
+                "dependentRequired".to_owned(),
+                "must have property vector when property model is present".to_owned()
+            )]
         );
     }
 
