@@ -5,6 +5,7 @@
 //! (`guidance/text.ts`), so every behavior lists names the same way. The
 //! text is plain ASCII and depends only on the config and the type.
 
+pub(crate) mod approvals;
 pub(crate) mod comments;
 pub(crate) mod constants;
 pub(crate) mod staterules;
@@ -26,6 +27,15 @@ pub(crate) fn list<S: AsRef<str>>(names: &[S], conjunction: &str) -> String {
                 .join(", "),
             last.as_ref()
         ),
+    }
+}
+
+/// A count and a noun: `1 rollup`, `2 rollups` (`plural`).
+pub(crate) fn plural(count: i64, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
     }
 }
 

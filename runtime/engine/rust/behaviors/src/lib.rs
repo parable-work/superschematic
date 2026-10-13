@@ -29,6 +29,7 @@
 //! [`Constants`] and [`Variants`]. The other core behaviors come in waves 2
 //! to 4 ([`NAMES`] lists the ones [`core`] registers).
 
+pub mod approvals;
 pub mod comments;
 pub mod constants;
 mod guidance;
@@ -36,6 +37,7 @@ pub mod staterules;
 pub mod variants;
 pub mod workflow;
 
+pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};

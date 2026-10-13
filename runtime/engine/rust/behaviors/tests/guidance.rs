@@ -486,3 +486,243 @@ fn the_staterules_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// Approvals' TypeScript guidance (`approvalsGuidance`) for the configs
+/// below, on a Doc.
+const APPROVALS_EXPECTED: &str = r#"{
+  "standard": {
+    "summary": "A move into approved waits for 2 sign-offs by callers with permission docs.approve; a move into published from approved waits for 1 sign-off by callers with permission docs.publish. The principal who created a Doc cannot sign off on it. behaviors.Approvals.gates lists the sign-offs that count, by state. A change of the own fields consumes every sign-off, and entering a gated state consumes its own, so each is signed again after.",
+    "operations": {
+      "signOff": {
+        "useWhen": "Use to sign off for approved or published, as the caller; it needs the gate's permission, else the call is forbidden.",
+        "doNotUseWhen": "Do not use while the instance is in the state, or to sign twice.",
+        "success": "Returns the sign-off, the subjects whose sign-offs for the state count (signedBy) and the count the gate needs.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved or published."
+          },
+          {
+            "code": "in_state",
+            "commonCorrection": "Wait until the instance has left the state; a sign-off counts toward the next move into it."
+          },
+          {
+            "code": "creator_cannot_sign",
+            "commonCorrection": "Ask another principal with the permission to sign off."
+          },
+          {
+            "code": "already_signed",
+            "commonCorrection": "Leave it: the caller has signed off for the state already."
+          }
+        ]
+      },
+      "withdrawSignOff": {
+        "useWhen": "Use to take back the caller's own sign-off for a gated state before the move it waits for.",
+        "success": "Returns the sign-off withdrawn; it no longer counts.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved or published."
+          },
+          {
+            "code": "not_signed",
+            "commonCorrection": "None: the caller has no sign-off for the state that counts."
+          }
+        ]
+      },
+      "listSignOffs": {
+        "useWhen": "Use to read the instance's sign-offs, oldest first, the consumed ones with consumedAt; with state, only those for it.",
+        "doNotUseWhen": "Do not page through them for the ones that count; read behaviors.Approvals.gates.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "transition": {
+        "doNotUseWhen": "Read behaviors.Approvals.gates before a move: a move into approved waits for 2 sign-offs by callers with permission docs.approve; a move into published from approved waits for 1 sign-off by callers with permission docs.publish.",
+        "errors": [
+          {
+            "code": "approvals_missing",
+            "description": "A move into a gated state with fewer sign-offs than its count; details.details gives the state, the count it requires and the sign-offs it has.",
+            "commonCorrection": "Ask callers with the gate's permission to sign off, then try again."
+          }
+        ]
+      },
+      "update": {
+        "success": "A change of the own fields consumes every sign-off: each gate is signed again before its move."
+      }
+    }
+  },
+  "lenient": {
+    "summary": "A move into approved waits for 1 sign-off by callers with permission docs.approve. behaviors.Approvals.gates lists the sign-offs that count, by state. Entering a gated state consumes its sign-offs, so a return to it is signed again; a change of the own fields keeps them.",
+    "operations": {
+      "signOff": {
+        "useWhen": "Use to sign off for approved, as the caller; it needs the gate's permission, else the call is forbidden.",
+        "doNotUseWhen": "Do not use while the instance is in the state, or to sign twice.",
+        "success": "Returns the sign-off, the subjects whose sign-offs for the state count (signedBy) and the count the gate needs.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved."
+          },
+          {
+            "code": "in_state",
+            "commonCorrection": "Wait until the instance has left the state; a sign-off counts toward the next move into it."
+          },
+          {
+            "code": "already_signed",
+            "commonCorrection": "Leave it: the caller has signed off for the state already."
+          }
+        ]
+      },
+      "withdrawSignOff": {
+        "useWhen": "Use to take back the caller's own sign-off for a gated state before the move it waits for.",
+        "success": "Returns the sign-off withdrawn; it no longer counts.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved."
+          },
+          {
+            "code": "not_signed",
+            "commonCorrection": "None: the caller has no sign-off for the state that counts."
+          }
+        ]
+      },
+      "listSignOffs": {
+        "useWhen": "Use to read the instance's sign-offs, oldest first, the consumed ones with consumedAt; with state, only those for it.",
+        "doNotUseWhen": "Do not page through them for the ones that count; read behaviors.Approvals.gates.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "transition": {
+        "doNotUseWhen": "Read behaviors.Approvals.gates before a move: a move into approved waits for 1 sign-off by callers with permission docs.approve.",
+        "errors": [
+          {
+            "code": "approvals_missing",
+            "description": "A move into a gated state with fewer sign-offs than its count; details.details gives the state, the count it requires and the sign-offs it has.",
+            "commonCorrection": "Ask callers with the gate's permission to sign off, then try again."
+          }
+        ]
+      }
+    }
+  },
+  "mixed": {
+    "summary": "A move into approved from review or draft waits for 3 sign-offs by callers with permission docs.approve; a move into published waits for 1 sign-off by callers with permission docs.publish. The principal who created a Doc cannot sign off on it for approved. behaviors.Approvals.gates lists the sign-offs that count, by state. A change of the own fields consumes every sign-off, and entering a gated state consumes its own, so each is signed again after.",
+    "operations": {
+      "signOff": {
+        "useWhen": "Use to sign off for approved or published, as the caller; it needs the gate's permission, else the call is forbidden.",
+        "doNotUseWhen": "Do not use while the instance is in the state, or to sign twice.",
+        "success": "Returns the sign-off, the subjects whose sign-offs for the state count (signedBy) and the count the gate needs.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved or published."
+          },
+          {
+            "code": "in_state",
+            "commonCorrection": "Wait until the instance has left the state; a sign-off counts toward the next move into it."
+          },
+          {
+            "code": "creator_cannot_sign",
+            "commonCorrection": "Ask another principal with the permission to sign off."
+          },
+          {
+            "code": "already_signed",
+            "commonCorrection": "Leave it: the caller has signed off for the state already."
+          }
+        ]
+      },
+      "withdrawSignOff": {
+        "useWhen": "Use to take back the caller's own sign-off for a gated state before the move it waits for.",
+        "success": "Returns the sign-off withdrawn; it no longer counts.",
+        "errors": [
+          {
+            "code": "no_gate",
+            "commonCorrection": "Name a gated state: approved or published."
+          },
+          {
+            "code": "not_signed",
+            "commonCorrection": "None: the caller has no sign-off for the state that counts."
+          }
+        ]
+      },
+      "listSignOffs": {
+        "useWhen": "Use to read the instance's sign-offs, oldest first, the consumed ones with consumedAt; with state, only those for it.",
+        "doNotUseWhen": "Do not page through them for the ones that count; read behaviors.Approvals.gates.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "transition": {
+        "doNotUseWhen": "Read behaviors.Approvals.gates before a move: a move into approved from review or draft waits for 3 sign-offs by callers with permission docs.approve; a move into published waits for 1 sign-off by callers with permission docs.publish.",
+        "errors": [
+          {
+            "code": "approvals_missing",
+            "description": "A move into a gated state with fewer sign-offs than its count; details.details gives the state, the count it requires and the sign-offs it has.",
+            "commonCorrection": "Ask callers with the gate's permission to sign off, then try again."
+          }
+        ]
+      },
+      "update": {
+        "success": "A change of the own fields consumes every sign-off: each gate is signed again before its move."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn the_approvals_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{Approvals, ApprovalsConfig, ApprovalsGate};
+
+    let expected: Value = serde_json::from_str(APPROVALS_EXPECTED).expect("the expected guidance");
+    let gate = |count: i64, permission: &str, from: Option<&[&str]>, exclude_creator: bool| {
+        ApprovalsGate {
+            count,
+            permission: permission.to_owned(),
+            from: from.map(names),
+            exclude_creator,
+        }
+    };
+    let doc = DescribeTarget {
+        schema: "Doc".to_owned(),
+        type_name: "Doc".to_owned(),
+        ..target()
+    };
+    let guidance = Approvals.hooks().guidance.expect("guidance");
+    for (key, config) in [
+        (
+            "standard",
+            ApprovalsConfig {
+                gates: vec![
+                    ("approved".to_owned(), gate(2, "docs.approve", None, true)),
+                    (
+                        "published".to_owned(),
+                        gate(1, "docs.publish", Some(&["approved"]), true),
+                    ),
+                ],
+                reset_on_change: true,
+            },
+        ),
+        (
+            "lenient",
+            ApprovalsConfig {
+                gates: vec![("approved".to_owned(), gate(1, "docs.approve", None, false))],
+                reset_on_change: false,
+            },
+        ),
+        (
+            "mixed",
+            ApprovalsConfig {
+                gates: vec![
+                    (
+                        "approved".to_owned(),
+                        gate(3, "docs.approve", Some(&["review", "draft"]), true),
+                    ),
+                    ("published".to_owned(), gate(1, "docs.publish", None, false)),
+                ],
+                reset_on_change: true,
+            },
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&Approvals, &config, &doc)),
+            expected[key],
+            "{key}"
+        );
+    }
+}
