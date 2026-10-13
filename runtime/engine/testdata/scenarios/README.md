@@ -92,7 +92,7 @@ reference itself.
 |---|---|
 | `name` | The test's full name (`describe > test`), as `node:test` gives it. Names need not be unique: a test written in a loop records once per pass. |
 | `behaviors` | The behaviors the schemas it defines compose, by name, sorted; absent when none. |
-| `testBehaviors` | The behaviors the test defined in TypeScript (`test/behavior-fixtures.ts`, `test/runner-fixtures.ts`, `test/reach-fixtures.ts` and the tests' own `defineBehavior` calls) that its answers depend on: one a schema composes or a step registers, or every one the engine registered when a step reads the registered behaviors (`tools.listBehaviors`, `tools.describeBehavior`, `behaviors.names`, `behaviors.has`, `behaviors.declaration`). Sorted; absent when none. A replayer that has not implemented each one skips the scenario. |
+| `testBehaviors` | The behaviors the test defined in TypeScript (`test/behavior-fixtures.ts`, `test/runner-fixtures.ts`, `test/reach-fixtures.ts` and the tests' own `defineBehavior` calls) that its answers depend on: one a schema composes or a step registers, or every one the engine registered when a step reads the registered behaviors (`tools.listBehaviors`, `tools.describeBehavior`, `behaviors.names`, `behaviors.has`, `behaviors.declaration`). Sorted; absent when none. A replayer that has not implemented each one skips the scenario; one that has implements each as it acts with none of its hooks set (`js` below). |
 | `js` | Why only the TypeScript engine can replay it, sorted; absent when nothing stops another (below). |
 | `dialect` | `"sqlite"` for a scenario that writes the file with SQL of its own (`storage.run`, `storage.exec`, `storage.transaction`): a replayer on Postgres skips it. |
 | `principals` | The principals the scenario acts as, by name. |
@@ -116,8 +116,23 @@ question, is such a name.
 | `values.driver` | The value store's driver, a function. |
 | `storage.transaction` | A step that runs a function in a transaction of the file. |
 | `events.watch` | A step that watches the log with functions. |
+| `testHook.<name>.<member>` | A test behavior read a hook the test had set (below): `testHook.probe.react` for a closure test.Ledger's reactions ran, `testHook.keep.ref` for the ref test.Keep's guard compared a discard with. |
 
-A step marked `js: true` is one of those.
+A step marked `js: true` is one of those, or a step during which a behavior
+read a hook the test had set.
+
+A hook is state a test behavior reads that the test sets as it runs, which
+the recording does not carry: `test/runner-fixtures.ts`'s `probe`, whose
+closures test.Ledger's reactions and schedule and test.Pacer's schedule run,
+or a value a test's own behavior compares a request with. A fixture declares
+its hooks with the recorder's `testHooks(name, hooks)`, and what it declares
+them holding is what the behavior does when the test sets nothing, which is
+what a replayer's own implementation of the behavior does. When a behavior
+reads a hook whose value is not the declared one (a closure the test put
+there, a value it changed; a function compares by identity, anything else by
+its JSON), the scenario is marked. A hook the test set but no behavior read,
+because nothing ran it, marks nothing. `test/recorder.test.ts` holds the
+recorder to this.
 
 ## Steps
 

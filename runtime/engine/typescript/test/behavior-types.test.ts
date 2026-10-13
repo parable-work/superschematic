@@ -24,6 +24,7 @@ import {
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { testHooks } from './recorder.ts';
 
 /** What each parseConfig of test.Kinds was given: whether other schemas were in reach, and the type names. */
 const targets: Array<{ schemas: boolean; names: readonly string[] }> = [];
@@ -31,8 +32,8 @@ const targets: Array<{ schemas: boolean; names: readonly string[] }> = [];
 let kept: ConfigTypes | undefined;
 /** What test.Kinds' afterConfigChange checked with the version being published. */
 const published: Array<readonly ValidationIssue[]> = [];
-/** Types test.Kinds' parseConfig also reads while other schemas are in reach, whatever its config says. */
-const extra = { withSchemas: [] as string[] };
+/** Types test.Kinds' parseConfig also reads while other schemas are in reach, whatever its config says: a recorder hook. */
+const extra = testHooks('extra', { withSchemas: [] as string[] });
 
 afterEach((t) => {
   targets.length = 0;

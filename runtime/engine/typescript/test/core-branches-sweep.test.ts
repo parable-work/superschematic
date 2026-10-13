@@ -12,6 +12,7 @@ import { ACTOR_NAMESPACE, defineBehavior, uuidV5, type Principal } from '../dist
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { Calls, openBranches, publish, recipeConfig, recipeDocument, type Commit, type Ref } from './branches-fixtures.ts';
 import { alice, cleanup, clone, drivers } from './helpers.ts';
+import { testHooks } from './recorder.ts';
 import { testClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -20,8 +21,8 @@ const sweeper: Principal = { subject: 'sweeper', permissions: [] };
 
 const day = 24 * 60 * 60 * 1000;
 
-/** The ref test.Keep keeps: its guard vetoes a discard of it, whoever asks. */
-const keep = { ref: '' };
+/** The ref test.Keep keeps: its guard vetoes a discard of it, whoever asks. A recorder hook, which the recording does not carry. */
+const keep = testHooks('keep', { ref: '' });
 
 const keeper = defineBehavior({
   declaration: { name: 'test.Keep', vetoes: [{ code: 'kept', description: 'A discard of the ref the test keeps.' }] },

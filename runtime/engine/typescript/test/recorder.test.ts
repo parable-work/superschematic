@@ -1,9 +1,12 @@
-// The scenario recorder (recorder.ts) held to the scenarios README's rule
-// for times (D58): it records recorder-clocks.ts under Node.js with
-// ENGINE_RECORD set. A test's fixed clock is written as it read it, and so
-// is every number of its engine's steps, though a seq equals the clock's
-// reading; only the wall clock's times are symbols; and a fixed clock that
-// reads near the wall clock fails the test that opened it.
+// The scenario recorder (recorder.ts) held to the scenarios README's rules
+// for times and hooks (D58): it records recorder-clocks.ts and
+// recorder-hooks.ts under Node.js with ENGINE_RECORD set. A test's fixed
+// clock is written as it read it, and so is every number of its engine's
+// steps, though a seq equals the clock's reading; only the wall clock's
+// times are symbols; and a fixed clock that reads near the wall clock fails
+// the test that opened it. A behavior that runs a closure the test set, or
+// reads a value the test changed, marks its scenario js, and the step it
+// ran in; one with nothing set, or whose closure nothing runs, does not.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -16,17 +19,20 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 
 type Step = Record<string, unknown>;
 
-// recordClocks runs the recorder-clocks tests whose names match pattern
-// under Node.js, recording to a fresh directory, and returns the runner's
-// exit code and output and the scenarios written.
-async function recordClocks(pattern: string): Promise<{ code: number | null; output: string; scenarios: Array<{ name: string; steps: Step[] }> }> {
+type Scenario = { name: string; js?: string[]; testBehaviors?: string[]; steps: Step[] };
+
+// record runs the tests of a recorder fixture (recorder-clocks,
+// recorder-hooks) whose names match pattern under Node.js, recording to a
+// fresh directory, and returns the runner's exit code and output and the
+// scenarios written.
+async function record(fixture: string, pattern: string): Promise<{ code: number | null; output: string; scenarios: Scenario[] }> {
   const out = mkdtempSync(join(tmpdir(), 'superschematic-engine-recorder-'));
   try {
     const env: Record<string, string | undefined> = { ...process.env, ENGINE_RECORD: out };
     delete env.NODE_TEST_CONTEXT;
     const output: string[] = [];
     const code = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn('node', ['--test', '--test-reporter=spec', `--test-name-pattern=${pattern}`, 'test/recorder-clocks.ts'], {
+      const child = spawn('node', ['--test', '--test-reporter=spec', `--test-name-pattern=${pattern}`, `test/${fixture}.ts`], {
         cwd: root,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -36,9 +42,9 @@ async function recordClocks(pattern: string): Promise<{ code: number | null; out
       child.on('error', reject);
       child.on('close', resolve);
     });
-    let scenarios: Array<{ name: string; steps: Step[] }> = [];
+    let scenarios: Scenario[] = [];
     try {
-      scenarios = (JSON.parse(readFileSync(join(out, 'scenarios', 'recorder-clocks.json'), 'utf8')) as { scenarios: typeof scenarios }).scenarios;
+      scenarios = (JSON.parse(readFileSync(join(out, 'scenarios', `${fixture}.json`), 'utf8')) as { scenarios: typeof scenarios }).scenarios;
     } catch {
       // Nothing recorded.
     }
@@ -49,7 +55,7 @@ async function recordClocks(pattern: string): Promise<{ code: number | null; out
 }
 
 test('a fixed clock of 7 is written as 7, and so is a seq of 7, beside the wall clock whose times are symbols', { timeout: 60_000 }, async () => {
-  const { code, output, scenarios } = await recordClocks('a fixed clock of 7');
+  const { code, output, scenarios } = await record('recorder-clocks', 'a fixed clock of 7');
   assert.equal(code, 0, output);
   assert.deepEqual(
     scenarios.map((scenario) => scenario.name),
@@ -73,8 +79,58 @@ test('a fixed clock of 7 is written as 7, and so is a seq of 7, beside the wall 
 });
 
 test('a fixed clock that reads near the wall clock fails the test, which the recorder does not write', { timeout: 60_000 }, async () => {
-  const { code, output, scenarios } = await recordClocks('a fixed clock that reads today');
+  const { code, output, scenarios } = await record('recorder-clocks', 'a fixed clock that reads today');
   assert.notEqual(code, 0, output);
   assert.match(output, /the recorder cannot tell the times of "a fixed clock that reads today beside the wall clock" apart/u);
   assert.deepEqual(scenarios, []);
+});
+
+// hooks records recorder-hooks.ts once, for the tests below.
+let hooks: ReturnType<typeof record> | undefined;
+
+async function hookScenario(name: string): Promise<Scenario> {
+  hooks ??= record('recorder-hooks', '.');
+  const { code, output, scenarios } = await hooks;
+  assert.equal(code, 0, output);
+  const scenario = scenarios.find((entry) => entry.name === name);
+  assert.ok(scenario, `no scenario "${name}" in ${scenarios.map((entry) => entry.name).join(', ')}`);
+  return scenario;
+}
+
+// marked lists the calls of a scenario's steps marked js, by index.
+const marked = (scenario: Scenario): Array<[number, unknown]> =>
+  scenario.steps.flatMap((step, index): Array<[number, unknown]> => (step.js === true ? [[index, step.call]] : []));
+
+test('a scenario whose behavior runs a closure the test set is js, and so is the step it ran in', { timeout: 60_000 }, async () => {
+  const scenario = await hookScenario('a reaction runs a closure the test set');
+  assert.deepEqual(scenario.testBehaviors, ['test.Ledger']);
+  assert.deepEqual(scenario.js, ['testHook.probe.react']);
+  // The runner's first pass, before the closure was set, runs nothing of it.
+  assert.deepEqual(
+    scenario.steps.filter((step) => step.call === 'runner.runDue').map((step) => step.js),
+    [undefined, true]
+  );
+  assert.deepEqual(marked(scenario), [[5, 'runner.runDue']]);
+});
+
+test('a scenario whose behavior has no closure set, or one that nothing runs, is not js', { timeout: 60_000 }, async () => {
+  for (const name of ['a reaction with no closure set', 'a closure the test set that no runner pass runs']) {
+    const scenario = await hookScenario(name);
+    assert.deepEqual(scenario.testBehaviors, ['test.Ledger'], name);
+    assert.equal(scenario.js, undefined, name);
+    assert.deepEqual(marked(scenario), [], name);
+  }
+});
+
+test('a value hook marks the steps that read it changed, and not those that read its declared value', { timeout: 60_000 }, async () => {
+  const scenario = await hookScenario('a guard that reads a value hook the test closes and opens again');
+  assert.deepEqual(scenario.js, ['testHook.gate.closed']);
+  assert.deepEqual(
+    scenario.steps.filter((step) => step.call === 'instances.update').map((step) => [step.js, (step.error as { class?: string } | undefined)?.class]),
+    [
+      [undefined, undefined],
+      [true, 'BehaviorVetoError'],
+      [undefined, undefined],
+    ]
+  );
 });
