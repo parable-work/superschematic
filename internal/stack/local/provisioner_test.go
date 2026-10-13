@@ -246,7 +246,13 @@ func newFixture(t *testing.T, envName string) *fixture {
 // any, the output root's Bun workspace holds.
 func newFixtureOf(t *testing.T, s *ir.Stack, envName string) *fixture {
 	t.Helper()
-	resolved := resolve(t, assemble(t), s, stacktest.AcmeShop(), envName)
+	return newFixtureWith(t, s, stacktest.AcmeShop(), envName)
+}
+
+// newFixtureWith is newFixtureOf over services.
+func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName string) *fixture {
+	t.Helper()
+	resolved := resolve(t, assemble(t), s, services, envName)
 	data, err := stack.Marshal(resolved)
 	if err != nil {
 		t.Fatal(err)
@@ -661,6 +667,206 @@ func TestApplyRefusesATypeScriptServerItCannotRun(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			_ = f.prov.Destroy(context.Background(), f.req)
+		})
+	}
+}
+
+// writeCrate writes the Cargo.toml of a Rust server's crate into its
+// entrypoint module.
+func (f *fixture) writeCrate(t *testing.T, server, manifest string) {
+	t.Helper()
+	path := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, server), "Cargo.toml")
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// crate is a Cargo.toml whose package, and so whose binary, is name.
+func crate(name string) string {
+	return "[package]\nname = \"" + name + "\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n"
+}
+
+// rollout applies each rollout step of the fixture's environment up to
+// and including the one that starts id, and returns the first error.
+func (f *fixture) rollout(t *testing.T, id string) error {
+	t.Helper()
+	for _, step := range f.env.DeployOrder {
+		if step.Step != ir.StepRollout {
+			continue
+		}
+		if err := f.prov.Apply(context.Background(), f.req, *step); err != nil {
+			return err
+		}
+		if slices.Contains(step.Resources, id) {
+			return nil
+		}
+	}
+	t.Fatalf("no rollout step starts %s", id)
+	return nil
+}
+
+// TestApplyRunsARustServer applies Dev of the shop with shop-api in Rust
+// (D57): its wave builds its crate with cargo in its module, into the
+// program directory's Cargo target directory, and runs the binary its
+// Cargo.toml names from target/release with the environment a Go server
+// gets, its database included; Orders still builds with go.
+// Applying the wave again builds into the same target directory and
+// restarts the server.
+func TestApplyRunsARustServer(t *testing.T) {
+	f := newFixtureWith(t, rustStack(), rustShop(), "Dev")
+	f.writeCrate(t, "shop-api", crate("shop-api-server"))
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: superschematic-rust-stack-dev-postgres"},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	module := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, "shop-api"))
+	target, err := filepath.Abs(filepath.Join(f.req.Dir, local.RustTargetDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cargo []local.Command
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" {
+			cargo = append(cargo, cmd)
+		}
+	}
+	want := "build --release --locked --quiet --target-dir " + target
+	if len(cargo) != 1 || strings.Join(cargo[0].Args, " ") != want || cargo[0].Dir != module {
+		t.Fatalf("cargo ran %+v, want once, %q in %s", cargo, want, module)
+	}
+	var api *fakeProcess
+	for _, p := range f.runner.started {
+		if strings.HasSuffix(p.cmd.Path, "shop-api-server") {
+			api = p
+		}
+	}
+	if binary := filepath.Join(target, "release", "shop-api-server"); api == nil || api.cmd.Path != binary || api.cmd.Dir != module {
+		t.Fatalf("shop-api started as %+v, want %s in %s", api, binary, module)
+	}
+	if got := envValue(api.cmd.Env, "PORT"); got != fmt.Sprint(f.apiPort) {
+		t.Errorf("shop-api's PORT = %q, want %d", got, f.apiPort)
+	}
+	for name, value := range map[string]string{
+		"SHOP_DB_DATABASE_URL": local.DatabaseURL(f.pgPort, "shop_db"),
+		"STRIPE_KEY":           "sk_test_123",
+		"LOG_LEVEL":            "info",
+	} {
+		if got := envValue(api.cmd.Env, name); got != value {
+			t.Errorf("shop-api's %s = %q, want %q", name, got, value)
+		}
+	}
+	lines := f.runner.lines(f.req.Dir)
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "/bin/go build -o DIR/bin/orders") }) {
+		t.Errorf("Orders was not built with go:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, want := range []string{
+		"build shop-api: cargo build --release --locked in server/rust-stack/shop-api",
+		fmt.Sprintf("[shop-api] listening on %d\n", f.apiPort),
+		"shop-api is ready at " + local.ServerURL(f.apiPort),
+	} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, f.out)
+		}
+	}
+
+	if err := f.rollout(t, "shop-api.process"); err != nil {
+		t.Fatal(err)
+	}
+	if !api.stopped {
+		t.Error("applying shop-api's wave again did not restart it")
+	}
+	count := 0
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" && strings.Join(cmd.Args, " ") == want {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("cargo built shop-api %d times into %s, want twice", count, target)
+	}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: superschematic-rust-stack-dev-postgres"}}
+	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestApplyRefusesARustServerItCannotRun: without cargo on PATH, without a
+// crate, with a build that fails, or with a crate whose binary cargo would
+// not name alone, shop-api's wave fails and says why. A failed build's
+// diagnostics are in the error.
+func TestApplyRefusesARustServerItCannotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		services []stack.Service
+		setup    func(t *testing.T, f *fixture)
+		want     string
+	}{
+		{
+			name:  "no cargo",
+			setup: func(t *testing.T, f *fixture) { f.runner.missing = []string{"cargo"} },
+			want:  "cargo is not on PATH; the local target builds each Rust server with cargo build",
+		},
+		{
+			name:  "no crate",
+			setup: func(t *testing.T, f *fixture) {},
+			want:  "local: server shop-api: no Cargo.toml in ",
+		},
+		{
+			name: "a build that fails",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api"))
+				f.runner.rules = []rule{{prefix: "/bin/cargo build", stderr: "error[E0425]: cannot find value `pool` in this scope"}}
+			},
+			want: "local: build server shop-api: /bin/cargo build --release --locked --quiet --target-dir ",
+		},
+		{
+			name: "two binaries",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api")+"\n[[bin]]\nname = \"a\"\npath = \"src/a.rs\"\n\n[[bin]]\nname = \"b\"\npath = \"src/b.rs\"\n")
+			},
+			want: "declares 2 binaries; a server's crate builds one",
+		},
+		{
+			name: "a binary name cargo refuses",
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("shop-api")+"\n[[bin]]\nname = \"api/../x\"\n")
+			},
+			want: `names no binary cargo builds: its [package] name, or its one [[bin]]'s, is "api/../x"`,
+		},
+		{
+			name:     "two servers naming one binary",
+			services: stacktest.InRust(stacktest.WithoutBuckets(stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.AcmeShop()))), "shop-api", "shop-orders"),
+			setup: func(t *testing.T, f *fixture) {
+				f.writeCrate(t, "shop-api", crate("server"))
+				f.writeCrate(t, "Orders", crate("server"))
+			},
+			want: "local: servers shop-api and Orders both build a binary named server into one Cargo target directory, target; name each crate's binary after its server",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			services := tc.services
+			if services == nil {
+				services = rustShop()
+			}
+			f := newFixtureWith(t, rustStack(), services, "Dev")
+			f.keys(t)
+			tc.setup(t, f)
+			err := f.rollout(t, "shop-api.process")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			if tc.name == "a build that fails" && !strings.Contains(err.Error(), "error[E0425]: cannot find value `pool` in this scope") {
+				t.Errorf("the error lacks the build's diagnostics: %v", err)
+			}
+			for _, p := range f.runner.started {
+				if strings.Contains(p.cmd.Path, local.RustTargetDir) {
+					t.Errorf("a Rust server started: %s", p.cmd.Path)
+				}
 			}
 			_ = f.prov.Destroy(context.Background(), f.req)
 		})

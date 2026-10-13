@@ -662,8 +662,9 @@ func TestHistoryActorSettingRejectsNonSettingNames(t *testing.T) {
 
 // TestImplementationPaths: each language's implementation directory is its
 // template under the repository root, typescript/{service} by default for
-// TypeScript (D51); the workspace pattern replaces the service with *; a
-// template that is absolute or names no service is refused.
+// TypeScript (D51) and rust/{service} for Rust (D57); the workspace pattern
+// replaces the service with *; a template that is absolute or names no
+// service is refused.
 func TestImplementationPaths(t *testing.T) {
 	d := Default()
 	if got, want := d.TypeScriptImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "typescript", "shop-api"); got != want {
@@ -671,6 +672,12 @@ func TestImplementationPaths(t *testing.T) {
 	}
 	if got, want := d.GoImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "go", "shop-api"); got != want {
 		t.Fatalf("GoImplementationDir = %q, want %q", got, want)
+	}
+	if got, want := d.RustImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "rust", "shop-api"); got != want {
+		t.Fatalf("RustImplementationDir = %q, want %q", got, want)
+	}
+	if got := d.RustImplementationCrate("shop-api"); got != "schemas-shop-api-implementation" {
+		t.Fatalf("RustImplementationCrate = %q", got)
 	}
 	if got := d.TypeScriptImplementationGlob(); got != "typescript/*" {
 		t.Fatalf("TypeScriptImplementationGlob = %q", got)
@@ -682,7 +689,7 @@ func TestImplementationPaths(t *testing.T) {
 		t.Fatalf("NpmWorkspacePackage = %q", got)
 	}
 
-	n, err := Parse([]byte("[implementation_paths]\ntypescript = \"services/{service}/ts\"\n"), "test")
+	n, err := Parse([]byte("[implementation_paths]\ntypescript = \"services/{service}/ts\"\nrust = \"services/{service}/rs\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,14 +699,22 @@ func TestImplementationPaths(t *testing.T) {
 	if got := n.TypeScriptImplementationGlob(); got != "services/*/ts" {
 		t.Fatalf("TypeScriptImplementationGlob = %q", got)
 	}
+	if got, want := n.RustImplementationDir("/repo", "shop-api"), filepath.Join("/repo", "services", "shop-api", "rs"); got != want {
+		t.Fatalf("RustImplementationDir = %q, want %q", got, want)
+	}
 	if got := n.ImplementationPaths.Go; got != "go/{service}" {
 		t.Fatalf("an unset go template = %q, want the default", got)
+	}
+	if got := (Naming{}).RustImplementationDir("/repo", "shop-api"); got != filepath.Join("/repo", "rust", "shop-api") {
+		t.Fatalf("an empty naming's RustImplementationDir = %q, want the default", got)
 	}
 
 	for _, tc := range []struct{ key, value, want string }{
 		{"typescript", "/abs/{service}", "implementation_paths.typescript \"/abs/{service}\" is an absolute path"},
 		{"typescript", "typescript/impl", "implementation_paths.typescript \"typescript/impl\" does not contain {service}"},
 		{"go", "go/impl", "implementation_paths.go \"go/impl\" does not contain {service}"},
+		{"rust", "/abs/{service}", "implementation_paths.rust \"/abs/{service}\" is an absolute path"},
+		{"rust", "rust/impl", "implementation_paths.rust \"rust/impl\" does not contain {service}"},
 	} {
 		_, err := Parse([]byte("[implementation_paths]\n"+tc.key+" = \""+tc.value+"\"\n"), "test")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

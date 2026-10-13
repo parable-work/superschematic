@@ -153,6 +153,43 @@ func TestTypeScriptGolden(t *testing.T) {
 	checkGoldenEnvironment(t, assemble(t), storefront(), stacktest.AcmeShop(), "Dev")
 }
 
+// rustStack is the shop with shop-api written in Rust (D57), over
+// rustShop's services.
+func rustStack() *ir.Stack {
+	s := shop()
+	s.Name = "rust-stack"
+	return s
+}
+
+// rustShop is the acme-shop services with shop-api written in Rust and no
+// bucket, which a Rust server does not reach (D57): its server, which
+// reaches shop-db through its authDb, is a Rust process.
+func rustShop() []stack.Service {
+	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+}
+
+// TestRustGolden resolves the shop with shop-api in Rust in Dev: shop-api's
+// process is a Rust one, with the sql edge and port a Go server's has, and
+// no binary in the program, since the provisioner reads the binary's name
+// from the crate as it builds it.
+func TestRustGolden(t *testing.T) {
+	checkGoldenEnvironment(t, assemble(t), rustStack(), rustShop(), "Dev")
+	env := resolve(t, assemble(t), rustStack(), rustShop(), "Dev")
+	prog, err := local.ProgramOf(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range prog.Servers {
+		want := local.LanguageGo
+		if s.Deployable == "shop-api" {
+			want = local.LanguageRust
+		}
+		if s.Language != want || (want == local.LanguageRust) != (s.Binary == "") {
+			t.Errorf("server %s is %s with binary %q, want %s, with a binary when it is Go", s.Deployable, s.Language, s.Binary, want)
+		}
+	}
+}
+
 // checkGoldenEnvironment resolves env of s and checks its environment.json
 // and the program the provisioner renders from it against the golden
 // files.
@@ -341,14 +378,26 @@ func TestRefusals(t *testing.T) {
 		}
 		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
 	})
-	t.Run("a Rust server", func(t *testing.T) {
-		services := stacktest.AcmeShop()
-		for i := range services {
-			if services[i].Name == "shop-api" {
-				services[i].Language = registry.APILanguageRust
+	t.Run("a Rust server's bucket", func(t *testing.T) {
+		// shop-api lists shop-media; the Rust runtime has no Bucket, so
+		// the edge is refused as gcp refuses it, and nothing else is.
+		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-api"), "Dev")
+		want := "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)"
+		if len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering || !strings.Contains(errs.List[0].Message, want) {
+			t.Errorf("got %v, want the one lowering error %q", errs, want)
+		}
+	})
+	t.Run("a Rust job or worker", func(t *testing.T) {
+		// shop-orders' server is a Rust process; its job and its worker
+		// are left out of D57.
+		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-orders"), "Dev")
+		wantFailure(t, errs, stack.CodeUnrealizable, "job "+stacktest.ShipOrdersJob+" is a RUST job, and platform local.job runs only GO; Rust jobs and workers are not built (D57)")
+		wantFailure(t, errs, stack.CodeUnrealizable, "worker "+stacktest.FulfilOrdersWorker+" is a RUST worker, and platform local.worker runs only GO; Rust jobs and workers are not built (D57)")
+		for _, e := range errs.List {
+			if strings.Contains(e.Message, "local.process") {
+				t.Errorf("the Rust server Orders was refused: %s", e.Message)
 			}
 		}
-		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO, TYPESCRIPT")
 	})
 	t.Run("a PORT field", func(t *testing.T) {
 		services := stacktest.AcmeShop()

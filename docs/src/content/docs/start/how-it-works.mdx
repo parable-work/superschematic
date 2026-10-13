@@ -27,8 +27,9 @@ directory. Each service is one schema: a directory with a
 `schema.config.ts` (or `.json` or `.yaml`) and its schema files under
 `src/`. Output goes to `dist/` next to `services/`.
 
-`examples/acme-shop/schemas` has six services, one or more of each core
-kind:
+`examples/acme-shop/schemas` has nine services. These seven have the
+kinds below; `shop-media`, a bucket, and `shop-web`, a static site, are the
+other two:
 
 | Service | Kind | What it declares |
 | --- | --- | --- |
@@ -36,8 +37,9 @@ kind:
 | `shop-db` | DB | the shop's tables: users, sessions, products, stock, orders and reviews |
 | `shop-api` | API | product routes over `shop-db`, served in Go |
 | `shop-orders` | API | order and review routes, served in Go (and in Rust with `--api-language`), with SDKs in all four languages |
+| `shop-stock` | API | stock routes over `shop-db`, served in Rust, which only `shop-orders`' server reserves through |
 | `shop-storefront` | API | cart routes, served in TypeScript |
-| `shop-stack` | Stack | what runs where: `shop-api` and `shop-orders` on Go servers, and a `Dev` environment that `stack dev` runs |
+| `shop-stack` | Stack | what runs where: `shop-api` and `shop-orders` on Go servers, `shop-stock` on a Rust one and `shop-storefront` on a TypeScript one, and a `Dev` environment that `stack dev` runs |
 
 ## A kind decides what a schema means
 

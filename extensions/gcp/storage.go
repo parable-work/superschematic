@@ -99,12 +99,12 @@ const publicAccessEnforced = "enforced"
 // Storage with the workload's own credentials from the metadata server, so
 // there is no credential to derive.
 //
-// A Rust server or job has no Bucket in its runtime, so the edge is
-// refused.
+// A Rust server has no Bucket in its runtime, and D57 leaves it out, so
+// the edge is refused.
 func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	if from.Language == registry.APILanguageRust {
-		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Bucket in its runtime to reach bucket %s with", from.Kind, from.Name, from.Language, from.Kind, to.Name)
+		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Bucket in its runtime to reach bucket %s with: buckets from a Rust server are not built (D57)", from.Kind, from.Name, from.Language, from.Kind, to.Name)
 	}
 	account := from.Name + ".account"
 	member := ir.Output{Resource: account, Name: "member"}

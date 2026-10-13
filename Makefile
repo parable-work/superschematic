@@ -191,10 +191,12 @@ python:
 # superscalar's core from the checkout `make setup` stands up, so
 # preserve_order is always on there; its lints and tests run with its
 # schemafile feature and without, and again with arbitrary_precision. The
-# http runtime's run again with its optional http-client feature, and with
-# its identity features, whose store and route tests run on SQLite (and on
-# the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is
-# set).
+# http runtime's run again with its optional http-client feature, with its
+# identity features, whose store and route tests run on SQLite (and on the
+# Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set),
+# and with a stack server's features (D57): postgres, whose tests run on the
+# Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set,
+# and logging.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -202,7 +204,11 @@ rust:
 		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client \
 		&& cargo clippy --all-targets --features identity -- -D warnings \
 		&& cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings \
-		&& cargo test --features identity-postgres,identity-sqlite
+		&& cargo test --features identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features postgres -- -D warnings \
+		&& cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings \
+		&& cargo test --features postgres,identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features logging -- -D warnings && cargo test --features logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

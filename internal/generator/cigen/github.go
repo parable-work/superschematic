@@ -231,11 +231,16 @@ func (g github) header(w *yamlWriter, notes []string) {
 // the lockfile the project commits, which fails when the lockfile is
 // missing or does not match the packages the build wrote, and type-checks
 // each TypeScript server and the implementation of each API one serves
-// (D51, amended).
+// (D51, amended). For the Rust servers it sets up the Rust release
+// tools.env pins before the build, which brings the output root's Cargo
+// lockfile up to date with it, refuses a lockfile git does not track or
+// the build changed, and checks each Rust server, with the implementations
+// it depends on, frozen to the lockfile (D57).
 func (g github) check() job {
 	st := g.req.Stack
 	servers := g.servers()
 	tsServers := g.typeScriptServers()
+	rustServers := g.rustServers()
 	steps := []step{g.checkout(), g.install()}
 	if len(servers) > 0 && g.req.Version != "" {
 		steps = append(steps, g.archives())
@@ -246,6 +251,9 @@ func (g github) check() job {
 			uses: &actionSetupGo,
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
+	}
+	if len(rustServers) > 0 {
+		steps = append(steps, setupRust())
 	}
 	packages := g.packages()
 	if len(tsServers) > 0 && st.PackageManager != registry.PackageManagerBun {
@@ -277,7 +285,52 @@ func (g github) check() job {
 			})
 		}
 	}
+	if len(rustServers) > 0 {
+		steps = append(steps, g.rustLockfile())
+		for _, server := range rustServers {
+			steps = append(steps, step{
+				name: "Compile server " + server,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				run:  rustCheck,
+			})
+		}
+	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
+}
+
+// rustCheck compiles a Rust server's crate and every crate it depends on,
+// the implementations among them, frozen to the workspace's lockfile.
+const rustCheck = "cargo check --locked"
+
+// setupRust installs the Rust release tools.env pins,
+// servergen.RustVersion, the one a Rust server's image builds with, as the
+// default toolchain: the build's cargo update --workspace and the
+// compiles run on it (D57). The runner's rustup installs it.
+func setupRust() step {
+	v := servergen.RustVersion
+	return step{name: "Set up Rust", run: fmt.Sprintf("rustup toolchain install %s --profile minimal\nrustup default %s", v, v)}
+}
+
+// rustLockfile checks the output root's Cargo lockfile, which the project
+// commits (D57). The build brings it up to date with cargo update
+// --workspace, so a lockfile the build changed was stale, and one git does
+// not track is missing; the compiles after it build frozen to it.
+func (g github) rustLockfile() step {
+	out := g.req.Stack.OutputRoot
+	lock := path.Join(out, servergen.RustLockfileName)
+	fix := fmt.Sprintf("build every service (superschematic build-all), which brings %s up to date, and commit it", lock)
+	return step{
+		name: "Check the Rust workspace's lockfile " + lock,
+		dir:  out,
+		run: strings.Join([]string{
+			"if ! git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then",
+			fmt.Sprintf(`  echo "::error file=%s::%s is not committed; %s" && exit 1`, lock, lock, fix),
+			"fi",
+			"git diff --quiet -- Cargo.lock || {",
+			fmt.Sprintf(`  echo "::error file=%s::%s does not match the crates the build wrote; %s" && git --no-pager diff -- Cargo.lock && exit 1`, lock, lock, fix),
+			"}",
+		}, "\n"),
+	}
 }
 
 // typeCheck type-checks a TypeScript package with the compiler its
@@ -337,9 +390,11 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		return job{}, err
 	}
 	param := "--param " + e.Parameters[0] + "=" + prNumber
-	build := g.build()
-	build.cond = notClosed
-	steps = append(steps, build,
+	for _, s := range g.buildSteps() {
+		s.cond = notClosed
+		steps = append(steps, s)
+	}
+	steps = append(steps,
 		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
 		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
 	)
@@ -364,7 +419,8 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, g.build(), step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
+	steps = append(steps, g.buildSteps()...)
+	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
@@ -492,6 +548,18 @@ func (g github) build() step {
 	return step{name: "Build the services", run: "superschematic build-all " + g.req.Stack.ServicesRoot}
 }
 
+// buildSteps are the steps of a cloud job that builds the services before
+// its command: the build, after the Rust release tools.env pins for a
+// stack with a Rust server, so the build's cargo update --workspace runs
+// on the release check ran it on and leaves the lockfile check accepted as
+// it is (D57). The runner's own cargo may be another release.
+func (g github) buildSteps() []step {
+	if len(g.rustServers()) == 0 {
+		return []step{g.build()}
+	}
+	return []step{setupRust(), g.build()}
+}
+
 // stackCommand is one of the stack commands on the stack, which the job
 // names since it runs from the repository root.
 func (g github) stackCommand(command, environment string, flags ...string) string {
@@ -506,6 +574,10 @@ func (g github) servers() []string { return g.serversIn(registry.APILanguageGo) 
 // typeScriptServers are the stack's TypeScript servers, whose entrypoint
 // packages the build writes into the output root's Bun workspace, sorted.
 func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
+
+// rustServers are the stack's Rust servers, whose crates the build writes
+// into the output root's Cargo workspace, sorted (D57).
+func (g github) rustServers() []string { return g.serversIn(registry.APILanguageRust) }
 
 // serversIn are the stack's servers in language, sorted.
 func (g github) serversIn(language string) []string {

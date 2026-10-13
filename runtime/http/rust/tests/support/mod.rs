@@ -2,7 +2,8 @@
 //! and DDL (`runtime/http/testdata/identity`), a scalar catalog standing in
 //! for superscalar's, and the databases a test runs on: SQLite always, and
 //! the Postgres `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` names when it is
-//! set and the `identity-postgres` feature is on.
+//! set and the `identity-postgres` feature is on, over one connection and,
+//! with the `postgres` feature too, over the server's pool.
 
 // Each test target uses part of this module.
 #![allow(dead_code)]
@@ -164,10 +165,36 @@ pub async fn databases() -> Vec<TestDb> {
     let mut dbs = vec![sqlite()];
     if let Some(db) = postgres().await {
         dbs.push(db);
+        dbs.extend(postgres_pool().await);
     } else {
         eprintln!("{POSTGRES_URL_ENV} is unset or identity-postgres is off: the test runs on SQLite alone");
     }
     dbs
+}
+
+#[cfg(not(all(feature = "identity-postgres", feature = "postgres")))]
+async fn postgres_pool() -> Option<TestDb> {
+    None
+}
+
+/// The server's pool (the `postgres` feature) over a schema of its own
+/// holding the fixture's `create.sql`, through the identity store's pool
+/// client.
+#[cfg(all(feature = "identity-postgres", feature = "postgres"))]
+async fn postgres_pool() -> Option<TestDb> {
+    use superschematic_http_runtime::identity::PostgresPool;
+    use superschematic_http_runtime::postgres::connect;
+    use superschematic_http_runtime::stackconfig::Database;
+
+    let mut db = postgres().await?;
+    let (_, schema) = db.cleanup.as_ref()?;
+    let url = std::env::var(POSTGRES_URL_ENV).ok()?;
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let url = format!("{url}{separator}options=-c%20search_path%3D{schema}%2Cpublic");
+    let pool = connect(&Database::Url(url)).unwrap();
+    db.name = "postgres-pool";
+    db.client = Arc::new(PostgresPool::new(pool));
+    Some(db)
 }
 
 #[cfg(not(feature = "identity-postgres"))]

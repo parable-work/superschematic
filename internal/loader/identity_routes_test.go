@@ -241,3 +241,59 @@ func TestLoadUserRoutesRefusals(t *testing.T) {
 		t.Errorf("LoadService = %v, want an error containing %q", err, want)
 	}
 }
+
+// accountsConfig is an @envVars type, in the JSON form, with one field
+// named name.
+func accountsConfig(name string) string {
+	return `{"types": {"AccountsConfig": {"name": "AccountsConfig", "role": "EmbeddedStruct", "envVars": true,
+  "fields": [{"name": "` + name + `", "typeRef": {"name": "string"}, "required": true}]}}}`
+}
+
+// TestLoadRefusesAnEnvVarsFieldThatTakesTheIdentityConfigField: outside a
+// stack, an API whose authDb has a User table refuses an @envVars field
+// named as its identity config field, or beginning with it and an
+// underscore, without a route set: the loader reads the authDb for it. An
+// authDb without a User table gives the API no such field, and an API none
+// of whose fields takes the name reads no authDb.
+func TestLoadRefusesAnEnvVarsFieldThatTakesTheIdentityConfigField(t *testing.T) {
+	for _, name := range []string{"FIXTURE_USER_ROUTES_API_IDENTITY", "FIXTURE_USER_ROUTES_API_IDENTITY_TTL"} {
+		_, err := LoadService(userRoutesDataService(t, "src/config.schema.json", accountsConfig(name)))
+		want := "@envVars field " + name + " of AccountsConfig collides with FIXTURE_USER_ROUTES_API_IDENTITY, the identity config field of fixture-user-routes-api, whose authDb fixture-user-model-db has a User table; a stack's platform sets it, so rename the setting"
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: LoadService = %v, want %q", name, err, want)
+		}
+	}
+
+	db, err := LoadService(filepath.FromSlash("tsreader/testdata/services/fixture-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	load := WithDependencyLoader(func(name string) (*ir.Schema, error) {
+		asked = append(asked, name)
+		return db, nil
+	})
+	dir := userRoutesDataService(t, "src/config.schema.json", accountsConfig("FIXTURE_USER_ROUTES_API_IDENTITY"))
+	if _, err := LoadService(dir, load); err != nil {
+		t.Errorf("an authDb without a User table: LoadService = %v", err)
+	}
+	if len(asked) != 1 || asked[0] != "fixture-user-model-db" {
+		t.Errorf("the dependency loader was asked for %v, want fixture-user-model-db once", asked)
+	}
+
+	asked = nil
+	dir = userRoutesDataService(t, "src/config.schema.json", accountsConfig("FIXTURE_USER_ROUTES_API_IDENTITIES"))
+	if _, err := LoadService(dir, load); err != nil {
+		t.Errorf("a field that only shares a prefix: LoadService = %v", err)
+	}
+	if len(asked) != 0 {
+		t.Errorf("an API none of whose fields takes the identity config field's name read its authDb: %v", asked)
+	}
+
+	failing := WithDependencyLoader(func(string) (*ir.Schema, error) { return nil, errors.New("no such service") })
+	_, err = LoadService(userRoutesDataService(t, "src/config.schema.json", accountsConfig("FIXTURE_USER_ROUTES_API_IDENTITY")), failing)
+	const want = "fixture-user-routes-api: reading the authDb fixture-user-model-db, whose User table decides whether an @envVars field collides with FIXTURE_USER_ROUTES_API_IDENTITY, the identity config field: no such service"
+	if err == nil || err.Error() != want {
+		t.Errorf("LoadService = %v, want %q", err, want)
+	}
+}

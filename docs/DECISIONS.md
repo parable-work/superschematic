@@ -4635,8 +4635,9 @@ runs, where `stack dev` skips that firing.
 
 Not built:
 - TypeScript jobs;
-- a job that runs on every deploy (Cloud Run's `runExecutionToken`);
-- workers.
+- a job that runs on every deploy (Cloud Run's `runExecutionToken`).
+
+Workers came with queues in D53, built in #336 and #339.
 
 The rule is reversible until the first release.
 
@@ -4955,8 +4956,7 @@ database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
 on Postgres.
 
 Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
-the Go and TypeScript ones do; and a check of an `@envVars` field that
-collides with it outside a stack.
+the Go and TypeScript ones do.
 
 The design is reversible until the first release.
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
@@ -5001,7 +5001,47 @@ backing by picking the database.
 | A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
 | On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
 
-Status: not built.
+Status: built.
+- #336 adds queues and Go workers, on the local target:
+  - `@queue` and `ir.QueueDef` on a DB class, whose table sqlgen writes
+    in each dialect the service lists and the migration plan carries;
+  - the Go ORM's `queues.go`: `Enqueue<Queue>` in the caller's
+    transaction, and the claims (`Claim`, `Complete`, `Fail`, `Extend`
+    and `Release`, each refusing a lost claim with `ErrClaimLost`);
+  - `@worker` and `ir.Worker`, the generated `Workers` interface and its
+    scaffold;
+  - the `worker` kind, with settings (`{ of, worker, instances,
+    concurrency, enabled }`) and `ir.ResolvedWorker`;
+  - each worker's Go module and image at `server/<stack>/<worker>/`,
+    which runs `runtime/http/go/worker`'s claim loop, and `stack dev`'s
+    worker processes.
+- #339 adds the `gcp.cloudrunworker` platform, a Cloud Run worker pool
+  scaled by hand to the worker's instances, and its connectors to Cloud
+  SQL, Cloud Run and Cloud Storage. The migration job grants each
+  worker's IAM database user read and write privileges.
+
+The claims run on Postgres alone, since the Go ORM does: resolution
+refuses a worker whose queue's database an environment places on SQLite
+or D1.
+
+acme-shop's `shop-db` declares `OrderPlaced`, which `PlaceOrder` enqueues
+in its transaction, and `shop-orders`' worker `FulfilOrders` fulfils the
+order, which `TestStackDevRunsTheShop` waits for.
+`TestGeneratedQueuesOnPostgres` runs the generated queue on Postgres when
+`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` is set, claiming with two pools
+at once among its cases. `runtime/http/go/worker`'s tests cover the loop's
+concurrency, its extended claims, its grace and its wait after a failed
+claim, and gcp's `cloudrunworker_test.go` the platform, its settings and
+its refusals.
+
+No worker has run on Google Cloud.
+
+Not built:
+- TypeScript and Rust workers, and claims in their runtimes;
+- claims on SQLite and D1, in a write transaction;
+- removing `done` messages, and an operator's command to read and retry
+  dead ones;
+- a backoff that grows with each attempt.
 
 The rule is reversible until the first release.
 
@@ -5020,7 +5060,49 @@ can see it.
 | `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
 | On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
 
-Status: not built.
+Status: built.
+- #334 adds buckets on the local target:
+  - the `Bucket` kind and its sentinel, and `buckets` on an API's
+    config, which the IR records as `Schema.Buckets`;
+  - the `bucket` deployable and edge kinds, and `ir.BucketConnection`
+    in the field `{SERVICE}_BUCKET` (`[derived_fields] bucket`), which
+    Go's `stackconfig.LoadBucket` and TypeScript's `loadBucket` read,
+    held to one encoding by `stackconfig_parity.json`;
+  - the `Bucket` interface in the Go and TypeScript HTTP runtimes, and a
+    `Deps` field per bucket;
+  - its GCS implementation: Go's in the `buckets.go` the build writes
+    beside an entrypoint's `main.go`, TypeScript's in the runtime's
+    `./gcs` entry;
+  - `stack dev`'s fake-gcs-server container, with a bucket per Bucket
+    service, and `--remove-data`.
+- #338 adds the `gcp.storage` platform, the connectors from a Cloud Run
+  service and job, and the policy rule `buckets-never-public`. The
+  Storage Admin role #337 gave `deployer` for sites creates the buckets
+  and sets their IAM. #339 adds a worker's connector.
+
+The GCS implementation is linked into every Go server or job whose APIs
+list a bucket, and a TypeScript server's package depends on
+`@google-cloud/storage` only then (`TestOnlyAServerWithABucketLinksGCS`).
+Every bucket connection is GCS's today, the local emulator's too, so the
+build decides by the bucket, not by the environments that place the
+workload on gcp.
+
+acme-shop's `shop-api` lists `shop-media` and signs the upload of a
+product's image (`createProductImageUpload`), which
+`TestStackDevRunsTheShop` puts through the signed URL and reads back from
+the emulator. servergen's `TestBucketsReachTheEmulator` runs the Go
+interface against fake-gcs-server under Docker, and the HTTP runtime's
+`gcs.test.ts` runs the TypeScript one when
+`SUPERSCHEMATIC_TEST_GCS_EMULATOR` names an emulator. gcp's
+`storage_test.go` covers the platform, its refusals, the connectors'
+grants and `buckets-never-public`.
+
+No bucket has run on Google Cloud. A live run should check whether a new
+bucket's IAM policy carries the project's convenience bindings, through
+which `planner`'s `roles/viewer` would read its objects.
+
+Not built: a `Bucket` in the Rust runtime, so gcp's connectors refuse a
+bucket edge from a Rust server or job.
 
 The rule is reversible until the first release.
 
@@ -5041,7 +5123,48 @@ is a TypeScript or Rust server, not a site.
 | `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
 | superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
 
-Status: not built.
+Status: built.
+- #333 adds sites on the local target, the first half:
+  - the `Site` kind, with `site: { build, output, fallback }`, and
+    `[implementation_paths] site`, where the build scaffolds a site once
+    and writes its typed browser config on every build (the first
+    amendment below);
+  - the `site` deployable and edge kinds, `site-calls-unexposed`, and
+    `PlatformSpec.PublicAddressOf`, which the local platform gives;
+  - the `<API>_CORS` field of each API a site calls, which Go's `cors`
+    package and `stackconfig.LoadCORS` and TypeScript's `corsHandler`
+    and `loadCors` read and check, held to one decision by
+    `runtime/http/testdata/cors_parity.json`;
+  - the `Sites` seam (`registry.SitePublisher`), the deploy's frozen
+    install, build and digest (`DigestSite`), `PinSites`, the manifest's
+    `sites`, and `--site` on `stack plan` and `stack deploy`, which
+    `stack build` prints;
+  - `stack dev`'s file server for each site, with its config and
+    fallback.
+- #337 adds the `gcp.site` platform, the `gcp.site-cloudrun` connector,
+  a Cloud Run service's public address, the publisher and
+  `deployer`'s Storage Admin role (the second amendment below), and the
+  Pulumi program exports the outputs each deployable's public address
+  references.
+
+acme-shop's `web/shop-web` lists shop-api's products through
+`loadApis()`, and `TestStackDevRunsTheShop` fetches its page, its config
+and a path that names no file, which the fallback answers, then sends
+shop-api a preflight from the site's origin, which it allows, and from
+another, which it does not. Resolution's `sites_test.go`, the deploy's
+`TestDeployPublishesASite` and `TestDigestSite`, and gcp's `site_test.go`
+cover the rest: the platform with a domain, without one and without a
+fallback, the publisher, and a deploy (`TestDeploySiteOnGCP`).
+
+No site has run on Google Cloud; the second amendment below says what to
+check first.
+
+Not built:
+- a site's SDK clients in the browser, which wait on superscalar's
+  browser build (the first amendment below);
+- Bun in the deploy job the generated CI writes for a schemas root on
+  npm, which a site's build needs;
+- the CORS field on a Rust server, which waits on D57.
 
 The rule is reversible until the first release.
 
@@ -5292,6 +5415,66 @@ package's tests compose them with `Lease`. `make cli-smoke` loads a
 fixture of each new behavior in both forms; the engine runs them in
 `core-behaviors.test.ts`; `superschematic engine-client` types their
 fields. The names and rules are reversible until the first release.
+
+
+## D57. A Rust server gets a generated entrypoint, a `Deps` over a Postgres pool, and an implementation crate, and reaches Cloud SQL through the socket Cloud Run mounts
+
+D51 gave a TypeScript API what a Go one has in a stack: a generated
+entrypoint, an image, a `Deps`, an implementation scaffold, and readers of
+the derived fields (section 3.4 of `docs/stack-model.md`). A Rust API has
+none of these. The generator logs "a RUST server, which gets no generated
+entrypoint yet" and writes nothing; the `local` target refuses the
+language; gcp's sql and bucket connectors refuse it; the Rust HTTP runtime
+reads no derived field, opens no database and logs nothing; and the
+generated `config.rs` reads `@envVars` alone. So acme-shop's Rust server
+runs beside the stack, by hand, over a SQLite file. D50's Rust stack
+entrypoint, which would read `<API>_IDENTITY`, waits on this. This entry is
+D51's twin for Rust.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server is Rust when the APIs it serves are, by `outputs.api.language` `RUST`, as D51 reads TypeScript. `local.process` and the local provisioner take `rust`, and `gcp.cloudrun` already did. `stack dev` builds a server with `cargo build --release --locked` into `<output-root>/program/<stack>/<environment>/target`, which every Rust server of an environment shares and a rebuild reuses, and runs the crate's single binary. Jobs and workers stay Go, as D52 and D53 leave TypeScript ones, and the resolver says so ("Rust jobs and workers are not built (D57)"). A Rust server's bucket edge is refused on both targets. | A language on `@server`, which could disagree with the API's own generated server. A target directory per server, which compiles the shared dependencies once per server. |
+| The Rust HTTP runtime gains `stackconfig`: `load_database`, `load_service`, `load_bucket`, `load_callers` and `load_cors`, each with a `_from` form over a map, reading the variables Go's `stackconfig` reads, with their refusals and two more that Go makes later or not at all: an unknown algorithm at load, and a variable under a field's prefix that is not UTF-8. `Database` is an enum, a URL or a Cloud SQL instance, whose `Debug` hides a password, as `Credential`'s hides a key. `runtime/http/testdata/stackconfig_parity.json` holds it to Go's encoding, as it holds TypeScript's. `credential_source` turns a callee's credential into the token source the SDK takes, the same type, so the entrypoint converts nothing. `<API>_IDENTITY` is the identity config's JSON, which `identity::Config::parse` reads. | Readers in the generated crate, written once per API. |
+| A Rust server's database is a pool of tokio-postgres connections (`deadpool-postgres`), behind the runtime's `postgres` feature: `connect(&Database)`, which opens nothing until a connection is asked for, and `ping(&Pool)`. A URL connects as it says, with TLS by its `sslmode` as libpq reads it. A Cloud SQL database connects over the Unix socket Cloud Run mounts at `/cloudsql/<connection name>`, which gcp's workload already adds, without TLS, which Cloud Run's connection terminates, as the IAM database user the connector creates, with an access token from the metadata server as the password, fetched for each new connection. So no Google library enters the runtime (D6), and connectors in other languages are untouched. The identity store runs over the same pool (`identity::PostgresPool`). | Google's Cloud SQL Rust connector, which does not exist. The Cloud SQL Auth Proxy as a sidecar, a second container per server. A password in Secret Manager, which section 7.4 keeps for platforms without IAM authentication. sqlx, a larger tree than the tokio-postgres the identity store already uses. A cached token, which a connection made after it expires would fail with. |
+| The generated `config.rs` writes `EnvConfig` and `load_env_config()`, the names Go and TypeScript use, beside the `@envVars` struct `load_config()` already reads. `EnvConfig` holds the `@envVars` fields and each derived field the server's resolution gives the API: `<DB>_DATABASE`, `<API>_SERVICE` per callee, `<API>_CALLERS` with a service clause, `<API>_IDENTITY` (parsed, the defaults when unset) with an identity authDb, and `<API>_CORS` on every Rust API, empty when no site calls it, since the API's build cannot see its sites. Every refusal is reported together. | Reading the variables in the entrypoint alone, which leaves a project's own binary without them. |
+| The API crate gains `deps.rs`: `Deps` (`config`, the pool of the API's database, a client per callee from its Rust SDK crate, and a `tracing` span for the API), and `Handlers`, the namespace implementations with what only the implementation can build: an authenticator of its own when the API has no identity authDb, and the webhook verifiers. `Implementations::new(handlers, …)` takes the identity and service authenticators the entrypoint builds as typed arguments, so a server cannot leave one out. `[implementation_paths] rust` defaults to `rust/{service}`, and the scaffold writes a crate there once, whose `create(deps)` returns the `Handlers`, never into a directory that holds a `Cargo.toml`. A Rust API with a bucket, or a callee with no Rust SDK, is refused. | `Implementations` as the implementation's return, which would make it build the identity and service authenticators the entrypoint already builds. |
+| The entrypoint is `<output-root>/server/<stack>/<server>/`: a crate named `<prefix><stack>-<server>-server` whose binary is the server's name, `src/main.rs`, a Dockerfile and its ignore file. `main.rs`, on a tokio runtime, initializes JSON-line logging (the runtime's `logging`); loads each API's `EnvConfig`; opens a pool per database; builds a client per `calls` edge with its credential source; calls each `create`; builds an identity service per authDb from `<API>_IDENTITY` and the service authenticator from `<API>_CALLERS`; builds each API's router; serves `/healthz` and `/readyz` (bounded pings, 503 while draining) on `$PORT`; and drains for ten seconds on SIGTERM. A server of two APIs hands a request to the API whose operations take it, as Go's dispatch does. The site CORS layer (the runtime's `cors`, held by `cors_parity.json`) is outermost, and each API keeps its identity CORS inside it. A config error stops the server, naming every variable. | One binary per API, which a server that serves two APIs cannot be. Merging the APIs' routers, which their shared OpenAPI routes make collide. |
+| The Rust servers are the members of a Cargo workspace at `<output-root>/Cargo.toml`, which the build writes and which excludes the generated `api`, `sdk` and `types` crates. Its lockfile, `<output-root>/Cargo.lock`, lives outside the emptied `server/`, so a project commits it, as D51's amendment has it commit `bun.lock`; each build runs `cargo update --workspace`, which writes or prunes it without moving a pin. The image, `stack dev` and the generated CI build with `--locked`, and CI's `check` refuses a lockfile git does not track or the build changed, then runs `cargo check --locked` on each server. The image builds with the Rust toolchain `tools.env` pins, from the build context that holds the superscalar and runtime checkouts its crates name by path, and runs as `distroless/cc` non-root; it fails, rather than resolve afresh, without the lockfile. | A lockfile per server, which every build would empty. Building on the host and copying the binary, which ties the image to the host's architecture and libc. |
+| acme-shop proves it with `shop-stock`, the API the auth guide's service callers section sketches (D37): a Rust API over `shop-db`'s `StockLevel`, whose stock anyone may list, whose levels staff with `stock.write` set, and whose reservations only `shop-orders`' server may make (`@requireService`). `shop-orders` reserves stock through it when an order is placed, so a Go server calls a Rust one with a service credential and forwards the shopper. `shop-stack` deploys it on a Rust server, and `TestStackDevRunsTheShop` calls it. | Moving `shop-orders` to Rust, which the Topcoat app and the Go tests are built on. A fixture alone, which nothing would run end to end. |
+
+Status: built.
+- The Rust HTTP runtime gains `stackconfig`, the `postgres`, `logging`
+  and site `cors` pieces and `identity::PostgresPool`. The stack config,
+  CORS and identity vectors hold it to Go's, and its Cloud SQL path is
+  tested through a socket relay and a fake metadata server.
+- `rustrestgen` and `envgen` write `deps.rs` and `EnvConfig`, and the
+  scaffold writes the implementation crate at `[implementation_paths]
+  rust`.
+- The `local` target builds and runs a Rust server, and gcp's sql edge
+  serves one; both refuse its bucket edge.
+- servergen writes each Rust server's crate, the workspace and its
+  lockfile, and the image, and cigen's `check` refuses a stale lockfile
+  and compiles each server. A fixture stack (`rs-stock`, `rs-pricing`,
+  `rs-orders`, `rs-web`) builds, serves and runs in Docker, with identity
+  over Postgres, Rust and Go callers and a site. `stack dev` runs a Rust
+  server over Postgres (`TestStackDevRunsARustServer`).
+- acme-shop's `shop-stock` is a Rust API on a Rust server in
+  `shop-stack`, whose stock `shop-orders` reserves in each order's
+  transaction with a service credential, and `TestStackDevRunsTheShop`
+  calls it. The shop commits `schemas/dist/Cargo.lock`, and `check.sh`
+  refuses a build that changes it.
+
+No Rust server has run on Cloud Run.
+
+Not built:
+- an implementation crate that builds with the API crate somewhere other
+  than the output root its `Cargo.toml` names by path, so `stack dev
+  --out` elsewhere collides in Cargo's lockfile;
+- Rust jobs and workers;
+- buckets from a Rust server;
+- OpenTelemetry export.
+
+The rule is reversible until the first release.
 
 ## D58. The engine is one Rust library every server links, over Postgres in a stack and SQLite in one process, and it serves its own routes
 

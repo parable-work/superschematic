@@ -1,0 +1,71 @@
+name: rs-stock
+kind: API
+types:
+  StockConfig:
+    name: StockConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: WAREHOUSE
+        typeRef: { name: string }
+        required: true
+        default: "main"
+  LevelView:
+    name: LevelView
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+      - name: cents
+        typeRef: { name: number }
+        required: true
+      - name: warehouse
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: Levels
+    operations:
+      - name: listLevels
+        typeRef: { name: LevelView, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: levels
+      - name: getLevel
+        typeRef: { name: LevelView }
+        required: true
+        httpMethod: GET
+        restPath: levels/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
+      - name: setLevel
+        typeRef: { name: LevelView }
+        required: true
+        httpMethod: PUT
+        restPath: levels/{sku}
+        auth: true
+        permissions: [stock.write]
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
+  - name: Reservations
+    serviceCallers: { mode: require, from: [rs-orders] }
+    operations:
+      - name: reserveStock
+        typeRef: { name: LevelView }
+        required: true
+        httpMethod: POST
+        restPath: reservations/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

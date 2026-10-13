@@ -1,0 +1,7 @@
+# A static site whose browser code calls rs-stock (D55): rs-stock's Rust
+# server answers CORS for the site's origin, which its CORS field lists.
+name: rs-web
+kind: Site
+calls:
+  - { name: rs-stock, kind: API }
+site: { fallback: index.html }

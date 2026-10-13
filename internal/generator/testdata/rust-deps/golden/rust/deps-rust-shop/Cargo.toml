@@ -1,0 +1,20 @@
+# The implementation of the deps-rust-shop API (D57).
+#
+# superschematic wrote this crate once, as a scaffold, because it was
+# missing, and never writes it again: it is yours, and so is its name. A
+# stack's server entrypoint depends on it by path and calls its `create`.
+[package]
+name = "schemas-deps-rust-shop-implementation"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+# The generated API crate, and the HTTP runtime it is built on.
+[dependencies]
+async-trait = "0.1.89"
+schemas-deps-rust-shop-api = { path = "../../schemas/dist/api/deps-rust-shop" }
+superschematic-http-runtime = { path = "../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

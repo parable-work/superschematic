@@ -1,0 +1,25 @@
+name: rs-catalog
+kind: API
+types:
+  Entry:
+    name: Entry
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Catalog
+    operations:
+      - name: getEntry
+        typeRef: { name: Entry }
+        required: true
+        httpMethod: GET
+        restPath: catalog/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
