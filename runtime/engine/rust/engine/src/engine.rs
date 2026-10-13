@@ -34,7 +34,7 @@ use crate::instances::Instances;
 use crate::namespaces::{NamespaceConfig, NamespaceOptions, Namespaces};
 use crate::registry::document::model_of;
 use crate::registry::{Catalog, Schemas};
-use crate::values::{ValueOptions, ValueStore};
+use crate::values::{ValueOptions, ValueStore, Values};
 
 /// Where the engine keeps its data.
 #[derive(Debug)]
@@ -323,6 +323,11 @@ impl Engine {
     /// The event log.
     pub fn events(&self) -> Events<'_> {
         Events { engine: self }
+    }
+
+    /// The value store: a value by its hash, and the sweep.
+    pub fn values(&self) -> Values<'_> {
+        Values { engine: self }
     }
 
     /// Runs `f` in a write transaction that excludes the writers `lock`

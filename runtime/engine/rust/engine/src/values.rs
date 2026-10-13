@@ -24,9 +24,10 @@
 //! deployment's engine crate implements over other storage. A driver's
 //! writes are outside the engine's transactions, so a rollback cannot undo
 //! them: once the outermost transaction ends, committed or rolled back, the
-//! store removes each value it wrote there that no holder references. That
-//! settling takes the catalog's lock, so it never removes a value another
-//! writer is about to hold.
+//! store removes each value it wrote there that no holder references, and
+//! [`Values::sweep`] removes what a crash left between a write and that end,
+//! for a driver that lists its hashes. That settling takes the catalog's
+//! lock, so it never removes a value another writer is about to hold.
 //!
 //! Who holds a value is `engine_payload_holders`: one row per value per
 //! holder (an instance's row, an event, or a row of a behavior's tables, by
@@ -43,19 +44,25 @@
 //! every process. Values come back in canonical form: an object's members
 //! sorted.
 //!
-//! Reading a value by its hash, through a schema that references it, comes
-//! with the store's API.
+//! A read by hash ([`Values::get`]) is allowed only through a schema of the
+//! namespace that references the value and that the caller may read;
+//! knowing a hash grants nothing.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, ThreadId};
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 use superschematic_engine_storage::{lock_key, Db, Dialect, Lock, Sql, SqlValue, Tx};
 
-use crate::errors::{EngineError, Error, Result};
+use crate::access::SchemaAction;
+use crate::engine::Engine;
+use crate::errors::{EngineError, EngineErrorCode, Error, Result};
 use crate::json;
+use crate::namespaces::NamespaceView;
+use crate::principal::{check_principal, Principal};
 
 /// The member of a ref that names its value's hash.
 pub const VALUE_REF_KEY: &str = "$value";
@@ -71,6 +78,9 @@ pub const DEFAULT_VALUE_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// The default of [`ValueOptions::max_bytes`]: 16 MiB.
 pub const DEFAULT_VALUE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// How many hashes a sweep reads from a driver at a time.
+const SWEEP_PAGE: usize = 500;
 
 /// A failure of a deployment's value driver.
 pub type DriverError = Box<dyn std::error::Error + Send + Sync>;
@@ -126,6 +136,20 @@ impl std::fmt::Debug for ValueOptions {
             .field("max_bytes", &self.max_bytes)
             .finish()
     }
+}
+
+/// A value read by its hash.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StoredValue {
+    pub hash: String,
+    pub bytes: u64,
+    pub value: Value,
+}
+
+/// What a sweep removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SweepResult {
+    pub removed: u64,
 }
 
 /// The hash a ref names, or `None` for a value that is no ref.
@@ -563,6 +587,30 @@ impl ValueStore {
         Ok(filled)
     }
 
+    /// The value stored under a hash, or `None`.
+    pub fn read(&self, tx: &Tx<'_>, hash: &str) -> Result<Option<StoredValue>> {
+        Ok(self.cached(tx, hash)?.map(|value| StoredValue {
+            hash: hash.to_owned(),
+            bytes: value.bytes,
+            value: Value::clone(&value.value),
+        }))
+    }
+
+    /// The schemas of a namespace whose rows, events or behaviors' rows hold
+    /// a value, by name.
+    pub fn schemas_holding(&self, tx: &Tx<'_>, hash: &str, namespace: &str) -> Result<Vec<String>> {
+        tx.all(
+            Sql::per(
+                "SELECT DISTINCT schema FROM engine_payload_holders WHERE hash = ? AND namespace = ? ORDER BY schema",
+                "SELECT schema FROM engine_payload_holders WHERE hash = ? AND namespace = ? GROUP BY schema ORDER BY schema COLLATE \"C\"",
+            ),
+            &[SqlValue::from(hash), SqlValue::from(namespace)],
+        )?
+        .iter()
+        .map(|row| Ok(row.text("schema")?.to_owned()))
+        .collect()
+    }
+
     // cached is a value, parsed, from the cache or the driver.
     fn cached(&self, tx: &Tx<'_>, hash: &str) -> Result<Option<CachedValue>> {
         if let Some(hit) = self.cache().get(hash) {
@@ -692,6 +740,66 @@ impl ValueStore {
             Ok::<_, Error>(())
         });
     }
+
+    /// Removes every value the store holds that no holder references, and
+    /// says how many: what a crash left between a driver's write and the
+    /// end of its transaction. It needs a driver that lists its hashes;
+    /// `engine_payloads` lists them, and leaves none behind.
+    pub fn sweep(&self, db: &Db) -> Result<SweepResult> {
+        let mut removed = 0;
+        let mut after = String::new();
+        loop {
+            let hashes: Vec<String> = match &self.driver {
+                None => db.read(|tx| {
+                    tx.all(
+                        Sql::per(
+                            "SELECT hash FROM engine_payloads WHERE hash > ? ORDER BY hash LIMIT ?",
+                            "SELECT hash FROM engine_payloads WHERE hash > ? ORDER BY hash COLLATE \"C\" LIMIT ?",
+                        ),
+                        &[
+                            SqlValue::from(after.as_str()),
+                            SqlValue::Integer(SWEEP_PAGE as i64),
+                        ],
+                    )?
+                    .iter()
+                    .map(|row| Ok(row.text("hash")?.to_owned()))
+                    .collect::<Result<_>>()
+                })?,
+                Some(driver) => driver
+                    .list(&after, SWEEP_PAGE)
+                    .ok_or_else(|| {
+                        Error::usage(
+                            "values.sweep needs a driver that lists its hashes (ValueDriver.list)",
+                        )
+                    })?
+                    .map_err(driver_error)?,
+            };
+            removed += db.write(Lock::Catalog, |tx| {
+                let mut removed = 0;
+                for hash in &hashes {
+                    if held(tx, hash)? {
+                        continue;
+                    }
+                    match &self.driver {
+                        None => {
+                            tx.run(
+                                "DELETE FROM engine_payloads WHERE hash = ?",
+                                &[SqlValue::from(hash.as_str())],
+                            )?;
+                        }
+                        Some(driver) => driver.remove(hash).map_err(driver_error)?,
+                    }
+                    self.cache().delete(hash);
+                    removed += 1;
+                }
+                Ok::<_, Error>(removed)
+            })?;
+            if hashes.len() < SWEEP_PAGE {
+                return Ok(SweepResult { removed });
+            }
+            after = hashes.last().cloned().unwrap_or_default();
+        }
+    }
 }
 
 fn holder_key(holder: &ValueHolder<'_>) -> [SqlValue; 5] {
@@ -743,6 +851,75 @@ fn parse_pointer(at: &str) -> Result<Vec<String>> {
         )));
     }
     Ok(json::pointer_tokens(at))
+}
+
+/// The value store as callers read it (`engine.values`): a value by its
+/// hash, through a schema that references it, and the sweep.
+pub struct Values<'e> {
+    pub(crate) engine: &'e Engine,
+}
+
+impl Values<'_> {
+    /// The value stored under a hash, `{ hash, bytes, value }`, when a schema
+    /// of the namespace the principal may read references it; otherwise
+    /// `not_found`, whether or not the namespace holds the value.
+    pub fn get(
+        &self,
+        principal: &Principal,
+        hash: &str,
+        namespace: Option<&str>,
+    ) -> Result<StoredValue> {
+        check_principal(principal)?;
+        let engine = self.engine;
+        engine.db.read(|tx| {
+            let view = NamespaceView::load(&engine.namespaces, tx)?;
+            let namespace = view.resolve(namespace)?;
+            if !is_hash(hash) {
+                return Err(EngineError::invalid_argument(format!(
+                    "a value's hash is the SHA-256 of its canonical JSON, 64 lowercase hex digits, not {}",
+                    json::quote(hash)
+                ))
+                .into());
+            }
+            let store = &engine.values;
+            let readable = store
+                .schemas_holding(tx, hash, &namespace)?
+                .iter()
+                .any(|schema| {
+                    engine
+                        .access
+                        .allows(principal, SchemaAction::Read, &namespace, schema)
+                });
+            let value = if readable { store.read(tx, hash)? } else { None };
+            value.ok_or_else(|| {
+                EngineError::new(
+                    EngineErrorCode::NotFound,
+                    format!(
+                        "namespace {namespace} holds no value {hash} that {} may read",
+                        principal.subject
+                    ),
+                )
+                .into()
+            })
+        })
+    }
+
+    /// The threshold: a member whose JSON is longer is stored by hash.
+    pub fn threshold_bytes(&self) -> u64 {
+        self.engine.values.threshold
+    }
+
+    /// The longest value the store keeps; a write of a longer one is
+    /// `value_too_large`.
+    pub fn max_bytes(&self) -> u64 {
+        self.engine.values.max_bytes
+    }
+
+    /// Removes each value the store keeps that no holder references, and
+    /// says how many. It acts for no principal, as retention's prune does.
+    pub fn sweep(&self) -> Result<SweepResult> {
+        self.engine.values.sweep(&self.engine.db)
+    }
 }
 
 #[cfg(test)]

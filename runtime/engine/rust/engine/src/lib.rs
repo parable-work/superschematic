@@ -88,6 +88,7 @@ pub use registry::{
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;
 pub use values::{
-    is_hash, DriverError, ValueDriver, ValueOptions, DEFAULT_VALUE_CACHE_BYTES,
-    DEFAULT_VALUE_MAX_BYTES, DEFAULT_VALUE_THRESHOLD, MIN_VALUE_THRESHOLD, VALUE_REF_KEY,
+    is_hash, DriverError, StoredValue, SweepResult, ValueDriver, ValueOptions, Values,
+    DEFAULT_VALUE_CACHE_BYTES, DEFAULT_VALUE_MAX_BYTES, DEFAULT_VALUE_THRESHOLD,
+    MIN_VALUE_THRESHOLD, VALUE_REF_KEY,
 };
