@@ -43,6 +43,7 @@
 //! ```
 
 mod access;
+pub mod api;
 pub mod behaviors;
 pub mod calls;
 mod engine;
