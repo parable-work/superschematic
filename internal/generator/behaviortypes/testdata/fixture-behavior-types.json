@@ -1,0 +1,1243 @@
+[
+  {
+    "name": "Batch",
+    "behaviors": "BatchBehaviors",
+    "structs": [
+      {
+        "name": "BatchBehaviors",
+        "doc": "BatchBehaviors holds the fields of a Batch's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": [
+          {
+            "json": "Blueprint",
+            "name": "Blueprint",
+            "doc": "The fields of Blueprint.",
+            "shape": {
+              "kind": "struct",
+              "ref": "BatchBlueprint"
+            },
+            "required": true
+          },
+          {
+            "json": "Rollups",
+            "name": "Rollups",
+            "doc": "The fields of Rollups.",
+            "shape": {
+              "kind": "struct",
+              "ref": "BatchRollups"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "BatchBlueprint",
+        "doc": "BatchBlueprint holds the fields a Batch's Blueprint adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "children",
+            "name": "Children",
+            "doc": "What was stamped: each step's key and its child's id, in the order they were created; absent until the instance is stamped.",
+            "shape": {
+              "kind": "array",
+              "elem": {
+                "kind": "struct",
+                "ref": "BatchBlueprintChildrenItem"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "BatchBlueprintChildrenItem",
+        "doc": "BatchBlueprintChildrenItem types an item of BatchBlueprint.children.",
+        "members": [
+          {
+            "json": "id",
+            "name": "Id",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "key",
+            "name": "Key",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "BatchRollups",
+        "doc": "BatchRollups holds the fields a Batch's Rollups adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "values",
+            "name": "Values",
+            "doc": "Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {\"over\": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent.",
+            "shape": {
+              "kind": "struct",
+              "ref": "BatchRollupsValues"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "BatchRollupsValues",
+        "doc": "BatchRollupsValues types BatchRollups.values.",
+        "members": [
+          {
+            "json": "jobs",
+            "name": "Jobs",
+            "doc": "count over the jobs instances whose batch points here.",
+            "shape": {
+              "kind": "json"
+            },
+            "required": true
+          },
+          {
+            "json": "jobsByStatus",
+            "name": "JobsByStatus",
+            "doc": "countBy over the jobs instances whose batch points here.",
+            "shape": {
+              "kind": "json"
+            },
+            "required": true
+          }
+        ]
+      }
+    ],
+    "enums": null
+  },
+  {
+    "name": "Job",
+    "behaviors": "JobBehaviors",
+    "structs": [
+      {
+        "name": "JobBehaviors",
+        "doc": "JobBehaviors holds the fields of a Job's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": [
+          {
+            "json": "Workflow",
+            "name": "Workflow",
+            "doc": "The fields of Workflow.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobWorkflow"
+            },
+            "required": true
+          },
+          {
+            "json": "Lease",
+            "name": "Lease",
+            "doc": "The fields of Lease.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobLease"
+            },
+            "required": true
+          },
+          {
+            "json": "Assignment",
+            "name": "Assignment",
+            "doc": "The fields of Assignment.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobAssignment"
+            },
+            "required": true
+          },
+          {
+            "json": "Budget",
+            "name": "Budget",
+            "doc": "The fields of Budget.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobBudget"
+            },
+            "required": true
+          },
+          {
+            "json": "Retries",
+            "name": "Retries",
+            "doc": "The fields of Retries.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobRetries"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobWorkflow",
+        "doc": "JobWorkflow holds the fields a Job's Workflow adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "status",
+            "name": "Status",
+            "doc": "The state the instance is in.",
+            "shape": {
+              "kind": "enum",
+              "ref": "JobState"
+            },
+            "required": true
+          },
+          {
+            "json": "enteredAt",
+            "name": "EnteredAt",
+            "doc": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+            "shape": {
+              "kind": "integer"
+            }
+          }
+        ]
+      },
+      {
+        "name": "JobLease",
+        "doc": "JobLease holds the fields a Job's Lease adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "holder",
+            "name": "Holder",
+            "doc": "The subject of the principal that holds the lease; absent when the instance is free.",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "token",
+            "name": "Token",
+            "doc": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it.",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "acquiredAt",
+            "name": "AcquiredAt",
+            "doc": "When the lease was acquired, in epoch milliseconds; absent when the instance is free.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "renewedAt",
+            "name": "RenewedAt",
+            "doc": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "expiresAt",
+            "name": "ExpiresAt",
+            "doc": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "active",
+            "name": "Active",
+            "doc": "Whether a lease is held and has not expired.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          },
+          {
+            "json": "expiries",
+            "name": "Expiries",
+            "doc": "How many leases have expired or been abandoned since the last resetExpiries.",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "ended",
+            "name": "Ended",
+            "doc": "How and when the last lease ended (reason and at); absent while one is held.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobLeaseEnded"
+            }
+          }
+        ]
+      },
+      {
+        "name": "JobLeaseEnded",
+        "doc": "JobLeaseEnded types JobLease.ended.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "reason",
+            "name": "Reason",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "release",
+                "abandon",
+                "ttl",
+                "maxHold",
+                "holder"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobAssignment",
+        "doc": "JobAssignment holds the fields a Job's Assignment adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "assignee",
+            "name": "Assignee",
+            "doc": "The principal the instance is assigned to; absent when it is unassigned.",
+            "shape": {
+              "kind": "string"
+            }
+          }
+        ]
+      },
+      {
+        "name": "JobBudget",
+        "doc": "JobBudget holds the fields a Job's Budget adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "meters",
+            "name": "Meters",
+            "doc": "Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobBudgetMeters"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobBudgetMeters",
+        "doc": "JobBudgetMeters types JobBudget.meters.",
+        "members": [
+          {
+            "json": "calls",
+            "name": "Calls",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobBudgetMetersCalls"
+            },
+            "required": true
+          },
+          {
+            "json": "cpuSeconds",
+            "name": "CpuSeconds",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobBudgetMetersCpuSeconds"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobBudgetMetersCalls",
+        "doc": "JobBudgetMetersCalls types JobBudgetMeters.calls.",
+        "members": [
+          {
+            "json": "limit",
+            "name": "Limit",
+            "shape": {
+              "kind": "integer",
+              "nullable": true
+            },
+            "required": true
+          },
+          {
+            "json": "remaining",
+            "name": "Remaining",
+            "shape": {
+              "kind": "integer",
+              "nullable": true
+            },
+            "required": true
+          },
+          {
+            "json": "reserved",
+            "name": "Reserved",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "used",
+            "name": "Used",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobBudgetMetersCpuSeconds",
+        "doc": "JobBudgetMetersCpuSeconds types JobBudgetMeters.cpuSeconds.",
+        "members": [
+          {
+            "json": "limit",
+            "name": "Limit",
+            "shape": {
+              "kind": "integer",
+              "nullable": true
+            },
+            "required": true
+          },
+          {
+            "json": "remaining",
+            "name": "Remaining",
+            "shape": {
+              "kind": "integer",
+              "nullable": true
+            },
+            "required": true
+          },
+          {
+            "json": "reserved",
+            "name": "Reserved",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "used",
+            "name": "Used",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobRetries",
+        "doc": "JobRetries holds the fields a Job's Retries adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "total",
+            "name": "Total",
+            "doc": "Failures counted.",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "classAttempts",
+            "name": "ClassAttempts",
+            "doc": "Failures counted, by failure class.",
+            "shape": {
+              "kind": "struct",
+              "ref": "JobRetriesClassAttempts"
+            },
+            "required": true
+          },
+          {
+            "json": "bestScore",
+            "name": "BestScore",
+            "doc": "The score of the kept result; absent when no scored result is kept.",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "exhausted",
+            "name": "Exhausted",
+            "doc": "Whether the instance has run out of attempts.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          },
+          {
+            "json": "stuck",
+            "name": "Stuck",
+            "doc": "Whether the instance failed with the same signature stuckAfter times in a row.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "JobRetriesClassAttempts",
+        "doc": "JobRetriesClassAttempts types JobRetries.classAttempts.",
+        "members": [
+          {
+            "json": "invalidOutput",
+            "name": "InvalidOutput",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "rejected",
+            "name": "Rejected",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "timeout",
+            "name": "Timeout",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          }
+        ]
+      }
+    ],
+    "enums": [
+      {
+        "name": "JobState",
+        "doc": "JobState is a state of a Job's Workflow.",
+        "members": [
+          {
+            "name": "Queued",
+            "value": "queued"
+          },
+          {
+            "name": "Running",
+            "value": "running"
+          },
+          {
+            "name": "Done",
+            "value": "done"
+          },
+          {
+            "name": "Failed",
+            "value": "failed"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Note",
+    "behaviors": "NoteBehaviors",
+    "structs": [
+      {
+        "name": "NoteBehaviors",
+        "doc": "NoteBehaviors holds the fields of a Note's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": []
+      }
+    ],
+    "enums": null
+  },
+  {
+    "name": "Ticket",
+    "behaviors": "TicketBehaviors",
+    "structs": [
+      {
+        "name": "TicketBehaviors",
+        "doc": "TicketBehaviors holds the fields of a Ticket's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": [
+          {
+            "json": "Workflow",
+            "name": "Workflow",
+            "doc": "The fields of Workflow.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketWorkflow"
+            },
+            "required": true
+          },
+          {
+            "json": "Comments",
+            "name": "Comments",
+            "doc": "The fields of Comments.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketComments"
+            },
+            "required": true
+          },
+          {
+            "json": "Revisions",
+            "name": "Revisions",
+            "doc": "The fields of Revisions.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketRevisions"
+            },
+            "required": true
+          },
+          {
+            "json": "Dependencies",
+            "name": "Dependencies",
+            "doc": "The fields of Dependencies.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketDependencies"
+            },
+            "required": true
+          },
+          {
+            "json": "Links",
+            "name": "Links",
+            "doc": "The fields of Links.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketLinks"
+            },
+            "required": true
+          },
+          {
+            "json": "Timers",
+            "name": "Timers",
+            "doc": "The fields of Timers.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketTimers"
+            },
+            "required": true
+          },
+          {
+            "json": "Approvals",
+            "name": "Approvals",
+            "doc": "The fields of Approvals.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketApprovals"
+            },
+            "required": true
+          },
+          {
+            "json": "Numbering",
+            "name": "Numbering",
+            "doc": "The fields of Numbering.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketNumbering"
+            },
+            "required": true
+          },
+          {
+            "json": "acme.Rating",
+            "name": "AcmeRating",
+            "doc": "The fields of acme.Rating.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketAcmeRating"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketWorkflow",
+        "doc": "TicketWorkflow holds the fields a Ticket's Workflow adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "status",
+            "name": "Status",
+            "doc": "The state the instance is in.",
+            "shape": {
+              "kind": "enum",
+              "ref": "TicketState"
+            },
+            "required": true
+          },
+          {
+            "json": "enteredAt",
+            "name": "EnteredAt",
+            "doc": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+            "shape": {
+              "kind": "integer"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketComments",
+        "doc": "TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "commentCount",
+            "name": "CommentCount",
+            "doc": "How many comments the instance has.",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketRevisions",
+        "doc": "TicketRevisions holds the fields a Ticket's Revisions adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "revision",
+            "name": "Revision",
+            "doc": "The number of the instance's latest revision.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "pendingProposals",
+            "name": "PendingProposals",
+            "doc": "With review in the config, how many of the instance's proposals are pending; absent without review.",
+            "shape": {
+              "kind": "json"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketDependencies",
+        "doc": "TicketDependencies holds the fields a Ticket's Dependencies adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "blocked",
+            "name": "Blocked",
+            "doc": "Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketLinks",
+        "doc": "TicketLinks holds the fields a Ticket's Links adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "targets",
+            "name": "Targets",
+            "doc": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketLinksTargets"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketLinksTargets",
+        "doc": "TicketLinksTargets types TicketLinks.targets.",
+        "members": [
+          {
+            "json": "project",
+            "name": "Project",
+            "doc": "The projects instance project points at.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketLinksTargetsProject"
+            },
+            "required": true
+          },
+          {
+            "json": "reviewers",
+            "name": "Reviewers",
+            "doc": "The people instances reviewers points at, in the order they were linked.",
+            "shape": {
+              "kind": "array",
+              "elem": {
+                "kind": "struct",
+                "ref": "TicketLinksTargetsReviewersItem"
+              }
+            }
+          },
+          {
+            "json": "spec",
+            "name": "Spec",
+            "doc": "The documents instance spec points at.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketLinksTargetsSpec"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketLinksTargetsProject",
+        "doc": "TicketLinksTargetsProject types TicketLinksTargets.project.",
+        "members": [
+          {
+            "json": "id",
+            "name": "Id",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "schema",
+            "name": "Schema",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "projects"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketLinksTargetsReviewersItem",
+        "doc": "TicketLinksTargetsReviewersItem types an item of TicketLinksTargets.reviewers.",
+        "members": [
+          {
+            "json": "id",
+            "name": "Id",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "schema",
+            "name": "Schema",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "people"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketLinksTargetsSpec",
+        "doc": "TicketLinksTargetsSpec types TicketLinksTargets.spec.",
+        "members": [
+          {
+            "json": "id",
+            "name": "Id",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "latest",
+            "name": "Latest",
+            "doc": "The target's latest revision.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "revision",
+            "name": "Revision",
+            "doc": "The target's revision the link records.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "schema",
+            "name": "Schema",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "documents"
+              ]
+            },
+            "required": true
+          },
+          {
+            "json": "stale",
+            "name": "Stale",
+            "doc": "Whether the target has moved past that revision.",
+            "shape": {
+              "kind": "boolean"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketTimers",
+        "doc": "TicketTimers holds the fields a Ticket's Timers adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "deadlines",
+            "name": "Deadlines",
+            "doc": "Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketTimersDeadlines"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketTimersDeadlines",
+        "doc": "TicketTimersDeadlines types TicketTimers.deadlines.",
+        "members": [
+          {
+            "json": "close",
+            "name": "Close",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketTimersDeadlinesClose"
+            }
+          },
+          {
+            "json": "respond",
+            "name": "Respond",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketTimersDeadlinesRespond"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketTimersDeadlinesClose",
+        "doc": "TicketTimersDeadlinesClose types TicketTimersDeadlines.close.",
+        "members": [
+          {
+            "json": "dueAt",
+            "name": "DueAt",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "fired",
+            "name": "Fired",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          },
+          {
+            "json": "firedAt",
+            "name": "FiredAt",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "outcome",
+            "name": "Outcome",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "moved",
+                "skipped",
+                "vetoed",
+                "forbidden"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketTimersDeadlinesRespond",
+        "doc": "TicketTimersDeadlinesRespond types TicketTimersDeadlines.respond.",
+        "members": [
+          {
+            "json": "dueAt",
+            "name": "DueAt",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "fired",
+            "name": "Fired",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          },
+          {
+            "json": "firedAt",
+            "name": "FiredAt",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "outcome",
+            "name": "Outcome",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "moved",
+                "skipped",
+                "vetoed",
+                "forbidden"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketApprovals",
+        "doc": "TicketApprovals holds the fields a Ticket's Approvals adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "gates",
+            "name": "Gates",
+            "doc": "The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketApprovalsGates"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketApprovalsGates",
+        "doc": "TicketApprovalsGates types TicketApprovals.gates.",
+        "members": [
+          {
+            "json": "done",
+            "name": "Done",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketApprovalsGatesDone"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketApprovalsGatesDone",
+        "doc": "TicketApprovalsGatesDone types TicketApprovalsGates.done.",
+        "members": [
+          {
+            "json": "signedBy",
+            "name": "SignedBy",
+            "shape": {
+              "kind": "array",
+              "elem": {
+                "kind": "string"
+              }
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketNumbering",
+        "doc": "TicketNumbering holds the fields a Ticket's Numbering adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "seq",
+            "name": "Seq",
+            "doc": "The instance's number in its count, from 1; absent until it is numbered.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "label",
+            "name": "Label",
+            "doc": "The number as the format prints it, unique within its scope; absent until it is numbered.",
+            "shape": {
+              "kind": "string"
+            }
+          }
+        ]
+      },
+      {
+        "name": "TicketAcmeRating",
+        "doc": "TicketAcmeRating holds the fields a Ticket's acme.Rating adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "ratingCount",
+            "name": "RatingCount",
+            "doc": "How many ratings the item has.",
+            "shape": {
+              "kind": "json"
+            }
+          },
+          {
+            "json": "ratingAverage",
+            "name": "RatingAverage",
+            "doc": "The mean rating; 0 before the first.",
+            "shape": {
+              "kind": "json"
+            }
+          }
+        ]
+      }
+    ],
+    "enums": [
+      {
+        "name": "TicketState",
+        "doc": "TicketState is a state of a Ticket's Workflow.",
+        "members": [
+          {
+            "name": "Open",
+            "value": "open"
+          },
+          {
+            "name": "InProgress",
+            "value": "in-progress"
+          },
+          {
+            "name": "Done",
+            "value": "done"
+          },
+          {
+            "name": "Dropped",
+            "value": "dropped"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Worker",
+    "behaviors": "WorkerBehaviors",
+    "structs": [
+      {
+        "name": "WorkerBehaviors",
+        "doc": "WorkerBehaviors holds the fields of a Worker's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": [
+          {
+            "json": "Workflow",
+            "name": "Workflow",
+            "doc": "The fields of Workflow.",
+            "shape": {
+              "kind": "struct",
+              "ref": "WorkerWorkflow"
+            },
+            "required": true
+          },
+          {
+            "json": "Presence",
+            "name": "Presence",
+            "doc": "The fields of Presence.",
+            "shape": {
+              "kind": "struct",
+              "ref": "WorkerPresence"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "WorkerWorkflow",
+        "doc": "WorkerWorkflow holds the fields a Worker's Workflow adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "status",
+            "name": "Status",
+            "doc": "The state the instance is in.",
+            "shape": {
+              "kind": "enum",
+              "ref": "WorkerState"
+            },
+            "required": true
+          },
+          {
+            "json": "enteredAt",
+            "name": "EnteredAt",
+            "doc": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+            "shape": {
+              "kind": "integer"
+            }
+          }
+        ]
+      },
+      {
+        "name": "WorkerPresence",
+        "doc": "WorkerPresence holds the fields a Worker's Presence adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "deadline",
+            "name": "Deadline",
+            "doc": "When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "lastBeatAt",
+            "name": "LastBeatAt",
+            "doc": "When the instance was last beaten, in epoch milliseconds; absent before the first beat.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "missed",
+            "name": "Missed",
+            "doc": "Whether the instance missed its deadline and has not been beaten since.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          },
+          {
+            "json": "released",
+            "name": "Released",
+            "doc": "The instances whose lease the last miss expired, by schema; absent before a miss.",
+            "shape": {
+              "kind": "map",
+              "elem": {
+                "kind": "array",
+                "elem": {
+                  "kind": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "enums": [
+      {
+        "name": "WorkerState",
+        "doc": "WorkerState is a state of a Worker's Workflow.",
+        "members": [
+          {
+            "name": "Idle",
+            "value": "idle"
+          },
+          {
+            "name": "Busy",
+            "value": "busy"
+          },
+          {
+            "name": "Missing",
+            "value": "missing"
+          }
+        ]
+      }
+    ]
+  }
+]

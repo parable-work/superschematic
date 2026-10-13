@@ -21,11 +21,13 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -302,6 +304,11 @@ type ModuleOutput struct {
 	// IdentityDescriptor in identity.go. Nil when the schema has no User
 	// table.
 	Identity *DescriptorFile
+
+	// Behaviors are the types that compose behaviors, each with its
+	// <T>Behaviors and the structs and enums its behaviors' fields hold
+	// (D58), written as behaviors.go. Nil when no type composes one.
+	Behaviors []behaviortypes.Type
 }
 
 // DescriptorFile is one descriptor document written beside the types.
@@ -354,6 +361,10 @@ type Options struct {
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	// Empty fields fall back to naming.Default().
 	Naming naming.Naming
+
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields behaviors.go types; a schema that composes none needs none.
+	Registry *registry.Registry
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -492,6 +503,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 				output.HasInputFieldWrappers = true
 			}
 		}
+	}
+
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
 	}
 
 	return output, nil

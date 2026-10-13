@@ -217,8 +217,8 @@ func (o *ModuleOutput) filterImports(usedAliases map[string]bool) []ModuleImport
 }
 
 // WriteTypes writes all generated module files into outputDir: go.mod,
-// scalars.go, enums.go, types.go, unions.go, identity.go, README.md and the
-// descriptors. Files whose content would be empty are removed when stale.
+// scalars.go, enums.go, types.go, unions.go, identity.go, behaviors.go,
+// README.md and the descriptors. Files whose content would be empty are removed when stale.
 func WriteTypes(output *ModuleOutput, outputDir string) error {
 	return WriteTypesWithProfile(output, outputDir, nil, false)
 }
@@ -249,6 +249,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "types.tmpl", Filename: "types.go"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.go"},
 		{Condition: output.Identity != nil, Template: "identity.tmpl", Filename: "identity.go"},
+		{Condition: output.HasBehaviors(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
 	}
 
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {

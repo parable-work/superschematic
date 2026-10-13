@@ -227,6 +227,7 @@ func (r run) generateGoTypes() error {
 			DependencyModules: depModules,
 			ModuleClosure:     closure,
 			Naming:            r.Options.Naming,
+			Registry:          r.Registry,
 			Clock:             r.Options.Clock,
 		})
 		return err
