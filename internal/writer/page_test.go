@@ -3,28 +3,20 @@ package writer
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestTSWriterEmitsPaginated: the TypeScript writer emits @paginated with
 // both limits, as the loader filled them in from a YAML page that left
-// them out, and reading it back gives the same IR. The fixture's basket
-// operation, whose input type the writer cannot render, is left out.
+// them out, and reading it back gives the same IR.
 func TestTSWriterEmitsPaginated(t *testing.T) {
 	schema, err := loader.LoadService(dataFixtures + "/fixture-paged-api-yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := schema.OperationSets[0]
-	set.Operations = slices.DeleteFunc(set.Operations, func(op *ir.FieldDef) bool { return op.Name == "placeBasket" })
-	delete(schema.Types, "BasketInput")
-	delete(schema.Types, "BasketView")
-
 	dir := t.TempDir()
 	if _, err := WriteService(schema, FormatTS, dir); err != nil {
 		t.Fatalf("WriteService: %v", err)

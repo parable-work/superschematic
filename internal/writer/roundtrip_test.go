@@ -87,14 +87,8 @@ var corpus = []roundtripFixture{
 	// @paginated on operations (D60), from TypeScript, and from JSON and
 	// YAML, whose pages leave members unsaid for the loader to fill in.
 	{name: "fixture-paged-api", dir: tsFixtures + "/fixture-paged-api", native: FormatTS},
-	{
-		name: "fixture-paged-api-json", dir: dataFixtures + "/fixture-paged-api-json", native: FormatJSON,
-		skipTSReason: "role APIInput (BasketInput) has no TypeScript authoring form in the writer; TestTSWriterEmitsPaginated covers the leg",
-	},
-	{
-		name: "fixture-paged-api-yaml", dir: dataFixtures + "/fixture-paged-api-yaml", native: FormatYAML,
-		skipTSReason: "role APIInput (BasketInput) has no TypeScript authoring form in the writer; TestTSWriterEmitsPaginated covers the leg",
-	},
+	{name: "fixture-paged-api-json", dir: dataFixtures + "/fixture-paged-api-json", native: FormatJSON},
+	{name: "fixture-paged-api-yaml", dir: dataFixtures + "/fixture-paged-api-yaml", native: FormatYAML},
 	// RefersTo on fields and arguments, with and without its config, in a
 	// list and under Validate and Nullable, and a SearchQuery argument
 	// (D61, D62), from TypeScript, JSON and YAML.
