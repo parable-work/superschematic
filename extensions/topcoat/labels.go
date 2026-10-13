@@ -34,13 +34,18 @@ func enumOptions(enum *ir.EnumDef) []formOption {
 }
 
 // humanize is a camelCase or PascalCase name in words, the first
-// capitalized: displayName is "Display name".
+// capitalized: displayName is "Display name". A number that ends a word
+// is a word of its own, line1 "Line 1" and addressLine2 "Address line 2",
+// unless it follows an acronym or a single letter, which keep it (awsS3Bucket
+// is "Aws S3 bucket", userID2 "User ID2", v2 "V2"), or letters follow it
+// (md5sum is "Md5sum").
 func humanize(name string) string {
 	var words []string
 	var word []rune
 	runes := []rune(name)
 	for i, r := range runes {
 		boundary := unicode.IsUpper(r) && i > 0 && (unicode.IsLower(runes[i-1]) || i+1 < len(runes) && unicode.IsLower(runes[i+1]))
+		boundary = boundary || numberEndsWord(runes, i, word)
 		if r == '_' || r == '-' || r == ' ' || boundary {
 			if len(word) > 0 {
 				words = append(words, string(word))
@@ -71,4 +76,24 @@ func humanize(name string) string {
 
 func isAcronym(word string) bool {
 	return len(word) > 1 && strings.ToUpper(word) == word
+}
+
+// numberEndsWord reports whether the digit at runes[i] starts a number that
+// is a word of its own after word, the letters before it: word is two
+// letters or more and no acronym, and the number ends the name or is
+// followed by a separator or a capital, not by a lowercase letter.
+func numberEndsWord(runes []rune, i int, word []rune) bool {
+	if !unicode.IsDigit(runes[i]) || len(word) < 2 || !unicode.IsLetter(word[len(word)-1]) || isAcronym(string(word)) {
+		return false
+	}
+	for _, r := range word {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	j := i
+	for j < len(runes) && unicode.IsDigit(runes[j]) {
+		j++
+	}
+	return j == len(runes) || !unicode.IsLower(runes[j])
 }

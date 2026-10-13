@@ -5295,7 +5295,7 @@ in-process (D43).
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `forms` has two kinds of form, which share their controls, their decoding and their errors. An input form, `<Input>Form`, per input type an in-process call takes and the service declares; the user model's operations have no in-process call, since the identity runtime serves them (D50), so login's input and the administration routes' arguments get no form, and a page signs a user in through the identity service. An argument form, `<Ns><Op>ArgsForm`, named after its `Args` struct, per operation a form submits: a GET operation with a query argument, whose form is a filter, and any other operation with an argument beside its input. A GET whose path carries its only arguments, `getOrder(id)`, is a link, and an operation whose only argument is its input uses the input's form. An argument form embeds its input's form as `input`, so one `<form>`, one `parse()` and one component cover every argument. `outputs.topcoat.forms` turns both off. | A module per kind, which split one feature and its helpers; a switch of its own for argument forms; an argument form for a GET by id, a form with nothing to fill; an argument form wrapping an input form alone |
+| `forms` has two kinds of form, which share their controls, their decoding and their errors. An input form, `<Input>Form`, per input type an in-process call takes and the service declares, one with one component whether an operation requires the input or takes it optionally; the user model's operations have no in-process call, since the identity runtime serves them (D50), so login's input and the administration routes' arguments get no form, and a page signs a user in through the identity service. An argument form, `<Ns><Op>ArgsForm`, named after its `Args` struct, per operation a form submits: a GET operation with a query argument, whose form is a filter, and any other operation with an argument beside its input. A GET whose path carries its only arguments, `getOrder(id)`, is a link, and an operation whose only argument is its input uses the input's form. An argument form embeds its input's form as `input`, so one `<form>`, one `parse()` and one component cover every argument. `outputs.topcoat.forms` turns both off. | A module per kind, which split one feature and its helpers; a switch of its own for argument forms; an argument form for a GET by id, a form with nothing to fill; an argument form wrapping an input form alone |
 | A control is named by its field's path, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`; an argument by its name, beside its input's fields. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, a list of an enum's members `Vec<String>`; an argument is an `Option<String>`, a list argument's values a `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
 | Every form implements `Deserialize` from the pairs a browser sends, which Topcoat's `Form` hands it as `Vec<(String, String)>` for a post's body or a GET's query, so `Form<T>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs; `from_query(cx)` reads a filter outside an extractor. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up; a name no control has, one that is not a path, or one deeper than 32 steps is ignored. An input field takes the last value sent (a checkbox row sends a hidden input of its name first), and an argument the first, as the router reads a parameter sent twice; a list argument's values are every value sent, a query list's split on commas as the router splits it; a blank value is none. An argument form reads its input's fields from the same tree. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize`, which reads no nested name and refuses a repeated key; re-encoding an argument form's other pairs for the input's form to decode again |
 | A form reads what a browser could send it and little more, since a page decodes a post before it asks who sent it. It reads at most 5000 pairs (`MAX_PAIRS`) and none after them, and sets its `overflow`, which `parse` refuses with the form's own message. Of a list's rows it reads one past the list's limit, its `listMax`, or 1000 (`MAX_ROWS`) for a list without one or with one above it, and `parse` refuses a list past the limit at the list, "must contain at most 3 items", as its listMax rule would; the add button shows while the list holds fewer. So a post's cost is a form's, whatever it sent: acme's `POST /orders/new`, which anyone may send, with 20,000 empty lines, 269 KB, rendered every line's errors in 6.5 s and 30.7 MB in release, and now renders 51 lines and the form's message in 5 ms and 40 KB; 4,000 lines render 51 and the list's message. | Reading every row sent, whose errors and answer grew with the rows sent, quadratically; Topcoat's body limit alone, whose 2 MB default holds 160,000 rows; dropping rows past the limit unsaid, which would accept a list cut short; refusing the request in `Deserialize`, which renders no form |
@@ -5322,7 +5322,9 @@ optional nested `BillingAddress`, `rooms` of one to three
 `RoomRequest`s, each with an id, a bounded integer and a list of
 `Amenity` members, a list of `Amenity` members, a date, a time, a
 date-time, a secret, a list of secrets without a listMax, a default, any
-JSON value and a map; `NoteInput`'s `tags` are rows of at most three.
+JSON value and a map; `NoteInput`'s `tags` are rows of at most three,
+and `draftNote` takes it optionally where `annotate` requires it, so the
+type has one form and one component however operations take it.
 `TestFormsServeATopcoatApp` drives a Topcoat app through
 `Router::handle`: the booking form renders its controls at their names
 with their attributes; a valid nested post books with the input's JSON,
@@ -5765,5 +5767,155 @@ in a repository whose root ignores every `dist`, and builds the stack it
 wrote. `cmd/superschematic` writes a gcp environment over the same tree,
 which loads and resolves, and over a copy of acme-shop's services writes
 the `@stack` acme-shop's `shop-stack` declares by hand.
+
+The rule is reversible until the first release.
+
+### D44, amended: a submission keeps its route's status, long text is a textarea, and a display component reads a time and names an id
+
+Building acme's order pages on the generated forms found five gaps.
+`submit` folded every refusal, a 401, 403, 404 or 409, into `FormErrors`,
+so a page that answered with the route's status, as `/orders` did,
+parsed the form and called the operation itself. A label ran a number
+into its word: `line1` read "Line1". A cancel's reason of up to 500
+characters and a review's body of up to 5000 were one-line inputs. And a
+display component showed a timestamp as the API's text,
+`2026-10-09T14:30:00Z`, and an order line's product as its raw id, since
+an API type does not say which table an id refers to.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An argument form's `submit(cx)` returns `Result<Output, Refusal>`. `Refusal { status, errors }` is the status a page answers with and the errors it renders the form again with: 422 for a form `parse` refused, else the route's status, as the JSON API answers, and `FormErrors::from_api`. `Refusal::from(errors)` and `Refusal::from_api(&err)` build one for a page over an input form, which knows the operation it calls. `parse()` is unchanged. acme's `/orders`, its cancel and `/orders/new` answer with it: a signed-out shopper's order is 401, a second cancel 409. | A `(StatusCode, FormErrors)` tuple, whose parts a page names itself; a status on `FormErrors`, which `parse`'s errors would carry as 422 too; a `submit` on an input form, which does not know the operation that takes it, as one input type may serve several |
+| A number that ends a word is a word of its own in a label: `line1` is "Line 1", `addressLine2` "Address line 2". An acronym or a single letter keeps its digits (`awsS3Bucket` is "Aws S3 bucket", `HTTP2Enabled` "HTTP2 enabled", `v2` "V2"), and a number followed by lowercase letters stays in its word (`md5sum`). A form, a display component and an argument share the rule; ids are unchanged. | Splitting every letter from a digit, which reads `awsS3Bucket` as "Aws S 3 bucket"; a list of technical words that keep their digits (`sha256`, `base64`), which a `@docs` title gives one field instead |
+| A text field or argument whose `maxLength`, its own or its scalar's, is 500 or more is long text, a `<textarea rows="6">` with `minlength`, `maxlength`, a placeholder and its hint, which renders the value as sent after a newline, since a browser drops one after the start tag. A textarea takes no `pattern`, so `parse` alone checks it. The app's choices still make it a select. | 200, which would make the titles and names this repository's schemas bound at 200 textareas; a hint per field in the schema, which no schema declares yet |
+| A display component shows a date, a time or a date-time as a `<time>` whose `datetime` is the value as the API sends it and whose text is the same for every reader, in English and UTC, with no locale or zone of the server's: a date-time "9 Oct 2026, 14:30 UTC", converted from its offset and cut to the minute, a date "9 Oct 2026", a time "14:30". Text that is none of them shows as it is. `views.rs` writes the text itself, `date_time_text`, `date_text` and `time_text`, public, each written when a component shows its kind, so the crate gains no dependency. This replaces the display amendment's text the API sends. | The API's text, which a reader parses by eye; the server's locale or zone, which are not the reader's; a date crate the crate does not otherwise need; formatting in the reader's zone, which takes a script the components do not ship, and which `datetime` leaves an app free to add |
+| `choices` is a module of its own, written when the crate has a form or a display component, and `forms` re-exports `Choices` and `Choice`, so code that names `forms::Choices` compiles. `<type>_detail` and `<type>_table` take an optional `choices` and show the label it gives a text or number value, else the value: a list's items and a map's values by their field's path, and a nested record's component gets `choices.under(field)`, so `lines.productId` names the products of an order's lines table. A choice matches a value whose text is its value exactly, an id's compact text, which a record holds and `to_string()` gives; acme's catalog choices are that text, and its order page names each line's product. `Choices` gains `label` and `under`, and shares its entries, so `under` copies none for each row. | Inferring the table an id refers to from its name or a source table's foreign key, which an API type does not declare; matching a UUID in either of its texts, which would parse values per cell and differ from what a form's select sends back; a second type of choices for display |
+| Money is not formatted. superscalar's `Finance.Money` is an integer of a currency's smallest unit that names no currency, so neither its decimal places nor its symbol are known, and no scalar holds a currency code; no schema here uses it outside test fixtures, and acme's prices are `Generic.Int64` fields named `*Cents`. A component shows such values as numbers. | Formatting a `*Cents` field by its name, a rule no schema states; assuming two decimal places for `Finance.Money` |
+
+Status: built. The goldens cover the seven fixtures again: fixture-forms-api
+gains `BillingAddress.line2` and `BookingInput.requests`, long text with
+a minLength, a pattern and a description, and fixture-views-api's
+`OrderView` gains `collectAt`, a `Temporal.Time`. `TestLabelsAndIDs`
+checks the label rule. Through `Router::handle`,
+`TestTheCrateServesATopcoatApp` submits `getTenant`'s filter signed out
+(401), without its permission (403), as a reader (200) and with a flag
+that is no boolean (422); `TestArgumentFormsServeATopcoatApp` answers a
+cancel the operation refuses as not found (404) or in conflict (409), a
+missing code with 422, builds each `Refusal`, and renders the 500
+characters of a reason as a textarea; `TestFormsServeATopcoatApp`
+renders the requests' textarea with its lengths and hint and no pattern,
+books its lines and leading newline as sent, renders a refused one again
+escaped after the newline, and labels `line2` "Line 2";
+`TestViewsRenderRecords` renders a date-time, a date and a time as text,
+one with an offset in UTC across a year's end, and the three functions'
+edge cases, then a detail's and a table's values by the app's choices,
+two records down, in a list and in a row's title cell, an unnamed value
+as it is and a label escaped, all in a crate with no forms. acme's tests
+see `/orders` signed out answer 401 with the form's message, a
+signed-out order 401, a second cancel 409, the reason and the review's
+body as textareas, "Line 1", the order's line named "Anvil", and its
+placing time in UTC.
+
+The rule is reversible until the first release.
+
+### D44, amended: a page per resource the operations describe, under a prefix, with a layout and a nav
+
+The display components left routing to the app: a component per record,
+not a page per operation. An app over an API whose operations list, read,
+create, edit, delete and act on records still wrote each page by hand,
+though the operations already say most of it: a GET of a collection
+returning a list is its list, a GET of an item its detail, a POST to the
+collection its new page, a PATCH or PUT of an item its edit page, a
+DELETE its delete, and a POST to a word after an item an action. The
+forms, the records, the display components and, since the amendment
+above, a submission's `Refusal` and the app's choices in a display
+component, each page needs exist. An admin surface of those pages, off
+by default and under a prefix of its own, takes no route from the app
+that does not ask for it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Pages are opt-in. `outputs.topcoat.pages: { enabled, prefix }` turns them on under `prefix`, `/console` by default, and `[extension.topcoat] pages_prefix = "/console"` in `superschematic.toml` does so for the one service the table lists, so a project that builds its configs with the core binary has them too; for several, `pages_prefix` is a table of the listed services whose pages are on, each with its prefix (`{ "shop-orders" = "/console" }`). The table refuses one path for several services, a service it does not list, and a prefix that is, or is under, another's: an app that links two crates registers each one's pages, layout and index at its prefix, and would register a page twice, which Topcoat's router refuses, or put one console's layout around the other's pages. A prefix starts with `/`, does not end with one, holds no parameter and only segments of letters, digits and `-._~`, and is not, nor is under, `/api` or `/_superschematic`, which the crate serves itself. The pages need the forms and the display components, and so the records; turning any of them off with the pages on is the build's error. They are written to `pages.rs`, `pub mod pages`, and no other module changes when they are off. | Pages on by default, an admin surface no app asked for; a prefix per resource; leaving the pages out silently when forms or views are off; deriving `<prefix>/<service>` for each of several services, a path the project never wrote |
+| The resources come from the operations with an in-process call, by REST path and result. `GET C` returning `T[]` is C's list and `GET C/{p}` returning `T` its detail, either making C a resource; `POST C` with an input or arguments is its new page; `PUT` or `PATCH C/{p}` with an input its edit page, `DELETE C/{p}` its delete and a `POST`, `PUT` or `PATCH` of `C/{p}/<verb>`, a path that names no collection, an action, each needing the detail, whose page holds them; `C/{p}/D` is D nested under C's item, even when nothing lists or reads C. Every other operation is left out with its reason in the build log, `GET auth/me` returning one object among them, and so is a `@requireService` one, since a browser holds no service credential. So are a `PUT`, `PATCH` or `DELETE` of a collection's own path (`widgets`, `widgets/{id}/parts`), which would change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action is a form on the item's page that posts in one click and a delete asks first. A collection is named by its words, its parameters' names aside, so `{id}` and `{projectId}` at one place are one collection's. | A resource declaration in the schema, which no schema has; grouping by operation set, which acme's `OrderQueries` and `OrderMutations` split across one collection; matching operations by type names; any method on `C/{p}/<verb>` an action, which made `PUT widgets/{id}/parts` an action named parts and a `DELETE` one click; a confirmation page per `DELETE` action |
+| Names and labels: the type's `@display` (D48) `noun`, `plural`, `createLabel` and `titleField` when it declares them, else the collection's last word in words, singular for the noun by English rules. A list's row links to its item's page when the list's element type is the detail's result type and the detail's last path parameter names one of its fields, a text or a whole number (`{id}` and `id`). | Linking every row by a field named `id` whatever the detail's parameter |
+| Every page calls its operation through `operations::*`, so the route's caller rule and argument checks hold, and submits through the forms. The route's traffic controls do not: an in-process call applies no `@rateLimit`, `@bodyLimit` or `@timeout`, since the pages are routes of the app, whose controls are the app's to set, where a procedure, a second route any browser reaches, keeps its route's (the procedures amendment). Each page submits through an argument form's `submit`, or through the input form of an operation whose only argument is its input, parsed, with the operation called and its refusal `Refusal::from_api`, the amendment above's. A route's values come from the page's path, set on the form over its hidden inputs, which a reader can change, and are decoded as an argument form decodes them; one that does not decode, or that the operation refuses at its parameter, is no page, 404. Every page but an item's renders the form it submits; an item's page submits its detail's argument form, when the detail takes a query argument, without rendering it, so `pages.rs` imports a form's component only where a page renders it. | Calling the implementations directly; trusting a hidden input; a submit helper of the pages' own beside the forms' |
+| A successful post goes on with 303 (POST-redirect-GET): to the new item's page after a create, when the result holds the field its detail's parameter names, else to the list; to the item after an edit or an action; to the list, or the parent's item, after a delete. A refused post renders the form again with the `Refusal`'s status and each error at its control: 422 for what the form's `parse` refuses, the route's status for what the operation refuses, a conflict's (409) as the form's own message; a row button renders it again, 200. A refused caller or a missing item keeps the route's status on a page of its own: 401 says so and, when the app's `Settings` name a sign-in page, links to it with the page to come back to as `next`, which for an action is the item's page; 403 and 404 say so. | Every refusal as 200 with a message; redirecting a 401 to the sign-in page, which the pages do not know and which loses the status |
+| A delete asks first: the item's page links to `<item>/delete`, a page that shows the item and posts the delete's form, so a GET never deletes and no script confirms. An action is a form on the item's page that posts to `<item>/<verb>`; a refused action renders the item's page again with its form as sent. A nested resource's list and new link are a section of the parent's item page when the parent has a detail, and its pages live under the parent's item either way. | A script's `confirm()`; a page per action; nested pages only as sections |
+| An edit page fills the update's input form from the detail's result, as its JSON: each field the two types share by JSON name and kind (a value of the same type's values, an object, rows of objects or of values, a group of one enum's members, JSON text of one type), recursively; any other field starts as the form's `new()`, and a secret or hidden one is not filled. | Requiring the update's input to be the detail's type |
+| A `#[layout]` at the prefix puts each page in `<main>` after a nav of the resources no item holds whose list the caller may use (`can_*`), the current one `aria-current`, and a breadcrumb trail read from the path: the index, each list, each item by its title, its type's `titleField` value, else by its noun and id, then the page. Both read the most specific path: the current resource is the one whose list's path is the longest the page's begins with, and each step of the trail the collection with the most words that begin the rest of the path, so `widgets/archived` beside `widgets/{id}` is a list of its own, never an item named archived whose detail is called; under an item, a collection is read before the item's edit, delete and actions. The item's detail is the page's own call, kept for the request (`#[memoize]`), so the trail costs no second call. The index at the prefix lists the same resources, and a sign-in link when a guard refused a caller who is not signed in. A list under an item, even one of a collection without pages, is in neither: it needs the item's id. The markup is semantic HTML with `ss-` classes and no styles. | A layout the app writes, which would restate the resources; marking only an exact match current; the first collection whose words match, in key order, which read `widgets/archived` as a widget; the item's id alone in the trail, which reads as a UUID; handing the title from the page to the layout, which Topcoat renders without an order between them |
+| The pages, the layout and the index are `#[page]`s and a `#[layout]` with paths fixed at build time, which the app's `.discover()` registers, as it registers the procedures. Links and redirects are built as strings, each value a percent-encoded segment, and the page functions and their path parameters are public, so an app's own page can link to one with `href!`. A route's parameters are named after their collections, `project_id`, so each place of a path has one name in every route through it, as Topcoat's router requires. | Registering them in `<service>(...)`, which panics beside `.discover()`; `href!` inside the crate, which panics for a page not registered and for an empty or dot segment; the API's parameter names, which differ between operations at one place |
+| `<type>_table` takes `#[default] hrefs: Vec<String>`: the i-th entry, unless empty, links row i, on its title's cell, or its first when the columns hold no title. A linked cell without text, an absent or blank title, an absent value, an empty list, links the type's noun (its `@display` noun, else its name in words) in its place, with the row's `id` when the record holds one as text or a whole number, `Document intro`, as the trail names an item without a title, so every row can be reached. Without `hrefs` a table renders as before, so the display components stay usable without pages. | A column of links, one more cell per row; a function from a record to its link, which would tie the component to the pages' routes; an empty link, which no reader can see or follow; "Open" for every untitled row, links a screen reader cannot tell apart |
+| What the app tells the pages is `pages::Settings`, its site title, its sign-in page and its `Choices`, in its app context, read with `try_app_context`; without it the title is the service's name in words, a 401 has no link and there are no choices. Every form and display component the pages render takes the choices, by each field's path, so `lines.productId` makes each line's product a select on the new-order page and its name in an order's lines. They are one set for every resource: a path names its field in each form and component that holds one, and choices per resource or per page are open. `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` is unchanged. | New arguments to `<service>(...)`, a change to every app; choices per page, which the generated pages could not take from the app |
+
+Status: built. The goldens cover an eighth fixture, the extension's own
+`fixture-pages-api`, the only golden with pages: projects listed by
+status, read, started from an input, edited with a patch whose tags and
+milestones are rows, deleted and archived with a reason, each owned by a
+member and needing `projects.read` or `projects.write`; a project's
+tasks, listed, read and added under it; the tasks a label marks, under a
+label without pages; members, which only a member reader lists;
+`GET auth/me`, which is no resource; and documents, whose paths are the
+edge cases: a title that may be absent, the drafts' list at
+`documents/drafts` beside `documents/{id}`, a detail with a query
+argument, a create whose input is optional and a replace that requires
+it, and a document's comments, which a `PUT` and a `DELETE` of their
+collection, and a `DELETE` of its cover, would change, none of which has a
+page. `TestPagesServeATopcoatApp` drives a Topcoat app over it through
+`Router::handle`: the index and the nav list only what the caller may
+list, the current one marked, and the trail names a project by its name,
+or by its noun and id for a caller who may not read it; the list filters
+by the query, links each row's title to its project, names each owner by
+the app's choices and offers the new page to a writer only; the item's
+page shows the detail, the edit and delete links, the archive form and
+the tasks' section, and a reader none of what changes it; the new page's
+owner is a select of the choices; a create
+posts, refuses a short name with 422 at its control and goes to the new
+project (303); the edit form is filled from the project, its tags and its
+milestones as rows, the milestones from another type with the same
+fields, its unmatched `notifyOwner` checked by its default; a row button
+renders it again, 200, and saves nothing; a save goes to the route's
+project whatever the hidden id says; a delete confirms on its own page and
+goes to the list; an archive goes back to the item, and a second one
+renders the item's page again with 409 and the conflict as the form's
+message; the tasks' pages live under the project, a new task under the
+route's project; the label's tasks have a page of their own and no place
+in the nav; and a caller who is not signed in gets 401 with a sign-in
+link that comes back (to the item for an action), one without the
+permission 403, a project that is not there and a route's id that is not
+a UUID 404; an untitled document's row links "Document intro"; the
+drafts are current in the nav and the trail on their own page, and no
+document named drafts is read; a document's page has its comments'
+section and no form for their `PUT` or `DELETE`, nor for its cover's, and
+the comments' trail runs through the document to them, never to an
+action; and a document created from a
+blank optional input is linked by its noun and id, and one replaced
+through the edit page goes back to it. Clippy, with warnings denied,
+passes a detail whose query argument's form the page submits and does not
+render. `TestPagesServeAnAPIWithoutCallers` turns the pages on for
+`fixture-args-api`, whose operations need no caller: its orders' index,
+list and page, four actions on one item, one refused with 409 and one with
+422 at a JSON control, and a nested create whose parent has no pages and
+which gets none. `TestTheOperationsDescribeResources` classifies an
+operation of every shape and each one left out with its reason;
+`TestPagesAreOffByDefault`,
+`TestThePagesServeUnderTheirPrefix`, `TestABadPagesConfigIsRefused`,
+`TestTheNamingFileTurnsPagesOn` and `TestATableLinksItsRows` check the
+config, the table and the generated code: a table of prefixes turns on
+the pages of the services it names, each under its own, and one path for
+several services, a service the table does not list and one prefix under
+another are refused.
+
+acme's `superschematic.toml` sets `pages_prefix = "/console"`, so
+shop-orders' crate has a console: its orders' list, new page, item page
+and cancel, and a product's reviews and new review under
+`/console/products/{product_id}/reviews`. The app gives
+`pages::Settings` its title, its sign-in page and the catalog's choices,
+and links the console from its own pages. Its tests, in memory and over
+SQLite, see the console list nothing and offer to sign in for a shopper
+who is not signed in, the orders answer 401 with a link that comes back,
+the nav list the orders once signed in, an order cancelled from its
+console page (303) and a second cancel's 409, an order placed with the
+product's select, and a product's reviews listed and one written. The
+copies in acme's `testdata/generated/` are unchanged: the core binary
+never reads the table.
 
 The rule is reversible until the first release.

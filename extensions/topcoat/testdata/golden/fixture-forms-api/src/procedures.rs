@@ -131,6 +131,39 @@ pub async fn call_account_sign_up(cx: &Cx, args: AccountSignUpArgsRecord) -> Res
     Ok(AccountViewRecord::from_wire(&json))
 }
 
+/// The arguments of account.draftNote, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountDraftNoteArgsRecord {
+    pub input: Option<NoteInputRecord>,
+    pub id: String,
+}
+
+impl AccountDraftNoteArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::AccountDraftNoteArgs, ProblemRecord> {
+        Ok(crate::api::AccountDraftNoteArgs {
+            input: decode("input", self.input.as_ref().map_or(Value::Null, NoteInputRecord::to_wire))?,
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// account.draftNote, called from the browser.
+#[procedure("/_superschematic/fixture-forms-api/account/draft-note")]
+pub async fn account_draft_note(cx: &Cx, args: AccountDraftNoteArgsRecord) -> topcoat::Result<Result<AccountViewRecord, ProblemRecord>> {
+    Ok(call_account_draft_note(cx, args).await)
+}
+
+/// The body of the account_draft_note procedure.
+pub async fn call_account_draft_note(cx: &Cx, args: AccountDraftNoteArgsRecord) -> Result<AccountViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::account_draft_note(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(AccountViewRecord::from_wire(&json))
+}
+
 /// The arguments of account.annotate, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
