@@ -928,6 +928,14 @@ vectors' database, which the TypeScript adapter wrote, as they say it
 reads, and the script that wrote it, run through the Rust adapter, writes
 the same file byte for byte.
 
+The adapter's fixed layout also runs on Postgres, without a trigger
+(`fixed::FixedLayout::with_dialect(fixed::Dialect::Postgres, ...)`), for
+tables a caller's own migrations create, and inside a synchronous
+transaction the caller holds: the caller implements `fixed::HostTx` over
+it, `fixed::HostClient` makes that the layout's client, and
+`Engine::run_on` runs each operation over it on the calling thread, with
+no executor. Every scenario runs through it so, on SQLite and on Postgres.
+
 ```rust
 use std::sync::Arc;
 use superschematic_versiongraph_engine::{sqlite, Engine, Options};
