@@ -38,7 +38,7 @@ use crate::engine::Engine;
 use crate::principal::{Principal, PrincipalService};
 use crate::tools::ToolFilter;
 
-pub use mcp::{McpOptions, MCP_PROTOCOL_VERSIONS};
+pub use mcp::{McpOptions, MCP_DISCOVER_VERSIONS, MCP_INITIALIZE_VERSIONS, MCP_SERVER_NAME};
 pub use problems::{status_text, Problem};
 pub use stream::{
     EventStream, Pull, StreamOptions, DEFAULT_HEARTBEAT_MS, DEFAULT_STREAM_PAGE_SIZE,
