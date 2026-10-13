@@ -1,0 +1,32 @@
+[package]
+name = "superschematic-schema-ir"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.99.0"
+description = "The behavior engine's run-time schema reader: the IR reader, validation and parse"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+# It links superscalar's core by path, from the checkout superschematic.toml's
+# [paths] scalar_rust names, which no registry holds; the engine (D58)
+# depends on it by path.
+publish = false
+
+# Standalone crate, as the schema runtime beside it is: it carries its own
+# dependency versions and lock file.
+[workspace]
+
+[dependencies]
+regex = "1.12"
+serde = "1.0.228"
+serde_json = "1.0.149"
+# What the generated Rust validators share: the error types, code-point
+# lengths and the pattern translation.
+superschematic-schema-runtime = { path = "../rust" }
+# The scalar core every scalar's own checks are. Without its default
+# lossless-json feature it leaves serde_json's arbitrary_precision to the
+# build that links this crate; it always turns on preserve_order.
+superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"
