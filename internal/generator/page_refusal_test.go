@@ -29,8 +29,6 @@ func TestServersAndSDKsRefusePagesTheyDoNotRender(t *testing.T) {
 		{"Rust server", LangRust, APILanguageRust, "the Rust server (rustrestgen)"},
 		{"Go SDK", LangGo, "", "the Go SDK (gosdkgen)"},
 		{"TypeScript SDK", LangTypeScript, "", "the TypeScript SDK (sdkgen)"},
-		{"Python SDK", LangPython, "", "the Python SDK (pysdkgen)"},
-		{"Rust SDK", LangRust, "", "the Rust SDK (rustsdkgen)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-paged-api"))

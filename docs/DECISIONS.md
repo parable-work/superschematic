@@ -6063,6 +6063,11 @@ reads a parameter's first value and an empty one as absent. Every server
 and SDK generator refuses a paged operation until it renders it
 (`apigen.RefusePages`), and `internal/generator/page_refusal_test.go`
 holds each to it.
+The Python and Rust SDKs render it: a paged method takes `cursor` and
+`limit` and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all`
+yields every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held
+by `fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
+`rustsdkgen`.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
