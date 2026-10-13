@@ -15,9 +15,9 @@
 //! loader, and the issues are written as that loader writes them: ajv's
 //! message for each keyword, an `if` branch's own failure after the errors
 //! inside it, an unknown key or a value outside an enum in the loader's
-//! words. Where the two validators visit a schema's keywords in another
-//! order the issues come in another order, and a syntax error's message is
-//! not the JavaScript runtime's; the verdict is the same.
+//! words, and a JSON syntax error as Node 24's `JSON.parse` words it. Where
+//! the two validators visit a schema's keywords in another order the issues
+//! come in another order; the verdict is the same.
 //!
 //! ```
 //! use superschematic_schema_ir::schemafile::{load_schema_file, SchemaFileLoader};

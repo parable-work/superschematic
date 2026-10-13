@@ -36,9 +36,13 @@ superschematic-schema-runtime = { path = "../rust" }
 # build that links this crate; it always turns on preserve_order.
 superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
 
-# The schema-file corpus needs the loader.
+# The schema-file corpus and the reader's syntax errors need the loader.
 [[test]]
 name = "schema_file_parity"
+required-features = ["schemafile"]
+
+[[test]]
+name = "json_syntax_errors"
 required-features = ["schemafile"]
 
 [lints.clippy]
