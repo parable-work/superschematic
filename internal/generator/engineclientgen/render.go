@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -22,7 +23,7 @@ var clientMembers = []string{"create", "get", "list", "update", "delete", "opera
 // module accumulates the module's text, the names it exports, and the
 // client's names its body uses.
 type module struct {
-	ts      tsRenderer
+	ts      behaviortypes.TSRenderer
 	b       strings.Builder
 	exports map[string]string
 	uses    map[string]bool
@@ -35,7 +36,7 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if m.ts.usesJSONObject {
+	if m.ts.UsesJSONObject {
 		m.uses["JSONObject"] = true
 	}
 	var out strings.Builder
@@ -51,7 +52,7 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 	out.WriteString("\n")
 	client := names.EngineNpmPackage + "/client"
 	if m.uses["isVeto"] {
-		fmt.Fprintf(&out, "import { isVeto } from %s;\n", quote(client))
+		fmt.Fprintf(&out, "import { isVeto } from %s;\n", behaviortypes.TSQuote(client))
 	}
 	var typeNames []string
 	for name := range m.uses {
@@ -60,7 +61,7 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 		}
 	}
 	sort.Strings(typeNames)
-	fmt.Fprintf(&out, "import type { %s } from %s;\n", strings.Join(typeNames, ", "), quote(client))
+	fmt.Fprintf(&out, "import type { %s } from %s;\n", strings.Join(typeNames, ", "), behaviortypes.TSQuote(client))
 	out.WriteString(m.b.String())
 	return []byte(out.String()), nil
 }
@@ -68,7 +69,7 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 // export claims an exported name, refusing one two parts of the module
 // would both take.
 func (m *module) export(name, owner string) error {
-	if !identifier.MatchString(name) {
+	if !behaviortypes.TSIdentifier.MatchString(name) {
 		return fmt.Errorf("engine-client: %s would export %q, which is not a TypeScript identifier", owner, name)
 	}
 	if prev, taken := m.exports[name]; taken {
@@ -85,7 +86,7 @@ func (m *module) line(format string, args ...any) {
 
 func (m *module) doc(indent, text string) {
 	if strings.TrimSpace(text) != "" {
-		m.line("%s%s", indent, jsDoc(text))
+		m.line("%s%s", indent, behaviortypes.TSDoc(text))
 	}
 }
 
@@ -96,7 +97,7 @@ func (m *module) typeAlias(name, owner, doc string, schema any) error {
 	}
 	m.b.WriteByte('\n')
 	m.doc("", doc)
-	m.line("export type %s = %s;", name, m.ts.render(schema, ""))
+	m.line("export type %s = %s;", name, m.ts.Render(schema, ""))
 	return nil
 }
 
@@ -144,8 +145,8 @@ func (m *module) schema(s *schemaModel) error {
 		return err
 	}
 	for _, behavior := range s.behaviors {
-		for _, a := range behavior.narrowed.aliases {
-			if err := m.typeAlias(a.name, owner+" behavior "+behavior.declaration.Name, a.doc, a.schema); err != nil {
+		for _, a := range behavior.Narrowed.Aliases {
+			if err := m.typeAlias(a.Name, owner+" behavior "+behavior.Declaration.Name, a.Doc, a.Schema); err != nil {
 				return err
 			}
 		}
@@ -208,8 +209,8 @@ func (m *module) schema(s *schemaModel) error {
 func (m *module) documentTypes(s *schemaModel) error {
 	roots := []string{s.instance.Name}
 	if s.variants != nil {
-		for _, value := range sortedKeys(s.variants.types) {
-			roots = append(roots, s.variants.types[value])
+		for _, value := range behaviortypes.SortedKeys(s.variants.Types) {
+			roots = append(roots, s.variants.Types[value])
 		}
 	}
 	types := map[string]bool{}
@@ -226,14 +227,14 @@ func (m *module) documentTypes(s *schemaModel) error {
 	}
 	delete(types, s.instance.Name)
 	owner := "schema " + s.name
-	for _, name := range sortedKeys(enums) {
+	for _, name := range behaviortypes.SortedKeys(enums) {
 		enum := s.schema.Enums[name]
-		values := enumValues(enum)
-		if err := m.typeAlias(name, owner+" enum "+name, codegen.DocText(enum.Description, enum.Comment), enumOf(values)); err != nil {
+		values := behaviortypes.EnumValues(enum)
+		if err := m.typeAlias(name, owner+" enum "+name, codegen.DocText(enum.Description, enum.Comment), behaviortypes.EnumOf(values)); err != nil {
 			return err
 		}
 	}
-	for _, name := range sortedKeys(types) {
+	for _, name := range behaviortypes.SortedKeys(types) {
 		td := s.schema.Types[name]
 		if err := m.export(name, owner+" type "+name); err != nil {
 			return err
@@ -252,11 +253,11 @@ func (m *module) ownFields(s *schemaModel, td *ir.TypeDef, skip map[string]bool,
 	var b strings.Builder
 	b.WriteString("{\n")
 	for _, field := range td.Fields {
-		if field == nil || skip[jsonKey(field)] {
+		if field == nil || skip[behaviortypes.JSONKey(field)] {
 			continue
 		}
 		if doc := codegen.DocText(field.Description, field.Comment); strings.TrimSpace(doc) != "" {
-			b.WriteString("  " + jsDoc(doc) + "\n")
+			b.WriteString("  " + behaviortypes.TSDoc(doc) + "\n")
 		}
 		fmt.Fprintf(&b, "  %s: %s;\n", fieldKey(field, patch), m.fieldType(s, field))
 	}
@@ -267,7 +268,7 @@ func (m *module) ownFields(s *schemaModel, td *ir.TypeDef, skip map[string]bool,
 // fieldKey is a field's key, optional unless the field is required and
 // this is not a patch.
 func fieldKey(field *ir.FieldDef, patch bool) string {
-	key := propertyKey(jsonKey(field))
+	key := behaviortypes.TSPropertyKey(behaviortypes.JSONKey(field))
 	if patch || !field.Required {
 		return key + "?"
 	}
@@ -306,12 +307,12 @@ func (m *module) valueType(s *schemaModel, name string) string {
 		return name
 	}
 	if scalar := s.schema.Scalars[name]; scalar != nil {
-		switch scalarJSONType(scalar) {
+		switch behaviortypes.ScalarJSONType(scalar) {
 		case "any":
 			return "unknown"
 		case "object":
-			m.ts.usesJSONObject = true
-			return jsonObjectType
+			m.ts.UsesJSONObject = true
+			return behaviortypes.JSONObjectType
 		case "array":
 			return "unknown[]"
 		case "number", "integer":
@@ -322,32 +323,6 @@ func (m *module) valueType(s *schemaModel, name string) string {
 		return "string"
 	}
 	return "unknown"
-}
-
-// scalarJSONType is the JSON type a scalar's values have: any, object or
-// array for a scalar whose json_schema mapping says so (ir.ScalarDef's
-// IsAnyJSON and StructuredJSONType), else its mapping or its primitive's.
-func scalarJSONType(scalar *ir.ScalarDef) string {
-	if scalar.IsAnyJSON() {
-		return "any"
-	}
-	if structured := scalar.StructuredJSONType(); structured != "" {
-		return structured
-	}
-	switch mapped := scalar.TypeMappings["json_schema"]; mapped {
-	case "number", "integer", "boolean", "string":
-		return mapped
-	case "":
-	default:
-		return "string"
-	}
-	switch scalar.LanguagePrimitive {
-	case ir.LanguageNumber:
-		return "number"
-	case ir.LanguageBoolean:
-		return "boolean"
-	}
-	return "string"
 }
 
 // instanceTypes writes <T>Fields, <T>, <T>Behaviors and <T>Patch.
@@ -369,7 +344,7 @@ func (m *module) instanceTypes(s *schemaModel) error {
 	if s.variants == nil {
 		m.line("export type %s = %s;", fieldsName, m.ownFields(s, s.instance, nil, false))
 	} else {
-		skip := map[string]bool{s.variants.field: true, s.variants.by: true}
+		skip := map[string]bool{s.variants.Field: true, s.variants.By: true}
 		m.line("export type %s = %s & (", fieldsName, m.ownFields(s, s.instance, skip, false))
 		for _, branch := range m.variantBranches(s) {
 			m.line("  | %s", branch)
@@ -382,43 +357,24 @@ func (m *module) instanceTypes(s *schemaModel) error {
 	m.line("export type %s = %s;", readName, fieldsName)
 
 	m.line("")
-	m.doc("", fmt.Sprintf("The fields of %s's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value.", an(s.base)))
-	var behaviors strings.Builder
-	for _, behavior := range s.behaviors {
-		if len(behavior.declaration.Fields) == 0 {
-			continue
-		}
-		fmt.Fprintf(&behaviors, "  readonly %s: {\n", propertyKey(behavior.declaration.Name))
-		for _, declared := range behavior.declaration.Fields {
-			shape := behavior.narrowed.fields[declared.Name]
-			if doc := descriptionOf(shape.schema); doc != "" {
-				behaviors.WriteString("    " + jsDoc(doc) + "\n")
-			}
-			optional := "?"
-			if shape.present {
-				optional = ""
-			}
-			fmt.Fprintf(&behaviors, "    readonly %s%s: %s;\n", propertyKey(declared.Name), optional, m.ts.render(withoutDescription(shape.schema), "    "))
-		}
-		behaviors.WriteString("  };\n")
-	}
-	if behaviors.Len() == 0 {
+	m.doc("", fmt.Sprintf("The fields of %s's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value.", behaviortypes.An(s.base)))
+	if members := m.ts.BehaviorMembers(s.behaviors); members == "" {
 		m.line("export type %s = Record<string, never>;", behaviorsName)
 	} else {
-		m.line("export type %s = {\n%s};", behaviorsName, behaviors.String())
+		m.line("export type %s = {\n%s};", behaviorsName, members)
 	}
 
 	m.line("")
-	m.doc("", fmt.Sprintf("A merge patch of %s's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations.", an(s.base)))
+	m.doc("", fmt.Sprintf("A merge patch of %s's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations.", behaviortypes.An(s.base)))
 	if s.variants == nil {
 		m.line("export type %s = %s;", patchName, m.ownFields(s, s.instance, nil, true))
 		return nil
 	}
-	patch := m.ownFields(s, s.instance, map[string]bool{s.variants.field: true}, true)
-	field := ownField(s.instance, s.variants.field)
+	patch := m.ownFields(s, s.instance, map[string]bool{s.variants.Field: true}, true)
+	field := behaviortypes.OwnField(s.instance, s.variants.Field)
 	var types []string
-	for _, value := range sortedKeys(s.variants.types) {
-		types = append(types, s.variants.types[value])
+	for _, value := range behaviortypes.SortedKeys(s.variants.Types) {
+		types = append(types, s.variants.Types[value])
 	}
 	if !field.Required {
 		types = append(types, "null")
@@ -426,9 +382,9 @@ func (m *module) instanceTypes(s *schemaModel) error {
 	doc := codegen.DocText(field.Description, field.Comment)
 	var extra strings.Builder
 	if strings.TrimSpace(doc) != "" {
-		extra.WriteString("  " + jsDoc(doc) + "\n")
+		extra.WriteString("  " + behaviortypes.TSDoc(doc) + "\n")
 	}
-	fmt.Fprintf(&extra, "  %s?: %s;\n", propertyKey(s.variants.field), union(types))
+	fmt.Fprintf(&extra, "  %s?: %s;\n", behaviortypes.TSPropertyKey(s.variants.Field), behaviortypes.TSUnion(types))
 	m.line("export type %s = %s;", patchName, strings.TrimSuffix(patch, "}")+extra.String()+"}")
 	return nil
 }
@@ -438,16 +394,16 @@ func (m *module) instanceTypes(s *schemaModel) error {
 // by holding any other value or none, and field none.
 func (m *module) variantBranches(s *schemaModel) []string {
 	v := s.variants
-	field := ownField(s.instance, v.field)
-	by := ownField(s.instance, v.by)
-	fieldKeyText, byKeyText := propertyKey(v.field), propertyKey(v.by)
+	field := behaviortypes.OwnField(s.instance, v.Field)
+	by := behaviortypes.OwnField(s.instance, v.By)
+	fieldKeyText, byKeyText := behaviortypes.TSPropertyKey(v.Field), behaviortypes.TSPropertyKey(v.By)
 	var branches []string
-	for _, value := range sortedKeys(v.types) {
-		member := fmt.Sprintf("%s: %s", fieldKeyText, v.types[value])
+	for _, value := range behaviortypes.SortedKeys(v.Types) {
+		member := fmt.Sprintf("%s: %s", fieldKeyText, v.Types[value])
 		if !field.Required {
-			member = fmt.Sprintf("%s?: %s | null", fieldKeyText, v.types[value])
+			member = fmt.Sprintf("%s?: %s | null", fieldKeyText, v.Types[value])
 		}
-		branches = append(branches, fmt.Sprintf("{ %s: %s; %s }", byKeyText, quote(value), member))
+		branches = append(branches, fmt.Sprintf("{ %s: %s; %s }", byKeyText, behaviortypes.TSQuote(value), member))
 	}
 	if field.Required {
 		return branches
@@ -455,9 +411,9 @@ func (m *module) variantBranches(s *schemaModel) []string {
 	other := "string"
 	if enum := s.schema.Enums[by.TypeRef.Name]; enum != nil {
 		var rest []string
-		for _, value := range enumValues(enum) {
-			if _, listed := v.types[value]; !listed {
-				rest = append(rest, quote(value))
+		for _, value := range behaviortypes.EnumValues(enum) {
+			if _, listed := v.Types[value]; !listed {
+				rest = append(rest, behaviortypes.TSQuote(value))
 			}
 		}
 		other = strings.Join(rest, " | ")
@@ -474,19 +430,9 @@ func (m *module) variantBranches(s *schemaModel) []string {
 	return branches
 }
 
-// an writes a name with its indefinite article: a Note, an Item. The
-// article follows the name's first letter, which is what a type's name
-// is read as.
-func an(name string) string {
-	if name != "" && strings.ContainsRune("AEIOUaeiou", rune(name[0])) {
-		return "an " + name
-	}
-	return "a " + name
-}
-
-// capitalAn is an at the start of a sentence.
+// capitalAn is behaviortypes.An at the start of a sentence.
 func capitalAn(name string) string {
-	text := an(name)
+	text := behaviortypes.An(name)
 	return strings.ToUpper(text[:1]) + text[1:]
 }
 
@@ -498,22 +444,6 @@ func possessive(name string) string {
 	return name + "'s"
 }
 
-// withoutDescription copies a schema's top node without its description,
-// which the caller has written as the member's doc comment.
-func withoutDescription(schema any) any {
-	node, ok := schema.(map[string]any)
-	if !ok {
-		return schema
-	}
-	out := make(map[string]any, len(node))
-	for key, value := range node {
-		if key != "description" {
-			out[key] = value
-		}
-	}
-	return out
-}
-
 // createParams writes <T>CreateParams when a behavior of the type takes
 // create parameters: each such behavior's, by name, required where its
 // schema requires a member, since the engine checks a missing entry as {}.
@@ -521,13 +451,13 @@ func (m *module) createParams(s *schemaModel) (name string, required bool, err e
 	properties := map[string]any{}
 	var requiredNames []any
 	for _, behavior := range s.behaviors {
-		schema, ok := behavior.narrowed.createParams.(map[string]any)
+		schema, ok := behavior.Narrowed.CreateParams.(map[string]any)
 		if !ok {
 			continue
 		}
-		properties[behavior.declaration.Name] = schema
+		properties[behavior.Declaration.Name] = schema
 		if list, _ := schema["required"].([]any); len(list) > 0 {
-			requiredNames = append(requiredNames, behavior.declaration.Name)
+			requiredNames = append(requiredNames, behavior.Declaration.Name)
 		}
 	}
 	if len(properties) == 0 {
@@ -538,7 +468,7 @@ func (m *module) createParams(s *schemaModel) (name string, required bool, err e
 	if len(requiredNames) > 0 {
 		object["required"] = requiredNames
 	}
-	doc := fmt.Sprintf("The parameters %s's create gives its behaviors, by behavior name.", an(s.base))
+	doc := fmt.Sprintf("The parameters %s's create gives its behaviors, by behavior name.", behaviortypes.An(s.base))
 	return name, len(requiredNames) > 0, m.typeAlias(name, "schema "+s.name, doc, object)
 }
 
@@ -547,15 +477,15 @@ func (m *module) createParams(s *schemaModel) (name string, required bool, err e
 func (m *module) preconditions(s *schemaModel) (string, error) {
 	properties := map[string]any{}
 	for _, behavior := range s.behaviors {
-		if behavior.narrowed.preconditions != nil {
-			properties[behavior.declaration.Name] = behavior.narrowed.preconditions
+		if behavior.Narrowed.Preconditions != nil {
+			properties[behavior.Declaration.Name] = behavior.Narrowed.Preconditions
 		}
 	}
 	if len(properties) == 0 {
 		return "", nil
 	}
 	name := s.base + "Preconditions"
-	doc := fmt.Sprintf("What a write to %s asserts, by behavior name: the Preconditions header.", an(s.base))
+	doc := fmt.Sprintf("What a write to %s asserts, by behavior name: the Preconditions header.", behaviortypes.An(s.base))
 	object := map[string]any{"type": "object", "additionalProperties": false, "properties": properties}
 	return name, m.typeAlias(name, "schema "+s.name, doc, object)
 }
@@ -566,17 +496,17 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 	owner := "schema " + s.name
 	var ops []operationInfo
 	for _, behavior := range s.behaviors {
-		for _, declared := range behavior.declaration.Operations {
+		for _, declared := range behavior.Declaration.Operations {
 			for _, member := range clientMembers {
 				if declared.Name == member {
-					return nil, fmt.Errorf("engine-client: %s: behavior %s's operation %s is named like the wrapper's own %s", owner, behavior.declaration.Name, declared.Name, member)
+					return nil, fmt.Errorf("engine-client: %s: behavior %s's operation %s is named like the wrapper's own %s", owner, behavior.Declaration.Name, declared.Name, member)
 				}
 			}
 			op := operationInfo{
-				behavior:    behavior.declaration.Name,
+				behavior:    behavior.Declaration.Name,
 				declaration: declared,
-				params:      behavior.narrowed.params[declared.Name],
-				result:      behavior.narrowed.results[declared.Name],
+				params:      behavior.Narrowed.Params[declared.Name],
+				result:      behavior.Narrowed.Results[declared.Name],
 				paramsType:  s.base + codegen.ToPascalCase(declared.Name) + "Params",
 				resultType:  s.base + codegen.ToPascalCase(declared.Name) + "Result",
 			}
@@ -584,11 +514,11 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 			if err := m.typeAlias(op.paramsType, owner+" operation "+declared.Name, "The parameters of "+doc, op.params); err != nil {
 				return nil, err
 			}
-			resultDoc := descriptionOf(op.result)
+			resultDoc := behaviortypes.DescriptionOf(op.result)
 			if resultDoc == "" {
 				resultDoc = fmt.Sprintf("What %s %s returns.", possessive(op.behavior), declared.Name)
 			}
-			if err := m.typeAlias(op.resultType, owner+" operation "+declared.Name, resultDoc, withoutDescription(op.result)); err != nil {
+			if err := m.typeAlias(op.resultType, owner+" operation "+declared.Name, resultDoc, behaviortypes.WithoutDescription(op.result)); err != nil {
 				return nil, err
 			}
 			ops = append(ops, op)
@@ -602,7 +532,7 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 		return nil, err
 	}
 	m.line("")
-	m.doc("", fmt.Sprintf("Each operation %s's behaviors add: its scope, parameters and result.", an(s.base)))
+	m.doc("", fmt.Sprintf("Each operation %s's behaviors add: its scope, parameters and result.", behaviortypes.An(s.base)))
 	m.line("export type %s = {", operations)
 	var instanceOps []string
 	for _, op := range ops {
@@ -610,9 +540,9 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 		if op.schemaScope() {
 			scope = registry.OperationScopeSchema
 		} else {
-			instanceOps = append(instanceOps, quote(op.declaration.Name))
+			instanceOps = append(instanceOps, behaviortypes.TSQuote(op.declaration.Name))
 		}
-		m.line("  %s: { scope: %s; params: %s; result: %s };", op.declaration.Name, quote(scope), op.paramsType, op.resultType)
+		m.line("  %s: { scope: %s; params: %s; result: %s };", op.declaration.Name, behaviortypes.TSQuote(scope), op.paramsType, op.resultType)
 	}
 	m.line("};")
 	if len(instanceOps) > 0 {
@@ -637,14 +567,14 @@ func (m *module) vetoes(s *schemaModel) error {
 		return err
 	}
 	m.line("")
-	m.doc("", fmt.Sprintf("The codes the vetoes of %s's behaviors carry, by behavior: what a refused call's details.code holds.", an(s.base)))
+	m.doc("", fmt.Sprintf("The codes the vetoes of %s's behaviors carry, by behavior: what a refused call's details.code holds.", behaviortypes.An(s.base)))
 	m.line("export type %s = {", name)
 	for _, behavior := range s.behaviors {
-		codes := make([]string, 0, len(behavior.declaration.Vetoes))
-		for _, veto := range behavior.declaration.Vetoes {
-			codes = append(codes, quote(veto.Code))
+		codes := make([]string, 0, len(behavior.Declaration.Vetoes))
+		for _, veto := range behavior.Declaration.Vetoes {
+			codes = append(codes, behaviortypes.TSQuote(veto.Code))
 		}
-		m.line("  %s: %s;", propertyKey(behavior.declaration.Name), union(codes))
+		m.line("  %s: %s;", behaviortypes.TSPropertyKey(behavior.Declaration.Name), behaviortypes.TSUnion(codes))
 	}
 	m.line("};")
 	return nil
@@ -661,7 +591,7 @@ func (m *module) vetoGuard(s *schemaModel) error {
 	m.uses["isVeto"] = true
 	m.uses["EngineVeto"] = true
 	m.line("")
-	m.doc("", fmt.Sprintf("%s is isVeto with the behaviors of %s and their codes.", name, an(s.base)))
+	m.doc("", fmt.Sprintf("%s is isVeto with the behaviors of %s and their codes.", name, behaviortypes.An(s.base)))
 	m.line("export function %s<B extends keyof %s>(error: unknown, behavior?: B, codes?: %s[B] | ReadonlyArray<%s[B]>): error is EngineVeto {", name, vetoes, vetoes, vetoes)
 	m.line("  return isVeto(error, behavior, codes);")
 	m.line("}")
@@ -701,13 +631,13 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 	m.line("export interface %s {", s.client)
 	m.doc("  ", fmt.Sprintf("create stores a new %s, with its behaviors' create parameters.", s.base))
 	m.line("  create(data: %s, options%s: %s): Promise<Instance<%s>>;", fields, createOptional, createOptions, typeArgs)
-	m.doc("  ", fmt.Sprintf("get reads %s; one that does not exist is 404 not_found.", an(s.base)))
+	m.doc("  ", fmt.Sprintf("get reads %s; one that does not exist is 404 not_found.", behaviortypes.An(s.base)))
 	m.line("  get(id: string, options?: CallOptions): Promise<Instance<%s>>;", typeArgs)
 	m.doc("  ", "list returns a page in creation order.")
 	m.line("  list(options?: ListOptions): Promise<InstancePage<%s>>;", typeArgs)
 	m.doc("  ", "update applies a merge patch of the own fields.")
 	m.line("  update(id: string, patch: %s, options?: %s): Promise<Instance<%s>>;", patch, writeOptions, typeArgs)
-	m.doc("  ", fmt.Sprintf("delete removes %s.", an(s.base)))
+	m.doc("  ", fmt.Sprintf("delete removes %s.", behaviortypes.An(s.base)))
 	m.line("  delete(id: string, options?: %s): Promise<void>;", writeOptions)
 	if instanceOps {
 		m.uses["OperationOutcome"] = true
@@ -729,7 +659,7 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 	}
 	m.line("}")
 
-	schemaName := quote(s.name)
+	schemaName := behaviortypes.TSQuote(s.name)
 	m.line("")
 	m.doc("", fmt.Sprintf("%s wraps an EngineClient with the %s schema's types.", factory, s.name))
 	m.line("export function %s(client: EngineClient): %s {", factory, s.client)
@@ -761,10 +691,10 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 		}
 		if op.schemaScope() {
 			m.line("    %s(params, options) {", op.declaration.Name)
-			m.line("      return client.instances.invokeSchema<%s>(%s, %s, %s, options);", op.resultType, schemaName, quote(op.declaration.Name), params)
+			m.line("      return client.instances.invokeSchema<%s>(%s, %s, %s, options);", op.resultType, schemaName, behaviortypes.TSQuote(op.declaration.Name), params)
 		} else {
 			m.line("    %s(id, params, options) {", op.declaration.Name)
-			m.line("      return client.instances.invoke<%s>(%s, id, %s, %s, options);", op.resultType, schemaName, quote(op.declaration.Name), params)
+			m.line("      return client.instances.invoke<%s>(%s, id, %s, %s, options);", op.resultType, schemaName, behaviortypes.TSQuote(op.declaration.Name), params)
 		}
 		m.line("    },")
 	}

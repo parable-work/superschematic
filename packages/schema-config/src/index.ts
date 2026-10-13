@@ -118,6 +118,16 @@ export type SqlOutputConfig = {
 };
 
 /**
+ * A DB service's engine document (D58), which the build writes when a type of the schema composes a behavior: an engine type, whose instances the engine keeps, which sql and orm leave out.
+ */
+export type EngineOutputConfig = {
+  /**
+   * The engine namespace the schema's engine types are defined, published and instantiated in: lowercase letters, digits and hyphens, starting with a letter, at most 63 characters. Unset is the service's name.
+   */
+  readonly namespace?: string;
+};
+
+/**
  * One CI renderer's options for a Stack service's generated workflow.
  */
 export type CiRendererConfig = {
@@ -145,6 +155,7 @@ export type SchemaOutputs = {
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
   readonly ci?: CiOutputConfig;
+  readonly engine?: EngineOutputConfig;
 };
 
 /**

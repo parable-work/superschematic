@@ -132,13 +132,13 @@ func TestRunRejectsUnknownKindAndUnknownOutputWithTodaysText(t *testing.T) {
 	reg := extensionRegistry(t, widgetExtension{generate: writeWidget})
 	schema, cfg = catalogService(map[string]any{"graphql": map[string]any{"enabled": true}})
 	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: reg})
-	want := `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, widget)`
+	want := `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, engine, widget)`
 	if err == nil || err.Error() != want {
 		t.Fatalf("unknown output error = %v, want %q", err, want)
 	}
 
 	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()})
-	want = `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci)`
+	want = `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, engine)`
 	if err == nil || err.Error() != want {
 		t.Fatalf("core-only unknown output error = %v, want %q", err, want)
 	}
@@ -185,7 +185,7 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 		return out
 	}
 	want := map[string][]string{
-		"DB":      {"sql", "orm", "types"},
+		"DB":      {"sql", "orm", "types", "enginedoc"},
 		"API":     {"types", "api", "sdks"},
 		"General": {"types", "envConfig"},
 		"Stack":   {"stack", "server", "ci"},
@@ -195,7 +195,7 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 			t.Errorf("Pipeline(%s) = %v, want %v", kind, got, pipeline)
 		}
 	}
-	if got := reg.OutputKeys(); !reflect.DeepEqual(got, []string{"types", "sql", "api", "sdk", "ci"}) {
+	if got := reg.OutputKeys(); !reflect.DeepEqual(got, []string{"types", "sql", "api", "sdk", "ci", "engine"}) {
 		t.Errorf("OutputKeys() = %v", got)
 	}
 }

@@ -248,11 +248,15 @@ const DefaultHistoryActorSetting = "superschematic.history_actor_id"
 
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
 // the schema declares no database tables and no queues. A queue's table
-// follows the tables (queues.go, D53).
+// follows the tables (queues.go, D53). An engine type, a type that
+// composes a behavior, gets no table: the engine keeps its instances in
+// tables of its own (D58), so the DDL, and the migration models
+// sqlmigrate builds on it, leave it out.
 func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
+	schema = codegen.WithoutEngineTypes(schema)
 
 	scalarMapping := sqlutil.ScalarSQLTypes(schema)
 	compositeDefaults, err := collectCompositeDefaults(schema, opts.Dependencies)

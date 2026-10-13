@@ -204,3 +204,9 @@ Three reference pages cover what a DB schema can add on top of this guide:
   whole, with engines in Go, TypeScript, Rust and Python.
 - [Projection views](/superschematic/reference/projections/): read-only SQL
   views over joined tables, with `@projection`, `@join` and `@column`.
+
+A type of a DB schema that composes a behavior, `@behavior("Workflow",
+...)` say, is no table: it is an engine type, whose instances the engine
+keeps, so the build writes it no table, no repository and no migration,
+and writes the schema's engine document instead
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).

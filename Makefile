@@ -329,13 +329,20 @@ docs:
 # admits them. The engine runs the first eleven documents with its own
 # behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
 # the work-queue package runs the last in
-# runtime/engine-workqueue/typescript/test/package.test.ts.
+# runtime/engine-workqueue/typescript/test/package.test.ts. It builds
+# fixture-behaviors-json, a General schema, and fixture-engine-db-json,
+# whose engine types the sql generator leaves out and whose engine
+# document the build writes (D58).
 cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
 		$(CORE_BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@for s in fixture-db-json fixture-general-yaml; do \
+	@for s in fixture-db-json fixture-general-yaml fixture-engine-db-json fixture-behaviors-json; do \
 		$(CORE_BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+	@grep -q '"namespace": "fixture-engine-db"' /tmp/superschematic-cli-smoke/types/go/fixture-engine-db/engine/fixture-engine-db.json \
+		|| { echo "cli-smoke: the engine fixture's build wrote no engine document"; exit 1; }
+	@! grep -qi 'ticket' /tmp/superschematic-cli-smoke/sql/fixture-engine-db/create.sql \
+		|| { echo "cli-smoke: sql wrote a table for an engine type"; exit 1; }
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \

@@ -30,7 +30,7 @@ func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 	}
 
 	wantPipelines := map[string][]string{
-		"DB":      {"sql", "orm", "types"},
+		"DB":      {"sql", "orm", "types", "enginedoc"},
 		"API":     {"types", "api", "sdks"},
 		"General": {"types", "envConfig"},
 		"Stack":   {"stack"},
@@ -101,7 +101,7 @@ func TestRegisterRejectsDuplicatesAndPostFinalizeRegistration(t *testing.T) {
 		t.Fatal("Decorator lookup must be keyed by target")
 	}
 
-	for _, name := range []string{"sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
+	for _, name := range []string{"sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestPipelineAppendsKindRestrictedGeneratorsInRegistrationOrder(t *testing.T
 		}
 		return out
 	}
-	if got := names(reg.Pipeline("DB")); !reflect.DeepEqual(got, []string{"sql", "orm", "types", "audit"}) {
+	if got := names(reg.Pipeline("DB")); !reflect.DeepEqual(got, []string{"sql", "orm", "types", "enginedoc", "audit"}) {
 		t.Errorf("Pipeline(DB) = %v", got)
 	}
 	if got := names(reg.Pipeline("Catalog")); !reflect.DeepEqual(got, []string{"types", "catalog", "audit"}) {
@@ -288,7 +288,7 @@ func TestRegisterBuildAllHookRejectsInvalidAndLateRegistrations(t *testing.T) {
 	if err := reg.RegisterBuildAllHook(BuildAllHook{Name: "merge", Run: noop}); err == nil {
 		t.Error("duplicate hook: want error")
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

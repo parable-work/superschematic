@@ -1,4 +1,4 @@
-package engineclientgen
+package behaviortypes
 
 import (
 	"encoding/json"
@@ -11,60 +11,71 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// narrowTarget is the type a config is narrowed on.
-type narrowTarget struct {
-	// schema is the schema's name.
-	schema string
-	// base names the instance type's exports (Note: NoteFields, NotePatch).
-	base     string
-	document *ir.Schema
-	instance *ir.TypeDef
+// Target is the type a config is narrowed on.
+type Target struct {
+	// Schema is the schema's name: the engine's name for it, which
+	// Dependencies' blockers default to.
+	Schema string
+	// Base names the types a narrowing refers to (Note: NoteState,
+	// NoteFields, NotePatch): the type's name.
+	Base     string
+	Document *ir.Schema
+	Instance *ir.TypeDef
 }
 
-// alias is a type a narrowing exports, such as a Workflow's states.
-type alias struct {
-	name   string
-	doc    string
-	schema any
+// Alias is a type a narrowing names, such as a Workflow's states: a node
+// {"$ts": Name} of a narrowed schema refers to it.
+type Alias struct {
+	Name   string
+	Doc    string
+	Schema any
 }
 
-// fieldShape is a behavior field as a read returns it, under its behavior's
-// name: its JSON Schema, and whether every read holds it (an engine leaves
-// out a field whose reader returns nothing).
-type fieldShape struct {
-	schema  any
-	present bool
+// FieldShape is a behavior field as a read returns it, under its
+// behavior's name: its JSON Schema, and whether every read holds it (an
+// engine leaves out a field whose reader returns nothing).
+type FieldShape struct {
+	Schema  any
+	Present bool
 }
 
-// narrowing is what a behavior adds to its type under its config. Every
-// schema is a decoded JSON Schema; a node {"$ts": name} is a type of the
-// module.
-type narrowing struct {
-	aliases []alias
-	// fields are the behavior's fields by name.
-	fields map[string]fieldShape
-	// params and results are each operation's, by name.
-	params  map[string]any
-	results map[string]any
-	// createParams is the create parameters' schema, as the config
+// Narrowing is what a behavior adds to its type under its config. Every
+// schema is a decoded JSON Schema; a node {"$ts": name} is a type the
+// narrowing names: one of its Aliases, or the type's own (<Base>Fields,
+// <Base>Patch), which only an operation's schemas refer to.
+type Narrowing struct {
+	Aliases []Alias
+	// Fields are the behavior's fields by name.
+	Fields map[string]FieldShape
+	// Params and Results are each operation's, by name.
+	Params  map[string]any
+	Results map[string]any
+	// CreateParams is the create parameters' schema, as the config
 	// narrows it; nil when the declaration takes none.
-	createParams any
-	// preconditions is the declaration's preconditionSchema, or nil.
-	preconditions any
-	// variants is a Variants config, which types the instance's own fields.
-	variants *variantsConfig
+	CreateParams any
+	// Preconditions is the declaration's preconditionSchema, or nil.
+	Preconditions any
+	// Variants is a Variants config, which types the instance's own fields.
+	Variants *Variants
 }
 
-// variantsConfig is Variants' config: field holds the type types names for
-// the value by holds.
-type variantsConfig struct {
-	field string
-	by    string
-	types map[string]string
+// Variants is Variants' config: Field holds the type Types names for the
+// value By holds.
+type Variants struct {
+	Field string
+	By    string
+	Types map[string]string
+}
+
+// Behavior is one behavior a type composes: its declaration and what its
+// config narrows.
+type Behavior struct {
+	Declaration registry.Behavior
+	Narrowed    Narrowing
 }
 
 // narrower narrows one core behavior's shapes under its decoded config.
-type narrower func(n *narrowing, config map[string]any, target narrowTarget) error
+type narrower func(n *Narrowing, config map[string]any, target Target) error
 
 // coreNarrowers are the narrowings of the core's behaviors. A behavior
 // without one keeps its declaration's shapes, and its fields hold any
@@ -92,12 +103,17 @@ var coreNarrowers = map[string]narrower{
 // write it.
 const idPattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
 
-// narrow starts from the declaration's shapes and applies the behavior's
+// NarrowerNames lists the behaviors the core narrows, sorted.
+func NarrowerNames() []string {
+	return SortedKeys(coreNarrowers)
+}
+
+// Narrow starts from the declaration's shapes and applies the behavior's
 // core narrowing, when it has one.
-func narrow(declaration registry.Behavior, config json.RawMessage, target narrowTarget) (narrowing, error) {
-	n := narrowing{fields: map[string]fieldShape{}, params: map[string]any{}, results: map[string]any{}}
+func Narrow(declaration registry.Behavior, config json.RawMessage, target Target) (Narrowing, error) {
+	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}}
 	for _, field := range declaration.Fields {
-		n.fields[field.Name] = fieldShape{schema: map[string]any{"description": field.Description}}
+		n.Fields[field.Name] = FieldShape{Schema: map[string]any{"description": field.Description}}
 	}
 	for _, op := range declaration.Operations {
 		params, err := decodeSchema(op.ParamsSchema)
@@ -108,14 +124,14 @@ func narrow(declaration registry.Behavior, config json.RawMessage, target narrow
 		if err != nil {
 			return n, fmt.Errorf("operation %s resultSchema: %w", op.Name, err)
 		}
-		n.params[op.Name] = params
-		n.results[op.Name] = result
+		n.Params[op.Name] = params
+		n.Results[op.Name] = result
 	}
 	var err error
-	if n.createParams, err = decodeSchema(declaration.CreateParamsSchema); err != nil {
+	if n.CreateParams, err = decodeSchema(declaration.CreateParamsSchema); err != nil {
 		return n, fmt.Errorf("createParamsSchema: %w", err)
 	}
-	if n.preconditions, err = decodeSchema(declaration.PreconditionSchema); err != nil {
+	if n.Preconditions, err = decodeSchema(declaration.PreconditionSchema); err != nil {
 		return n, fmt.Errorf("preconditionSchema: %w", err)
 	}
 	narrowFn, ok := coreNarrowers[declaration.Name]
@@ -134,18 +150,18 @@ func narrow(declaration registry.Behavior, config json.RawMessage, target narrow
 	return n, narrowFn(&n, decoded, target)
 }
 
-// ref is a node that renders as a type of the module, keeping a
+// ref is a node that renders as a type the narrowing names, keeping a
 // description for its doc comment.
 func ref(name, description string) map[string]any {
-	node := map[string]any{refKey: name}
+	node := map[string]any{RefKey: name}
 	if description != "" {
 		node["description"] = description
 	}
 	return node
 }
 
-// enumOf is a schema whose values are the strings given.
-func enumOf(values []string) map[string]any {
+// EnumOf is a schema whose values are the strings given.
+func EnumOf(values []string) map[string]any {
 	out := make([]any, 0, len(values))
 	for _, value := range values {
 		out = append(out, value)
@@ -218,35 +234,35 @@ func setOperationProperty(schemas map[string]any, operation string, path []strin
 // setField types a field of the behavior, keeping its declaration's
 // description. The field must be declared, so a narrowing cannot drift from
 // its declaration unnoticed.
-func setField(n *narrowing, name string, schema map[string]any, present bool) error {
-	current, ok := n.fields[name]
+func setField(n *Narrowing, name string, schema map[string]any, present bool) error {
+	current, ok := n.Fields[name]
 	if !ok {
 		return fmt.Errorf("the declaration has no field %s", name)
 	}
-	if description := descriptionOf(current.schema); description != "" {
+	if description := DescriptionOf(current.Schema); description != "" {
 		schema["description"] = description
 	}
-	n.fields[name] = fieldShape{schema: schema, present: present}
+	n.Fields[name] = FieldShape{Schema: schema, Present: present}
 	return nil
 }
 
 // Workflow: the status and transition's states are the config's; when the
 // status was entered is absent on an instance from before Workflow kept it.
-func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) error {
+func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 	states := stringsOf(config["states"])
-	state := target.base + "State"
-	n.aliases = append(n.aliases, alias{name: state, doc: fmt.Sprintf("A state of %s's Workflow.", an(target.base)), schema: enumOf(states)})
+	state := target.Base + "State"
+	n.Aliases = append(n.Aliases, Alias{Name: state, Doc: fmt.Sprintf("A state of %s's Workflow.", An(target.Base)), Schema: EnumOf(states)})
 	if err := setField(n, "status", ref(state, ""), true); err != nil {
 		return err
 	}
 	if err := setField(n, "enteredAt", integer(), false); err != nil {
 		return err
 	}
-	if err := setOperationProperty(n.params, "transition", nil, "to", ref(state, "")); err != nil {
+	if err := setOperationProperty(n.Params, "transition", nil, "to", ref(state, "")); err != nil {
 		return err
 	}
 	for _, name := range []string{"from", "to"} {
-		if err := setOperationProperty(n.results, "transition", nil, name, ref(state, "")); err != nil {
+		if err := setOperationProperty(n.Results, "transition", nil, name, ref(state, "")); err != nil {
 			return err
 		}
 	}
@@ -254,55 +270,55 @@ func narrowWorkflow(n *narrowing, config map[string]any, target narrowTarget) er
 }
 
 // Comments: the count is always there.
-func narrowComments(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowComments(n *Narrowing, _ map[string]any, _ Target) error {
 	return setField(n, "commentCount", map[string]any{"type": "integer"}, true)
 }
 
 // Revisions: a proposal's patch is the type's patch, a revision's data its
 // own fields; the revision number is absent until the first revision.
-func narrowRevisions(n *narrowing, _ map[string]any, target narrowTarget) error {
+func narrowRevisions(n *Narrowing, _ map[string]any, target Target) error {
 	if err := setField(n, "revision", map[string]any{"type": "integer"}, false); err != nil {
 		return err
 	}
-	patch := target.base + "Patch"
-	if err := setOperationProperty(n.params, "propose", nil, "patch", ref(patch, "")); err != nil {
+	patch := target.Base + "Patch"
+	if err := setOperationProperty(n.Params, "propose", nil, "patch", ref(patch, "")); err != nil {
 		return err
 	}
 	for _, op := range []string{"propose", "approve", "reject"} {
-		if err := setOperationProperty(n.results, op, nil, "patch", ref(patch, "")); err != nil {
+		if err := setOperationProperty(n.Results, op, nil, "patch", ref(patch, "")); err != nil {
 			return err
 		}
 	}
-	if err := setOperationProperty(n.results, "listProposals", []string{"properties", "items", "items"}, "patch", ref(patch, "")); err != nil {
+	if err := setOperationProperty(n.Results, "listProposals", []string{"properties", "items", "items"}, "patch", ref(patch, "")); err != nil {
 		return err
 	}
-	return setOperationProperty(n.results, "listRevisions", []string{"properties", "items", "items"}, "data", ref(target.base+"Fields", ""))
+	return setOperationProperty(n.Results, "listRevisions", []string{"properties", "items", "items"}, "data", ref(target.Base+"Fields", ""))
 }
 
 // Dependencies: a blocker is an instance of a schema the config lists, the
 // type's own when it lists none, and names its schema unless it is the
 // type's own. The create parameters are the engine's narrowing
 // (dependenciesCreateParams).
-func narrowDependencies(n *narrowing, config map[string]any, target narrowTarget) error {
+func narrowDependencies(n *Narrowing, config map[string]any, target Target) error {
 	schemas := stringsOf(config["schemas"])
 	if len(schemas) == 0 {
-		schemas = []string{target.schema}
+		schemas = []string{target.Schema}
 	}
-	own := slices.Contains(schemas, target.schema)
+	own := slices.Contains(schemas, target.Schema)
 	required := []any{"id"}
 	if !own {
 		required = []any{"id", "schema"}
 	}
 	blockerSchema := func() map[string]any {
-		schema := enumOf(schemas)
+		schema := EnumOf(schemas)
 		if own {
-			schema["description"] = fmt.Sprintf("The blocker's schema; %s when absent.", target.schema)
+			schema["description"] = fmt.Sprintf("The blocker's schema; %s when absent.", target.Schema)
 		} else {
 			schema["description"] = "The blocker's schema."
 		}
 		return schema
 	}
-	n.createParams = map[string]any{
+	n.CreateParams = map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
@@ -323,7 +339,7 @@ func narrowDependencies(n *narrowing, config map[string]any, target narrowTarget
 		},
 	}
 	for _, op := range []string{"addBlocker", "removeBlocker"} {
-		params, err := at(n.params[op])
+		params, err := at(n.Params[op])
 		if err != nil {
 			return err
 		}
@@ -331,11 +347,11 @@ func narrowDependencies(n *narrowing, config map[string]any, target narrowTarget
 			return fmt.Errorf("operation %s: %w", op, err)
 		}
 		params["required"] = required
-		if err := setOperationProperty(n.results, op, nil, "schema", enumOf(schemas)); err != nil {
+		if err := setOperationProperty(n.Results, op, nil, "schema", EnumOf(schemas)); err != nil {
 			return err
 		}
 	}
-	if err := setOperationProperty(n.results, "listBlockers", []string{"properties", "items", "items"}, "schema", enumOf(schemas)); err != nil {
+	if err := setOperationProperty(n.Results, "listBlockers", []string{"properties", "items", "items"}, "schema", EnumOf(schemas)); err != nil {
 		return err
 	}
 	return setField(n, "blocked", map[string]any{"type": "boolean"}, true)
@@ -358,7 +374,7 @@ type linkSpec struct {
 func linksOf(config map[string]any) []linkSpec {
 	links, _ := config["links"].(map[string]any)
 	out := make([]linkSpec, 0, len(links))
-	for _, name := range sortedKeys(links) {
+	for _, name := range SortedKeys(links) {
 		spec, _ := links[name].(map[string]any)
 		schema, _ := spec["schema"].(string)
 		required, _ := spec["required"].(bool)
@@ -390,14 +406,14 @@ func linkPin(pinned any) string {
 // instance has, with its target's schema, and for a pinned link its pin,
 // the target's latest of that kind and whether the target has moved past
 // the pin, a list of them for a many-valued link.
-func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error {
+func narrowLinks(n *Narrowing, config map[string]any, target Target) error {
 	links := linksOf(config)
 	names := make([]string, 0, len(links))
 	for _, link := range links {
 		names = append(names, link.name)
 	}
-	linkName := target.base + "LinkName"
-	n.aliases = append(n.aliases, alias{name: linkName, doc: fmt.Sprintf("A link of %s, by name.", an(target.base)), schema: enumOf(names)})
+	linkName := target.Base + "LinkName"
+	n.Aliases = append(n.Aliases, Alias{Name: linkName, Doc: fmt.Sprintf("A link of %s, by name.", An(target.Base)), Schema: EnumOf(names)})
 
 	createProperties := map[string]any{}
 	fieldProperties := map[string]any{}
@@ -458,18 +474,18 @@ func narrowLinks(n *narrowing, config map[string]any, target narrowTarget) error
 		created["required"] = required
 		field["required"] = required
 	}
-	n.createParams = created
+	n.CreateParams = created
 	if err := setField(n, "targets", field, len(required) > 0); err != nil {
 		return err
 	}
 
 	for _, op := range []string{"link", "unlink", "listLinked"} {
-		if err := setOperationProperty(n.params, op, nil, "name", ref(linkName, "")); err != nil {
+		if err := setOperationProperty(n.Params, op, nil, "name", ref(linkName, "")); err != nil {
 			return err
 		}
 	}
 	for _, op := range []string{"link", "unlink"} {
-		if err := setOperationProperty(n.results, op, nil, "name", ref(linkName, "")); err != nil {
+		if err := setOperationProperty(n.Results, op, nil, "name", ref(linkName, "")); err != nil {
 			return err
 		}
 	}
@@ -489,7 +505,7 @@ func listOf(items map[string]any, description string, link linkSpec) map[string]
 // Rollups: the values field holds each rollup's value by its function, or
 // { over: true } when its link holds more instances than it reads. min and
 // max have no value over no instance.
-func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
+func narrowRollups(n *Narrowing, config map[string]any, _ Target) error {
 	rollups, _ := config["rollups"].(map[string]any)
 	over := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"over"},
@@ -497,7 +513,7 @@ func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
 	}
 	properties := map[string]any{}
 	var required []any
-	for _, name := range sortedKeys(rollups) {
+	for _, name := range SortedKeys(rollups) {
 		spec, _ := rollups[name].(map[string]any)
 		function, _ := spec["function"].(string)
 		var value map[string]any
@@ -536,42 +552,42 @@ func narrowRollups(n *narrowing, config map[string]any, _ narrowTarget) error {
 
 // Variants: the type's own field takes a type per value of another; the
 // instance's own fields are typed as a union of them.
-func narrowVariants(n *narrowing, config map[string]any, target narrowTarget) error {
+func narrowVariants(n *Narrowing, config map[string]any, target Target) error {
 	field, _ := config["field"].(string)
 	by, _ := config["by"].(string)
 	types, _ := config["types"].(map[string]any)
-	if ownField(target.instance, field) == nil {
-		return fmt.Errorf("field %s is not a field of %s", field, target.instance.Name)
+	if OwnField(target.Instance, field) == nil {
+		return fmt.Errorf("field %s is not a field of %s", field, target.Instance.Name)
 	}
-	byField := ownField(target.instance, by)
+	byField := OwnField(target.Instance, by)
 	if byField == nil {
-		return fmt.Errorf("by %s is not a field of %s", by, target.instance.Name)
+		return fmt.Errorf("by %s is not a field of %s", by, target.Instance.Name)
 	}
 	var members []string
-	if enum := target.document.Enums[byField.TypeRef.Name]; enum != nil {
-		members = enumValues(enum)
-	} else if byField.TypeRef.Name != codegen.PrimitiveString && !stringScalar(target.document, byField.TypeRef.Name) {
-		return fmt.Errorf("by %s is not a string or enum field of %s", by, target.instance.Name)
+	if enum := target.Document.Enums[byField.TypeRef.Name]; enum != nil {
+		members = EnumValues(enum)
+	} else if byField.TypeRef.Name != codegen.PrimitiveString && !stringScalar(target.Document, byField.TypeRef.Name) {
+		return fmt.Errorf("by %s is not a string or enum field of %s", by, target.Instance.Name)
 	}
-	out := &variantsConfig{field: field, by: by, types: map[string]string{}}
-	for _, value := range sortedKeys(types) {
+	out := &Variants{Field: field, By: by, Types: map[string]string{}}
+	for _, value := range SortedKeys(types) {
 		typeName, _ := types[value].(string)
-		if target.document.Types[typeName] == nil || typeName == target.instance.Name {
-			return fmt.Errorf("types: %s is not a type of the schema besides %s", typeName, target.instance.Name)
+		if target.Document.Types[typeName] == nil || typeName == target.Instance.Name {
+			return fmt.Errorf("types: %s is not a type of the schema besides %s", typeName, target.Instance.Name)
 		}
 		if members != nil && !slices.Contains(members, value) {
 			return fmt.Errorf("types: %s is not a value of %s's enum %s", value, by, byField.TypeRef.Name)
 		}
-		out.types[value] = typeName
+		out.Types[value] = typeName
 	}
-	n.variants = out
+	n.Variants = out
 	return nil
 }
 
 // Numbering: the number and its label are absent on an instance made
 // before its schema composed Numbering, until assignNumber numbers it. The
 // config changes neither's type, so a nil config narrows as any does.
-func narrowNumbering(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowNumbering(n *Narrowing, _ map[string]any, _ Target) error {
 	return setFields(n,
 		typedField{"seq", integer(), false},
 		typedField{"label", map[string]any{"type": "string"}, false},
@@ -586,9 +602,9 @@ var timersOutcomes = []string{"moved", "skipped", "vetoed", "forbidden"}
 // that have started, so none is required; each has its due time and
 // whether it fired, and once fired when, and with a then its outcome. The
 // operations name a deadline of the config.
-func narrowTimers(n *narrowing, config map[string]any, _ narrowTarget) error {
+func narrowTimers(n *Narrowing, config map[string]any, _ Target) error {
 	deadlines, _ := config["deadlines"].(map[string]any)
-	names := sortedKeys(deadlines)
+	names := SortedKeys(deadlines)
 	properties := map[string]any{}
 	for _, name := range names {
 		properties[name] = map[string]any{
@@ -597,12 +613,12 @@ func narrowTimers(n *narrowing, config map[string]any, _ narrowTarget) error {
 				"dueAt":   integer(),
 				"fired":   boolean(),
 				"firedAt": integer(),
-				"outcome": enumOf(timersOutcomes),
+				"outcome": EnumOf(timersOutcomes),
 			},
 		}
 	}
 	for _, op := range []string{"fireTimer", "resetTimer", "snoozeTimer"} {
-		if err := setOperationProperty(n.params, op, nil, "deadline", enumOf(names)); err != nil {
+		if err := setOperationProperty(n.Params, op, nil, "deadline", EnumOf(names)); err != nil {
 			return err
 		}
 	}
@@ -615,11 +631,11 @@ func stringScalar(document *ir.Schema, name string) bool {
 	if scalar == nil {
 		return false
 	}
-	return scalarJSONType(scalar) == "string"
+	return ScalarJSONType(scalar) == "string"
 }
 
-// enumValues lists an enum's values as an instance holds them.
-func enumValues(enum *ir.EnumDef) []string {
+// EnumValues lists an enum's values as an instance holds them.
+func EnumValues(enum *ir.EnumDef) []string {
 	out := make([]string, 0, len(enum.Values))
 	for _, value := range enum.Values {
 		if value.SerializedAs != "" {
@@ -635,9 +651,9 @@ func enumValues(enum *ir.EnumDef) []string {
 // sign-offs count, and no gate with none, so none is required; signOff and
 // withdrawSignOff name a gated state. listSignOffs takes any state, a gate
 // a later version removed included.
-func narrowApprovals(n *narrowing, config map[string]any, _ narrowTarget) error {
+func narrowApprovals(n *Narrowing, config map[string]any, _ Target) error {
 	gates, _ := config["gates"].(map[string]any)
-	states := sortedKeys(gates)
+	states := SortedKeys(gates)
 	properties := map[string]any{}
 	for _, state := range states {
 		properties[state] = map[string]any{
@@ -646,10 +662,10 @@ func narrowApprovals(n *narrowing, config map[string]any, _ narrowTarget) error 
 		}
 	}
 	for _, op := range []string{"signOff", "withdrawSignOff"} {
-		if err := setOperationProperty(n.params, op, nil, "state", enumOf(states)); err != nil {
+		if err := setOperationProperty(n.Params, op, nil, "state", EnumOf(states)); err != nil {
 			return err
 		}
-		if err := setOperationProperty(n.results, op, nil, "state", enumOf(states)); err != nil {
+		if err := setOperationProperty(n.Results, op, nil, "state", EnumOf(states)); err != nil {
 			return err
 		}
 	}
@@ -657,7 +673,7 @@ func narrowApprovals(n *narrowing, config map[string]any, _ narrowTarget) error 
 }
 
 // Assignment: the assignee's subject, absent when unassigned.
-func narrowAssignment(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowAssignment(n *Narrowing, _ map[string]any, _ Target) error {
 	return setField(n, "assignee", map[string]any{"type": "string"}, false)
 }
 
@@ -669,7 +685,7 @@ type typedField struct {
 }
 
 // setFields types the fields given, in order.
-func setFields(n *narrowing, fields ...typedField) error {
+func setFields(n *Narrowing, fields ...typedField) error {
 	for _, field := range fields {
 		if err := setField(n, field.name, field.schema, field.present); err != nil {
 			return err
@@ -689,11 +705,11 @@ var leaseEnds = []string{"release", "abandon", "ttl", "maxHold", "holder"}
 // Lease: the holder and the lease's times are absent while the instance is
 // free, and how the last lease ended while one is held and before the
 // first; the token, active and the expiries are always there.
-func narrowLease(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowLease(n *Narrowing, _ map[string]any, _ Target) error {
 	ended := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"reason", "at"},
 		"properties": map[string]any{
-			"reason": enumOf(leaseEnds),
+			"reason": EnumOf(leaseEnds),
 			"at":     integer(),
 		},
 	}
@@ -711,7 +727,7 @@ func narrowLease(n *narrowing, _ map[string]any, _ narrowTarget) error {
 
 // Presence: the deadline and the last beat are absent before the first
 // beat, and the released leases before a miss; missed is always there.
-func narrowPresence(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowPresence(n *Narrowing, _ map[string]any, _ Target) error {
 	released := map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}
 	return setFields(n,
 		typedField{"deadline", integer(), false},
@@ -723,11 +739,11 @@ func narrowPresence(n *narrowing, _ map[string]any, _ narrowTarget) error {
 
 // Retries: the attempts by class hold every class of the config; the best
 // score is absent when no scored result is kept.
-func narrowRetries(n *narrowing, config map[string]any, _ narrowTarget) error {
+func narrowRetries(n *Narrowing, config map[string]any, _ Target) error {
 	classes, _ := config["classes"].(map[string]any)
 	properties := map[string]any{}
 	required := make([]any, 0, len(classes))
-	for _, name := range sortedKeys(classes) {
+	for _, name := range SortedKeys(classes) {
 		properties[name] = integer()
 		required = append(required, name)
 	}
@@ -743,7 +759,7 @@ func narrowRetries(n *narrowing, config map[string]any, _ narrowTarget) error {
 
 // Blueprint: the children, each step's key and its child's id, are absent
 // until the instance is stamped.
-func narrowBlueprint(n *narrowing, _ map[string]any, _ narrowTarget) error {
+func narrowBlueprint(n *Narrowing, _ map[string]any, _ Target) error {
 	child := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"key", "id"},
 		"properties": map[string]any{"key": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}},
@@ -753,12 +769,12 @@ func narrowBlueprint(n *narrowing, _ map[string]any, _ narrowTarget) error {
 
 // Budget: the meters field holds every meter of the config, by name; a
 // meter with no limit holds null for its limit and what remains of it.
-func narrowBudget(n *narrowing, config map[string]any, _ narrowTarget) error {
+func narrowBudget(n *Narrowing, config map[string]any, _ Target) error {
 	meters, _ := config["meters"].(map[string]any)
 	nullable := func() map[string]any { return map[string]any{"type": []any{"integer", "null"}} }
 	properties := map[string]any{}
 	required := make([]any, 0, len(meters))
-	for _, name := range sortedKeys(meters) {
+	for _, name := range SortedKeys(meters) {
 		properties[name] = map[string]any{
 			"type": "object", "additionalProperties": false, "required": []any{"used", "reserved", "limit", "remaining"},
 			"properties": map[string]any{"used": integer(), "reserved": integer(), "limit": nullable(), "remaining": nullable()},

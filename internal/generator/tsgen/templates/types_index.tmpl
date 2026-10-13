@@ -17,3 +17,6 @@ export * from './unions';
 {{if or .Types .ImportedTypes}}
 export * from './types';
 {{end}}
+{{if .Behaviors}}
+export * from './behaviors';
+{{end}}
