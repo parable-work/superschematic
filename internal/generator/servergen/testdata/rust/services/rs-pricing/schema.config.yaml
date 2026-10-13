@@ -1,0 +1,11 @@
+# The Rust API rs-stock calls (D57). Only a calling service may quote, so
+# its server verifies each caller's credential against its callers field.
+# rs-stock's Rust server calls it through its Rust SDK.
+name: rs-pricing
+kind: API
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  sdk:
+    rust: { enabled: true }

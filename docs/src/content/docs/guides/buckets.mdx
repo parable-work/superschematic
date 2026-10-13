@@ -95,7 +95,8 @@ curl -X PUT -H 'Content-Type: image/png' --data-binary @tea.png "$UPLOAD_URL"
 
 `superschematic stack dev` runs
 [fake-gcs-server](https://github.com/fsouza/fake-gcs-server), which speaks
-GCS's API, in a container beside Postgres, one per environment, and
+GCS's API, in a container beside Postgres, one per environment and
+checkout, and
 creates a bucket per Bucket service, named after it. The bucket field's
 endpoint points at it, so the same GCS implementation reaches it, with no
 credential. It signs URLs too: against an emulator, a V4 URL for the
@@ -107,7 +108,8 @@ The container keeps its objects between runs; `stack dev --remove-data`
 removes them with the containers. The environment's `storageImage` and
 `storagePort` values change its image, `fsouza/fake-gcs-server:1.56.1`,
 and its host port, which is otherwise a hash of the stack and the
-environment:
+environment, shifted by the checkout
+([Run it locally](/superschematic/guides/stacks/#run-it-locally)):
 
 ```ts
 @environment({ target: "local", local: { storagePort: 54443 } })

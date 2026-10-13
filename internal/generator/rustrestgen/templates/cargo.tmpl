@@ -21,7 +21,10 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 {{- if .HasEnvConfig }}
 dotenvy = "0.15"
 {{- end }}
-{{ .RuntimeCrate }} = { path = "{{ .RuntimeDepPath }}"{{ if .Identity }}, features = ["identity"]{{ end }} }
+{{- if .Deps }}
+tracing = { version = "{{ tracingVersion }}", default-features = false, features = ["std"] }
+{{- end }}
+{{ .RuntimeCrate }} = { path = "{{ .RuntimeDepPath }}"{{ with .RuntimeFeatures }}, features = [{{ range $i, $f := . }}{{ if $i }}, {{ end }}"{{ $f }}"{{ end }}]{{ end }} }
 {{ .TypesCrate }} = { path = "{{ .TypesDepPath }}" }
 {{- with .Identity }}
 {{- if .ScalarDepPath }}
@@ -32,4 +35,9 @@ dotenvy = "0.15"
 {{- end }}
 {{- range .DependencyCrates }}
 {{ .Name }} = { path = "{{ .Path }}" }
+{{- end }}
+{{- with .Deps }}
+{{- range .Calls }}
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
 {{- end }}

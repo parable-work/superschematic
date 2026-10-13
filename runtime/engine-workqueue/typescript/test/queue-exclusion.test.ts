@@ -386,7 +386,7 @@ for (const driver of drivers) {
       );
     });
 
-    test('parseConfig holds excludeStale to pinned links of the type', () => {
+    test('parseConfig holds excludeStale to pinned links of the type that hold one target', () => {
       const engine = openTestEngine({ driver });
       publish(engine, scopeDocument('Spec', [{ name: 'Revisions' }]));
       const refusal = (behaviors: BehaviorRef[]) =>
@@ -397,6 +397,8 @@ for (const driver of drivers) {
       assert.match(refusal([queueOn(['spec'])]), /behavior Queue config: excludeStale names links of Links, which the type does not list/);
       assert.match(refusal([linked, queueOn(['plan'])]), /excludeStale names "plan", which is not a link of the type's Links config \(its links: spec, design\)/);
       assert.match(refusal([linked, queueOn(['design'])]), /excludeStale names "design", a link that is not pinned, so it is never stale/);
+      const specs: BehaviorRef = { name: 'Links', config: { links: { specs: { schema: 'Spec', pinned: true, many: true, max: 3 } } } };
+      assert.match(refusal([specs, queueOn(['specs'])]), /excludeStale names "specs", a link that holds a list of targets; it reads links that hold one/);
       engine.schemas.define(alice, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, linked, queueOn(['spec'])]));
       const released: BehaviorRef = { name: 'Links', config: { links: { spec: { schema: 'Spec', pinned: 'release' } } } };
       engine.schemas.define(alice, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, released, queueOn(['spec'])]));

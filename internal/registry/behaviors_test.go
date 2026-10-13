@@ -71,7 +71,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Numbering", "Pinned", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -95,6 +95,22 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	if err := reg.RegisterBehavior(BehaviorSpec{Declaration: declaration("Late", nil)}); err == nil || !strings.Contains(err.Error(), "after Finalize") {
 		t.Fatalf("post-Finalize registration: got %v", err)
+	}
+}
+
+// A field may say it is volatile: it moves at a read, with no event of
+// its own instance. The registered field carries the flag, and a field
+// that does not say so is not.
+func TestRegisterBehaviorVolatileField(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Tally", map[string]any{
+		"fields": []any{map[string]any{"name": "total", "volatile": true}, map[string]any{"name": "lastAt"}},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	tally, _ := reg.Behavior("acme.Tally")
+	if want := []BehaviorField{{Name: "total", Volatile: true}, {Name: "lastAt"}}; !slices.Equal(tally.Fields, want) {
+		t.Fatalf("acme.Tally fields = %+v, want %+v", tally.Fields, want)
 	}
 }
 
@@ -201,6 +217,7 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"create params open by true", "acme", declaration("acme.Rating", map[string]any{"createParamsSchema": map[string]any{"type": "object", "additionalProperties": true}}), `createParamsSchema must set "additionalProperties": false or a schema`},
 		{"field name", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "rating count"}}}), `behavior acme.Rating field name "rating count" is not an identifier`},
 		{"field twice", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars"}, map[string]any{"name": "stars"}}}), `behavior acme.Rating declares field "stars" twice`},
+		{"field volatile not a boolean", "acme", declaration("acme.Rating", map[string]any{"fields": []any{map[string]any{"name": "stars", "volatile": "yes"}}}), "behavior declaration of extension acme: "},
 		{"operation not camelCase", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("Rate", nil)}}), `behavior acme.Rating operation name "Rate" is not camelCase`},
 		{"operation snake_case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate_item", nil)}}), `operation name "rate_item" is not camelCase`},
 		{"operation twice", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", nil), operation("rate", nil)}}), `behavior acme.Rating declares operation "rate" twice`},
@@ -358,7 +375,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},
@@ -375,7 +392,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}

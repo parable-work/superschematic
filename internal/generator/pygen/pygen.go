@@ -20,8 +20,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -119,6 +121,11 @@ type ModuleOutput struct {
 	// Python runtime, relative to the output directory, set by
 	// SetVersionGraphPath. Empty names the dependency without a source.
 	VersionGraphDepPath string
+
+	// Behaviors are the types that compose behaviors, each with its
+	// <T>Behaviors and the models and enums its behaviors' fields hold
+	// (D58), written as behaviors.py. Nil when no type composes one.
+	Behaviors []behaviortypes.Type
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -176,6 +183,10 @@ type Options struct {
 	// Naming supplies the module prefix and scalar library coordinates.
 	// Empty fields fall back to naming.Default().
 	Naming naming.Naming
+
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields behaviors.py types; a schema that composes none needs none.
+	Registry *registry.Registry
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -275,6 +286,12 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	collectModelRebuildTypes(output, imported.enumNames)
 
 	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
+		return nil, err
+	}
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
+	}
+	if err := checkBehaviorNames(output.Behaviors); err != nil {
 		return nil, err
 	}
 

@@ -14,7 +14,8 @@ name: ci
 # TypeScript authoring packages, schema runtime, http runtime, engine, the
 # engine's work-queue
 # package and the engine example, the
-# Python schema runtime, the Rust http runtime, the version graph (the core
+# Python schema runtime, the Rust http runtime, the Rust engine's workspace
+# (D58), the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
 # Python engines against Postgres), the Starlight docs build, and the
@@ -339,7 +340,7 @@ jobs:
         working-directory: extensions/cloudflare
         run: go run ./internal/tools/providerschemas -check
 
-      - name: Core behavior declarations drift (the engine's and the work-queue package's copies match the core registry)
+      - name: Core behavior declarations drift (the engine's, the Rust engine's and the work-queue package's copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -747,7 +748,7 @@ jobs:
           uv run --python 3.9 --isolated pytest -q
 
   rust:
-    name: rust (http and schema runtime crates)
+    name: rust (http and schema runtime crates, and the engine's schema reader)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -768,13 +769,30 @@ jobs:
           workspaces: |
             runtime/http/rust
             runtime/schema/rust
+            runtime/schema/rust-ir
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Check out the superscalar sources
+        # The engine's schema reader (runtime/schema/rust-ir) depends on
+        # superscalar's core by path ([paths] scalar_rust). Nothing of
+        # superscalar is built here but that crate.
+        run: scripts/superscalar-dep.sh --checkout
 
       # superscalar's default lossless-json feature turns on serde_json's
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
       # tests run with and without them. The http runtime's run again with
-      # its optional http-client feature, and with its identity features,
-      # whose store and route tests run on SQLite here.
+      # its optional http-client feature, with its identity features, whose
+      # store and route tests run on SQLite here, and with a stack server's
+      # features (D57): postgres, whose tests need a database and skip
+      # here, and logging.
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -788,6 +806,11 @@ jobs:
           cargo clippy --all-targets --features identity -- -D warnings
           cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings
           cargo test --features identity-postgres,identity-sqlite
+          cargo clippy --all-targets --features postgres -- -D warnings
+          cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings
+          cargo test --features postgres,identity-postgres,identity-sqlite
+          cargo clippy --all-targets --features logging -- -D warnings
+          cargo test --features logging
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust
@@ -796,6 +819,94 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+
+      # The engine's schema reader links superscalar's core, which keeps
+      # preserve_order on; it runs with its schemafile feature and without,
+      # and again with arbitrary_precision.
+      - name: engine schema reader fmt / clippy / test (every vector of both corpora)
+        working-directory: runtime/schema/rust-ir
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings
+          cargo test
+          cargo test --all-features
+          cargo test --all-features --features serde_json/arbitrary_precision
+
+  engine-rust:
+    name: engine-rust (the Rust engine's workspace)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Check out the superscalar sources
+        # The engine reads schemas through runtime/schema/rust-ir, which
+        # depends on superscalar's core by path ([paths] scalar_rust).
+        # Nothing of superscalar is built here but that crate.
+        run: scripts/superscalar-dep.sh --checkout
+
+      - name: Start Postgres
+        # The engine's and the storage's tests run on SQLite, and on this
+        # Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each
+        # test in a schema of its own; without the variable they skip the
+        # Postgres pass.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
+      # The same commands as `make engine-rust`, inline: the Makefile runs
+      # the superscalar and version-graph scripts when it is parsed. Clippy
+      # runs on every feature combination (each database alone, both, and
+      # neither), so a build that takes one database still compiles.
+      - name: fmt / clippy (every feature combination)
+        working-directory: runtime/engine/rust
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
+
+      # The test kit's replay of the scenario corpus
+      # (runtime/engine/testdata/scenarios) runs here too, on both
+      # databases; it fails when the corpus is missing.
+      - name: test (SQLite and Postgres)
+        working-directory: runtime/engine/rust
+        env:
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: cargo test --workspace --all-features
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
@@ -882,13 +993,13 @@ jobs:
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features rusqlite -- -D warnings
 
-      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite)
+      - name: Rust engine (its own tests, the SQLite adapter's and the SQLite vectors, and every scenario on SQLite, also inside a host's transaction)
         # The quick tier: no database URL, so the Postgres tests skip; the
         # full tier's step below runs them, and every scenario on Postgres.
         working-directory: runtime/versiongraph/rust-engine
         run: cargo test --features rusqlite
 
-      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres and every canonical vector through the Rust engine, also with serde_json's preserve_order)
+      - name: Rust engine and its Postgres and SQLite adapters (every scenario on SQLite and on Postgres, the fixed layout's on Postgres inside a host's transaction too, and every canonical vector through the Rust engine, also with serde_json's preserve_order)
         # The SQLite pass of make versiongraph-scenarios-rust needs no
         # database; its Postgres pass fails, rather than skips, without one.
         # The second run turns serde_json's preserve_order on, as superscalar
@@ -999,6 +1110,7 @@ jobs:
       - typescript
       - python
       - rust
+      - engine-rust
       - versiongraph
       - docs
     runs-on: ubuntu-latest

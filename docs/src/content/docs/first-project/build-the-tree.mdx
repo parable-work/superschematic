@@ -23,9 +23,10 @@ superschematic build-all schemas/services
 Each service's own build lines, as `build` prints them, come between these
 summary lines.
 
-The order comes from the configs: `shop-api` and `shop-orders` name
-`shop-db` as their `authDb`, and `shop-storefront` lists `shop-common` in
-its `dependencies`, so each builds after the service it needs. The stack,
+The order comes from the configs: `shop-api`, `shop-orders` and
+`shop-stock` name `shop-db` as their `authDb`, `shop-orders` calls
+`shop-stock`, and `shop-storefront` lists `shop-common` in its
+`dependencies`, so each builds after the service it needs. The stack,
 `shop-stack`, builds after the APIs it deploys: its build resolves its
 environments and writes each server's entrypoint. Every
 service loads through one TypeScript program, which is faster than a build
@@ -70,13 +71,16 @@ superschematic build-all --cache schemas/services
 <Snippet file="testdata/generated/logs/build-all-cache.txt" />
 
 After `rm -rf schemas/dist`, the same command restores each service but
-the stack:
+three:
 
 <Snippet file="testdata/generated/logs/build-all-restore.txt" />
 
-A stack's key covers the services its schema names, `shop-api` and
-`shop-orders`, which its build records under `schemas/dist`. With that
-record gone, it builds once more, and the cache keeps the result.
+A key covers the services a schema names in its decorators' arguments,
+which its build records under `schemas/dist`: the stack names the APIs it
+deploys, and `shop-stock`'s `@requireService` names `shop-orders`. With
+that record gone, both build once more, and so does `shop-orders`, whose
+key covers that of `shop-stock`, the API it calls. The cache keeps each
+result.
 
 The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
 `[cache] root` in the naming file move it. Because the key covers the

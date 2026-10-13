@@ -94,6 +94,14 @@ type Tool struct {
 // ToolKeys.Parameters cannot reuse them.
 var reservedToolParameterKeys = []string{"type", "additionalProperties", "properties", "required"}
 
+// ResolveToolKeys returns the vendor keys the tool documents are written
+// with for schema: DefaultToolKeys as hooks leave them, run over a tool set
+// with no tools. The engine document (internal/generator/enginedoc) carries
+// them, since an engine writes its own tool documents (D11, D58).
+func ResolveToolKeys(schema *ir.Schema, hooks []ToolHook) (ToolKeys, error) {
+	return applyToolHooks(schema, nil, hooks)
+}
+
 // applyToolHooks runs hooks over the endpoints' tool set, writes the MCP
 // records they leave back onto the endpoints, and returns the keys. With no
 // hooks it returns DefaultToolKeys and changes nothing.

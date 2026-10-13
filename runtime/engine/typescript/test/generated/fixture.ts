@@ -27,6 +27,8 @@ export type ProjectBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: ProjectState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Rollups: {
     /** Each rollup's value, by name, computed when the instance is read: a count, counts by value, a number, a field's value, or a boolean. A rollup whose link holds more than 500 instances is {"over": true} instead; a min or max with no value to compare, and a latest whose instance holds none, is absent. */
@@ -140,7 +142,7 @@ export function projectClient(client: EngineClient): ProjectClient {
 
 // The Spec schema.
 
-/** A Spec's own fields, as a create gives them. A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema. */
+/** A Spec's own fields, as a create gives them. A spec tasks pin a revision of. Its blockers are tasks, so a blocker names its schema, and it is final once a principal with specs.approve signs off. */
 export type SpecFields = {
   /** What the spec specifies. */
   title: string;
@@ -155,6 +157,8 @@ export type SpecBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: SpecState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */
@@ -165,6 +169,10 @@ export type SpecBehaviors = {
   readonly Dependencies: {
     /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
     readonly blocked: boolean;
+  };
+  readonly Approvals: {
+    /** The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent. */
+    readonly gates: { final?: { signedBy: string[] } };
   };
 };
 
@@ -432,6 +440,73 @@ export type SpecListDependentsResult = {
   next: string | null;
 };
 
+/** The parameters of Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+export type SpecSignOffParams = {
+  /** Why, for the others. */
+  note?: string;
+  /** The gated state to sign off for. */
+  state: 'final';
+};
+
+/** The sign-off, with the gate's sign-offs after it and the count it needs. */
+export type SpecSignOffResult = {
+  /** When, in epoch milliseconds. */
+  at: number;
+  /** How many the gate needs. */
+  count: number;
+  note?: string;
+  /** Every subject whose sign-off for the state is not yet consumed, in the order they signed. */
+  signedBy: string[];
+  /** The gated state. */
+  state: 'final';
+  /** The subject of the caller who signed. */
+  subject: string;
+};
+
+/** The parameters of Approvals' withdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. */
+export type SpecWithdrawSignOffParams = {
+  /** The gated state whose sign-off to withdraw. */
+  state: 'final';
+};
+
+/** The sign-off withdrawn. */
+export type SpecWithdrawSignOffResult = {
+  /** When it was signed, in epoch milliseconds. */
+  at: number;
+  note?: string;
+  /** The gated state. */
+  state: 'final';
+  /** The subject of the caller who signed. */
+  subject: string;
+};
+
+/** The parameters of Approvals' listSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
+export type SpecListSignOffsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** At most this many sign-offs; 50 when absent. */
+  limit?: number;
+  /** Only sign-offs for this state. */
+  state?: string;
+};
+
+/** What Approvals' listSignOffs returns. */
+export type SpecListSignOffsResult = {
+  items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** When a change of the own fields, entering the state or a new version without its gate consumed it; absent while it counts. */
+    consumedAt?: number;
+    note?: string;
+    /** The gated state. */
+    state: string;
+    /** The subject of the caller who signed. */
+    subject: string;
+  }>;
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
 /** Each operation a Spec's behaviors add: its scope, parameters and result. */
 export type SpecOperations = {
   transition: { scope: 'instance'; params: SpecTransitionParams; result: SpecTransitionResult };
@@ -445,16 +520,20 @@ export type SpecOperations = {
   removeBlocker: { scope: 'instance'; params: SpecRemoveBlockerParams; result: SpecRemoveBlockerResult };
   listBlockers: { scope: 'instance'; params: SpecListBlockersParams; result: SpecListBlockersResult };
   listDependents: { scope: 'instance'; params: SpecListDependentsParams; result: SpecListDependentsResult };
+  signOff: { scope: 'instance'; params: SpecSignOffParams; result: SpecSignOffResult };
+  withdrawSignOff: { scope: 'instance'; params: SpecWithdrawSignOffParams; result: SpecWithdrawSignOffResult };
+  listSignOffs: { scope: 'instance'; params: SpecListSignOffsParams; result: SpecListSignOffsResult };
 };
 
 /** The name of an operation on one Spec. */
-export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type SpecInstanceOperation = 'transition' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents' | 'signOff' | 'withdrawSignOff' | 'listSignOffs';
 
 /** The codes the vetoes of a Spec's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type SpecVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Revisions: 'no_review' | 'not_pending';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
+  Approvals: 'approvals_missing' | 'already_signed' | 'creator_cannot_sign' | 'in_state' | 'no_gate' | 'not_signed';
 };
 
 /** A Spec create's options: its id, and each behavior's create parameters. */
@@ -504,6 +583,12 @@ export interface SpecClient {
   listBlockers(id: string, params?: SpecListBlockersParams, options?: SpecWriteOptions): Promise<SpecListBlockersResult>;
   /** Dependencies' listDependents: Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time. */
   listDependents(id: string, params?: SpecListDependentsParams, options?: SpecWriteOptions): Promise<SpecListDependentsResult>;
+  /** Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+  signOff(id: string, params: SpecSignOffParams, options?: SpecWriteOptions): Promise<SpecSignOffResult>;
+  /** Approvals' withdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. */
+  withdrawSignOff(id: string, params: SpecWithdrawSignOffParams, options?: SpecWriteOptions): Promise<SpecWithdrawSignOffResult>;
+  /** Approvals' listSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
+  listSignOffs(id: string, params?: SpecListSignOffsParams, options?: SpecWriteOptions): Promise<SpecListSignOffsResult>;
 }
 
 /** specClient wraps an EngineClient with the Spec schema's types. */
@@ -560,6 +645,15 @@ export function specClient(client: EngineClient): SpecClient {
     listDependents(id, params, options) {
       return client.instances.invoke<SpecListDependentsResult>('Spec', id, 'listDependents', params ?? {}, options);
     },
+    signOff(id, params, options) {
+      return client.instances.invoke<SpecSignOffResult>('Spec', id, 'signOff', params, options);
+    },
+    withdrawSignOff(id, params, options) {
+      return client.instances.invoke<SpecWithdrawSignOffResult>('Spec', id, 'withdrawSignOff', params, options);
+    },
+    listSignOffs(id, params, options) {
+      return client.instances.invoke<SpecListSignOffsResult>('Spec', id, 'listSignOffs', params ?? {}, options);
+    },
   };
 }
 
@@ -592,7 +686,7 @@ export type ReviewDetail = {
   pullRequest: number;
 };
 
-/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, and it waits for its blockers. */
+/** A Task's own fields, as a create gives them. A task of a project: its kind picks the shape of its detail, it pins the spec it builds, it lists the tasks it relates to, it waits for its blockers, and it fails a day after it starts unless it is done. */
 export type TaskFields = {
   /** What the task does. */
   title: string;
@@ -619,18 +713,22 @@ export type TaskBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: TaskState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Comments: {
     /** How many comments the instance has. */
     readonly commentCount: number;
   };
   readonly Links: {
-    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; absent when the instance holds none. */
+    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
     readonly targets: {
       /** The Task instance parent points at. */
       parent?: { id: string; schema: 'Task' };
       /** The Project instance project points at. */
       project: { id: string; schema: 'Project' };
+      /** The Task instances related points at, in the order they were linked. */
+      related?: Array<{ id: string; schema: 'Task' }>;
       /** The Spec instance spec points at. */
       spec?: {
         id: string;
@@ -641,6 +739,29 @@ export type TaskBehaviors = {
         schema: 'Spec';
         /** Whether the target has moved past that revision. */
         stale?: boolean;
+      };
+    };
+  };
+  readonly Numbering: {
+    /** The instance's number in its count, from 1; absent until it is numbered. */
+    readonly seq?: number;
+    /** The number as the format prints it, unique within its scope; absent until it is numbered. */
+    readonly label?: string;
+  };
+  readonly Timers: {
+    /** Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed. */
+    readonly deadlines: {
+      overdue?: {
+        dueAt: number;
+        fired: boolean;
+        firedAt?: number;
+        outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+      };
+      stuck?: {
+        dueAt: number;
+        fired: boolean;
+        firedAt?: number;
+        outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
       };
     };
   };
@@ -673,7 +794,7 @@ export type TaskPatch = {
 export type TaskState = 'todo' | 'doing' | 'done' | 'failed';
 
 /** A link of a Task, by name. */
-export type TaskLinkName = 'parent' | 'project' | 'spec';
+export type TaskLinkName = 'parent' | 'project' | 'related' | 'spec';
 
 /** The parameters a Task's create gives its behaviors, by behavior name. */
 export type TaskCreateParams = {
@@ -698,6 +819,11 @@ export type TaskCreateParams = {
       /** The target's id. */
       id: string;
     };
+    /** The Task instances related points at, in order, each once. */
+    related?: Array<string | {
+      /** The target's id. */
+      id: string;
+    }>;
     /** The Spec instance spec points at: its id, or an object with its id and the revision to record. */
     spec?: string | {
       /** The target's id. */
@@ -764,7 +890,7 @@ export type TaskListCommentsResult = {
   next: string | null;
 };
 
-/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+/** The parameters of Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
 export type TaskLinkParams = {
   /** The target's id. */
   id: string;
@@ -787,8 +913,10 @@ export type TaskLinkResult = {
   schema: string;
 };
 
-/** The parameters of Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+/** The parameters of Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
 export type TaskUnlinkParams = {
+  /** The target to remove, which a many-valued link needs; for a link that holds one target, the one it must hold. */
+  id?: string;
   /** The link's name in the config. */
   name: TaskLinkName;
 };
@@ -832,6 +960,57 @@ export type TaskListLinkedResult = {
   }>;
   /** The cursor of the next page; null after the last. */
   next: string | null;
+};
+
+/** The parameters of Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+export type TaskAssignNumberParams = Record<string, never>;
+
+/** The instance's number. */
+export type TaskAssignNumberResult = {
+  /** The number as the format prints it. */
+  label: string;
+  /** Its number in its count. */
+  seq: number;
+};
+
+/** The parameters of Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
+export type TaskFireTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+};
+
+/** What Timers' fireTimer returns. */
+export type TaskFireTimerResult = {
+  /** Whether this call fired the deadline. */
+  fired: boolean;
+  /** When it fired a deadline with then: what the move met. */
+  outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+};
+
+/** The parameters of Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
+export type TaskResetTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+};
+
+/** What Timers' resetTimer returns. */
+export type TaskResetTimerResult = {
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
+};
+
+/** The parameters of Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
+export type TaskSnoozeTimerParams = {
+  /** The deadline's name. */
+  deadline: 'overdue' | 'stuck';
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
+};
+
+/** What Timers' snoozeTimer returns. */
+export type TaskSnoozeTimerResult = {
+  /** When it is due, in epoch milliseconds. */
+  dueAt: number;
 };
 
 /** The parameters of Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
@@ -908,6 +1087,10 @@ export type TaskOperations = {
   link: { scope: 'instance'; params: TaskLinkParams; result: TaskLinkResult };
   unlink: { scope: 'instance'; params: TaskUnlinkParams; result: TaskUnlinkResult };
   listLinked: { scope: 'schema'; params: TaskListLinkedParams; result: TaskListLinkedResult };
+  assignNumber: { scope: 'instance'; params: TaskAssignNumberParams; result: TaskAssignNumberResult };
+  fireTimer: { scope: 'instance'; params: TaskFireTimerParams; result: TaskFireTimerResult };
+  resetTimer: { scope: 'instance'; params: TaskResetTimerParams; result: TaskResetTimerResult };
+  snoozeTimer: { scope: 'instance'; params: TaskSnoozeTimerParams; result: TaskSnoozeTimerResult };
   addBlocker: { scope: 'instance'; params: TaskAddBlockerParams; result: TaskAddBlockerResult };
   removeBlocker: { scope: 'instance'; params: TaskRemoveBlockerParams; result: TaskRemoveBlockerResult };
   listBlockers: { scope: 'instance'; params: TaskListBlockersParams; result: TaskListBlockersResult };
@@ -915,13 +1098,15 @@ export type TaskOperations = {
 };
 
 /** The name of an operation on one Task. */
-export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Task's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
   Comments: never;
-  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target';
+  Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
+  Numbering: never;
+  Timers: 'no_deadline' | 'not_armed';
   Dependencies: 'blocked' | 'already_blocking' | 'cycle' | 'gated';
   Constants: never;
   Variants: never;
@@ -958,12 +1143,20 @@ export interface TaskClient {
   comment(id: string, params: TaskCommentParams, options?: TaskWriteOptions): Promise<TaskCommentResult>;
   /** Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
   listComments(id: string, params?: TaskListCommentsParams, options?: TaskWriteOptions): Promise<TaskListCommentsResult>;
-  /** Links' link: Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision or release, or the one given. */
+  /** Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: TaskLinkParams, options?: TaskWriteOptions): Promise<TaskLinkResult>;
-  /** Links' unlink: Clears an optional link. A required link cannot be unlinked, only moved. */
+  /** Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
   unlink(id: string, params: TaskUnlinkParams, options?: TaskWriteOptions): Promise<TaskUnlinkResult>;
   /** Links' listLinked: Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision or the release each records, the target's latest and whether the target has moved past it. */
   listLinked(params: TaskListLinkedParams, options?: CallOptions): Promise<TaskListLinkedResult>;
+  /** Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+  assignNumber(id: string, params?: TaskAssignNumberParams, options?: TaskWriteOptions): Promise<TaskAssignNumberResult>;
+  /** Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
+  fireTimer(id: string, params: TaskFireTimerParams, options?: TaskWriteOptions): Promise<TaskFireTimerResult>;
+  /** Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
+  resetTimer(id: string, params: TaskResetTimerParams, options?: TaskWriteOptions): Promise<TaskResetTimerResult>;
+  /** Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
+  snoozeTimer(id: string, params: TaskSnoozeTimerParams, options?: TaskWriteOptions): Promise<TaskSnoozeTimerResult>;
   /** Dependencies' addBlocker: Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state that is terminal takes no blocker that is not finished. */
   addBlocker(id: string, params: TaskAddBlockerParams, options?: TaskWriteOptions): Promise<TaskAddBlockerResult>;
   /** Dependencies' removeBlocker: Stops another instance from blocking this one. */
@@ -1012,6 +1205,18 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     listLinked(params, options) {
       return client.instances.invokeSchema<TaskListLinkedResult>('Task', 'listLinked', params, options);
+    },
+    assignNumber(id, params, options) {
+      return client.instances.invoke<TaskAssignNumberResult>('Task', id, 'assignNumber', params ?? {}, options);
+    },
+    fireTimer(id, params, options) {
+      return client.instances.invoke<TaskFireTimerResult>('Task', id, 'fireTimer', params, options);
+    },
+    resetTimer(id, params, options) {
+      return client.instances.invoke<TaskResetTimerResult>('Task', id, 'resetTimer', params, options);
+    },
+    snoozeTimer(id, params, options) {
+      return client.instances.invoke<TaskSnoozeTimerResult>('Task', id, 'snoozeTimer', params, options);
     },
     addBlocker(id, params, options) {
       return client.instances.invoke<TaskAddBlockerResult>('Task', id, 'addBlocker', params, options);

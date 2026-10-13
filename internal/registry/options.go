@@ -78,7 +78,7 @@ type Options struct {
 	Stage BuildStage
 
 	// ImplementationRoot, when set, is the repository root under which the
-	// Go and TypeScript API generators scaffold a missing implementation,
+	// Go, TypeScript and Rust API generators scaffold a missing implementation,
 	// at the naming file's [implementation_paths] template of the API's
 	// language (docs/stack-model.md, sections 8.5 and 8.6). Empty writes no
 	// scaffold; build and build-all set it under --scaffold.
@@ -92,6 +92,14 @@ type Options struct {
 	// (docs/stack-model.md, sections 8.1, 8.2 and 8.5). Empty writes no
 	// entrypoint.
 	RepositoryRoot string
+
+	// SchemasRoot is the schemas root, the parent of the services root,
+	// which every build of the CLI sets. The Stack kind's generator
+	// resolves each environment in the checkout it names, so a local
+	// environment's containers and default ports are the checkout's own
+	// (docs/stack-model.md, section 8.3). Empty resolves them for no
+	// checkout.
+	SchemasRoot string
 
 	// Release is the release of superschematic the generated code pins:
 	// the one a stack's workflow installs, and the modules and static

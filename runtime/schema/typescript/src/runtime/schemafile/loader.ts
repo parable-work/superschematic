@@ -143,7 +143,7 @@ export class SchemaFileLoader {
     const form = this.dispatch(tree, source);
     const validate = this.validators.get(form.def) as ValidateFunction;
     if (!validate(toPlain(tree))) {
-      throw new SchemaFileError(source, (validate.errors ?? []).map(toIssue));
+      throw new SchemaFileError(source, issuesOf(validate.errors ?? []));
     }
 
     let decoded: JSONObject;
@@ -450,6 +450,35 @@ function findRepeatedKey(text: string): { key: string; path: string } | undefine
 
 function escapePointer(key: string): string {
   return key.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+// issuesOf turns ajv's errors into issues in a defined order rather than
+// ajv's, which follows its compiled code: by instance path, then by
+// keyword, then by message, each compared by Unicode code point, as the
+// engine orders the issues it checks with ajv (runtime/engine/README.md,
+// "Errors").
+function issuesOf(errors: ErrorObject[]): SchemaFileIssue[] {
+  return errors
+    .map((error) => ({ keyword: error.keyword, issue: toIssue(error) }))
+    .sort(
+      (a, b) =>
+        compareCodePoints(a.issue.path, b.issue.path) || compareCodePoints(a.keyword, b.keyword) || compareCodePoints(a.issue.message, b.issue.message)
+    )
+    .map(({ issue }) => issue);
+}
+
+// compareCodePoints orders two strings by Unicode code point, as their
+// UTF-8 bytes order, not by UTF-16 code unit as `<` does.
+function compareCodePoints(a: string, b: string): number {
+  const left = [...a];
+  const right = [...b];
+  for (let index = 0; index < left.length && index < right.length; index += 1) {
+    const difference = (left[index].codePointAt(0) as number) - (right[index].codePointAt(0) as number);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.length - right.length;
 }
 
 function toIssue(error: ErrorObject): SchemaFileIssue {

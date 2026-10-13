@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -45,9 +47,10 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 	}
 
 	type fixtureCase struct {
-		name   string
-		schema *ir.Schema
-		deps   map[string]*ir.Schema
+		name     string
+		schema   *ir.Schema
+		deps     map[string]*ir.Schema
+		registry *registry.Registry
 	}
 	cases := []fixtureCase{
 		{name: "fixture-db", schema: dbSchema},
@@ -61,6 +64,9 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		}
 		cases = append(cases, fixtureCase{name: name, schema: schema})
 	}
+	// behaviors.py: each behavior's fields (D58).
+	behaviorsRegistry := behaviortypestest.Registry(t)
+	cases = append(cases, fixtureCase{name: behaviortypestest.Service, schema: behaviortypestest.Schema(t, behaviorsRegistry), registry: behaviorsRegistry})
 
 	var importPaths []string
 	var moduleNames []string
@@ -68,6 +74,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		output, err := Generate(tc.schema, Options{
 			SchemaName:   tc.name,
 			Dependencies: tc.deps,
+			Registry:     tc.registry,
 			Clock:        fixedClock,
 		})
 		if err != nil {
@@ -104,6 +111,44 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 	if out, err := jsonProbe.CombinedOutput(); err != nil {
 		t.Errorf("Generic.JSON runtime probe failed: %v\n%s", err, out)
 	}
+
+	behaviorsProbe := exec.Command(pythonPath, "-W", "error", "-c", buildBehaviorsProbeScript(importPaths, moduleNames[len(moduleNames)-1]))
+	if out, err := behaviorsProbe.CombinedOutput(); err != nil {
+		t.Errorf("behaviors runtime probe failed: %v\n%s", err, out)
+	}
+}
+
+// buildBehaviorsProbeScript checks the behavior types fixture's models
+// (D58): TicketBehaviors parses a read's behaviors, each behavior under its
+// exact name, and writes them back unchanged; a state Ticket's Workflow does
+// not have is refused; a type whose behaviors declare no field parses {}.
+func buildBehaviorsProbeScript(importPaths []string, moduleName string) string {
+	var b strings.Builder
+	b.WriteString("import json\nimport sys\n")
+	b.WriteString("from pydantic import ValidationError\n")
+	for _, importPath := range importPaths {
+		fmt.Fprintf(&b, "sys.path.insert(0, %q)\n", importPath)
+	}
+	fmt.Fprintf(&b, "from %s import NoteBehaviors, TicketBehaviors, TicketState\n", moduleName)
+	fmt.Fprintf(&b, "read = %q\n", behaviortypestest.TicketBehaviors)
+	b.WriteString("behaviors = TicketBehaviors.from_json(read)\n")
+	b.WriteString("assert behaviors.workflow.status == TicketState.InProgress, behaviors.workflow\n")
+	b.WriteString("assert behaviors.comments.comment_count == 2\n")
+	b.WriteString("assert behaviors.revisions.pending_proposals is None\n")
+	b.WriteString("assert behaviors.links.targets.spec.schema_ == 'documents' and behaviors.links.targets.spec.stale\n")
+	b.WriteString("assert [r.id for r in behaviors.links.targets.reviewers] == ['ana', 'bo']\n")
+	b.WriteString("assert behaviors.timers.deadlines.close is None and behaviors.timers.deadlines.respond.outcome == 'moved'\n")
+	b.WriteString("assert behaviors.acme_rating.rating_average == 4.5\n")
+	b.WriteString("assert behaviors.to_json_dict() == json.loads(read), behaviors.to_json_dict()\n")
+	b.WriteString("assert TicketBehaviors.from_dict(json.loads(read)) == behaviors\n")
+	b.WriteString("try:\n")
+	b.WriteString("    TicketBehaviors.from_json(read.replace('in-progress', 'closed'))\n")
+	b.WriteString("except ValidationError:\n")
+	b.WriteString("    pass\n")
+	b.WriteString("else:\n")
+	b.WriteString("    raise AssertionError('a state the Workflow lacks was accepted')\n")
+	b.WriteString("assert NoteBehaviors.from_json('{}').to_json_dict() == {}\n")
+	return b.String()
 }
 
 // buildGenericJSONProbeScript checks the generated Generic.JSON field: every

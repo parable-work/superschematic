@@ -697,7 +697,9 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `behaviors["acme.Rating"].ratingCount`, apart from the type's own
   fields and every other behavior's, so none collides, and a filter or a
   display names one by its qualified name, `acme.Rating.ratingCount`.
-  A config never renames a field.
+  A config never renames a field. A field the engine computes at a read
+  from other instances, the clock or the config says `"volatile": true`,
+  since no event of its instance records its moves.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an
@@ -760,11 +762,22 @@ so the service lists the file in its `tsconfig.json` `include`, as acme's
 
 The loader checks each entry against its declaration and names the type
 and the behavior when it fails; `json-schema` limits the names to the
-registered behaviors and holds each config to its schema. No generator
-renders behaviors yet, so `build` refuses such a schema and names the
-generator; `build --emit-ir`, `format` and `json-schema` accept it. A
-generator whose output covers what behaviors add sets
-`GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` and
+registered behaviors and holds each config to its schema. The core's
+`types` generator renders behaviors: its `<Type>Behaviors` holds your
+behavior's fields under its exact name, typed as any JSON, since a
+declaration names a field without a schema, and in Go, Rust and Python
+under the name in PascalCase (`acme.Rating` is `AcmeRating`). The DB and
+General pipelines build such a schema: on a DB type a behavior makes an
+engine type, which `sql` and `orm` leave out and the `enginedoc`
+generator writes into the engine document, with your behavior and the
+`Package` its `BehaviorSpec` names
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+An API's own type cannot compose one, and the API generators refuse an
+API that uses an engine type, naming themselves. A generator of yours
+whose output covers what behaviors add, or holds nothing a type's
+behaviors add, as acme's manifest lists type names, sets
+`GeneratorSpec.RendersBehaviors`; without it, a build of such a schema
+that runs it fails and names it. acme's `shop-ratings` and
 `shop-ratings-ts` services (`ext/testdata/services`) compose
 `acme.Rating`.
 
@@ -880,7 +893,7 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants`, `Variants` and `Branches`, when it opens; `behaviors` adds yours beside them, as it adds
+`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and `Approvals`, when it opens; `behaviors` adds yours beside them, as it adds
 the core's [work-queue behaviors](/superschematic/guides/work-queues/)
 from `@superschematic/engine-workqueue`. No core operation names an
 invocation policy, so their tools take the default of the policy you

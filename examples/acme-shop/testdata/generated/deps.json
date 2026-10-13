@@ -71,7 +71,8 @@
       "service": "shop-orders",
       "deps": [
         "shop-db-orm",
-        "shop-orders-types"
+        "shop-orders-types",
+        "shop-stock-sdk"
       ]
     },
     {
@@ -95,6 +96,26 @@
       "deps": [
         "shop-db-types"
       ]
+    },
+    {
+      "id": "shop-stock-sdk",
+      "language": "go",
+      "kind": "sdk",
+      "name": "example.com/acme/sdk/go/shop-stock",
+      "path": "sdk/go/shop-stock",
+      "service": "shop-stock",
+      "deps": [
+        "shop-stock-types"
+      ]
+    },
+    {
+      "id": "shop-stock-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-stock",
+      "path": "types/go/shop-stock",
+      "service": "shop-stock",
+      "deps": null
     },
     {
       "id": "shop-common-types",
@@ -175,6 +196,37 @@
       "deps": [
         "shop-db-types"
       ]
+    },
+    {
+      "id": "shop-stock-api",
+      "language": "rust",
+      "kind": "api",
+      "name": "acme-shop-stock-api",
+      "path": "api/shop-stock",
+      "service": "shop-stock",
+      "deps": [
+        "shop-stock-types"
+      ]
+    },
+    {
+      "id": "shop-stock-sdk",
+      "language": "rust",
+      "kind": "sdk",
+      "name": "acme-shop-stock-sdk",
+      "path": "sdk/rust/shop-stock",
+      "service": "shop-stock",
+      "deps": [
+        "shop-stock-types"
+      ]
+    },
+    {
+      "id": "shop-stock-types",
+      "language": "rust",
+      "kind": "types",
+      "name": "acme-shop-stock-types",
+      "path": "types/rust/shop-stock",
+      "service": "shop-stock",
+      "deps": null
     },
     {
       "id": "shop-api-sdk",

@@ -10,7 +10,11 @@ import (
 // 3.4). The platform sets the derived field, so a setting of that name
 // would be set twice. The naming file's [derived_fields] names the derived
 // fields. An API with a service clause also has its callers field, which
-// the http edges to it derive (ir.CallersField).
+// the http edges to it derive (ir.CallersField). An API whose authDb has a
+// User table also has its identity config field (ir.IdentityConfigField,
+// D50), which each of its servers reads in a stack: in.AuthDB is that
+// authDb, which the loader reads for an API with an @envVars field that
+// takes the field's name (TakesIdentityConfigField).
 func checkDerivedFields(schema *ir.Schema, in Input, r *Result) {
 	type derivedField struct{ name, from string }
 	var derived []derivedField
@@ -19,6 +23,9 @@ func checkDerivedFields(schema *ir.Schema, in Input, r *Result) {
 	}
 	if schema.Kind == ir.SchemaKindAPI && schema.HasServiceCallers() {
 		derived = append(derived, derivedField{ir.CallersField(schema.Name), "the callers field the http edges to " + schema.Name + " derive"})
+	}
+	if schema.Kind == ir.SchemaKindAPI && in.AuthDB != nil && in.AuthDB.UserTable() != nil {
+		derived = append(derived, derivedField{ir.IdentityConfigField(schema.Name), "the identity config field of " + schema.Name + ", whose authDb " + in.AuthDB.Name + " has a User table"})
 	}
 	if len(derived) == 0 {
 		return
@@ -36,4 +43,29 @@ func checkDerivedFields(schema *ir.Schema, in Input, r *Result) {
 			}
 		}
 	}
+}
+
+// TakesIdentityConfigField reports whether an @envVars field of the API
+// schema takes the name of its identity config field
+// (ir.IdentityConfigField), or a name that begins with it and an
+// underscore. The API has that field when its authDb has a User table
+// (D50), so the loader reads the authDb of such a schema, as it does for
+// one with a user model route set, and checkDerivedFields refuses the
+// field.
+func TakesIdentityConfigField(schema *ir.Schema) bool {
+	if schema.Kind != ir.SchemaKindAPI {
+		return false
+	}
+	identity := ir.IdentityConfigField(schema.Name)
+	for _, typ := range schema.Types {
+		if typ == nil || !typ.EnvVars {
+			continue
+		}
+		for _, field := range typ.Fields {
+			if ir.DerivedFieldClaims(identity, field.Name) {
+				return true
+			}
+		}
+	}
+	return false
 }

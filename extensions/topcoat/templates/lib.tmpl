@@ -25,14 +25,30 @@
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
 {{- end }}
+{{- if .HasChoices }}
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
+{{- end }}
+{{- if .Pages }}
+//! `pages` serves a page per resource the operations describe, under
+//! `{{ .Pages.Prefix }}`, with a layout and a nav; the app's `.discover()`
+//! registers them, and `pages::Settings` in its app context names its
+//! sign-in page and its choices.
+{{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+{{ if .HasChoices -}}
+pub mod choices;
+{{ end -}}
 {{ if .HasForms -}}
 pub mod forms;
 {{ end -}}
 pub mod operations;
+{{- if .Pages }}
+pub mod pages;
+{{- end }}
 {{- if .Procedures }}
 pub mod procedures;
 {{- end }}

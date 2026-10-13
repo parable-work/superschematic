@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -157,7 +158,11 @@ func TestLocalStackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev"})
+	// The environment resolves in a checkout of the test's own, whose
+	// containers are named for it.
+	root := t.TempDir()
+	schemasRoot := filepath.Join(root, "schemas")
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev", SchemasRoot: schemasRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +174,10 @@ func TestLocalStackRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	container, storage := local.ContainerName(stackName, "Dev"), local.StorageContainerName(stackName, "Dev")
+	checkout := local.Checkout(schemasRoot, stackName, "Dev")
+	container, storage := local.ContainerName(stackName, "Dev", checkout), local.StorageContainerName(stackName, "Dev", checkout)
 	emulator := local.StorageURL(storagePort)
 
-	root := t.TempDir()
 	outputRoot := filepath.Join(root, "dist")
 	for _, server := range []string{"ledger-api", "ledger-worker"} {
 		copyFakeServer(t, filepath.Join(outputRoot, local.ModulePath(stackName, server)))
@@ -191,7 +196,7 @@ func TestLocalStackRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), stackName, "Dev")
+	stateDir, err := local.EnsureStateDir(schemasRoot, stackName, "Dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +456,148 @@ func TestLocalTypeScriptServerRuns(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
+}
+
+// TestLocalRustServerRuns applies a local environment of one Rust server
+// for real, with cargo and no Docker (D57): the provisioner builds a fake
+// server's crate, which honours the entrypoint's contract, with `cargo
+// build --release --locked` into the program directory's target
+// directory, runs the binary its Cargo.toml names from target/release,
+// waits for /readyz, and the server reads its resolved environment and no
+// more of the test's. Destroy stops it with SIGTERM, which it answers
+// before it exits. Applied again, it builds into the same target
+// directory, where the binary is current.
+func TestLocalRustServerRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: the local stack builds a Rust server with cargo")
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skipf("cargo is not available: %v", err)
+	}
+	stackName := fmt.Sprintf("local-target-rs-it-%d", os.Getpid())
+	port := freePort(t)
+	api := ir.ServiceRef{Name: "ledger-rs", Kind: ir.SchemaKindAPI}
+	greeting := "hello"
+	services := []stack.Service{{
+		Name: "ledger-rs", Kind: ir.SchemaKindAPI, Language: registry.APILanguageRust,
+		Config: &stack.Config{
+			Type:   "LedgerConfig",
+			Fields: []stack.ConfigField{{Name: "GREETING", Required: true, Default: &greeting}},
+		},
+		Operations: []stack.Operation{{Name: "Accounts.getBalance"}},
+	}}
+	st := &ir.Stack{
+		Name:   stackName,
+		Deploy: []ir.ServiceRef{api},
+		Environments: []*ir.Environment{{
+			Name:     "Dev",
+			Target:   local.Target,
+			Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Service: &api}, Values: map[string]any{"port": float64(port)}}},
+		}},
+	}
+	reg, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRoot := filepath.Join(root, "dist")
+	module := filepath.Join(outputRoot, local.ModulePath(stackName, "ledger-rs"))
+	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "fakerustserver"))); err != nil {
+		t.Fatal(err)
+	}
+	stateDir, err := local.EnsureStateDir(filepath.Join(root, "schemas"), stackName, "Dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LEDGER_LEAK", "leaked")
+
+	out := &syncBuffer{}
+	prov := &local.Provisioner{Out: out, ReadyTimeout: time.Minute}
+	dir := filepath.Join(root, "program")
+	req := registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)}
+	t.Cleanup(func() {
+		_ = prov.Destroy(context.Background(), req)
+		if t.Failed() || testing.Verbose() {
+			t.Logf("provisioner output:\n%s", out)
+		}
+	})
+	if err := prov.Render(env, dir); err != nil {
+		t.Fatal(err)
+	}
+	apply := func() {
+		t.Helper()
+		for _, step := range env.DeployOrder {
+			if err := prov.Apply(context.Background(), req, *step); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	apply()
+	binary := filepath.Join(dir, local.RustTargetDir, "release", "fake-rust-server")
+	built, err := os.Stat(binary)
+	if err != nil {
+		t.Fatalf("the build wrote no binary at %s: %v", binary, err)
+	}
+	if entries, err := os.ReadDir(module); err != nil || slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "target" }) {
+		t.Errorf("cargo wrote a target directory into the server's module, which each build of the stack empties: %v", err)
+	}
+
+	resp, err := http.Get(local.ServerURL(port) + "/env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&got)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["PORT"] != fmt.Sprint(port) || got["GREETING"] != "hello" {
+		t.Errorf("the server got PORT=%q GREETING=%q, want %d and hello", got["PORT"], got["GREETING"], port)
+	}
+	if _, leaked := got["LEDGER_LEAK"]; leaked {
+		t.Error("the server inherited a variable its environment does not bind")
+	}
+
+	if err := prov.Destroy(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := http.Get(local.ServerURL(port) + "/readyz"); err == nil {
+		t.Error("the server still answers after Destroy")
+	}
+	for _, want := range []string{
+		"build ledger-rs: cargo build --release --locked in server/" + stackName + "/ledger-rs",
+		"[ledger-rs] fake Rust server listening on 127.0.0.1:" + fmt.Sprint(port),
+		"[ledger-rs] fake Rust server stopped",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+
+	// Applied again over the same target directory, cargo finds the
+	// binary current and leaves it as it was.
+	apply()
+	again, err := os.Stat(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.ModTime().Equal(built.ModTime()) {
+		t.Errorf("the second build wrote the binary again (%s, then %s); it should reuse the target directory", built.ModTime(), again.ModTime())
+	}
+	resp, err = http.Get(local.ServerURL(port) + "/readyz")
+	if err != nil {
+		t.Fatalf("the server is not ready after the second apply: %v", err)
+	}
+	_ = resp.Body.Close()
 }
 
 // checkToken checks a compact JWS as D37 says the callee does: its header's

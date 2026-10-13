@@ -57,13 +57,18 @@ const ormGenerator = "orm"
 // registry cannot import. Core registers no documents and no build-all
 // hooks; extensions do.
 //
-// Registration order fixes Registry.OutputKeys: types, sql, api, sdk, ci is the
-// order the ParseOutputs error lists.
+// Registration order fixes Registry.OutputKeys: types, sql, api, sdk, ci,
+// engine is the order the ParseOutputs error lists.
 func RegisterCore(reg *registry.Registry) error {
 	specs := []registry.GeneratorSpec{
 		{
 			Name:      typesGenerator,
 			OutputKey: "types",
+			// Each language's types write <T>Behaviors for a type that
+			// composes behaviors: each behavior's fields as a read
+			// returns them, narrowed by the type's config (D58). The
+			// own-field type stays the instance's data.
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledTypeLanguages() {
@@ -83,6 +88,9 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:         "sql",
 			OutputKey:    "sql",
 			OutputSchema: sqlOutputSchema,
+			// An engine type, a DB type that composes a behavior, gets
+			// no table: the engine keeps its instances (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{SQLDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -93,6 +101,8 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			Name: ormGenerator,
+			// An engine type gets no repository (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -135,6 +145,10 @@ func RegisterCore(reg *registry.Registry) error {
 			// path; a no-op when the schema declares no @envVars class. Its
 			// language follows outputs.types (envLoaderLanguage).
 			Name: "envConfig",
+			// It reads the @envVars class alone, which composes no
+			// behavior, so a General schema whose types compose
+			// behaviors builds: its types write <T>Behaviors (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -201,6 +215,24 @@ func RegisterCore(reg *registry.Registry) error {
 			Enabled: cigen.Enabled,
 			Generate: func(c registry.GenerateContext) error {
 				return run{c}.measure("output.ci", func() error { return cigen.Generate(c) })
+			},
+		},
+		{
+			// The engine document of a DB schema whose types compose
+			// behaviors, its engine types (D58): engine/<schema>.json in
+			// the Go types module, which the types generator holds as a
+			// constant in Go, TypeScript and Rust too
+			// (internal/generator/enginedoc). It writes nothing for a
+			// schema with no engine type, and claims no directory: the
+			// document sits in the Go types module, which the types
+			// generator claims. outputs.engine names the namespace.
+			Name:             enginedocGenerator,
+			OutputKey:        "engine",
+			OutputSchema:     engineOutputSchema,
+			RendersBehaviors: true,
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.engine", r.generateEngineDocument)
 			},
 		},
 	}

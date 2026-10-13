@@ -13,7 +13,6 @@ import {
   InstanceValidationError,
   allowAll,
   defineBehavior,
-  openEngine,
   type AccessPolicy,
   type AccessRequest,
   type BehaviorDeclaration,
@@ -25,18 +24,19 @@ import {
   type Principal,
 } from '../dist/index.js';
 import { counter, openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { testHooks } from './recorder.ts';
 import { runnerPrincipal, testClock } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   flags.fieldCreates = false;
-  cleanup();
+  cleanup(t);
 });
 
 const bob: Principal = { subject: 'bob', permissions: [] };
 
-/** What the running test makes the behaviors do beyond their config. */
-const flags = { fieldCreates: false };
+/** What the running test makes the behaviors do beyond their config: a recorder hook. */
+const flags = testHooks('flags', { fieldCreates: false });
 
 const spawnParams = {
   type: 'object',

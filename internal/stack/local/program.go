@@ -34,6 +34,15 @@ const MigrationsDir = "migrations"
 // binary is built into.
 const binDir = "bin"
 
+// RustTargetDir is the Cargo target directory, under the program
+// directory, every Rust server of the environment builds into (D57): cargo
+// keeps its compiled dependencies there between runs, where the server's
+// own directory, which each build of the stack empties, would lose them.
+// The binary runs from `target/release/<binary>`, the binary the crate's
+// Cargo.toml names. The output root a project ignores holds it, and a
+// Dockerfile's ignore file leaves out every `target` directory.
+const RustTargetDir = "target"
+
 // Program is what the local provisioner runs for one environment: the
 // environment's resource graph read into the containers, databases,
 // buckets and processes it starts, in deploy order. Render writes it as
@@ -140,8 +149,11 @@ type Migration struct {
 // Server is a process node: the server's entrypoint, started with its
 // environment, then probed until it is ready. A Go server's module is
 // built into Binary first; a TypeScript server's main.ts runs on Bun, with
-// no binary. A worker's process (Kind "worker", D53) has no port and no
-// URL, and is ready once it starts (ReadinessStarted).
+// no binary; a Rust server's crate is built into RustTargetDir, and the
+// binary its Cargo.toml names, which the provisioner reads as it builds,
+// runs from there, so Binary is empty (D57). A worker's process (Kind
+// "worker", D53) has no port and no URL, and is ready once it starts
+// (ReadinessStarted).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
@@ -167,16 +179,18 @@ func (s *Server) what() string {
 
 // Job is a job node (D52): the job's entrypoint module, built with the
 // servers and run with its environment on its schedule, in its time zone,
-// while the environment runs, or once by `stack run`. A run that outlives
-// TimeoutSeconds is stopped, and a failed run is run again up to Retries
-// times.
+// while the environment runs, or once by `stack run`. A Go job's module is
+// built into Binary; a TypeScript job's main.ts runs on Bun, with no
+// binary. A run that outlives TimeoutSeconds is stopped, and a failed run
+// is run again up to Retries times.
 type Job struct {
 	ID             string   `json:"id"`
 	Deployable     string   `json:"deployable"`
 	Name           string   `json:"name"`
 	Wave           int      `json:"wave"`
+	Language       string   `json:"language"`
 	Module         string   `json:"module"`
-	Binary         string   `json:"binary"`
+	Binary         string   `json:"binary,omitempty"`
 	API            string   `json:"api"`
 	Job            string   `json:"job"`
 	Schedule       string   `json:"schedule,omitempty"`
@@ -598,9 +612,9 @@ func serverOf(res *ir.Resource) (*Server, error) {
 	switch s.Language, _ = res.Properties["language"].(string); s.Language {
 	case LanguageGo:
 		s.Binary = filepath.ToSlash(filepath.Join(binDir, s.Name))
-	case LanguageTypeScript:
+	case LanguageTypeScript, LanguageRust:
 	default:
-		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s servers", s.Language, LanguageGo, LanguageTypeScript)
+		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s, %s and %s servers", s.Language, LanguageGo, LanguageTypeScript, LanguageRust)
 	}
 	if kind, set := res.Properties["kind"]; set {
 		if s.Kind, ok = kind.(string); !ok || s.Kind != "worker" {
@@ -663,7 +677,13 @@ func jobOf(res *ir.Resource) (*Job, error) {
 	if j.Retries, ok = intValue(res.Properties["retries"]); !ok || j.Retries < 0 {
 		return nil, fmt.Errorf("its retries is not a number of zero or more")
 	}
-	j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
+	switch j.Language, _ = res.Properties["language"].(string); j.Language {
+	case LanguageGo:
+		j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
+	case LanguageTypeScript:
+	default:
+		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s jobs", j.Language, LanguageGo, LanguageTypeScript)
+	}
 	env, err := envOf(res.Properties["env"])
 	if err != nil {
 		return nil, err

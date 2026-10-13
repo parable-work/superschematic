@@ -10,7 +10,7 @@ import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 afterEach(cleanup);
 
 // The core's behaviors, which every engine registers when it opens.
-const CORE = ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow'];
+const CORE = ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow'];
 
 // refusal registers an implementation with a fresh engine and returns the message it is refused with.
 function refusal(implementation: AnyBehaviorImplementation): string {
@@ -112,6 +112,7 @@ describe('behavior registration refuses', () => {
       [(d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'), /operation increment scope "type" is not "instance" or "schema"/],
       [(d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
       [(d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],
+      [(d) => ((d.fields as Array<Record<string, unknown>>)[0].volatile = 'yes'), /fields\[0\]\.volatile is a boolean/],
       [(d) => (d.requires = ['test.Counter']), /requires names the behavior itself/],
       [(d) => ((d.requires = ['test.Flag']), (d.conflicts = ['test.Flag'])), /it both requires and conflicts with test\.Flag/],
       [(d) => (d.configSchema = { type: 'object', properties: { start: { type: 'nonsense' } } }), /configSchema does not compile/],

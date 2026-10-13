@@ -20,11 +20,19 @@
 //! [`Engine::run_sweeper`] are the graph's maintenance.
 //!
 //! The engine's operations are `async`: each runs in one transaction of its
-//! [`Storage`]. [`postgres`] is the Postgres adapter, with a default client
+//! [`Storage`]. [`Engine::on`] runs them over a storage the caller lends
+//! instead, which may borrow a transaction the caller holds, and
+//! [`Engine::run_on`] runs one so synchronously, polling it once with
+//! [`ready`]: over a storage whose futures are always ready, an operation
+//! awaits nothing else. [`Engine::unbound`] is an engine with no storage of
+//! its own, for a host that lends one to every operation. [`postgres`] is
+//! the Postgres adapter, with a default client
 //! over tokio-postgres (the `tokio-postgres` feature, on by default), and
 //! [`sqlite`] the SQLite adapter (D32), which keeps every graph in one fixed
 //! layout of tables, with a default client over rusqlite (the `rusqlite`
-//! feature, off by default).
+//! feature, off by default). [`fixed`] is that layout in either dialect,
+//! SQLite or Postgres without a trigger (D58), with [`fixed::HostClient`],
+//! which runs it in a synchronous transaction a host holds.
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), superschematic_versiongraph_engine::Error> {
@@ -50,6 +58,7 @@ mod core;
 mod engine;
 mod error;
 pub mod facade;
+pub mod fixed;
 pub mod postgres;
 pub mod sqlite;
 pub mod storage;
@@ -57,8 +66,8 @@ mod sweep;
 
 pub use crate::core::{Change, Conflict, Finding, Resolution, Take, Tree};
 pub use crate::engine::{
-    CommitOptions, CommitResult, Edits, Engine, KindEdits, MergeResult, Options, ReleasedResult,
-    SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY, DEFAULT_WALK_CEILING,
+    ready, CommitOptions, CommitResult, Edits, Engine, EngineOn, KindEdits, MergeResult, Options,
+    ReleasedResult, SaveResult, TreeResult, DEFAULT_SNAPSHOT_EVERY, DEFAULT_WALK_CEILING,
 };
 pub use crate::error::Error;
 pub use crate::storage::{Commit, Ref, Release, Storage};

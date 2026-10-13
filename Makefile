@@ -46,7 +46,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust engine-rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -106,8 +106,9 @@ go-goldens: schema-file-types
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
-# The schema-file JSON Schema and TypeScript types in ir/typescript are
-# written from the IR structs. CI fails when a committed file differs.
+# The schema-file JSON Schema and TypeScript types in ir/typescript, and the
+# engine's Rust schema reader's copy of the JSON Schema, are written from
+# the IR structs. CI fails when a committed file differs.
 schema-file-types:
 	go run ./internal/tools/schemafiletypes
 
@@ -140,16 +141,21 @@ cloudflare-schemas-check:
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
 # with no extension linked writes into the package that implements it
-# (--package). CI fails when a committed copy differs.
+# (--package). The Rust engine's behaviors crate (D58) carries a copy of the
+# engine package's declarations too, which each behavior embeds with
+# include_str!. CI fails when a committed copy differs.
 ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
 WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 
 behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 
 behaviors-check:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 
 ts:
@@ -181,10 +187,16 @@ python:
 # too, and its lints run with and without each of its features. The schema
 # runtime's run again with arbitrary_precision too, which superscalar's
 # default lossless-json feature turns on: an error map and a number check
-# must not depend on either. The http runtime's run again with its optional
-# http-client feature, and with its identity features, whose store and route
-# tests run on SQLite (and on the Postgres
-# SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set).
+# must not depend on either. The engine's schema reader (rust-ir) links
+# superscalar's core from the checkout `make setup` stands up, so
+# preserve_order is always on there; its lints and tests run with its
+# schemafile feature and without, and again with arbitrary_precision. The
+# http runtime's run again with its optional http-client feature, with its
+# identity features, whose store and route tests run on SQLite (and on the
+# Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set),
+# and with a stack server's features (D57): postgres, whose tests run on the
+# Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set,
+# and logging.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -192,9 +204,18 @@ rust:
 		&& cargo clippy --all-targets --features http-client -- -D warnings && cargo test --features http-client \
 		&& cargo clippy --all-targets --features identity -- -D warnings \
 		&& cargo clippy --all-targets --features identity-postgres,identity-sqlite -- -D warnings \
-		&& cargo test --features identity-postgres,identity-sqlite
+		&& cargo test --features identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features postgres -- -D warnings \
+		&& cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings \
+		&& cargo test --features postgres,identity-postgres,identity-sqlite \
+		&& cargo clippy --all-targets --features logging -- -D warnings && cargo test --features logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --all-targets --all-features -- -D warnings \
+		&& cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings \
+		&& cargo test && cargo test --all-features \
+		&& cargo test --all-features --features serde_json/arbitrary_precision
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
 		&& cargo test --features serde_json/preserve_order
@@ -203,6 +224,27 @@ rust:
 		&& cargo clippy --no-default-features -- -D warnings \
 		&& cargo clippy --no-default-features --features rusqlite -- -D warnings \
 		&& cargo test --features rusqlite && cargo test --features rusqlite,serde_json/preserve_order
+
+# The Rust engine's workspace (D58): every crate's format, its lints on
+# every feature combination of the databases (both, neither, and each
+# alone), and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The
+# engine reads schemas through runtime/schema/rust-ir, which needs the
+# superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
+# and the storage's tests run on SQLite, and on Postgres as well when
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
+# own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
+# each in a schema it creates and drops; without it they skip that pass.
+# The test kit replays the scenario corpus
+# (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
+# names) on the same databases, and fails when the corpus is missing.
+# CI runs the same commands as the engine-rust job, against its Postgres.
+engine-rust:
+	cd runtime/engine/rust && cargo fmt --all --check \
+		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
+		&& cargo test --workspace --all-features
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
@@ -243,19 +285,21 @@ versiongraph-scenarios-ts:
 		test/facade.test.ts test/gained-column.test.ts
 
 # Every version-graph scenario through the Rust engine. First on SQLite
-# (D32): the SQLite adapter over rusqlite (the rusqlite feature), with the
-# adapter's own tests, every canonical vector as a round trip and the SQLite
-# vectors, which need no database server and run with or without a Postgres
-# URL (the URL is unset for them, so the Postgres tests skip here and run
-# below). Then on Postgres: the Postgres adapter, and the crate's other
-# Postgres tests (every canonical vector's rendering, the adapter, the
-# sweeper), against the Postgres that
+# (D32): the SQLite adapter over rusqlite (the rusqlite feature), and its
+# fixed layout inside a host's transaction over plain rusqlite (D58), with
+# the adapter's own tests, every canonical vector as a round trip and the
+# SQLite vectors, which need no database server and run with or without a
+# Postgres URL (the URL is unset for them, so the Postgres tests skip here
+# and run below). Then on Postgres: the Postgres adapter, the fixed layout
+# on Postgres inside a host's transaction over the synchronous postgres
+# client, and the crate's other Postgres tests (every canonical vector's
+# rendering, the adapter, the sweeper), against the Postgres that
 # SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names; that pass fails
 # without it. It runs every test target with the feature on, so the SQLite
 # tests run again there, and one build serves both passes.
 versiongraph-scenarios-rust:
 	cd runtime/versiongraph/rust-engine && env -u SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL \
-		cargo test --features rusqlite --test scenarios --test sqlite -- --nocapture
+		cargo test --features rusqlite --test scenarios --test sqlite --test host -- --nocapture
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against (the SQLite pass above needs none)" >&2; exit 1; }
 	cd runtime/versiongraph/rust-engine && cargo test --tests --features rusqlite -- --nocapture
@@ -286,19 +330,27 @@ docs:
 # The core with no extension linked (CORE_BIN) builds a DB, an API and a
 # General service from the fixture corpus, and loads fixture-behaviors-json,
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
-# fixture-reactions-json, fixture-variants-json, fixture-branches-json and
-# fixture-workqueue-json, whose types compose the core's behaviors (D10):
-# --emit-ir carries all eighteen and json-schema admits them. The engine
-# runs the first seven documents with its own behaviors in
-# runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
-# package runs the last in
-# runtime/engine-workqueue/typescript/test/package.test.ts.
+# fixture-reactions-json, fixture-variants-json, fixture-branches-json,
+# fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
+# fixture-timers-json and fixture-workqueue-json, whose types compose the
+# core's behaviors (D10): --emit-ir carries all twenty-two and json-schema
+# admits them. The engine runs the first eleven documents with its own
+# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
+# the work-queue package runs the last in
+# runtime/engine-workqueue/typescript/test/package.test.ts. It builds
+# fixture-behaviors-json, a General schema, and fixture-engine-db-json,
+# whose engine types the sql generator leaves out and whose engine
+# document the build writes (D58).
 cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
 		$(CORE_BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@for s in fixture-db-json fixture-general-yaml; do \
+	@for s in fixture-db-json fixture-general-yaml fixture-engine-db-json fixture-behaviors-json; do \
 		$(CORE_BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+	@grep -q '"namespace": "fixture-engine-db"' /tmp/superschematic-cli-smoke/types/go/fixture-engine-db/engine/fixture-engine-db.json \
+		|| { echo "cli-smoke: the engine fixture's build wrote no engine document"; exit 1; }
+	@! grep -qi 'ticket' /tmp/superschematic-cli-smoke/sql/fixture-engine-db/create.sql \
+		|| { echo "cli-smoke: sql wrote a table for an engine type"; exit 1; }
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \
@@ -313,10 +365,18 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-branches-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-staterules-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-approvals-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-numbering-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-timers-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches Lease Assignment Queue Presence Blueprint Budget Retries; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Lease Assignment Queue Presence Blueprint Budget Retries; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 
@@ -343,7 +403,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behaviors-check ts python rust cli-smoke example-migrations versions
+test: go-test catalog-check schema-file-types-check behaviors-check ts python rust engine-rust cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 
@@ -355,6 +415,7 @@ fmt:
 	cd runtime/versiongraph/rust && cargo fmt
 	cd runtime/versiongraph/rust-engine && cargo fmt
 	cd runtime/versiongraph/python && cargo fmt
+	cd runtime/engine/rust && cargo fmt --all
 
 clean:
 	rm -rf bin

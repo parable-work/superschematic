@@ -1,7 +1,7 @@
 {
   "name": {{ quote .Package }},
   "version": "0.0.0",
-  "description": "Server {{ .Name }} of stack {{ .Stack }}, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "description": "{{ capitalize .Kind }} {{ .Name }} of stack {{ .Stack }}, which superschematic writes on every build of the stack. DO NOT EDIT.",
   "private": true,
   "type": "module",
   "main": "main.ts",

@@ -1,0 +1,10 @@
+# The database of rs-stock, its authDb: its User and UserRole tables are
+# the user model's (D50), and the loader adds Session, UserCredential and
+# UserRoleGrant beside them. rs-stock's Rust server opens a Postgres pool
+# on it and builds the identity store over that pool, so it generates no
+# Rust; its Go types are the Go ORM's, which a DB always generates.
+name: rs-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }

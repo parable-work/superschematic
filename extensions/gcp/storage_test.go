@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
-	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
 	"github.com/parable-work/superschematic/stack/stacktest"
 
@@ -203,17 +202,15 @@ func TestBucketConnectorFromAJob(t *testing.T) {
 }
 
 // TestBucketConnectorRefusesRust checks that a Rust server's bucket edge
-// fails to lower: the Rust runtime has no Bucket.
+// fails to lower, though its sql edge lowers: the Rust runtime has no
+// Bucket, and D57 leaves buckets from a Rust server out.
 func TestBucketConnectorRefusesRust(t *testing.T) {
-	services := stacktest.AcmeShop()
-	for i := range services {
-		if services[i].Name == "shop-api" {
-			services[i].Language = registry.APILanguageRust
-		}
-	}
+	services := stacktest.InRust(stacktest.AcmeShop(), "shop-api")
 	_, err := stack.Resolve(assemble(t), stack.Input{Stack: shop(), Services: services, Environment: "Staging"})
-	if err == nil || !strings.Contains(err.Error(), "no Bucket in its runtime to reach bucket shop-media") {
-		t.Fatalf("err = %v, want a lowering error about the Rust runtime's Bucket", err)
+	var errs *stack.Errors
+	if !errors.As(err, &errs) || len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering ||
+		!strings.Contains(errs.List[0].Message, "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)") {
+		t.Fatalf("err = %v, want the one lowering error of the Rust server's bucket edge", err)
 	}
 }
 

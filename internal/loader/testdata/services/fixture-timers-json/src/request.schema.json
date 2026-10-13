@@ -1,0 +1,50 @@
+{
+  "kind": "General",
+  "name": "requests",
+  "description": "A support request an engine runs with the core's Workflow and Timers and no extension: one open four hours without an answer is escalated, one waiting a week on its customer is resolved, and a visit is reminded a day before its time. Leaving open or waiting cancels its deadline, and a principal with requests.timers resets or snoozes one.",
+  "scalars": {
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "languagePrimitive": "string"
+    }
+  },
+  "types": {
+    "Request": {
+      "name": "Request",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["open", "waiting", "escalated", "resolved"],
+            "transitions": [
+              { "from": "open", "to": "waiting" },
+              { "from": "waiting", "to": "open" },
+              { "from": "open", "to": "escalated" },
+              { "from": "escalated", "to": "open" },
+              { "from": "open", "to": "resolved" },
+              { "from": "waiting", "to": "resolved" },
+              { "from": "escalated", "to": "resolved" }
+            ]
+          }
+        },
+        {
+          "name": "Timers",
+          "config": {
+            "deadlines": {
+              "respond": { "start": { "enters": "open" }, "afterMs": 14400000, "then": { "transition": "escalated" }, "until": { "leaves": "open" } },
+              "lapse": { "start": { "enters": "waiting" }, "afterMs": 604800000, "then": { "transition": "resolved" }, "until": { "leaves": "waiting" } },
+              "remind": { "start": { "field": "visitAt" }, "afterMs": -86400000, "until": { "enters": ["resolved"] } }
+            },
+            "sweepMs": 60000,
+            "permission": "requests.timers"
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "visitAt", "typeRef": { "name": "Temporal.DateTime" } }
+      ]
+    }
+  }
+}

@@ -297,6 +297,13 @@ stops the servers and the containers, which keep their data for the next
 run: the databases, and the buckets' objects. --remove-data removes the
 containers and their data instead.
 
+Each checkout of the repository runs the environment in containers of its
+own, named for a hash of its state directory, on ports shifted by it, so
+two worktrees run one stack at once; --remove-data removes this
+checkout's alone. A container an older superschematic created for the
+environment, which names no checkout, stays with its data: dev prints the
+docker rm that removes it.
+
 The environment is --environment, or the stack's one environment on the local
 target. A secret a server reads comes from
 <schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env, a line
@@ -322,7 +329,7 @@ Examples:
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
-	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove the environment's containers and their data, the Postgres databases and the buckets' objects, instead of stopping them")
+	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them")
 	// The flag's name before the storage emulator's container joined
 	// Postgres's (D54): it removes both.
 	cmd.Flags().BoolVar(&flags.removeData, "remove-database", false, "")

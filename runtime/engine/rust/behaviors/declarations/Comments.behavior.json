@@ -1,0 +1,137 @@
+{
+  "name": "Comments",
+  "description": "Comments on the instance, each a reply to another or not. A caller who may write the instance adds one; a caller who may read it lists them. Deleting the instance deletes its comments.",
+  "fields": [
+    {
+      "name": "commentCount",
+      "description": "How many comments the instance has."
+    }
+  ],
+  "operations": [
+    {
+      "name": "comment",
+      "description": "Adds a comment to the instance, or a reply to one of its comments.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "The comment's text.",
+            "maxLength": 10000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "replyTo": {
+            "description": "The id of the instance's comment this one replies to.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The comment.",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "When, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "createdBy": {
+            "description": "The subject of the caller who added it.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The comment's number on the instance: 1, 2, 3, ...",
+            "type": "integer"
+          },
+          "replyTo": {
+            "description": "The id of the comment it replies to.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "createdBy",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "listComments",
+      "description": "Lists the instance's comments, oldest first, one page at a time.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many comments; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "integer"
+                },
+                "createdBy": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "integer"
+                },
+                "replyTo": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "body",
+                "createdBy",
+                "createdAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

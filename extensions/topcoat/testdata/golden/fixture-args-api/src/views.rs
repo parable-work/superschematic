@@ -9,16 +9,39 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
+use crate::choices::Choices;
 use crate::records::{OrderNoteInputRecord, OrderViewRecord, ReviewViewRecord, WriteReviewInputRecord};
 use topcoat::view::{View, component, view};
+
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
 
 /// Labels a value of `OrderStatus`: its member's name in words. A value the
 /// enum does not declare is its own label.
@@ -33,14 +56,15 @@ pub fn order_status_label(value: &str) -> &str {
 }
 
 /// `OrderNoteInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_note_input_detail(record: OrderNoteInputRecord) -> topcoat::Result<impl View> {
+pub async fn order_note_input_detail(record: OrderNoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderNoteInput" role="group">
             <dl>
                 <div data-field="text">
                     <dt>"Text"</dt>
-                    <dd>(record.text)</dd>
+                    <dd>(text_of(&choices, "text", &record.text))</dd>
                 </div>
             </dl>
         </div>
@@ -48,8 +72,16 @@ pub async fn order_note_input_detail(record: OrderNoteInputRecord) -> topcoat::R
 }
 
 /// `OrderNoteInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat::Result<impl View> {
+pub async fn order_note_input_table(
+    rows: Vec<OrderNoteInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderNoteInput">
             <thead>
@@ -58,9 +90,23 @@ pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat:
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.text.trim().is_empty()).then_some("Order note input");
                     <tr>
-                        <td data-field="text">(row.text)</td>
+                        <td data-field="text">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "text", &row.text))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "text", &row.text))
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -69,14 +115,15 @@ pub async fn order_note_input_table(rows: Vec<OrderNoteInputRecord>) -> topcoat:
 }
 
 /// `OrderViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl View> {
+pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="status">
                     <dt>"Status"</dt>
@@ -84,7 +131,12 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
                 </div>
                 <div data-field="note">
                     <dt>"Note"</dt>
-                    <dd>(record.note)</dd>
+                    <dd>
+                        match record.note {
+                            Some(value) => (text_of(&choices, "note", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
             </dl>
         </div>
@@ -92,8 +144,16 @@ pub async fn order_view_detail(record: OrderViewRecord) -> topcoat::Result<impl 
 }
 
 /// `OrderViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<impl View> {
+pub async fn order_view_table(
+    rows: Vec<OrderViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="OrderView">
             <thead>
@@ -104,11 +164,30 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Order view");
                     <tr>
-                        <td data-field="id">(row.id)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
                         <td data-field="status"><data value=(&row.status)>(order_status_label(&row.status))</data></td>
-                        <td data-field="note">(row.note)</td>
+                        <td data-field="note">
+                            match row.note {
+                                Some(value) => (text_of(&choices, "note", &value)),
+                                None => "",
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -117,22 +196,23 @@ pub async fn order_view_table(rows: Vec<OrderViewRecord>) -> topcoat::Result<imp
 }
 
 /// `ReviewViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn review_view_detail(record: ReviewViewRecord) -> topcoat::Result<impl View> {
+pub async fn review_view_detail(record: ReviewViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ReviewView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="rating">
                     <dt>"Rating"</dt>
-                    <dd>(record.rating)</dd>
+                    <dd>(number_of(&choices, "rating", record.rating))</dd>
                 </div>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
             </dl>
         </div>
@@ -140,8 +220,16 @@ pub async fn review_view_detail(record: ReviewViewRecord) -> topcoat::Result<imp
 }
 
 /// `ReviewViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn review_view_table(rows: Vec<ReviewViewRecord>) -> topcoat::Result<impl View> {
+pub async fn review_view_table(
+    rows: Vec<ReviewViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="ReviewView">
             <thead>
@@ -152,11 +240,25 @@ pub async fn review_view_table(rows: Vec<ReviewViewRecord>) -> topcoat::Result<i
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Review view");
                     <tr>
-                        <td data-field="id">(row.id)</td>
-                        <td data-field="rating">(row.rating)</td>
-                        <td data-field="title">(row.title)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="rating">(number_of(&choices, "rating", row.rating))</td>
+                        <td data-field="title">(text_of(&choices, "title", &row.title))</td>
                     </tr>
                 }
             </tbody>
@@ -165,18 +267,19 @@ pub async fn review_view_table(rows: Vec<ReviewViewRecord>) -> topcoat::Result<i
 }
 
 /// `WriteReviewInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn write_review_input_detail(record: WriteReviewInputRecord) -> topcoat::Result<impl View> {
+pub async fn write_review_input_detail(record: WriteReviewInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="WriteReviewInput" role="group">
             <dl>
                 <div data-field="rating">
                     <dt>"Rating"</dt>
-                    <dd>(record.rating)</dd>
+                    <dd>(number_of(&choices, "rating", record.rating))</dd>
                 </div>
                 <div data-field="title">
                     <dt>"Title"</dt>
-                    <dd>(record.title)</dd>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
                 </div>
             </dl>
         </div>
@@ -184,8 +287,15 @@ pub async fn write_review_input_detail(record: WriteReviewInputRecord) -> topcoa
 }
 
 /// `WriteReviewInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn write_review_input_table(rows: Vec<WriteReviewInputRecord>) -> topcoat::Result<impl View> {
+pub async fn write_review_input_table(
+    rows: Vec<WriteReviewInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="WriteReviewInput">
             <thead>
@@ -195,10 +305,17 @@ pub async fn write_review_input_table(rows: Vec<WriteReviewInputRecord>) -> topc
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
                     <tr>
-                        <td data-field="rating">(row.rating)</td>
-                        <td data-field="title">(row.title)</td>
+                        <td data-field="rating">
+                            if let Some(href) = &href {
+                                <a href=(href)>(number_of(&choices, "rating", row.rating))</a>
+                            } else {
+                                (number_of(&choices, "rating", row.rating))
+                            }
+                        </td>
+                        <td data-field="title">(text_of(&choices, "title", &row.title))</td>
                     </tr>
                 }
             </tbody>

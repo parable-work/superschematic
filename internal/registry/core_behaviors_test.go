@@ -11,7 +11,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}
+var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Numbering", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
@@ -64,6 +64,23 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
 		t.Errorf("Reactions fields %v and operations %v, want none", reactions.Fields, reactions.Operations)
 	}
+	// The fields that move at a read, with no event of their own instance,
+	// say so (D56): no other core field does.
+	var volatile []string
+	for _, name := range coreBehaviorNames {
+		b, _ := reg.Behavior(name)
+		for _, field := range b.Fields {
+			if field.Volatile {
+				volatile = append(volatile, BehaviorFieldPath(name, field.Name))
+			}
+		}
+	}
+	if want := []string{"Budget.meters", "Dependencies.blocked", "Lease.active", "Links.targets", "Rollups.values"}; !slices.Equal(volatile, want) {
+		t.Errorf("volatile fields = %v, want %v", volatile, want)
+	}
+	if names := fieldNames(workflow.Fields); !slices.Equal(names, []string{"status", "enteredAt"}) {
+		t.Errorf("Workflow fields = %v, want status and enteredAt", names)
+	}
 	var scopes []string
 	for _, op := range links.Operations {
 		scopes = append(scopes, op.Name+":"+op.Scope)
@@ -114,6 +131,14 @@ func TestCoreBehaviors(t *testing.T) {
 			len(b.Vetoes) != 0 || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
 			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
 		}
+	}
+	// StateRules holds the own fields to the state of the type's Workflow:
+	// no field, no operation, and Workflow required, since its guard reads
+	// the status.
+	stateRules, _ := reg.Behavior("StateRules")
+	if stateRules.Package != EnginePackage || !stateRules.ConfigRequired() || !slices.Equal(stateRules.Requires, []string{"Workflow"}) || len(stateRules.Fields) != 0 ||
+		len(stateRules.Operations) != 0 || len(stateRules.PreconditionSchema) != 0 || len(stateRules.CreateParamsSchema) != 0 {
+		t.Errorf("StateRules = %+v, want the engine's, a config, Workflow required, and no field, operation or parameter", stateRules)
 	}
 	// Branches makes each instance a version graph's root: one field, the
 	// release pointer's version, no requirement, and sixteen operations, all
@@ -177,7 +202,7 @@ func TestCoreBehaviors(t *testing.T) {
 	}{
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
-		{links, []string{"no_revision", "no_release", "required_link", "required_target"}},
+		{links, []string{"no_revision", "no_release", "required_link", "required_target", "too_many", "not_linked"}},
 		{rollups, []string{"not_held"}},
 		{revisions, []string{"no_review", "not_pending"}},
 		{retries, []string{"exhausted", "limits_fixed", "not_configured"}},
@@ -189,6 +214,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
 		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
 			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
+		{stateRules, []string{"missing_fields", "frozen_fields", "required_fields"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -246,6 +272,12 @@ func TestCoreBehaviors(t *testing.T) {
 		{links, `{"links": {"spec": {"schema": "the documents"}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
+		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 5, "required": true}, "watchers": {"schema": "people", "many": false}}}`, ""},
+		{links, `{"links": {"reviewers": {"schema": "people", "many": true}}}`, "behavior Links config: "},
+		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 0}}}`, "behavior Links config: "},
+		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 101}}}`, "behavior Links config: "},
+		{links, `{"links": {"reviewers": {"schema": "people", "max": 5}}}`, "behavior Links config: "},
+		{links, `{"links": {"reviewers": {"schema": "people", "many": false, "max": 5}}}`, "behavior Links config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, ""},
 		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status"},
 			"estimate": {"schema": "tasks", "link": "project", "function": "sum", "field": "estimate"},
@@ -298,6 +330,13 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"enters": "doing"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"leaves": "doing"}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority", "to": "urgent"}}, "then": {"transition": "escalated"}},
+			{"when": {"changes": {"field": "Lease.ended.reason", "from": "ttl"}}, "then": {"transition": "queued"}},
+			{"when": {"changes": {"field": "Workflow.status", "to": {"any": "JSON"}}}, "then": {"link": "project", "transition": "active"}}]}`, ""},
+		{reactions, `{"rules": [{"when": {"changes": {"to": "urgent"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority", "into": "urgent"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "Workflow..status"}}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"changes": {"field": "priority"}, "enters": "doing"}, "then": {"transition": "escalated"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "the tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
@@ -349,6 +388,19 @@ func TestCoreBehaviors(t *testing.T) {
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 500}}`, "behavior Branches config: "},
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 60000, "abandonAfter": 0}}`, "behavior Branches config: "},
 		{branches, `{"kinds": {"step": {"type": "Step"}}, "schemaEpoch": 1}`, "behavior Branches config: "},
+		{stateRules, `{"states": {"sent": {"required": ["customer", "amount"], "frozen": ["amount"]}, "paid": {"frozen": "all"}}, "permission": "invoices.amend"}`, ""},
+		{stateRules, `{"states": {"draft": {"required": ["title"]}}}`, ""},
+		{stateRules, ``, "behavior StateRules config: "},
+		{stateRules, `{"states": {}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"required": []}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"required": ["amount", "amount"]}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "some"}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": []}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"in review": {"frozen": "all"}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"optional": ["notes"]}}}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "all"}}, "permission": ""}`, "behavior StateRules config: "},
+		{stateRules, `{"states": {"sent": {"frozen": "all"}}, "roles": ["admin"]}`, "behavior StateRules config: "},
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},
@@ -481,4 +533,13 @@ func TestCoreBehaviorNamesAreTaken(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `behavior name "Workflow" of extension acme must be acme.<Name>`) {
 		t.Fatalf("an extension's bare Workflow: err = %v", err)
 	}
+}
+
+// fieldNames lists the names of a behavior's fields, in order.
+func fieldNames(fields []BehaviorField) []string {
+	names := make([]string, len(fields))
+	for i, field := range fields {
+		names[i] = field.Name
+	}
+	return names
 }

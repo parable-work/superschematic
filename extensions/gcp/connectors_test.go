@@ -1,7 +1,6 @@
 package gcp_test
 
 import (
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -122,22 +121,46 @@ func TestSQLConnectorUnderParameter(t *testing.T) {
 	}
 }
 
-// TestSQLConnectorRefusesRust checks that a Rust server's sql edge fails
-// to lower: Cloud SQL has no connector for Rust, and the password form is
-// not built.
-func TestSQLConnectorRefusesRust(t *testing.T) {
-	services := stacktest.AcmeShop()
-	for i := range services {
-		if services[i].Name == "shop-api" {
-			services[i].Language = registry.APILanguageRust
+// rustShop is the acme-shop services with shop-api written in Rust (D57)
+// and no bucket, which a Rust server does not reach yet: its server's
+// sql edge is its authDb's, to shop-db. It resolves over a stack
+// WithoutBucketSettings returns.
+func rustShop() []stack.Service {
+	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+}
+
+// TestSQLConnectorServesRust checks that a Rust server's sql edge lowers
+// as a Go server's does (D57): the same grants, database user and Cloud
+// SQL connection, and the Cloud SQL volume on its service, mounted at
+// /cloudsql, where the Rust runtime dials the instance's socket as the
+// IAM user.
+func TestSQLConnectorServesRust(t *testing.T) {
+	reg := assemble(t)
+	goEnv := resolve(t, reg, stacktest.WithoutBucketSettings(shop()), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
+	env := resolve(t, reg, stacktest.WithoutBucketSettings(shop()), rustShop(), "Staging")
+	if got := env.Deployable("shop-api").Language; got != registry.APILanguageRust {
+		t.Fatalf("shop-api's server is %s, want %s", got, registry.APILanguageRust)
+	}
+	edge := "sql:shop-api->shop-db"
+	ids := ownedBy(env, edge)
+	if got, want := strings.Join(ids, ", "), "shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, shop-api.database-user.shop-db"; got != want {
+		t.Fatalf("%s produces %s, want %s", edge, got, want)
+	}
+	for _, id := range ids {
+		res, goRes := node(t, env, id), node(t, goEnv, id)
+		if res.Type != goRes.Type {
+			t.Errorf("%s is a %s, and a %s for a Go server", id, res.Type, goRes.Type)
 		}
+		wantJSON(t, id, res.Properties, mustJSON(t, goRes.Properties))
 	}
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: shop(), Services: services, Environment: "Staging"})
-	var errs *stack.Errors
-	if !errors.As(err, &errs) || len(errs.List) == 0 || errs.List[0].Code != stack.CodeLowering ||
-		!strings.Contains(err.Error(), "no Cloud SQL connector") {
-		t.Fatalf("err = %v, want a lowering error about the Cloud SQL connector", err)
-	}
+	wantJSON(t, "derived connection", binding(t, env, "shop-api", "SHOP_DB_DATABASE").Value,
+		`{"cloudSql":{"database":{"$output":{"resource":"shop-db.database.shop-db","name":"name"}},"instance":{"$output":{"resource":"shop-db.instance","name":"connectionName"}},"user":"shop-api@acme-staging.iam"}}`)
+
+	template := node(t, env, "shop-api.service").Properties["template"].(map[string]any)
+	container := template["containers"].([]any)[0].(map[string]any)
+	wantJSON(t, "Cloud SQL volume", template["volumes"],
+		`[{"cloudSqlInstance":{"instances":[{"$output":{"resource":"shop-db.instance","name":"connectionName"}}]},"name":"cloudsql"}]`)
+	wantJSON(t, "Cloud SQL mount", container["volumeMounts"], `[{"mountPath":"/cloudsql","name":"cloudsql"}]`)
 }
 
 // TestHTTPConnectorGrants checks the Cloud Run to Cloud Run connector on

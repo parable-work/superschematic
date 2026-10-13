@@ -397,7 +397,7 @@ Document generators are driven by presence, not by the kind's pipeline
 | `Dirs` | the directories the generator writes for this run |
 | `Enabled` | whether it runs; a non-empty reason is recorded in `Result.Skipped`. nil means enabled |
 | `Generate` | writes the outputs |
-| `RendersBehaviors` | the generator's output covers what a type's behaviors add; without it, `Run` refuses a schema whose types compose behaviors (section 3.16) |
+| `RendersBehaviors` | the generator's output covers what a type's behaviors add, or nothing of the type at all; without it, `Run` refuses a schema whose types compose behaviors, or that uses a DB service's engine type (section 3.16) |
 
 A generator reaches a kind in one of two ways. The kind's `Pipeline` names
 it, and it runs at that position. Or the generator lists the kind in
@@ -409,8 +409,10 @@ runs on every build and a schema config cannot turn it off.
 
 `GenerateContext` is the per-run state every generator in a pipeline
 shares: the schema, its config, the parsed outputs, the options, the
-registry, memoized `LoadDependency`, `APIOutput` and `EnvConfig` closures,
-and the `Result`. `Done(key, dir)` and `Skip(key)` record outputs.
+registry, memoized `LoadDependency`, `APIOutput`, `EnvConfig` and
+`EngineDocument` closures, and the `Result`. `EngineDocument` returns the
+engine document of a DB schema with engine types as JSON, or nil (section
+3.16). `Done(key, dir)` and `Skip(key)` record outputs.
 `InstallTargetDir` resolves a directory relative to the repository root for
 a generator that installs files outside the output root.
 
@@ -421,6 +423,7 @@ The core generators:
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
 | `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
+| `enginedoc` | `engine` | the engine document of a DB schema whose types compose behaviors, its engine types: `engine/<schema>.json` in the Go types module, which the types hold as a constant too (section 3.16); last in the DB kind's pipeline, and `outputs.engine.namespace` names the engine namespace |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
 | `envConfig` | none | the environment loader for a schema with an `@envVars` class |
@@ -814,7 +817,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name` and `description` |
+| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
@@ -825,9 +828,14 @@ engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
 and as a tool that takes its parameters and no `id` (D16, amended).
 `RegisterBehavior` refuses any other value, and the engine does too.
 
-A field carries only a name and a description. A field's type can depend
-on the behavior's config, and the loader needs only the name to refuse a
-collision.
+A field carries a name, a description and whether it is volatile, no
+type. A field's type can depend on the behavior's config, and the loader
+needs only the name to refuse a collision. A volatile field
+(`"volatile": true`) can move without an event of its own instance: it
+is computed when the instance is read, from other instances, the clock
+or the config, as `Rollups.values` and `Dependencies.blocked` are. No
+event records such a move, so `Reactions`' `changes`, which hears a
+field through its instance's events, refuses one (D56).
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
@@ -933,21 +941,89 @@ the first enabled generator without `GeneratorSpec.RendersBehaviors` fails
 the run with `generator: <name> does not render behaviors yet: type <T>
 composes behavior <B>`. The check covers core and extension generators
 alike; document generators, which render their documents, are not asked.
-No core generator sets the flag. `build --emit-ir`, `format` and
-`json-schema` run no generator and accept the schema. The one generator
-that renders behaviors is a command of its own, not in a pipeline:
-`engine-client` types the engine's client for engine schemas (D49). It
-narrows the core's behaviors by their configs; an extension's behavior
-it types by its declaration, its operations' parameters and results,
-create parameters, precondition and veto codes as declared and its
-fields as any JSON.
+`build --emit-ir`, `format` and `json-schema` run no generator and accept
+the schema. A generator whose output holds nothing a behavior adds, as
+acme's `acmeManifest` lists the types by name, sets the flag too.
+
+Of the core's pipeline generators, `types`, `sql`, `orm`, `enginedoc`
+and `envConfig` set the flag (D58), so the DB and General pipelines build
+a schema whose types compose behaviors. For each such type, each
+language's types write `<T>Behaviors`: what a read returns under
+`behaviors`, one member per behavior that declares a field, holding those
+fields (Go's `behaviors.go`, TypeScript's `types/behaviors.ts`, Rust's
+`src/behaviors.rs`, Python's `behaviors.py`). The own-field type `<T>` is
+unchanged: it is the instance's `data`. `envConfig` reads the `@envVars`
+class alone.
+
+A type of a DB schema that composes a behavior is an engine type: its
+instances are the engine's, kept in the DB service's database, in the
+engine's own tables. `sql` and `orm` leave it out
+(`codegen.WithoutEngineTypes`): it gets no table, no repository, and no
+step in a migration plan, which `sqlmigrate` builds on `sql` (D27). The
+`enginedoc` generator writes the schema's engine document,
+`engine/<schema>.json` in the Go types module, and the types hold the
+same bytes as `EngineDocument` in Go, `engineDocument` in TypeScript
+(exported as `<types package>/engine`, not from the package's index) and
+`ENGINE_DOCUMENT` in Rust. It holds the engine namespace
+(`outputs.engine.namespace`, else the service's name), the meta-schema
+the binary's `json-schema` prints, the D11 tool options the binary
+registers (its invocation policy and the vendor keys the tool hooks
+leave), each behavior the engine types compose with the package that
+implements it, and one schema-file document per engine type: a `General`
+document named after the type, holding it, the value types it reaches
+(`@jsonField` types, and types it imports from a General dependency) and
+the enums and scalars they use, with no imports.
+`internal/generator/enginedoc/README.md` is its contract.
+
+Before any generator runs, `Run` refuses, one line per problem
+(`enginedoc.Problems`):
+
+- an engine type that reaches a table: a field of it, or of a value type
+  it holds, typed as a table or as another engine type. The engine
+  reaches another instance through the `Links` behavior (D16), and a
+  table's row through its key in a plain field;
+- a table, a value type or a projection that references or reads an
+  engine type, which has no table;
+- an engine type that declares what only a table has (`@versioned`,
+  `@optimistic`, a version graph, the `User` or `UserRole` trait, a
+  queue, a projection) or a field the database generates (`AutoGenerate`):
+  the engine gives each instance its id;
+- an engine type that reaches a map or a union, which the engine's schema
+  runtime does not validate.
+
+An API's own type never composes a behavior: `Run` refuses it with
+`generator: type <T> of API <api> composes behavior <B>, but behaviors
+compose on DB types ...`. An API that imports a DB service's engine type,
+or projects one with `@source`, builds its types, but the first enabled
+generator without the flag refuses it, `api` or `sdks`:
+`generator: api does not render engine types yet: <api> imports
+<db>.<T>, which composes behavior <B> (D58)`. The `server` generator
+refuses a server that serves such an API the same way. The generated
+servers do not open the engine yet.
+
+`types` shares its narrowings with the other generator that renders
+behaviors, a command of its own and not in a pipeline: `engine-client`
+types the engine's client for engine schemas (D49).
+`internal/generator/behaviortypes` narrows the core's behaviors by their
+configs, a Workflow's states, a Links config's names, a Timers config's
+deadlines, for both. An extension's behavior has no narrowing:
+`engine-client` types its operations' parameters and results, create
+parameters, precondition and veto codes as declared, and both type its
+fields as any JSON, since a declaration names a field without a schema.
+A behavior's member keeps its exact name in the JSON; where a language's
+names cannot hold it, the member takes the behavior's name in PascalCase,
+each run of letters and digits capitalized and the runs joined
+(`acme.Rating` is `AcmeRating`, `acme_rating` in Rust and Python), and a
+Go tag, a serde rename or a Pydantic alias carries the exact name. A
+config's key that names a member, a deadline's or a gate's, follows the
+same rule.
 
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`,
-`Variants` and `Branches`. It
-declares the work-queue behaviors the optional
+`Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
+`Approvals`. It declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
 (`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
@@ -959,17 +1035,21 @@ takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
 `Dependencies` declare a `createParamsSchema`: a create's links by name
 and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
-`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches` and every
-work-queue behavior list the codes of their vetoes. `Constants` and `Variants`
-declare no field, operation, parameter, precondition or code: what they
-refuse is an issue at a field (`invalid_instance`), which the engine's
-implementation returns from its `validate` hook, not a veto. A config a
+`Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`, `Timers`,
+`StateRules`, `Approvals`
+and every work-queue behavior list the codes of their
+vetoes. `Constants` and `Variants` declare no field, operation,
+parameter, precondition or code: what they refuse is an issue at a field
+(`invalid_instance`), which the engine's implementation returns from its
+`validate` hook, not a veto. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
 that names a state the config does not list, a Workflow outcome for a
 state a transition leaves, a gated state of `Dependencies` that is not a
-state of the type's Workflow, or a rollup whose linked schema has no
-such link, say);
+state of the type's Workflow, a gate of `Approvals` on a state the
+Workflow lacks, a `Timers` deadline that starts at a field whose values
+are not date-times, or a rollup whose linked schema has no such link,
+say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -981,17 +1061,21 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`, `vectors` (`dimensions`, `model`, `permission`); required | none | `search`, `similar`, `staleEmbeddings` and `settleEmbeddings`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `changes` (`field`, `to`, `from`), `allTerminal`, `anyTerminal`, `holds` or `revised`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Constants` | `fields`, `permission`; required | none | none |
 | `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
 | `Branches` | `kinds` (by name: `type`, a type of the document, `parent` (`key`, `of`), `order`, `singleton`, `units`, `retentionDays`), `primary`, `snapshotEvery`, `sweep` (`intervalMs`, `discardGrace`, `pruneBatch`, `abandonAfter`); required | `release` | `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `releaseCommit`, `discard`, and the read-only `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history` |
+| `StateRules` | `states` (by a state of the type's Workflow: `required`, `frozen`, a list or `all`), `permission`; required; requires `Workflow` | none | none |
+| `Approvals` | `gates` (by state of the type's Workflow: `count`, `permission`, `from`, `excludeCreator`), `resetOnChange`; required; requires `Workflow` | `gates` | `signOff`, `withdrawSignOff`, the read-only `listSignOffs` |
+| `Numbering` | `format`, `scope` (`link`), `reset` (`yearly`); required | `seq`, `label` | `assignNumber` |
+| `Timers` | `deadlines` (by name: `start`, one of `create`, `enters` and `field`, `afterMs`, `then` (`transition`, `from`), `until`, one of `leaves` and `enters`), `sweepMs`, `permission`; required; `Workflow` for `enters`, `then` and `until` | `deadlines` | `fireTimer`, `resetTimer`, `snoozeTimer` |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`revised.link`, `name`, `data`); optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
@@ -1025,6 +1109,30 @@ links, rollups and states are checked by the engine, which sees the
 type's Workflow, Links and Rollups configs. `make cli-smoke` loads
 `fixture-reactions-json`, whose projects start, finish and fail their
 parent, and its TypeScript twin loads to the same IR.
+
+`Approvals` names states of the type's Workflow, each gate's and the
+states it is gated from, which the loader does not check: the engine
+does, when the schema is defined. `make cli-smoke` loads
+`fixture-approvals-json`, whose expense claims wait for sign-offs before
+they are approved and paid, and its TypeScript twin loads to the same IR.
+
+`Numbering` names a link of the type's Links config (`scope`), which the
+loader does not check: the engine refuses one that is not a required,
+single-valued link, a format outside its tokens and a yearly reset whose
+format prints no year, when the schema is defined. It declares no veto
+code: nothing it does after the define is refused. `make cli-smoke`
+loads `fixture-numbering-json`, whose invoices are numbered per project
+and per year, and its TypeScript twin loads to the same IR.
+
+`Timers` names states of the type's Workflow and an own field, which the
+loader does not check: the engine refuses a state the Workflow lacks, a
+field whose JSON Schema format is not `date-time`, and a deadline that
+names a state on a type without `Workflow`, which a declaration's
+`requires` cannot say, since a field deadline needs none, when the
+schema is defined. The engine's runner fires its deadlines (D16,
+amended). `make cli-smoke` loads `fixture-timers-json`, whose support
+requests are escalated or resolved when nobody moves them in time, and
+its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
@@ -1074,11 +1182,12 @@ from `acme-schematic behaviors --extension acme`, which acme's smoke runs
 with `--check` (section 10). The core's copies come from
 the core binary, each into the package that implements it: `make
 behaviors` writes `runtime/engine/typescript/src/behaviors/core/declarations`
-with `--package @superschematic/engine` and
+with `--package @superschematic/engine`, the same declarations into the
+Rust engine's `runtime/engine/rust/behaviors/declarations` (D58), and
 `runtime/engine-workqueue/typescript/src/declarations` with `--package
 @superschematic/engine-workqueue`, so each package carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space
@@ -1323,7 +1432,10 @@ reading only each config's `name` and `kind`.
 4. Call each generator's `Enabled`. Collect the `Dirs` of the enabled ones
    and fail, before any runs, if two claim the same directory, if a
    type composes a behavior and an enabled generator does not set
-   `RendersBehaviors` (section 3.16), or if `types` is enabled and a
+   `RendersBehaviors`, or the schema is an API, or the schema uses a DB
+   service's engine type and an enabled generator does not set it, or a
+   DB schema's engine types reach a table or a table references one
+   (section 3.16), or if `types` is enabled and a
    library it writes imports the types of a dependency whose config does
    not enable that language. The dependencies are the ones
    `codegen.TypeDependencies` finds in `Schema.Imports`: those that
@@ -1350,7 +1462,7 @@ reading only each config's `name` and `kind`.
 
 `ParseOutputs(raw, reg)` accepts only keys that some generator claims as
 its `OutputKey`. The error lists the core keys in registration order
-(`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It
+(`types`, `sql`, `api`, `sdk`, `ci`, `engine`), then the extension keys sorted. It
 validates each section against the `OutputSchema` of the generator that
 claims its key, decodes the core sections into typed fields, checks their
 target languages, fills the API defaults, rejects an enabled `outputs.api`
@@ -1545,7 +1657,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

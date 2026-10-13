@@ -35,7 +35,12 @@ use serde_json::Value;
 use topcoat::context::Cx;
 use topcoat::router::content::Form;
 use topcoat::router::request::uri;
+use topcoat::router::StatusCode;
 use topcoat::view::{View, component, view};
+
+/// The values the app names for a field, which a text or number control
+/// they name offers as a `<select>`; `crate::choices`, also here.
+pub use crate::choices::{Choice, Choices};
 
 /// Why a form was refused: each control's messages, and the form's own.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -192,58 +197,28 @@ impl From<ParseError> for FormErrors {
     }
 }
 
-/// Options the app supplies for a form's text and number controls, each
-/// of which then renders as a `<select>`. An input type does not say which
-/// values an id may take (a product's, a room's), so the page that renders
-/// the form says, per field.
-///
-/// A field is named by its path with the rows' indexes left out,
-/// `rooms.roomId` for every room's, or by its control's name,
-/// `rooms[0].roomId` for one row's, which wins.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Choices {
-    fields: Vec<(String, Vec<Choice>)>,
-}
-
-/// One option: the value a form sends and the label it shows.
+/// Why a form's submission was refused: the status a page answers with,
+/// and the errors it renders the form again with. 422 for a form `parse`
+/// refused; for the operation's refusal, the route's status (401, 403, 404,
+/// 409, ...), as the JSON API answers it, and its errors
+/// (`FormErrors::from_api`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct Choice {
-    pub value: String,
-    pub label: String,
+pub struct Refusal {
+    pub status: StatusCode,
+    pub errors: FormErrors,
 }
 
-impl Choices {
-    pub fn new() -> Self {
-        Self::default()
+impl Refusal {
+    /// The operation's refusal: the route's status and its errors.
+    pub fn from_api(err: &ApiError) -> Self {
+        Self { status: err.status, errors: FormErrors::from_api(err) }
     }
+}
 
-    /// These choices with `field`'s options, each a value and its label,
-    /// in order.
-    #[must_use]
-    pub fn with<V: Into<String>, L: Into<String>>(
-        mut self,
-        field: impl Into<String>,
-        options: impl IntoIterator<Item = (V, L)>,
-    ) -> Self {
-        let options = options
-            .into_iter()
-            .map(|(value, label)| Choice { value: value.into(), label: label.into() })
-            .collect();
-        self.fields.push((field.into(), options));
-        self
-    }
-
-    /// The options of the control named `name`, else of its `path`.
-    pub fn of(&self, name: &str, path: &str) -> Option<&[Choice]> {
-        self.find(name).or_else(|| self.find(path))
-    }
-
-    fn find(&self, field: &str) -> Option<&[Choice]> {
-        self.fields
-            .iter()
-            .rev()
-            .find(|(name, _)| name == field)
-            .map(|(_, options)| options.as_slice())
+impl From<FormErrors> for Refusal {
+    /// A form `parse` refused: 422.
+    fn from(errors: FormErrors) -> Self {
+        Self { status: StatusCode::UNPROCESSABLE_ENTITY, errors }
     }
 }
 
@@ -704,12 +679,13 @@ impl TenantGetTenantArgsForm {
     }
 
     /// Parses the form, then calls the operation in-process
-    /// (`operations::tenant_get_tenant`). A refusal, the form's or the
-    /// operation's (`FormErrors::from_api`), is the form's errors, which a
-    /// page renders the form again with.
-    pub async fn submit(&self, cx: &Cx) -> Result<types::TenantView, FormErrors> {
+    /// (`operations::tenant_get_tenant`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::TenantView, Refusal> {
         let args = self.parse()?;
-        operations::tenant_get_tenant(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+        operations::tenant_get_tenant(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 
     /// Whether the component shows the errors at `path`: at an argument's
@@ -833,12 +809,13 @@ impl TenantListTenantsArgsForm {
     }
 
     /// Parses the form, then calls the operation in-process
-    /// (`operations::tenant_list_tenants`). A refusal, the form's or the
-    /// operation's (`FormErrors::from_api`), is the form's errors, which a
-    /// page renders the form again with.
-    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::TenantView>, FormErrors> {
+    /// (`operations::tenant_list_tenants`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::TenantView>, Refusal> {
         let args = self.parse()?;
-        operations::tenant_list_tenants(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+        operations::tenant_list_tenants(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 
     /// Whether the component shows the errors at `path`: at an argument's
@@ -971,12 +948,13 @@ impl TenantUpdateSecretArgsForm {
     }
 
     /// Parses the form, then calls the operation in-process
-    /// (`operations::tenant_update_secret`). A refusal, the form's or the
-    /// operation's (`FormErrors::from_api`), is the form's errors, which a
-    /// page renders the form again with.
-    pub async fn submit(&self, cx: &Cx) -> Result<types::TenantView, FormErrors> {
+    /// (`operations::tenant_update_secret`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::TenantView, Refusal> {
         let args = self.parse()?;
-        operations::tenant_update_secret(cx, args).await.map_err(|err| FormErrors::from_api(&err))
+        operations::tenant_update_secret(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 
     /// Whether the component shows the errors at `path`: at an argument's

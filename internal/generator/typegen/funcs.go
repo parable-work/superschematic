@@ -366,6 +366,9 @@ func templateFuncs() template.FuncMap {
 			return false
 		},
 		"unionWrapperType": unionWrapperType,
+		"behaviorGoType":   behaviorGoType,
+		"behaviorGoTag":    behaviorGoTag,
+		"goComment":        goComment,
 		"formatComment": func(name, doc string) string {
 			return codegen.FormatComment("// ", name, doc)
 		},

@@ -19,9 +19,11 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -240,6 +242,11 @@ type ModuleOutput struct {
 	// src/identity.rs. Empty when the schema has no User table.
 	IdentityDescriptor string
 
+	// EngineDocument is the schema's engine document (D58) as a Rust raw
+	// string literal, the ENGINE_DOCUMENT constant of src/engine.rs.
+	// Empty when no type of the DB schema composes a behavior.
+	EngineDocument string
+
 	// VersionGraphDepPath is the Cargo.toml path entry for the version
 	// graph's Rust engine crate (Naming.VersionGraphRustCrate), relative to
 	// the output directory, set by SetVersionGraphPath. Empty names the
@@ -256,6 +263,11 @@ type ModuleOutput struct {
 	// relative to the output directory, set by SetSchemaRuntimePath. Empty
 	// names the crate's version instead.
 	SchemaRuntimeDepPath string
+
+	// Behaviors are the types that compose behaviors, each with its
+	// <T>Behaviors and the structs and enums its behaviors' fields hold
+	// (D58), written as src/behaviors.rs. Nil when no type composes one.
+	Behaviors []behaviortypes.Type
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -281,6 +293,16 @@ type Options struct {
 	// Naming supplies the crate prefix and the scalar crate coordinates.
 	// Empty fields fall back to naming.Default().
 	Naming naming.Naming
+
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields src/behaviors.rs types; a schema that composes none needs
+	// none.
+	Registry *registry.Registry
+
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which src/engine.rs holds.
+	// Nil writes no src/engine.rs.
+	EngineDocument []byte
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -397,6 +419,15 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
+		return nil, err
+	}
+	if opts.EngineDocument != nil {
+		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
+	}
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
+	}
+	if err := checkBehaviorNames(output.Behaviors); err != nil {
 		return nil, err
 	}
 	output.UsesHashMap = hasMapFields(output.Types)
@@ -1020,6 +1051,10 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	}
 	// The validators read and parse serde_json values.
 	if output.Validators != nil {
+		crateNames["serde_json"] = struct{}{}
+	}
+	// A behavior's field of any JSON is a serde_json::Value.
+	if behaviortypes.UsesKind(output.Behaviors, behaviortypes.KindJSON) {
 		crateNames["serde_json"] = struct{}{}
 	}
 

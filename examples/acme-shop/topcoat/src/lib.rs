@@ -6,7 +6,9 @@
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
 //! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
-//! the display components the crate builds from their types. The JSON API
+//! the display components the crate builds from their types. The crate's
+//! generated pages serve a console of shop-orders' resources at `/console`,
+//! the catalog's products named in its forms and tables. The JSON API
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
 //! and the shop's users are the core user model's (D50): one session
@@ -23,12 +25,13 @@ use acme_shop_orders_topcoat::api::{
     ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{
-    Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm, PlaceOrderInputForm, WriteReviewInputForm,
-    order_cancel_order_args_fields, order_list_orders_args_fields, place_order_input_fields, write_review_input_fields,
+    Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm, PlaceOrderInputForm, Refusal,
+    WriteReviewInputForm, order_cancel_order_args_fields, order_list_orders_args_fields, place_order_input_fields,
+    write_review_input_fields,
 };
 use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
-use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations};
+use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages};
 use serde::Deserialize;
 use topcoat::context::{Cx, app_context};
 use topcoat::router::content::Form;
@@ -92,15 +95,26 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// carries, read by the identity runtime as the JSON API reads it. Topcoat's
 /// origin policy runs before that check, so an origin the identity config
 /// trusts must be one the router's `OriginPolicy` trusts too; this app
-/// trusts none.
+/// trusts none. `.discover()` registers the console the crate generates
+/// under `/console`, whose `pages::Settings` name its title, the sign-in
+/// page a refused shopper comes back from and the catalog's products.
 pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
-    let pages = IdentityPageAuthenticator::of(&implementations);
+    let authenticator = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
         .discover()
         .app_context(users)
-        .shop_orders(implementations, pages)
+        .app_context(console_settings())
+        .shop_orders(implementations, authenticator)
         .build()
+}
+
+/// The console's settings: its title, the sign-in page, which comes back
+/// to the console page it is given as `next`, and the catalog's products,
+/// which the new-order page offers for each line and every order's lines
+/// show by name.
+fn console_settings() -> pages::Settings {
+    pages::Settings::new().title("Acme shop console").sign_in("/sign-in").choices(product_choices())
 }
 
 /// The sign-in form, as the browser sends it: the shopper's email and
@@ -195,6 +209,8 @@ async fn shop_page(title: &str, #[default] child: Child<'_>) -> topcoat::Result<
             <a href="/orders">"Orders"</a>
             " "
             <a href="/orders/new">"Place an order"</a>
+            " "
+            <a href="/console">"Console"</a>
         </nav>
         <h1>(title)</h1>
         (child)
@@ -312,27 +328,30 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
 
 /// The shopper's orders, which need `orders.read`, filtered by the GET form
 /// `OrderListOrdersArgsForm` reads from the query, its controls showing the
-/// filters in effect. The page parses the filter and makes the call itself,
-/// so a refused filter is 422 at its control and a refused caller the
-/// route's 401 or 403.
+/// filters in effect. `submit` keeps the route's status: a refused filter is
+/// 422 with the message at its control, and a refused caller the route's
+/// 401, with the sign-in button, or 403, the message the form's own.
 #[page("/orders")]
 async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
     let unfiltered = filter == OrderListOrdersArgsForm::new();
-    let (errors, listed) = match filter.parse() {
-        Ok(args) => (FormErrors::default(), Some(operations::order_list_orders(cx, args).await)),
-        Err(errors) => (errors, None),
+    let (status, orders, errors) = match filter.submit(cx).await {
+        Ok(orders) => (StatusCode::OK, Some(orders), FormErrors::default()),
+        Err(refused) => (refused.status, None, refused.errors),
     };
+    let signed_out = status == StatusCode::UNAUTHORIZED;
     Ok(view! {
+        (status)
         shop_page(
             title: "Orders",
+            if signed_out {
+                sign_in_button(next: "/orders")
+            }
             <form method=(OrderListOrdersArgsForm::METHOD) action="/orders">
                 order_list_orders_args_fields(form: filter, errors: errors)
                 <button type="submit">"Filter"</button>
             </form>
-            match listed {
-                Some(Ok(orders)) => order_list(orders: orders, unfiltered: unfiltered),
-                Some(Err(err)) => refusal(err: err, next: "/orders"),
-                None => (StatusCode::UNPROCESSABLE_ENTITY),
+            if let Some(orders) = orders {
+                order_list(orders: orders, unfiltered: unfiltered)
             }
         )
     })
@@ -368,8 +387,9 @@ async fn order_list(orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat:
 path_param!(id: types::IdentityUUID, error = not_found);
 
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
-/// with the route's status when the call is refused (401, 403, 404). While
-/// the order is placed, the form that cancels it: `cancel` as sent and its
+/// each line's product by its name in the catalog (`product_choices`), with
+/// the route's status when the call is refused (401, 403, 404). While the
+/// order is placed, the form that cancels it: `cancel` as sent and its
 /// errors after a refused cancel, which keeps the form, and its form-level
 /// message, on the page even when the order is no longer placed.
 #[component]
@@ -389,7 +409,7 @@ async fn order_page(
             title: "Order",
             match order {
                 Ok(order) => {
-                    order_view_detail(record: OrderViewRecord::from(order))
+                    order_view_detail(record: OrderViewRecord::from(order), choices: product_choices())
                     if cancellable {
                         <form method=(OrderCancelOrderArgsForm::METHOD) action=(format!("{path}/cancel"))>
                             order_cancel_order_args_fields(form: cancel, errors: errors)
@@ -410,28 +430,31 @@ async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 /// Cancels the order from its form, by the id in the route rather than the
-/// form's hidden input, then back to its page (303). A refusal, the form's
-/// or the operation's, renders the order's page again, 422, with the form
-/// as sent and each error at its control: an over-long reason at the
-/// reason, and an order that is not placed (the operation's 409) as the
-/// form's own.
+/// form's hidden input, then back to its page (303). A refusal renders the
+/// order's page again with the form as sent and each error at its control,
+/// and the status `submit` keeps: 422 for an over-long reason, at the
+/// reason, and the operation's 409 for an order that is not placed, as the
+/// form's own message.
 #[page(POST "/orders/{id}/cancel")]
 async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
     let id = *path_param::<Id>(cx)?;
     let form = OrderCancelOrderArgsForm { id: Some(id.to_string()), ..form };
-    let errors = match form.submit(cx).await {
+    let refused = match form.submit(cx).await {
         Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
-        Err(errors) => errors,
+        Err(refused) => refused,
     };
     Ok(view! {
-        (StatusCode::UNPROCESSABLE_ENTITY)
-        order_page(id: id, cancel: Some(form), errors: errors)
+        (refused.status)
+        order_page(id: id, cancel: Some(form), errors: refused.errors)
     })
 }
 
 /// Each line's product, from the catalog: `place_order_input_fields`
 /// renders the `productId` of every line (`lines.productId`) as a select
-/// of these, each product's id as the API sends it and its name.
+/// of these, and `order_view_detail` shows an order's lines by their
+/// products' names, on the shop's pages and the console's. A choice's
+/// value is the product's id as the API sends it, the compact text
+/// `to_string()` gives, which a record holds.
 fn product_choices() -> Choices {
     Choices::new().with("lines.productId", CATALOG.iter().map(|product| (product.id().to_string(), product.name)))
 }
@@ -468,21 +491,24 @@ async fn new_order() -> topcoat::Result<impl View> {
 /// Places an order from the form. A row button (`_action`) adds or removes
 /// a line and renders the form again, 200, without placing it. Otherwise
 /// the form is parsed by `PlaceOrderInput`'s rules and the operation
-/// called: the new order's page (303), or the form again, 422, as sent,
-/// each error at its control (`lines[0].quantity`).
+/// called: the new order's page (303), or the form again as sent, each
+/// error at its control (`lines[0].quantity`), with a `Refusal`'s status:
+/// 422 for a form the rules refuse, the route's for the operation's
+/// refusal, 401 for a shopper signed out.
 #[page(POST "/orders/new")]
 async fn place_order(cx: &Cx, Form(form): Form<PlaceOrderInputForm>) -> topcoat::Result<impl View> {
     let mut form = form;
     let (status, errors) = if form.apply_action() {
         (StatusCode::OK, FormErrors::default())
     } else {
-        match form.parse() {
+        let refused = match form.parse() {
             Ok(input) => match operations::order_place_order(cx, OrderPlaceOrderArgs { input }).await {
                 Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
-                Err(err) => (StatusCode::UNPROCESSABLE_ENTITY, FormErrors::from_api(&err)),
+                Err(err) => Refusal::from_api(&err),
             },
-            Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, errors),
-        }
+            Err(errors) => Refusal::from(errors),
+        };
+        (refused.status, refused.errors)
     };
     Ok(view! {
         (status)

@@ -11,6 +11,7 @@ Modules:
 {{end}}{{if gt (len .Enums) 0}}    - enums: Enumeration types
 {{end}}{{if gt (len .ExportedTypeNames) 0}}    - types: Complex object types
 {{end}}{{if gt (len .Unions) 0}}    - unions: Union types
+{{end}}{{if .Behaviors}}    - behaviors: Each type's behaviors' fields, as a read returns them
 {{end}}    - validation_errors: Validation error classes
 
 Usage:
@@ -57,6 +58,12 @@ from .types import (
 from .unions import (
     {{range $i, $union := .Unions}}{{if $i}},
     {{end}}{{$union.Name}}{{end}}
+)
+{{end}}
+{{if .Behaviors -}}
+from .behaviors import (
+    {{range $i, $name := .BehaviorNames}}{{if $i}},
+    {{end}}{{$name}}{{end}}
 )
 {{end}}
 {{if gt (len .ModelRebuildTypes) 0 -}}
@@ -117,6 +124,12 @@ __all__ = [
     # Unions
     {{range .Unions -}}
     "{{.Name}}",
+    {{end}}
+    {{- end}}
+    {{if .Behaviors -}}
+    # Behaviors
+    {{range .BehaviorNames -}}
+    "{{.}}",
     {{end}}
     {{- end}}
 ]

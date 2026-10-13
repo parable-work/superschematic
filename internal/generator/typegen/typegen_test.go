@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -37,14 +39,13 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-optimistic-db"},
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
+		// Types that compose behaviors: behaviors.go (D58).
+		{service: behaviortypestest.Service},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {
-			schema, err := loader.LoadService(filepath.Join(fixturesDir, tc.service))
-			if err != nil {
-				t.Fatalf("load %s: %v", tc.service, err)
-			}
+			schema, reg := loadFixture(t, tc.service)
 
 			deps := map[string]*ir.Schema{}
 			depModules := map[string]string{}
@@ -62,6 +63,7 @@ func TestWriteTypesGolden(t *testing.T) {
 				ModulePath:        "example.com/schemas/types/go/" + tc.service,
 				Dependencies:      deps,
 				DependencyModules: depModules,
+				Registry:          reg,
 				Clock:             fixedClock,
 			})
 			if err != nil {
@@ -97,6 +99,22 @@ func TestWriteTypesGolden(t *testing.T) {
 			compareWithGolden(t, outDir, filepath.Join("testdata", "golden", tc.service))
 		})
 	}
+}
+
+// loadFixture loads a fixture service, and the registry that declares the
+// behaviors its types compose: the core's, and acme.Rating for the
+// behavior types fixture, which lives with the loader's data-form fixtures.
+func loadFixture(t *testing.T, service string) (*ir.Schema, *registry.Registry) {
+	t.Helper()
+	if service == behaviortypestest.Service {
+		reg := behaviortypestest.Registry(t)
+		return behaviortypestest.Schema(t, reg), reg
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, service))
+	if err != nil {
+		t.Fatalf("load %s: %v", service, err)
+	}
+	return schema, nil
 }
 
 func TestGenerateTypedRecordFields(t *testing.T) {

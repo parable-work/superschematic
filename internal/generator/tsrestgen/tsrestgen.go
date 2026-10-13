@@ -269,6 +269,11 @@ type APIOutput struct {
 	// Deps is what deps.ts's Deps holds beside the config and the logger
 	// (D51); the dispatch layer sets it with SetDeps before WriteAPI.
 	Deps DepsInfo
+	// Jobs are the API's jobs (D52) and Workers its workers (D53), sorted
+	// by name: deps.ts declares the Jobs and Workers interfaces, and the
+	// scaffold createJobs and createWorkers.
+	Jobs    []JobInfo
+	Workers []WorkerInfo
 	// HasEnvConfig reports whether the package's config.ts declares
 	// EnvConfig and loadEnvConfig, which Deps.config holds. The dispatch
 	// layer writes config.ts (envgen) and sets it.
@@ -350,6 +355,8 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		PGPeerRange:           PGPeerRange,
 		PGTypesVersion:        PGTypesVersion,
 		NodeTypesVersion:      NodeTypesVersion,
+		Jobs:                  jobsOf(schema),
+		Workers:               workersOf(schema),
 	}
 
 	if opts.AuthDB != nil && opts.AuthDB.UserTable() != nil {
@@ -1063,5 +1070,8 @@ func templateFuncs() template.FuncMap {
 		"splitLines":   func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"join":         strings.Join,
 		"sub":          func(a, b int) int { return a - b },
+		// jsdoc keeps text from ending the JSDoc comment it goes in: a
+		// schedule such as */15 would.
+		"jsdoc": func(s string) string { return strings.ReplaceAll(s, "*/", "*\\/") },
 	}
 }

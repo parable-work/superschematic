@@ -11,19 +11,18 @@ import {
   CursorExpiredError,
   EngineError,
   allowAll,
-  openEngine,
   type Engine,
   type EngineEvent,
   type EngineOptions,
   type InstanceFields,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, schemaDocument, thrown, track } from './helpers.ts';
 import { ledger, ledgerDocument, mark, openRunnerEngine, plainDocument, probe, publish, resetProbe, testClock } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 /** A document with a body, which the value store keeps by hash past 1 KiB. */

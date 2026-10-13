@@ -1,0 +1,56 @@
+{
+  "name": "StateRules",
+  "description": "Rules per state of the type's Workflow: the own fields an instance must hold to enter a state, and the ones that cannot change while it is in it. A field is held when it is neither absent nor null. A transition into a state while a field it requires is not held is vetoed, and a create whose initial state requires one is refused at the field. An update, a caller's or one a behavior's operation applies, that clears a field the instance's state requires, or changes one it freezes, is vetoed; a caller with the config's permission may change a frozen field. Requires Workflow.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["states"],
+    "properties": {
+      "states": {
+        "description": "The rules, by a state of the type's Workflow.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "required": {
+              "description": "The type's own top-level fields, by JSON key, an instance must hold to enter the state, and keeps while it is in it.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "frozen": {
+              "description": "The type's own top-level fields, by JSON key, that do not change while the instance is in the state, or all, every one of them.",
+              "oneOf": [
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                { "const": "all" }
+              ]
+            }
+          }
+        }
+      },
+      "permission": {
+        "description": "The permission a caller needs to change a field a state freezes; nobody may when absent. What a state requires holds for every caller.",
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "requires": ["Workflow"],
+  "vetoes": [
+    { "code": "missing_fields", "description": "A Workflow transition into a state while a field the state requires is absent or null; details names the state and the fields." },
+    { "code": "frozen_fields", "description": "An update, a caller's or one an operation applies, that changes a field the instance's state freezes, by a caller without the config's permission; details names the state and the fields." },
+    { "code": "required_fields", "description": "An update, a caller's or one an operation applies, that clears a field the instance's state requires; details names the state and the fields." }
+  ]
+}

@@ -69,6 +69,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Generated Files
 
 - `types/` - Pure TypeScript types (no runtime); use `{{.PackageName}}/types` for zero-runtime imports
+{{- if .Behaviors}}
+- `types/behaviors.ts` - `<Type>Behaviors` for each type that composes behaviors: each behavior's fields as a read returns them under `behaviors`, narrowed by the type's config
+{{- end}}
 - `validators/` - Validation functions; use `{{.PackageName}}/validators/scalars/<name>` for granular imports
 - `mask/` - Secret-masking helpers for types with @secret fields
 - `index.ts` - Main export (re-exports all; backward compatible)

@@ -6,7 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The implementation side of a TypeScript API (D51; docs/stack-model.md,
@@ -40,6 +45,13 @@ type DepsInfo struct {
 
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
+
+	// DatabaseTypesPackage is the TypeScript types package of Database
+	// when the API declares a worker (D53): it declares the queues'
+	// messages, which the Workers interface takes, and exports their
+	// definitions from its ./queues entry, which a worker claims with and
+	// an implementation enqueues with. Empty otherwise.
+	DatabaseTypesPackage string
 }
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
@@ -114,13 +126,151 @@ func (o *APIOutput) ChecksEndUsers() bool {
 }
 
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
-// each callee's SDK, in order.
+// each callee's SDK, in order, then the types of the database whose queues
+// the Workers interface's messages are, when the API declares a worker.
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
 		out = append(out, call.Package)
 	}
+	if o.HasWorkers() && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
+		out = append(out, o.Deps.DatabaseTypesPackage)
+	}
 	return out
+}
+
+// JobInfo is a job of the API (D52): a method of the generated Jobs
+// interface, which a job's entrypoint calls once per run.
+type JobInfo struct {
+	// Name is the job's `@job` class, and Method the Jobs method that runs
+	// it, the class in camel case.
+	Name   string
+	Method string
+
+	// Schedule is the decorator's schedule, for the method's comment;
+	// empty for a job that runs only on demand.
+	Schedule string
+}
+
+// WorkerInfo is a worker of the API (D53): a method of the generated
+// Workers interface, which handles one message of its queue.
+type WorkerInfo struct {
+	// Name is the worker's `@worker` class, and Method the Workers method
+	// that handles a message, the class in camel case.
+	Name   string
+	Method string
+
+	// Queue is the `@queue` class of the API's database whose messages the
+	// worker handles: the message's type in the database's TypeScript
+	// types.
+	Queue string
+
+	// Concurrency is the decorator's concurrency, for the method's
+	// comment.
+	Concurrency int
+}
+
+// jobsOf reads the API's jobs, sorted by name.
+func jobsOf(schema *ir.Schema) []JobInfo {
+	var jobs []JobInfo
+	for _, job := range schema.Jobs {
+		if job != nil {
+			jobs = append(jobs, JobInfo{Name: job.Name, Method: tsutil.ToCamelCase(job.Name), Schedule: job.Schedule})
+		}
+	}
+	slices.SortFunc(jobs, func(a, b JobInfo) int { return strings.Compare(a.Name, b.Name) })
+	return jobs
+}
+
+// workersOf reads the API's workers, sorted by name.
+func workersOf(schema *ir.Schema) []WorkerInfo {
+	var workers []WorkerInfo
+	for _, w := range schema.Workers {
+		if w == nil {
+			continue
+		}
+		concurrency := w.Concurrency
+		if concurrency <= 0 {
+			concurrency = ir.DefaultWorkerConcurrency
+		}
+		workers = append(workers, WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency})
+	}
+	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
+	return workers
+}
+
+// HasJobs reports whether the API declares a job, for which deps.ts
+// declares Jobs and JobsConstructor.
+func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
+
+// HasWorkers reports whether the API declares a worker, for which deps.ts
+// declares Workers and WorkersConstructor.
+func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+
+// WorkerQueues are the queues the API's workers handle, sorted and each
+// once: the message types deps.ts imports from the database's types.
+func (o *APIOutput) WorkerQueues() []string {
+	var out []string
+	for _, w := range o.Workers {
+		if !slices.Contains(out, w.Queue) {
+			out = append(out, w.Queue)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// The functions an implementation of an API with jobs or workers exports,
+// of the generated JobsConstructor's and WorkersConstructor's types.
+const (
+	JobsFunc    = "createJobs"
+	WorkersFunc = "createWorkers"
+)
+
+// exportPattern matches a declaration that exports a name, by the name's
+// place in the match: `export const createJobs`, `export function
+// createJobs`, or a name in an export list, `export { createJobs }`.
+var exportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:declare\s+)?(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)|export\s*(?:type\s+)?\{([^}]*)\}`)
+
+// reexportPattern matches a re-export of a whole module.
+var reexportPattern = regexp.MustCompile(`(?m)^\s*export\s*\*\s*from`)
+
+// ExportsName reports whether the TypeScript package at dir exports name
+// from a file that is not a test: a declaration that exports it, or an
+// export list that names it. A file that re-exports a whole module
+// (`export * from`) may export it too, so it counts as exporting it.
+func ExportsName(dir, name string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, fmt.Errorf("read implementation package %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		file := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(file, ".ts") || strings.HasSuffix(file, ".d.ts") || strings.HasSuffix(file, ".test.ts") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			return false, fmt.Errorf("read implementation package %s: %w", dir, err)
+		}
+		text := string(data)
+		if reexportPattern.MatchString(text) {
+			return true, nil
+		}
+		for _, m := range exportPattern.FindAllStringSubmatch(text, -1) {
+			if m[1] == name {
+				return true, nil
+			}
+			for _, item := range strings.Split(m[2], ",") {
+				fields := strings.Fields(item)
+				// `createJobs`, or `jobs as createJobs`.
+				if len(fields) > 0 && fields[len(fields)-1] == name {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 // ImplementationFile is the file the scaffold writes the implementation

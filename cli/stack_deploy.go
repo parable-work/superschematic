@@ -182,7 +182,13 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 		}
 		return fail(fmt.Errorf("stack %s has no environment %s (its environments: %s)", st.Name, environment, strings.Join(known, ", ")))
 	}
-	if c.env, err = stack.Resolve(p.reg, stack.Input{Stack: st, Services: c.services, Environment: environment}); err != nil {
+	// The checkout is the build's, so a local environment resolves here
+	// with the containers and ports stack dev runs it with.
+	schemasRoot, err := stack.CanonicalSchemasRoot(p.schemasRoot)
+	if err != nil {
+		return fail(err)
+	}
+	if c.env, err = stack.Resolve(p.reg, stack.Input{Stack: st, Services: c.services, Environment: environment, SchemasRoot: schemasRoot}); err != nil {
 		return fail(err)
 	}
 	if c.env.Target == local.Target && !allowLocal {
@@ -650,7 +656,7 @@ func newStackBuildCmd(a *app) *cobra.Command {
 		Long: `build builds, through the environment's target (Cloud Build on gcp), the
 image of each server and job whose build context changed since the image
 the deploy manifest records, as stack deploy would, and deploys nothing.
-Each Go or TypeScript server, and each Go job, builds from the Dockerfile
+Each Go or TypeScript server, job and worker builds from the Dockerfile
 superschematic build-all writes at <output-root>/server/<stack>/<deployable>/,
 with the repository root as its context, cut down by the
 Dockerfile.dockerignore beside it.

@@ -47,6 +47,7 @@ calls from its pages.
       - shop-db/ DB: the tables
       - shop-api/ API: products and sign-in, served in Go
       - shop-orders/ API: orders and reviews, for the guides
+      - shop-stock/ API: stock, served in Rust
       - shop-storefront/ API: carts, served in TypeScript
       - shop-stack/ Stack: what runs, and the Dev environment stack dev runs
   - go/ the Go module: the implementations and tests
@@ -55,6 +56,8 @@ calls from its pages.
   - typescript/ the TypeScript service, a client and tests
   - python/ a client and tests
   - rust/ a client and tests
+  - rust-impl/
+    - shop-stock/ the implementation of shop-stock
   - rust-server/ shop-orders on the generated Rust server, for the guides
   - topcoat/ a Topcoat app over the Rust server's implementations, for the guides
   - testdata/generated/ copies of the generated files these pages quote

@@ -1,0 +1,33 @@
+[package]
+name = "superschematic-engine-storage"
+description = "The engine's storage over SQLite and Postgres: transactions, savepoints, the write counter, writer locks, the migration ledger, typed DDL, the behavior SQL checker and the commit notifier (D16, D58)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Both databases by default: the bindings every server links (the Node-API
+# addon and the C archive) open SQLite for a test, a local run or a Topcoat
+# app and Postgres in a stack, so the build they take has both. A build
+# that needs one turns the default off and names it.
+default = ["sqlite", "postgres"]
+# SQLite through rusqlite and the SQLite it bundles, so the SQLite version
+# is known (3.x with STRICT tables, RETURNING and FTS5).
+sqlite = ["dep:rusqlite"]
+# Postgres through the synchronous postgres crate over tokio-postgres 0.7,
+# the client the version graph's Rust engine uses.
+postgres = ["dep:postgres", "dep:bytes"]
+
+[dependencies]
+bytes = { version = "1.11", optional = true }
+postgres = { version = "0.19.14", optional = true }
+rusqlite = { version = "0.40.2", optional = true, features = ["bundled"] }
+# Advisory lock keys and the suffix of a Postgres identifier cut to 63
+# bytes, both SHA-256 so they are the same in every process and release.
+sha2 = "0.10.9"
+
+[lints]
+workspace = true

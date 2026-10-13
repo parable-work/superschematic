@@ -178,6 +178,35 @@ workspace and runs it with `bun main.ts`, beside the Go servers;
 stack, and `go/stack_dev_test.go` reads a cart from the running
 storefront.
 
+The storefront has no background work, but a TypeScript API declares
+[jobs](/superschematic/guides/stacks/#jobs) and
+[workers](/superschematic/guides/queues/) as a Go one does, and its
+`deps.ts` gets `Jobs` and `Workers`. Your implementation exports
+`createJobs` and `createWorkers` beside `create`, each from the same
+`Deps`:
+
+```ts
+import { enqueue } from '@superschematic/http-runtime/postgres';
+import { orderPlacedQueue } from '@acme/shop-db-types/queues';
+import type { JobsConstructor, WorkersConstructor } from '@acme/shop-orders-api';
+
+export const createJobs: JobsConstructor = deps => ({
+  async shipOrders(signal) {
+    // One run, on the job's schedule or with stack run; SIGTERM aborts signal.
+  },
+});
+
+export const createWorkers: WorkersConstructor = deps => ({
+  async fulfilOrders(message, signal) {
+    // One message of shop-db's queue OrderPlaced; a rejection retries it.
+  },
+});
+```
+
+The stack's build writes each a package of its own beside the server's,
+whose `main.ts` builds the `Deps` and runs the job once, or claims the
+queue's messages until SIGTERM, and `stack dev` runs them on Bun.
+
 <LinkCard
   title="Next: build the whole tree"
   href="/superschematic/first-project/build-the-tree/"

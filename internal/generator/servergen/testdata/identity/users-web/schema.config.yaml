@@ -1,0 +1,8 @@
+# A static site whose browser code calls users-api (D55): Accounts answers
+# CORS for the site's origin on users-api's routes, and hands a preflight
+# from another origin on to the API's router, whose identity runtime
+# answers its config's trusted origins (D55, amended).
+name: users-web
+kind: Site
+calls:
+  - { name: users-api, kind: API }

@@ -104,7 +104,7 @@ CREATE TABLE stock_level (
   quantity BIGINT NOT NULL
 );
 
-COMMENT ON TABLE stock_level IS 'How many units of a product the warehouse holds.';
+COMMENT ON TABLE stock_level IS 'How many units of a product the warehouse holds, one row per product.';
 
 CREATE TABLE "user" (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -229,6 +229,8 @@ CREATE UNIQUE INDEX uq_review_one_per_author ON review USING BTREE (product_id, 
 CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_ops);
 
 CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
+
+CREATE UNIQUE INDEX uq_stock_level_one_per_product ON stock_level USING BTREE (product_id);
 
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);
 

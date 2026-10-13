@@ -112,14 +112,14 @@ func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 				ref := root["$defs"].(map[string]any)["BehaviorRef"].(map[string]any)
 				ref["allOf"] = ref["allOf"].([]any)[1:]
 			},
-			want: "$defs/BehaviorRef/allOf: expected one branch per registered behavior [Assignment Blueprint Branches Budget Comments Constants Dependencies Lease Links Presence Queue Reactions Retries Revisions Rollups Search Variants Workflow]",
+			want: "$defs/BehaviorRef/allOf: expected one branch per registered behavior [Approvals Assignment Blueprint Branches Budget Comments Constants Dependencies Lease Links Numbering Presence Queue Reactions Retries Revisions Rollups Search StateRules Timers Variants Workflow]",
 		},
 		"a config branch for another behavior": {
 			edit: func(root map[string]any) {
 				branch := root["$defs"].(map[string]any)["BehaviorRef"].(map[string]any)["allOf"].([]any)[0].(map[string]any)
 				branch["if"].(map[string]any)["properties"].(map[string]any)["name"].(map[string]any)["const"] = "acme.Stock"
 			},
-			want: "$defs/BehaviorRef/allOf/0: expected the branch that holds the config of behavior Assignment",
+			want: "$defs/BehaviorRef/allOf/0: expected the branch that holds the config of behavior Approvals",
 		},
 		"no behavior config": {
 			edit: func(root map[string]any) {
