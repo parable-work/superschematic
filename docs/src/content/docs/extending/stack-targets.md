@@ -63,11 +63,21 @@ it, so two checkouts run one environment side by side. A cloud target's
 platform ignores it: nothing it names may change from checkout to
 checkout.
 
+- `Provider` names the provider the platform runs on: `local`, `gcp`,
+  `cloudflare`, `fake`. It is required. Two platforms of one provider meet
+  only through a connector that names both; between two of different
+  providers that no connector names, the core's generic connector serves
+  an http or a site edge (see below).
 - `NameOf` returns the deployable's name in the environment. It sees no
   resource name, address or bindings yet. Under a parameter, reference
   the parameter, so each member gets a name of its own.
 - `AddressOf` returns how an edge reaches the deployable, usually an
   output of one of its nodes. It sees the resource name.
+- `PublicAddressOf`, for an exposed deployable, returns where a browser
+  reaches it from outside the environment: a site edge derives the API's
+  from it, and so does the generic connector. A site platform must have
+  one; a server platform without one cannot be called from a site or from
+  another provider.
 - `Lower` returns a `registry.Lowered`: the deployable's nodes, and for an
   exposed server under a domain, the DNS records it needs, in the neutral
   shape (`ir.DNSRecord`: name, type and value). It sees the bindings too.
@@ -97,10 +107,25 @@ for _, b := range d.Bindings {
 		return registry.Lowered{}, fmt.Errorf("binding %s: %w", b.Field, err)
 	}
 	for _, v := range vars {
+		if v.Secret {
+			// From the platform's secret store; see below.
+			continue
+		}
 		env = append(env, map[string]any{"name": v.Name, "value": v.Value})
 	}
 }
 ```
+
+A variable marked `Secret` is a secret member, such as a signed-token
+credential's private key (`ir.SecretDerivedMember`). Its value is always a
+reference to an output, never a literal: resolution refuses a connector
+that derives one as a literal. Set it from the platform's secret store,
+never as a plain value. gcp writes a Secret Manager secret of the
+deployable's own and a version whose data is the reference, grants the
+deployable's account access, and mounts it with `valueSource.secretKeyRef`
+at that version; `stack/stacktest`'s fake platforms write a fake secret
+version; the local target's process reads it from its state directory,
+where its provisioner resolves the reference.
 
 `Settings` is the JSON Schema of a deployable's settings on the platform.
 Resolution validates each `settings` element against it, and refuses a
@@ -180,6 +205,44 @@ connector from it for each edge its server platform has; it may share the
 server connector's `Connect`, which sees the job or the worker as `From`,
 as gcp's do. For an http edge, the callee's issuer lists the job or the
 worker as a caller that serves its API.
+
+### Across providers
+
+The core registers a generic connector for http edges, `generic.http`,
+and one for site edges, `generic.site` (`ConnectorSpec.Generic`, which
+names no platform). `Registry.Connector` returns the connector that names
+both platforms when there is one, and otherwise the generic one of the
+edge's kind when the two platforms' providers differ. So a target needs
+no connector to or from another provider's platforms, and a connector
+that knows both, such as a database driver for another cloud's Postgres,
+still wins where it is registered. Two platforms of one provider that no
+connector names get none, and resolution reports `no-connector`. A sql or
+a bucket edge across providers always needs a connector of its own.
+
+The generic connector reaches the callee at its public address, so the
+callee's server must be exposed: resolution refuses an http edge across
+providers to one the stack does not expose with
+`cross-provider-unexposed`, and one whose platform gives no public
+address with `lowering`. For an http edge it adds a key node, the Pulumi
+`tls` provider's `PrivateKey` with the `ED25519` algorithm, which the core
+pins and registers (`internal/stack/generic/schemas`), and derives:
+
+- for the caller, the callee's public address and a `signed-token`
+  credential, `iss` and `sub` the caller's deployable and `aud` the
+  callee's, whose `Key` references the node's `privateKeyPemPkcs8`, a
+  secret member, which the caller's platform sets from its secret store;
+- for the callee, an issuer that is the caller, with the node's
+  `publicKeyPem` as its one key (`ir.ServiceAuthKey.PEM`), EdDSA and a
+  lifetime of 300 seconds.
+
+The HTTP runtimes read both PEMs: a signed-token source signs with the
+PKCS#8 key, its `kid` the key's RFC 7638 thumbprint, and the callers
+reader turns the SubjectPublicKeyInfo key into a JWK with the same `kid`.
+A platform that can be called from another provider gives its exposed
+servers a `PublicAddressOf`; one that can call out sets secret members
+from its store. Each edge has one key slot today; rotation is not built.
+A distribution that links the pulumi provisioner pins the `tls` provider
+for it, `stack.GenericKeyPackage` at `stack.GenericKeyProviderVersion`.
 
 ## A target
 
@@ -360,6 +423,16 @@ Keep a `ProviderVersion` constant beside it. `schemas.ResourceTypes`
 refuses a pin at another version, and the distribution passes the
 constant to the provisioner (`pulumi.Extension{ProviderVersions: ...}`),
 so the provider that applies a node is the one its schema came from.
+
+The root module pins one provider the same way, for the generic
+connector's key node: pulumi-tls, in `internal/stack/generic/schemas`,
+written by `go run ./internal/tools/providerschemas` from the repository's
+root. pulumi-tls is bridged through the Terraform plugin framework, whose
+bridge metadata has no auto-aliasing table, so the tool takes the
+Terraform type from the metadata's renames table and refuses a list
+property there, whose Terraform name it cannot know. A connector that
+emits a type no target registers brings its schema in
+`ConnectorSpec.ResourceTypes`, as a DNS platform does.
 
 ## Test it offline
 
