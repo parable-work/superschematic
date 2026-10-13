@@ -8,18 +8,21 @@
 //! scenario one test: the calls it made on the engines it opened and what
 //! each returned or threw. The replayer resolves the file's shared values,
 //! skips a scenario only the TypeScript engine can run (`js`), one that
-//! needs a behavior this engine does not register yet (`testBehaviors`, or
-//! a core behavior in `behaviors`; milestone 5), one that writes the file
-//! with SQL of its own on Postgres (`dialect: sqlite`), and one that calls a
-//! method that changes the engine and is not built yet (the runner, the
-//! tools, a behavior's operation). It opens each engine as the recording
-//! says, with a policy answering from the recorded answer table, seeded or
-//! fixed ids and a wall (strict) or fixed clock, then makes each step's
-//! call through [`superschematic_engine::calls`] and compares its result or
-//! its error (class, code, message and details), binding the symbols
-//! (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`, `{{opaque:N}}`) at their first
-//! appearance in an answer. A read-only call not built yet (the tools
+//! needs a behavior this engine does not have (a test behavior the kit has
+//! not ported, [`behaviors`], or a core behavior, milestones 8 to 12), one
+//! that writes the file with SQL of its own on Postgres (`dialect: sqlite`),
+//! and one that calls a method that changes the engine and is not built yet
+//! (the runner, the tools). It opens each engine as the recording says,
+//! with a policy answering from the recorded answer table, seeded or fixed
+//! ids, a wall (strict) or fixed clock, and the test behaviors it names,
+//! then makes each step's call through [`superschematic_engine::calls`]
+//! (`behaviors.register` through the kit's behaviors) and compares its
+//! result or its error (class, code, message and details), binding the
+//! symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`, `{{opaque:N}}`) at their
+//! first appearance in an answer. A read-only call not built yet (the tools
 //! document) is skipped and counted.
+
+pub mod behaviors;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -38,8 +41,8 @@ use superschematic_engine::{
 };
 
 /// The core's behaviors, which the TypeScript engine registers and this one
-/// does not yet (milestone 5): a scenario whose schemas compose one is
-/// skipped.
+/// does not yet (milestones 8 to 12): a scenario whose schemas compose one
+/// is skipped.
 pub const CORE_BEHAVIORS: [&str; 15] = [
     "Workflow",
     "Comments",
@@ -60,22 +63,21 @@ pub const CORE_BEHAVIORS: [&str; 15] = [
 
 /// Calls that change the engine and are not built yet: a scenario that
 /// makes one is skipped, since the steps after it depend on it.
-pub const UNBUILT_WRITES: [&str; 11] = [
-    "instances.invoke",
-    "instances.operate",
-    "instances.invokeSchema",
+pub const UNBUILT_WRITES: [&str; 7] = [
     "tools.call",
     "runner.runDue",
     "runner.start",
     "runner.stop",
-    "behaviors.register",
     "storage.transaction",
     "events.watch",
     "search",
 ];
 
-/// Calls that only read and are not built yet (milestones 5 and 6): the
-/// step is skipped and counted.
+/// Calls that only read and are not built yet (milestone 6): the step is
+/// skipped and counted. The registered behaviors' names and declarations
+/// (`behaviors.names`, `has`, `declaration`) are read, but list the core's
+/// behaviors, which this engine does not register yet, so they are skipped
+/// too until it does.
 pub const UNBUILT_READS: [&str; 8] = [
     "tools.describe",
     "tools.manifest",
@@ -216,13 +218,13 @@ pub fn replay_file(file: &ScenarioFile, database: &Database, repository: &Path) 
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if let Some(reason) = skip_reason(scenario, &steps, database) {
+        if let Some(reason) = skip_reason(&file.name, scenario, &steps, database) {
             report.steps_skipped += steps.len();
             report.skipped.push((name, reason));
             continue;
         }
         report.replayed += 1;
-        let mut run = Run::new(database, repository, scenario);
+        let mut run = Run::new(database, repository, &file.name, scenario);
         for (index, step) in steps.iter().enumerate() {
             match run.step(step) {
                 Ok(Outcome::Passed) => report.steps_passed += 1,
@@ -243,7 +245,12 @@ pub fn replay_file(file: &ScenarioFile, database: &Database, repository: &Path) 
 }
 
 // skip_reason says why a scenario is not replayed, or None.
-fn skip_reason(scenario: &Value, steps: &[Value], database: &Database) -> Option<String> {
+fn skip_reason(
+    file: &str,
+    scenario: &Value,
+    steps: &[Value],
+    database: &Database,
+) -> Option<String> {
     let names = |key: &str| -> Vec<String> {
         scenario
             .get(key)
@@ -260,16 +267,22 @@ fn skip_reason(scenario: &Value, steps: &[Value], database: &Database) -> Option
     if !js.is_empty() {
         return Some(format!("js: {}", js.join(", ")));
     }
-    let test_behaviors = names("testBehaviors");
-    if !test_behaviors.is_empty() {
-        return Some(format!("test behaviors: {}", test_behaviors.join(", ")));
+    let missing: Vec<String> = names("testBehaviors")
+        .into_iter()
+        .filter(|name| behaviors::test_behavior(file, name).is_none())
+        .collect();
+    if !missing.is_empty() {
+        return Some(format!("test behaviors not ported: {}", missing.join(", ")));
     }
     let core: Vec<String> = names("behaviors")
         .into_iter()
         .filter(|name| CORE_BEHAVIORS.contains(&name.as_str()))
         .collect();
     if !core.is_empty() {
-        return Some(format!("core behaviors (milestone 5): {}", core.join(", ")));
+        return Some(format!(
+            "core behaviors (milestones 8 to 12): {}",
+            core.join(", ")
+        ));
     }
     if scenario.get("dialect").and_then(Value::as_str) == Some("sqlite")
         && database.dialect() == Dialect::Postgres
@@ -336,6 +349,7 @@ enum Bound {
 struct Run<'d> {
     database: &'d Database,
     repository: &'d Path,
+    file: &'d str,
     principals: Map<String, Value>,
     engines: Vec<(String, Opened)>,
     places: Vec<(String, Place)>,
@@ -345,10 +359,11 @@ struct Run<'d> {
 }
 
 impl<'d> Run<'d> {
-    fn new(database: &'d Database, repository: &'d Path, scenario: &Value) -> Self {
+    fn new(database: &'d Database, repository: &'d Path, file: &'d str, scenario: &Value) -> Self {
         Run {
             database,
             repository,
+            file,
             principals: scenario
                 .get("principals")
                 .and_then(Value::as_object)
@@ -385,6 +400,26 @@ impl<'d> Run<'d> {
                 let opened = self.engine_of(step)?;
                 opened.engine = None;
                 Ok(None)
+            }
+            "behaviors.register" => {
+                let name = args
+                    .first()
+                    .and_then(|given| given.get("behavior"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let set = behaviors::test_behavior(self.file, &name)
+                    .ok_or_else(|| format!("the test kit has no behavior {name}"))?;
+                let engine = self
+                    .engine_of(step)?
+                    .engine
+                    .as_ref()
+                    .ok_or("the engine is closed")?;
+                engine
+                    .behaviors()
+                    .register_set(set)
+                    .map(|()| None)
+                    .map_err(|error| error_json(&error))
             }
             "storage.get" | "storage.all" | "storage.run" | "storage.exec" => {
                 if self.database.dialect() == Dialect::Postgres {
@@ -591,6 +626,16 @@ impl<'d> Run<'d> {
             )),
             Some(document) => Some(MetaSchema::Document(document.clone())),
         };
+        if let Some(Value::Array(names)) = given.get("behaviors") {
+            for name in names.iter().filter_map(Value::as_str) {
+                let set = behaviors::test_behavior(self.file, name).ok_or_else(|| {
+                    error_json(&Error::Usage(format!(
+                        "the test kit has no behavior {name}"
+                    )))
+                })?;
+                options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
+            }
+        }
         if let Some(Value::Object(values)) = given.get("values") {
             options.values = ValueOptions {
                 threshold_bytes: values.get("thresholdBytes").and_then(Value::as_u64),
@@ -1130,6 +1175,10 @@ pub fn error_json(error: &Error) -> Value {
         }
         Error::Usage(message) => {
             out.insert("class".into(), Value::from("TypeError"));
+            out.insert("message".into(), Value::from(message.as_str()));
+        }
+        Error::Config(message) => {
+            out.insert("class".into(), Value::from("BehaviorConfigError"));
             out.insert("message".into(), Value::from(message.as_str()));
         }
         Error::Storage(failure) => {
