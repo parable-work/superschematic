@@ -10,10 +10,12 @@
 //! and the sweep removes what a crash left; on SQLite and, with the
 //! variable set, on Postgres.
 //!
-//! milestone 5: the behaviors' parts (a field reader, an operation's view,
-//! Variants' validation, Search's index, before(), a behavior's own rows
-//! through values.stow and values.release, Revisions). milestone 6: the
-//! route and the MCP tool that read a value by its hash.
+//! The behaviors' parts (a field reader, an operation's view, a behavior's
+//! own field and rows through values.stow and values.release) are the test
+//! kit's (`testkit/tests/behavior_values.rs`). milestone 6: before(),
+//! which the runner's reactions read, and the route and the MCP tool that
+//! read a value by its hash. Variants' validation, Search's index and
+//! Revisions are core behaviors' (milestones 8 to 12).
 
 mod support;
 

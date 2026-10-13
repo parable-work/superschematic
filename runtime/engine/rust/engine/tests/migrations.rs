@@ -9,9 +9,10 @@
 //! update of a seeded instance at its sequence, its events read back with
 //! their causes and value refs, a large field the next write moves to the
 //! value store, a lookup by a unique field and a unique conflict, and a
-//! read from before a floor. milestone 5: the checks that publish a schema
-//! with a test behavior on the migrated storage and run its operations
-//! (checkOperationEvents, test.Holder's references). milestone 6: the
+//! read from before a floor. Not yet ported: the checks that publish a
+//! schema with a test behavior on the migrated storage and run its
+//! operations (checkOperationEvents, test.Holder's references), which need
+//! the test kit's behaviors and the open meta-schema. milestone 6: the
 //! runner's subscriptions on a migrated storage.
 
 mod support;

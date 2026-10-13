@@ -5,8 +5,10 @@
 //! it, and what where refuses; on SQLite and, with the variable set, on
 //! Postgres, where every comparison repeats the index's expression.
 //!
-//! milestone 5: a behavior's filters (Workflow.status, a behavior's index
-//! on its column, which serves null as one more range).
+//! A behavior's filters, and a behavior's index on its column, which
+//! serves null as one more range, are the replay's (`list-filters.json`,
+//! with the test kit's test.Counter and test.Tag); Workflow.status is a
+//! core behavior's (milestones 8 to 12).
 
 mod support;
 

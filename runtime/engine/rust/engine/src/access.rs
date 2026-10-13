@@ -227,7 +227,7 @@ pub trait AccessPolicy: Send + Sync {
 }
 
 /// Decides whether a principal holds a permission: a rule's `require`, and
-/// a behavior's `can()` (milestone 5), ask it. The default is
+/// a behavior's `can()`, ask it. The default is
 /// [`DottedPermissions`], the HTTP runtime's `hasAnyPermission`; a
 /// deployment with its own vocabulary implements it in its engine crate.
 pub trait PermissionMatcher: Send + Sync {

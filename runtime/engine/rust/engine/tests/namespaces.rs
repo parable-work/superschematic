@@ -8,9 +8,9 @@
 //! policy: who may create, archive and list, the questions it is asked,
 //! and a refused caller learning nothing. An archived namespace refuses an
 //! instance's create, update and delete while its instances and events
-//! read on. milestone 5: an archived namespace refusing a behavior's
-//! operation, and the tools (milestone 6) hiding what writes there;
-//! milestone 6: the runner, which runs nothing in an archived namespace.
+//! read on. milestone 6: an archived namespace refusing a behavior's
+//! operation (its scenario opens a runner), the tools hiding what writes
+//! there, and the runner, which runs nothing in an archived namespace.
 
 mod support;
 

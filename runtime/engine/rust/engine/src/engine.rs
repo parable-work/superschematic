@@ -210,9 +210,9 @@ pub struct EngineOptions {
     /// engine opened without one is refused, as the TypeScript engine
     /// refuses it; `Policy::allow_all()` is for tests and local use.
     pub policy: Option<Policy>,
-    /// Decides whether a principal holds a permission a rule requires (and,
-    /// from milestone 5, one a behavior's config names); the HTTP runtime's
-    /// dotted-path `hasAnyPermission` when absent.
+    /// Decides whether a principal holds a permission a rule requires, or
+    /// one a behavior's `can()` asks about; the HTTP runtime's dotted-path
+    /// `hasAnyPermission` when absent.
     pub permission_matcher: Option<Arc<dyn PermissionMatcher>>,
     /// The configured namespaces besides `default`, and the shared one. A
     /// create makes more while the engine runs.

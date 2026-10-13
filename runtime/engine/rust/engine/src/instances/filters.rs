@@ -8,9 +8,9 @@
 //! the instance type's own top-level fields that holds a string, a number
 //! or a boolean, by its key, or a field a behavior lets a list filter on,
 //! which the behavior keeps in one of its columns, by its qualified name
-//! (`Workflow.status`; milestone 5 registers behaviors). A value is of the
-//! field's JSON type, or null, which keeps the instances whose field holds
-//! no value, and a list holds 1 to 100 of them.
+//! (`Workflow.status`). A value is of the field's JSON type, or null,
+//! which keeps the instances whose field holds no value, and a list holds
+//! 1 to 100 of them.
 //!
 //! A page keeps creation order (`position`) and reads in one of two ways:
 //! through an index whose every key a member names (an own index, or a

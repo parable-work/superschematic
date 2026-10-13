@@ -6,8 +6,9 @@
 //! keeps an indexed field inline in the row; on SQLite and, with the
 //! variable set, on Postgres.
 //!
-//! milestone 5: a behavior's update() and two creates in one call meeting
-//! the index (test.Slugger). milestone 6: the describe document's lookup.
+//! A behavior's update() and two creates in one call meeting the index
+//! (test.Slugger) are the replay's (`unique.json`). milestone 6: the
+//! describe document's lookup.
 
 mod support;
 

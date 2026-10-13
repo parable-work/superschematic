@@ -3,9 +3,9 @@
 //! version, on SQLite and, with the variable set, on Postgres. The case of
 //! `test/normalize.test.ts` that needs no behavior is here too.
 //!
-//! milestone 5: none of these cases needs a behavior; the TypeScript cases
-//! that register one (normalize.test.ts's test.Mailer) run once behaviors
-//! do.
+//! None of these cases needs a behavior; the TypeScript cases that
+//! register one (normalize.test.ts's test.Mailer) are the replay's
+//! (`normalize.json`).
 
 mod support;
 

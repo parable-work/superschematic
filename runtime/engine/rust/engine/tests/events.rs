@@ -15,8 +15,9 @@
 //! without the per-namespace writer lock (D58); and a watch on one engine
 //! wakes for another's commit.
 //!
-//! milestone 5: the kinds, behaviors and exclude filters over operation
-//! events (test.Counter, test.Tally).
+//! The kinds, behaviors and exclude filters over operation events
+//! (test.Counter, test.Tally) are the replay's (`events.json`), which
+//! composes the test kit's behaviors.
 
 mod support;
 
