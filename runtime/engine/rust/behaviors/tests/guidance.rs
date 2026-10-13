@@ -12,8 +12,8 @@ use superschematic_engine::json::stringify;
 use superschematic_engine::Behavior;
 use superschematic_engine_behaviors::{
     Comments, Constants, ConstantsConfig, Dependencies, DependenciesConfig, LinkPin, LinkSpec,
-    Links, LinksConfig, Revisions, RevisionsConfig, RevisionsReview, Variants, VariantsConfig,
-    Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
+    Links, LinksConfig, Numbering, NumberingConfig, Revisions, RevisionsConfig, RevisionsReview,
+    Variants, VariantsConfig, Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
 };
 
 /// The TypeScript guidance for the configs below.
@@ -1366,6 +1366,132 @@ fn dependencies_guidance_and_create_parameters_are_the_typescript_engines() {
         assert_eq!(
             stringify(&create_params(&Dependencies, &config, &task)),
             stringify(&expected[name]["createParams"]),
+            "{name}"
+        );
+    }
+}
+
+/// Numbering's TypeScript guidance (`numberingGuidance`) for an Invoice: a
+/// yearly count per customer, printed with the year, on a type whose link
+/// operation moves the customer; one count, printed without it; and a count
+/// per project with the year's two digits, on a type with no link
+/// operation.
+const NUMBERING: &str = r#"{
+  "scoped": {
+    "summary": "Each Invoice gets a number at its create, in a count per target of its customer link, starting again at 1 each UTC year, printed as INV-{yyyy}-{seq:4}: number 42, made in 2026, prints INV-2026-0042. A label is unique among one customer target's instances. A refused create takes no number, a delete leaves a gap, and nothing changes a number once set.",
+    "operations": {
+      "create": {
+        "success": "The new Invoice holds behaviors.Numbering.seq, the next number of its count, and label, the number as INV-{yyyy}-{seq:4} prints it. It is counted in the count of the customer target the create gives."
+      },
+      "list": {
+        "useWhen": "where: { \"Numbering.label\": \"INV-2026-0042\" } finds an instance by the number a person reads, and \"Numbering.seq\" by its number. Each customer target counts from 1, so a label can match one instance per target."
+      },
+      "update": {
+        "doNotUseWhen": "Do not use to change a number, which behaviors.Numbering holds: nothing changes a number once set."
+      },
+      "assignNumber": {
+        "useWhen": "Use on an instance created before Invoice composed Numbering, which holds no number yet; to backfill, invoke it on each in creation order.",
+        "doNotUseWhen": "Do not use to renumber: an instance numbered already keeps its number, and the call changes nothing.",
+        "success": "Returns seq and label, counted as its create would have counted them, by its customer target, in the year it was created; behaviors.Numbering holds them from then on."
+      },
+      "link": {
+        "success": "Moving customer keeps the instance's number, which stays in the count of the target it was numbered under."
+      }
+    }
+  },
+  "plain": {
+    "summary": "Each Invoice gets a number at its create, in one count for Invoice, printed as No. {seq}: number 42 prints No. 42. A label is unique. A refused create takes no number, a delete leaves a gap, and nothing changes a number once set.",
+    "operations": {
+      "create": {
+        "success": "The new Invoice holds behaviors.Numbering.seq, the next number of its count, and label, the number as No. {seq} prints it."
+      },
+      "list": {
+        "useWhen": "where: { \"Numbering.label\": \"No. 42\" } finds an instance by the number a person reads, and \"Numbering.seq\" by its number."
+      },
+      "update": {
+        "doNotUseWhen": "Do not use to change a number, which behaviors.Numbering holds: nothing changes a number once set."
+      },
+      "assignNumber": {
+        "useWhen": "Use on an instance created before Invoice composed Numbering, which holds no number yet; to backfill, invoke it on each in creation order.",
+        "doNotUseWhen": "Do not use to renumber: an instance numbered already keeps its number, and the call changes nothing.",
+        "success": "Returns seq and label, counted as its create would have counted them; behaviors.Numbering holds them from then on."
+      }
+    }
+  },
+  "short": {
+    "summary": "Each Invoice gets a number at its create, in a count per target of its project link, printed as {yy}/{seq:1}: number 42, made in 2026, prints 26/42. A label is unique among one project target's instances. A refused create takes no number, a delete leaves a gap, and nothing changes a number once set.",
+    "operations": {
+      "create": {
+        "success": "The new Invoice holds behaviors.Numbering.seq, the next number of its count, and label, the number as {yy}/{seq:1} prints it. It is counted in the count of the project target the create gives."
+      },
+      "list": {
+        "useWhen": "where: { \"Numbering.label\": \"26/42\" } finds an instance by the number a person reads, and \"Numbering.seq\" by its number. Each project target counts from 1, so a label can match one instance per target."
+      },
+      "update": {
+        "doNotUseWhen": "Do not use to change a number, which behaviors.Numbering holds: nothing changes a number once set."
+      },
+      "assignNumber": {
+        "useWhen": "Use on an instance created before Invoice composed Numbering, which holds no number yet; to backfill, invoke it on each in creation order.",
+        "doNotUseWhen": "Do not use to renumber: an instance numbered already keeps its number, and the call changes nothing.",
+        "success": "Returns seq and label, counted as its create would have counted them, by its project target; behaviors.Numbering holds them from then on."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn numbering_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine::behaviors::{DescribedTypeOperation, OperationScope};
+
+    let expected: Value = serde_json::from_str(NUMBERING).expect("the expected guidance");
+    let invoice = |operations: &[&str]| {
+        let mut invoice = target();
+        invoice.schema = "Invoice".to_owned();
+        invoice.type_name = "Invoice".to_owned();
+        invoice.operations = operations
+            .iter()
+            .map(|name| DescribedTypeOperation {
+                name: (*name).to_owned(),
+                behavior: Some("Links".to_owned()),
+                writes: true,
+                scope: OperationScope::Instance,
+            })
+            .collect();
+        invoice
+    };
+    let guidance = Numbering.hooks().guidance.expect("guidance");
+    for (name, config, operations) in [
+        (
+            "scoped",
+            NumberingConfig {
+                format: "INV-{yyyy}-{seq:4}".to_owned(),
+                scope: Some("customer".to_owned()),
+                yearly: true,
+            },
+            &["link", "unlink"][..],
+        ),
+        (
+            "plain",
+            NumberingConfig {
+                format: "No. {seq}".to_owned(),
+                scope: None,
+                yearly: false,
+            },
+            &[][..],
+        ),
+        (
+            "short",
+            NumberingConfig {
+                format: "{yy}/{seq:1}".to_owned(),
+                scope: Some("project".to_owned()),
+                yearly: false,
+            },
+            &["assignNumber"][..],
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&Numbering, &config, &invoice(operations))),
+            expected[name],
             "{name}"
         );
     }
