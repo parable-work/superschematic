@@ -5946,3 +5946,38 @@ TypeScript server, whose tests send preflights from the site, a trusted
 origin and another.
 
 The rule is reversible until the first release.
+
+### D30, amended: a local environment's containers and default ports are its checkout's
+
+The local target named an environment's containers after the stack and
+the environment alone, `superschematic-<stack>-<environment>-postgres`
+and `-storage`, and hashed their host ports and the servers' from the
+same names. Two checkouts of a repository, two git worktrees, running
+`stack dev` on one stack shared one Postgres container and one emulator,
+and their servers asked for the same ports. Two agents' acme checks met
+this way: one run lost its schema in the middle of its test, a column
+missing, when the other's run took the container over and migrated it to
+its own branch's model.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A checkout's discriminator is six hexadecimal digits of a SHA-256 of the absolute path of the environment's state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`, with the schemas root's links resolved. Two checkouts differ, one keeps it from run to run, and a checkout that moves gets a new one. | An ID generated into the state directory at the first run, which survives a move, but which a copied checkout carries to a second one, and which the build would read from a file the machine writes. The worktree's name, which a plain clone has not. A variable or flag naming the copy, as `COMPOSE_PROJECT_NAME` does, which each run must remember to set. |
+| Every build of the CLI resolves a local environment in its checkout: `Options.SchemasRoot` reaches the stack's generator, which hands the canonical root to resolution as `stack.Input.SchemasRoot`, which platforms see as `StackEnvironment.SchemasRoot`. `environment.json` names the checkout's containers and holds its ports, so the build, `stack dev` and `stack run` agree. The build cache keys a Stack service by its checkout, since its output is that checkout's. A resolution with no schemas root, a library's or a test's, names no checkout and keeps the names and ports from before. | The provisioner renaming the containers and moving the ports when it runs, which would leave `environment.json` holding URLs no process listens on, the reason the ports are derived at resolution. Only `stack dev`'s build naming the checkout, which would leave a later `build-all` writing an environment whose program `stack run` refuses as stale. |
+| A container is `superschematic-<stack>-<environment>-<checkout>-postgres` or `-storage`, lower case, and carries the label `superschematic.checkout` beside the stack's and the environment's. A name stays within 63 bytes, a DNS label's, by losing the end of its stack and environment and keeping the checkout whole, which still tells them apart. | The hash in place of the readable name, which `docker ps` would no longer tie to a stack. |
+| The discriminator, read as a number modulo the ranges' span, is one offset that shifts every default port of the environment within its range. Two default ports of an environment meet in one checkout only where they meet in every one, so `local-distinct-ports` says the same of an environment wherever it resolves. | Hashing the checkout with each deployable's name, under which two servers could meet in one checkout and not another, and a build would fail in one worktree alone. |
+| What the environment sets wins in every checkout: `postgresPort`, `storagePort`, the images and a server's or a site's `port`. An environment that sets a port runs in one checkout at a time, as before, and such a port can meet a default one in some checkouts only. | Shifting a set port too, which would no longer be the port it says. |
+| A container of the environment that names no checkout, one an older superschematic created, stays as it is with its data. The provisioner runs the checkout's own and prints the `docker rm --force --volumes` that removes the old one, which it finds by the stack's and the environment's labels; `--remove-data` and `--remove-database` remove the checkout's containers alone. | Adopting the old container, which an older binary in another checkout may still run, the sharing this ends. Removing it, which deletes data no one asked to lose. |
+| acme-shop's `scripts/check.sh` compares the `environment.json` it quotes with its copy with each port and the discriminator masked, and keeps the copy while they match so. | A fixed checkout for the build the pages quote, which would need the variable the first row declines. |
+
+Status: built. `internal/stack/local`'s `TestCheckouts` resolves the shop
+in two checkouts and in none, and checks the names, the labels, the
+ports, their offsets, the set ports and the 63-byte limit;
+`TestContainersOfNoCheckout` has the provisioner name each old container
+and purge the checkout's alone; the goldens resolve in a checkout of
+their own. `stackgen`'s `TestResolveInTheBuildsCheckout` builds through a
+link to the checkout, and `buildcache`'s `TestStackKeyIsItsCheckouts`
+keys a stack, but not an API, by its checkout. `cli`'s
+`TestStackDevRunsALocalEnvironment` runs `stack dev` beside a container
+of no checkout, which it names and which `--remove-data` leaves.
+
+The rule is reversible until the first release.

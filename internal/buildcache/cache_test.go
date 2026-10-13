@@ -161,6 +161,39 @@ func TestComputeInputHashesFollowAuthDBDependencies(t *testing.T) {
 	assert.NotEqual(t, before["api"], after["api"])
 }
 
+// TestStackKeyIsItsCheckouts: a stack resolves each local environment for
+// the checkout it builds in, so two checkouts of one tree share an API's
+// key but not the stack's, and one checkout keeps its stack's key from
+// build to build, through a link to it too.
+func TestStackKeyIsItsCheckouts(t *testing.T) {
+	checkout := func(repo string) []buildplan.Service {
+		writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+		var services []buildplan.Service
+		for name, kind := range map[string]ir.SchemaKind{"shop-api": ir.SchemaKindAPI, "shop-stack": ir.SchemaKindStack} {
+			dir := filepath.Join(repo, "schemas", "services", name)
+			writeFile(t, filepath.Join(dir, "src", name+".schema.ts"), "export class Service {}")
+			services = append(services, buildplan.Service{Name: name, Dir: dir, Config: &schemaconfig.SchemaConfig{Name: name, Kind: kind}})
+		}
+		return services
+	}
+	one, two := t.TempDir(), t.TempDir()
+	first, err := ComputeInputHashes(checkout(one), one, naming.Naming{})
+	require.NoError(t, err)
+	second, err := ComputeInputHashes(checkout(two), two, naming.Naming{})
+	require.NoError(t, err)
+	assert.Equal(t, first["shop-api"], second["shop-api"], "an API's entry serves every checkout")
+	assert.NotEqual(t, first["shop-stack"], second["shop-stack"], "a stack's entry is its checkout's")
+
+	again, err := ComputeInputHashes(checkout(one), one, naming.Naming{})
+	require.NoError(t, err)
+	assert.Equal(t, first["shop-stack"], again["shop-stack"])
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(one, link))
+	linked, err := ComputeInputHashes(checkout(link), link, naming.Naming{})
+	require.NoError(t, err)
+	assert.Equal(t, first["shop-stack"], linked["shop-stack"], "a link to a checkout is that checkout")
+}
+
 // TestCallsJoinTheKey: a caller's generated Deps imports each callee's
 // SDK, so a change to a callee changes the caller's key; two APIs that
 // call each other hash without a cycle, and a callee's key does not follow

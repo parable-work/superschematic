@@ -48,6 +48,14 @@ type StackEnvironment struct {
 	// Parameters are the environment's parameters, the parent's first. A
 	// platform names a deployable under them (section 5.4).
 	Parameters []string
+
+	// SchemasRoot is the absolute schemas root of the checkout the
+	// environment is resolved in, symlinks resolved, or empty when the
+	// resolution names none. A target that runs the environment on the
+	// machine at hand tells checkouts apart by it: the local target names
+	// its containers and derives its default ports per checkout (section
+	// 8.3). A cloud target's platforms ignore it.
+	SchemasRoot string
 }
 
 // PlatformContext is what a platform's NameOf, AddressOf and Lower

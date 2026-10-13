@@ -55,8 +55,13 @@ name only the dependencies a reference does not imply.
 
 `NameOf`, `AddressOf` and `Lower` each receive a `registry.PlatformContext`:
 the `StackEnvironment` being resolved (stack, name, target, values merged
-from the parents, domain and parameters) and a copy of the deployable
-resolved so far.
+from the parents, domain and parameters, and the schemas root of the
+checkout it resolves in) and a copy of the deployable resolved so far.
+Every build of the CLI sets `SchemasRoot`, absolute with its links
+resolved; the local target names its containers and shifts its ports by
+it, so two checkouts run one environment side by side. A cloud target's
+platform ignores it: nothing it names may change from checkout to
+checkout.
 
 - `NameOf` returns the deployable's name in the environment. It sees no
   resource name, address or bindings yet. Under a parameter, reference

@@ -183,6 +183,7 @@ func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemacon
 			Stage:                opts.Stage,
 			ImplementationRoot:   opts.ImplementationRoot,
 			RepositoryRoot:       repositoryRoot,
+			SchemasRoot:          opts.SchemasRoot,
 		})
 		return err
 	}); err != nil {

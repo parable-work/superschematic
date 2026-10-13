@@ -1718,14 +1718,15 @@ runs an environment on the `local` target (`internal/stack/local`):
    job runs, and the queue each worker handles (section 8.8).
 4. It stops the sites, the servers and the workers, callers first, then
    the containers, which keep their data for the next run: the databases,
-   and the buckets' objects. `--remove-data` removes the containers and
-   their data instead; `--remove-database`, its name before the storage
-   emulator joined Postgres, does the same.
+   and the buckets' objects. `--remove-data` removes the checkout's
+   containers and their data instead, and no other checkout's;
+   `--remove-database`, its name before the storage emulator joined
+   Postgres, does the same.
 
 | Stack concept | local |
 | --- | --- |
-| database | one Postgres container per environment, `superschematic-<stack>-<environment>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
-| bucket | one fake-gcs-server container per environment beside Postgres's, `superschematic-<stack>-<environment>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
+| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
+| bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
@@ -1736,7 +1737,27 @@ runs an environment on the `local` target (`internal/stack/local`):
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
-| port | a server's or a site's `port` setting and the `postgresPort` and `storagePort` values, else a hash of the stack, the environment and the deployable: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator and 30000 to 32767 for Postgres, the same from run to run |
+| port | a server's or a site's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout, else a hash of the stack, the environment and the deployable, shifted within its range by the checkout's offset: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator and 30000 to 32767 for Postgres, the same from run to run |
+| checkout | `<checkout>` is six hexadecimal digits of a SHA-256 of the absolute path of the environment's state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`, its links resolved. Each container carries it as the label `superschematic.checkout`, beside `superschematic.stack` and `superschematic.environment`, and read as a number modulo 2768 it is the offset that shifts every default port of the environment. So two checkouts of a repository run one environment side by side, one checkout keeps its containers from run to run, and a checkout that moves starts new ones |
+
+Every build of the CLI resolves a local environment in the checkout it
+builds: the stack's generator hands the canonical schemas root to
+resolution, which platforms see as `StackEnvironment.SchemasRoot`, so
+`environment.json` names the checkout's containers and holds its ports,
+and the build cache keys a stack by its checkout. A resolution with no
+schemas root, a library's or a test's, names the containers
+`superschematic-<stack>-<environment>-postgres` and derives the ports
+with no offset, as before checkouts were told apart. A name longer than
+63 bytes, a DNS label's limit, loses the end of its stack and environment
+and keeps the checkout whole. Since the offset shifts every default port
+of an environment alike, two of them meet in one checkout only where
+they meet in every one, and `local-distinct-ports` says the same of the
+environment wherever it resolves; only a port the environment sets can
+meet a default one in some checkouts and not others. A container of the
+environment an older superschematic created, which carries no
+`superschematic.checkout` label, is left as it is: the provisioner runs
+the checkout's own, prints the `docker rm --force --volumes` that removes
+the old one and its data, and never removes it itself (D30, amended).
 
 `<schemas-root>/.superschematic` holds what belongs to one machine: each
 local environment's secrets file and the key pairs of its edges. It

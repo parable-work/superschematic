@@ -1,9 +1,12 @@
 package local
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -94,10 +97,15 @@ const (
 
 // A port the environment does not set falls in a range by a hash of the
 // stack, the environment and, for a server, the deployable, so it stays
-// the same from run to run and differs between environments. The servers'
-// range, the Postgres container's and the storage emulator's do not
-// overlap, and all sit below the ephemeral ranges of Linux (32768 and up)
-// and macOS (49152 and up).
+// the same from run to run and differs between environments. The
+// checkout's discriminator shifts every such port of an environment by
+// one offset within its range, so two checkouts of a repository run the
+// environment side by side, while two of its ports meet in one checkout
+// only when they meet in every checkout, and `local-distinct-ports` says
+// the same of the environment wherever it resolves (D30, amended). The
+// servers' range, the Postgres container's and the storage emulator's do
+// not overlap, and all sit below the ephemeral ranges of Linux (32768 and
+// up) and macOS (49152 and up).
 const (
 	serverPortBase   = 20000
 	storagePortBase  = 23000
@@ -105,8 +113,9 @@ const (
 	portSpan         = 2768
 )
 
-// hashPort returns base plus a hash of parts, below base+portSpan.
-func hashPort(base int, parts ...string) int {
+// hashPort returns base plus a hash of parts shifted by the checkout's
+// offset, below base+portSpan.
+func hashPort(base int, checkout string, parts ...string) int {
 	h := fnv.New32a()
 	for i, part := range parts {
 		if i > 0 {
@@ -114,26 +123,62 @@ func hashPort(base int, parts ...string) int {
 		}
 		_, _ = h.Write([]byte(part))
 	}
-	return base + int(h.Sum32()%portSpan)
+	return base + (int(h.Sum32()%portSpan)+portOffset(checkout))%portSpan
+}
+
+// portOffset is how far a checkout shifts each port hashPort derives: its
+// discriminator read as a hexadecimal number, modulo portSpan, and zero for
+// no checkout.
+func portOffset(checkout string) int {
+	n, err := strconv.ParseUint(checkout, 16, 32)
+	if err != nil {
+		return 0
+	}
+	return int(n % portSpan)
+}
+
+// checkoutBytes is how many bytes of its hash a checkout's discriminator
+// holds: six hexadecimal digits.
+const checkoutBytes = 3
+
+// Checkout returns the discriminator of the checkout a local environment
+// runs from: the first six hexadecimal digits of a SHA-256 of the absolute
+// path of its state directory (StateDir), or empty when schemasRoot is
+// empty. Two checkouts of a repository differ, and one keeps its
+// discriminator from run to run, so it keeps its containers (D30,
+// amended). schemasRoot is the canonical root resolution reads
+// (stack.CanonicalSchemasRoot).
+func Checkout(schemasRoot, stack, environment string) string {
+	if schemasRoot == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(filepath.ToSlash(StateDir(schemasRoot, stack, environment))))
+	return hex.EncodeToString(sum[:checkoutBytes])
+}
+
+// checkoutOf is the discriminator of the checkout env resolves in.
+func checkoutOf(env registry.StackEnvironment) string {
+	return Checkout(env.SchemasRoot, env.Stack, env.Name)
 }
 
 // ServerPort returns the port a server listens on: its `port` setting, or
-// one derived from the stack, the environment and the server's name.
+// one derived from the stack, the environment, the server's name and the
+// checkout.
 func ServerPort(env registry.StackEnvironment, d ir.ResolvedDeployable) int {
 	if port, ok := intValue(d.Settings["port"]); ok {
 		return port
 	}
-	return hashPort(serverPortBase, env.Stack, env.Name, d.Name)
+	return hashPort(serverPortBase, checkoutOf(env), env.Stack, env.Name, d.Name)
 }
 
 // PostgresPort returns the host port the environment's Postgres container
-// publishes: the `postgresPort` value, or one derived from the stack and
-// the environment.
+// publishes: the `postgresPort` value, or one derived from the stack, the
+// environment and the checkout.
 func PostgresPort(env registry.StackEnvironment) int {
 	if port, ok := intValue(env.Values["postgresPort"]); ok {
 		return port
 	}
-	return hashPort(postgresPortBase, env.Stack, env.Name)
+	return hashPort(postgresPortBase, checkoutOf(env), env.Stack, env.Name)
 }
 
 // PostgresImage returns the image the environment's Postgres container
@@ -145,20 +190,66 @@ func PostgresImage(env registry.StackEnvironment) string {
 	return DefaultPostgresImage
 }
 
-// ContainerName returns the name of the environment's Postgres container:
-// `superschematic-<stack>-<environment>-postgres`, lower case.
-func ContainerName(stack, environment string) string {
-	return strings.ToLower("superschematic-" + stack + "-" + environment + "-postgres")
+// maxContainerName is the longest name the local target gives a
+// container: a DNS label's 63 bytes, so the name also serves as the
+// container's host name on a Docker network.
+const maxContainerName = 63
+
+// containerName returns the name of an environment's container that plays
+// role: `superschematic-<stack>-<environment>-<checkout>-<role>`, lower
+// case, or `superschematic-<stack>-<environment>-<role>` for no checkout,
+// the name before checkouts were told apart. A name with a checkout that
+// would be longer than maxContainerName loses the end of its stack and
+// environment, which the checkout, a hash of a directory named after both,
+// still tells apart.
+func containerName(stack, environment, checkout, role string) string {
+	head := strings.ToLower("superschematic-" + stack + "-" + environment)
+	if checkout == "" {
+		return head + "-" + role
+	}
+	tail := "-" + checkout + "-" + role
+	if len(head)+len(tail) > maxContainerName {
+		head = strings.TrimRight(head[:maxContainerName-len(tail)], "-_.")
+	}
+	return head + tail
+}
+
+// ContainerName returns the name of the environment's Postgres container
+// in a checkout (Checkout):
+// `superschematic-<stack>-<environment>-<checkout>-postgres`, lower case.
+func ContainerName(stack, environment, checkout string) string {
+	return containerName(stack, environment, checkout, "postgres")
+}
+
+// The labels of each container of an environment, which say whose it is:
+// the stack's name, the environment's, and the checkout's discriminator
+// (Checkout), which a container of no checkout lacks.
+const (
+	LabelStack       = "superschematic.stack"
+	LabelEnvironment = "superschematic.environment"
+	LabelCheckout    = "superschematic.checkout"
+)
+
+// containerLabels are the labels of env's containers.
+func containerLabels(env registry.StackEnvironment) map[string]any {
+	labels := map[string]any{
+		LabelStack:       env.Stack,
+		LabelEnvironment: env.Name,
+	}
+	if checkout := checkoutOf(env); checkout != "" {
+		labels[LabelCheckout] = checkout
+	}
+	return labels
 }
 
 // StoragePort returns the host port the environment's storage emulator
-// publishes: the `storagePort` value, or one derived from the stack and the
-// environment (D54).
+// publishes: the `storagePort` value, or one derived from the stack, the
+// environment and the checkout (D54).
 func StoragePort(env registry.StackEnvironment) int {
 	if port, ok := intValue(env.Values["storagePort"]); ok {
 		return port
 	}
-	return hashPort(storagePortBase, env.Stack, env.Name)
+	return hashPort(storagePortBase, checkoutOf(env), env.Stack, env.Name)
 }
 
 // StorageImage returns the image the environment's storage emulator runs:
@@ -171,10 +262,10 @@ func StorageImage(env registry.StackEnvironment) string {
 }
 
 // StorageContainerName returns the name of the environment's storage
-// emulator's container: `superschematic-<stack>-<environment>-storage`,
-// lower case.
-func StorageContainerName(stack, environment string) string {
-	return strings.ToLower("superschematic-" + stack + "-" + environment + "-storage")
+// emulator's container in a checkout (Checkout):
+// `superschematic-<stack>-<environment>-<checkout>-storage`, lower case.
+func StorageContainerName(stack, environment, checkout string) string {
+	return containerName(stack, environment, checkout, "storage")
 }
 
 // StorageURL returns the base URL of a storage emulator published on port:
@@ -283,26 +374,23 @@ func databaseAddress(ctx registry.PlatformContext) any {
 	return Loopback + ":" + strconv.Itoa(PostgresPort(ctx.Environment))
 }
 
-// postgresContainer is the environment's Postgres container node. Every
-// database deployable returns the same node, so they share it. It is ready
-// once pg_isready answers inside it.
+// postgresContainer is the environment's Postgres container node, named
+// for the checkout. Every database deployable returns the same node, so
+// they share it. It is ready once pg_isready answers inside it.
 func postgresContainer(env registry.StackEnvironment) *ir.Resource {
 	return &ir.Resource{
 		ID:   PostgresContainer,
 		Type: TypeContainer,
 		Properties: map[string]any{
-			"name":  ContainerName(env.Stack, env.Name),
+			"name":  ContainerName(env.Stack, env.Name, checkoutOf(env)),
 			"image": PostgresImage(env),
 			"ports": []any{map[string]any{
 				"host":          Loopback,
 				"hostPort":      PostgresPort(env),
 				"containerPort": postgresPort,
 			}},
-			"env": []any{map[string]any{"name": "POSTGRES_HOST_AUTH_METHOD", "value": "trust"}},
-			"labels": map[string]any{
-				"superschematic.stack":       env.Stack,
-				"superschematic.environment": env.Name,
-			},
+			"env":    []any{map[string]any{"name": "POSTGRES_HOST_AUTH_METHOD", "value": "trust"}},
+			"labels": containerLabels(env),
 			"readiness": map[string]any{"exec": []any{
 				"pg_isready", "--host", Loopback, "--port", strconv.Itoa(postgresPort), "--username", PostgresUser, "--quiet",
 			}},
@@ -312,11 +400,11 @@ func postgresContainer(env registry.StackEnvironment) *ir.Resource {
 }
 
 // storageContainer is the environment's storage emulator's container node
-// (D54): fake-gcs-server on plain HTTP, keeping its objects in the
-// container's filesystem, so a stopped container keeps them for the next
-// run. The emulator writes the URLs it hands out with the host's view of
-// its address. Every bucket deployable returns the same node, so they
-// share it. It is ready once it answers its list of buckets.
+// (D54), named for the checkout: fake-gcs-server on plain HTTP, keeping
+// its objects in the container's filesystem, so a stopped container keeps
+// them for the next run. The emulator writes the URLs it hands out with
+// the host's view of its address. Every bucket deployable returns the same
+// node, so they share it. It is ready once it answers its list of buckets.
 func storageContainer(env registry.StackEnvironment) *ir.Resource {
 	port := StoragePort(env)
 	host := Loopback + ":" + strconv.Itoa(port)
@@ -324,7 +412,7 @@ func storageContainer(env registry.StackEnvironment) *ir.Resource {
 		ID:   StorageContainer,
 		Type: TypeContainer,
 		Properties: map[string]any{
-			"name":  StorageContainerName(env.Stack, env.Name),
+			"name":  StorageContainerName(env.Stack, env.Name, checkoutOf(env)),
 			"image": StorageImage(env),
 			"ports": []any{map[string]any{
 				"host":          Loopback,
@@ -336,10 +424,7 @@ func storageContainer(env registry.StackEnvironment) *ir.Resource {
 				"-backend", "filesystem", "-filesystem-root", "/storage",
 				"-public-host", host, "-external-url", StorageURL(port),
 			},
-			"labels": map[string]any{
-				"superschematic.stack":       env.Stack,
-				"superschematic.environment": env.Name,
-			},
+			"labels":    containerLabels(env),
 			"readiness": map[string]any{"http": StorageReadinessPath},
 		},
 		Phase: ir.PhaseInfrastructure,

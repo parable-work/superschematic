@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/stack"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
@@ -196,7 +197,11 @@ func TestStackDevRunsTypeScriptJobsAndWorkers(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(schemasRoot, "superschematic.toml"), []byte(naming.String()), 0o644))
 	outputRoot := t.TempDir()
-	container := local.ContainerName("tq-stack", "Dev")
+	// The container is the checkout's, named for the schemas root as the
+	// build resolves it (D30, amended).
+	canonical, err := stack.CanonicalSchemasRoot(schemasRoot)
+	require.NoError(t, err)
+	container := local.ContainerName("tq-stack", "Dev", local.Checkout(canonical, "tq-stack", "Dev"))
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container).Run() })
 
 	// A first build scaffolds tq-shop's implementation, which the test

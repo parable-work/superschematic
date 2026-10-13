@@ -1064,13 +1064,14 @@ func (r *resolver) resolveBuckets() {
 func (r *resolver) stackEnvironment() registry.StackEnvironment {
 	env := r.env.chain[len(r.env.chain)-1]
 	return registry.StackEnvironment{
-		Stack:      r.stack.Name,
-		Name:       env.Name,
-		Extends:    env.Extends,
-		Target:     r.env.target,
-		Values:     deepCopy(r.env.values).(map[string]any),
-		Domain:     r.env.domain,
-		Parameters: slices.Clone(r.env.parameters),
+		Stack:       r.stack.Name,
+		Name:        env.Name,
+		Extends:     env.Extends,
+		Target:      r.env.target,
+		Values:      deepCopy(r.env.values).(map[string]any),
+		Domain:      r.env.domain,
+		Parameters:  slices.Clone(r.env.parameters),
+		SchemasRoot: r.in.SchemasRoot,
 	}
 }
 

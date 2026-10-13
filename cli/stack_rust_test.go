@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/stack"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
@@ -116,7 +117,11 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	// physical path, so the output root is one with no link above it, as
 	// the generated crates' relative paths expect.
 	outputRoot := testpaths.TempDir(t)
-	container := local.ContainerName("rs-dev-stack", "Dev")
+	// The container is the checkout's, named for the schemas root as the
+	// build resolves it (D30, amended).
+	canonical, err := stack.CanonicalSchemasRoot(filepath.Dir(servicesRoot))
+	require.NoError(t, err)
+	container := local.ContainerName("rs-dev-stack", "Dev", local.Checkout(canonical, "rs-dev-stack", "Dev"))
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container).Run() })
 
 	ctx, cancel := context.WithCancel(context.Background())
