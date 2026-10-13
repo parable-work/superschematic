@@ -182,6 +182,56 @@ function caseNow(): Case {
   return current;
 }
 
+/**
+ * testHooks declares hooks: state a test behavior reads that the running
+ * test sets, such as runner-fixtures.ts's probe, whose closures
+ * test.Ledger's reactions and schedule run, or a value a guard compares a
+ * request with. What hooks holds when it is declared is what the behavior
+ * does with nothing set, and so what another implementation of the
+ * behavior does, since a recording carries nothing the test sets. When a
+ * behavior reads a hook whose value is not its declared one (a closure the
+ * test put there, a value it changed), what the engine does depends on
+ * code or data the corpus does not hold: the recorder marks the case `js`
+ * (`testHook.<name>.<member>`) and the step the read came in. Without
+ * ENGINE_RECORD it returns hooks.
+ */
+export function testHooks<T extends object>(name: string, hooks: T): T {
+  if (!recording) {
+    return hooks;
+  }
+  const declared = new Map<string, unknown>(Object.entries(hooks).map(([member, value]) => [member, hookValue(value)]));
+  return new Proxy(hooks, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof property === 'string' && hookValue(value) !== declared.get(property)) {
+        noteHook(`testHook.${name}.${property}`);
+      }
+      return value;
+    },
+  });
+}
+
+// hookValue is what a hook's value is compared by: a function by identity,
+// anything else by its JSON.
+function hookValue(value: unknown): unknown {
+  return typeof value === 'function' || value === undefined ? value : JSON.stringify(value);
+}
+
+// noteHook marks the case, and the step a behavior read the hook in, as
+// depending on what the test set. A read outside any step (a started
+// runner's) marks the case alone.
+function noteHook(reason: string): void {
+  const record = current;
+  if (record === undefined) {
+    return;
+  }
+  record.js.add(reason);
+  const where = active ?? exchanges.getStore();
+  if (where !== undefined) {
+    where.step.js = true;
+  }
+}
+
 /** rawEngine is the engine a recording proxy stands for, or the engine itself. */
 export function rawEngine(engine: Engine): Engine {
   return raws.get(engine) ?? engine;

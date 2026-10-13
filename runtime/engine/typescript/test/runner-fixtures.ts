@@ -1,7 +1,9 @@
 // The behaviors the runner tests register: test.Ledger keeps the notes its
 // mark operation writes on an instance, and its reactions and schedule do
 // what the running test puts in probe; test.Pacer has one schedule, whose
-// interval follows the config of each schema that composes it.
+// interval follows the config of each schema that composes it. probe is a
+// recorder hook: a scenario in which a behavior runs a closure the test put
+// there is one only this engine replays.
 import {
   allowAll,
   defineBehavior,
@@ -16,6 +18,7 @@ import {
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, freshPath, openEngine, schemaDocument, track } from './helpers.ts';
+import { testHooks } from './recorder.ts';
 
 /** The principal the runner acts as in these tests. */
 export const runnerPrincipal: Principal = { subject: 'runner', permissions: [] };
@@ -40,7 +43,7 @@ export const probe: {
   /** test.Pacer's interval for a config, in place of its everyMs. */
   every?: (config: PacerConfig) => unknown;
   tick?: (context: ScheduleContext<PacerConfig>) => void;
-} = {};
+} = testHooks('probe', {});
 
 export function resetProbe(): void {
   delete probe.react;
