@@ -161,6 +161,23 @@ impl Target {
         options
     }
 
+    /// Options whose storage listens for the commits of other processes
+    /// (Postgres's LISTEN connection), so an event stream or a watch wakes
+    /// for another engine's writes; the same as [`Target::options`] on
+    /// SQLite, whose one process writes the file.
+    pub fn listening_options(&self) -> EngineOptions {
+        #[allow(unused_mut)]
+        let mut options = self.options();
+        #[cfg(feature = "postgres")]
+        if let Storage::Postgres {
+            options: postgres, ..
+        } = &mut options.storage
+        {
+            postgres.listen = true;
+        }
+        options
+    }
+
     /// An engine on the target with the default options.
     pub fn open(&self) -> Engine {
         Engine::open(self.options()).expect("open the engine")
