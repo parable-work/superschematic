@@ -55,6 +55,8 @@ as their support lands in every generator.
 | --- | --- | --- | --- |
 | `@rest(method, path)` | method | the route's HTTP method and path, under `/api` | [API routes](/superschematic/guides/api-routes/#operation-sets) |
 | `QueryParam<T>` | argument | read the argument from the query string | [API routes](/superschematic/guides/api-routes/#arguments) |
+| `RefersTo<T, Target, { options?, value?, label? }>` | field, argument | the value names an item of `Target`, as the API's operation that lists it does; `value` is the target's field it holds (`id`), `label` the one that names an item (its `titleField`) | [References and search](/superschematic/reference/references-and-search/#refersto-a-value-that-names-an-item) |
+| `SearchQuery<T>` | argument | the operation's search text: an optional query parameter of a `GET`, one per operation | [References and search](/superschematic/reference/references-and-search/#searchquery-a-lists-search-text) |
 | `extends Authenticated` | class | every route of the set needs a caller | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `extends Encrypted`, `@encrypted` | class, method | the route's request body travels as an encrypted envelope | [API routes](/superschematic/guides/api-routes/#encrypted-payloads) |
 | `EncryptedField<T>` | argument, result | the operation's request body travels as an encrypted envelope | [API routes](/superschematic/guides/api-routes/#encrypted-payloads) |

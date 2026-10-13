@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -205,6 +206,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				return nil, nil, err
 			}
 			vin.AuthDB = authDB
+			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, reg); err != nil {
+				return nil, nil, err
+			}
 			var verified *ir.Schema
 			err = o.profile.Measure("loader.verify", func() error {
 				var err error
@@ -306,6 +310,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		return nil, nil, err
 	}
 	vin.AuthDB = authDB
+	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, reg); err != nil {
+		return nil, nil, err
+	}
 
 	var verified *ir.Schema
 	err = o.profile.Measure("loader.verify", func() error {
@@ -354,6 +361,59 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 		return nil, fmt.Errorf("%s: reading the authDb %s, %s: %w", schema.Name, schema.AuthDB, reads, err)
 	}
 	return authDB, nil
+}
+
+// referenceDependenciesFor reads the dependencies whose types the API's
+// references name (D61): a RefersTo whose target the schema does not
+// declare and one of its imports lists, from the service that import
+// names, through the dependency loader (WithDependencyLoader) or as the
+// service of that name beside this one. It reads nothing for any other
+// schema; ResolveReference refuses a target found in neither.
+func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, reg *registry.Registry) (map[string]*ir.Schema, error) {
+	if schema.Kind != ir.SchemaKindAPI {
+		return nil, nil
+	}
+	var names []string
+	for _, held := range ir.ReferencesOf(schema) {
+		target := held.Ref.Type
+		if schema.Types[target] != nil || schema.Enums[target] != nil || schema.Unions[target] != nil || schema.Scalars[target] != nil {
+			continue
+		}
+		for _, imp := range schema.Imports {
+			if !slices.Contains(imp.Types, target) {
+				continue
+			}
+			name := imp.Package
+			if i := strings.LastIndex(name, "/"); i >= 0 {
+				name = name[i+1:]
+			}
+			if name != schema.Name && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	load := o.loadDependency
+	if load == nil {
+		load = func(name string) (*ir.Schema, error) {
+			return LoadService(filepath.Join(servicePath, "..", name),
+				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
+				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache),
+				func(nested *loadOptions) { nested.authDBRead = true })
+		}
+	}
+	sort.Strings(names)
+	deps := make(map[string]*ir.Schema, len(names))
+	for _, name := range names {
+		dep, err := load(name)
+		if err != nil {
+			return nil, fmt.Errorf("%s: reading the dependency %s, whose type a RefersTo names: %w", schema.Name, name, err)
+		}
+		deps[name] = dep
+	}
+	return deps, nil
 }
 
 // runVerify executes the format-agnostic verification pass on the assembled

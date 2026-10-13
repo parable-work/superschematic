@@ -34,6 +34,8 @@ func TestLoadServiceDataFormatsMatchTSGolden(t *testing.T) {
 		// A page whose members the data forms leave unsaid (D60).
 		{"fixture-paged-api-json", "fixture-paged-api"},
 		{"fixture-paged-api-yaml", "fixture-paged-api"},
+		{"fixture-refs-api-json", "fixture-refs-api"},
+		{"fixture-refs-api-yaml", "fixture-refs-api"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {

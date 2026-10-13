@@ -130,5 +130,6 @@ export type {
   SignedUrlMethod,
   SignedUrlOptions,
 } from './bucket.js';
+export { MAX_SEARCH_TERMS, foldText, likePattern, searchMatches, searchTerms } from './search.js';
 export { LOG_LEVELS, createLogger } from './logger.js';
 export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

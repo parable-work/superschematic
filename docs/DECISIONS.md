@@ -6095,10 +6095,25 @@ wrappers (`QueryParam`, `Validate`).
 | A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of its `listMax`, else the page's `maxLimit`, at most 10 calls; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
 | The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
 
-Status: designed. This batch builds the IR, `RefersTo`, the readers, the
-JSON Schema, `format`, the checks and `ir.ResolveReference`, and the
-Topcoat forms, display components and pages. No server, SDK or OpenAPI
-document changes. acme's `PlaceOrderLine.productId`,
+Status: the core is built; the Topcoat parts are designed. `RefersTo`
+and `RefersToConfig` come from `@superschematic/api`; the TypeScript
+reader writes `ir.ReferenceDef` (`references: { type, options, value,
+label }`, `type` required and no member blank) on `FieldDef` after
+`relation` and on `ArgumentDef` after `encrypted`, as the JSON and YAML
+forms do; `format` writes `RefersTo<T, Target, { ... }>` back with only
+the members said. `ir.ResolveReference(schema, dependencies, ref)`
+derives the target, options, value, label and lookup and reports the
+first rule broken, and `ir.ReferencesOf` lists every reference with its
+holder. `internal/loader/verify/references.go` runs it after the display
+checks, adds the refusals of placement and of the value's type, and reads
+the dependency whose type a reference names when the schema imports it.
+The tests: `ir/reference_test.go`, `verify/references_test.go`, the
+reader's `refers_to_test.go` with `broken-references`, the loader's
+`references_test.go` (a dependency's target among them), and
+`fixture-refs-api` in TypeScript, JSON and YAML, which load to one IR and
+round-trip through every writer. No server, SDK or OpenAPI document
+changes. The Topcoat forms, display components and pages follow in this
+batch. acme's `PlaceOrderLine.productId`,
 `OrderLineView.productId` and the `productId` path arguments refer to a
 `ProductView` that `shop-orders` lists in a new `listProducts`, with a
 lookup, and reads in `getProduct`; its app drops its hand-written catalog
@@ -6124,9 +6139,25 @@ console has no box to type into.
 | The console's filter form renders the search argument first, as `<input type="search">` labeled "Search", holding the text sent, with its rules as attributes, and gives the form `role="search"`. A submitted search starts at the first page. | Its argument's name in words as its label, "Q" |
 | SQLite keeps the scan. An FTS5 table with the trigram tokenizer stays for later, for the reasons D27, amended, gave: a virtual table and triggers that the model, the diff and the runner do not know. acme's reviews are few, and a Topcoat app over a SQLite file serves one process. | Building it now, ahead of a SQLite reader that needs search to be fast |
 
-Status: designed. This batch builds the IR, `SearchQuery`, the readers,
-the JSON Schema, `format`, the checks, the helpers in the Go, TypeScript
-and Rust runtimes with their vectors, and the console's search box. acme's
+Status: the core and the runtimes' helpers are built; the console's box
+is designed. `SearchQuery` comes from `@superschematic/api`; the readers
+write `search: true` on `ArgumentDef` after `references`, with `isQuery`
+and without `required`, and `format` writes `SearchQuery<T>` back.
+`internal/loader/verify/search.go` refuses, in every form, a second search
+argument, one that is not a query parameter of a GET, is required, has a
+default, or holds anything but one text value (`ir.TextValue`, the rule
+`titleField` and a reference's label share). The runtimes give
+`search.Terms`, `search.LikePattern`, `search.Fold` and `search.Matches`
+in Go (`runtime/http/go/search`), `searchTerms`, `likePattern`,
+`foldText` and `searchMatches` in TypeScript, and `search::terms`,
+`search::like_pattern`, `search::fold` and `search::matches` in Rust: the
+fold is each character's simple lowercase, one for one, so an in-memory
+match is the same in the three. `runtime/http/testdata/search_parity.json`,
+written by the Go package's test, holds them to the same words (Unicode
+`White_Space` without U+FEFF, the first 8), patterns, folds and matches.
+The tests: `verify/search_test.go`, the reader's and the loader's tests
+with `fixture-refs-api`, and each runtime's parity test. The console's
+search box follows in this batch. acme's
 `listReviews` takes `q`, matched against `Review`'s `search_text` in
 memory, over SQLite and over Postgres. Follows: FTS5; the search in the
 OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
