@@ -289,11 +289,22 @@ func (n Naming) TypeScriptImplementationGlob() string {
 // RustImplementationDir resolves the Rust implementation crate's
 // directory of service against repoRoot (D57).
 func (n Naming) RustImplementationDir(repoRoot, service string) string {
-	template := n.ImplementationPaths.Rust
-	if template == "" {
-		template = Default().ImplementationPaths.Rust
+	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(n.rustImplementationTemplate(), ServicePathPlaceholder, service)))
+}
+
+// RustImplementationGlob is the [implementation_paths] rust template with
+// `*` for the service, slash-separated and relative to the repository
+// root: the pattern a Rust server's image context takes every Rust
+// implementation in by (D57).
+func (n Naming) RustImplementationGlob() string {
+	return strings.ReplaceAll(n.rustImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+func (n Naming) rustImplementationTemplate() string {
+	if n.ImplementationPaths.Rust != "" {
+		return n.ImplementationPaths.Rust
 	}
-	return filepath.Join(repoRoot, filepath.FromSlash(strings.ReplaceAll(template, ServicePathPlaceholder, service)))
+	return Default().ImplementationPaths.Rust
 }
 
 func (n Naming) typeScriptImplementationTemplate() string {
@@ -944,6 +955,17 @@ func (n Naming) RustAPICrate(schemaName string) string {
 // service's Rust implementation (D57), which the engineer may rename.
 func (n Naming) RustImplementationCrate(schemaName string) string {
 	return n.RustCratePrefix + schemaName + "-implementation"
+}
+
+// RustServerCrate returns the crate name of the entrypoint of a Rust server
+// of a stack (D57): the stack's name and the server's, as NpmServerPackage
+// spells them, and a suffix of its own. Two stacks of one output root may
+// each have a server of one name, and the crates of both are members of
+// the output root's Cargo workspace, which names each package once; the
+// crate's binary is the server's name.
+func (n Naming) RustServerCrate(stack, server string) string {
+	npm := n.NpmServerPackage(stack, server)
+	return n.RustCratePrefix + strings.TrimPrefix(npm, n.NpmScope+"/")
 }
 
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the

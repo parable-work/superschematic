@@ -9,7 +9,9 @@
 // environment places on Cloud SQL, and buckets.go opens each bucket on GCS,
 // or on an emulator that serves its API, on a server whose APIs list one
 // (D54). A TypeScript server's is a package at
-// the same place, whose main.ts does the same on Bun (typescript.go). The
+// the same place, whose main.ts does the same on Bun (typescript.go), and
+// a Rust server's a crate there, whose main.rs does the same on tokio, a
+// member of the output root's Cargo workspace (rust.go, workspace.go). The
 // generator package plans what each server serves from the stack and the
 // APIs' server outputs; this package turns that plan into files.
 package servergen
@@ -48,7 +50,8 @@ const GoVersion = "1.26.4"
 // RustVersion is the Rust image the Dockerfile builds the static archives
 // in: tools.env's RUST_VERSION, which scripts/superscalar-dep.sh and
 // scripts/versiongraph-archive.sh build them with, since archives two Rust
-// releases built do not link into one binary.
+// releases built do not link into one binary. A Rust server's image builds
+// the server with it, and its crate states it as its rust-version (D57).
 const RustVersion = "1.99.0"
 
 // The files of an entrypoint module.
@@ -1163,6 +1166,15 @@ func templateFuncs() template.FuncMap {
 			}
 			return joinNames(names)
 		},
+		"rustServiceList": func(apis []*RustAPI) string {
+			names := make([]string, len(apis))
+			for i, a := range apis {
+				names[i] = a.Service
+			}
+			return joinNames(names)
+		},
+		"rustString": rustString,
+		"rustLet":    rustLet,
 	}
 }
 

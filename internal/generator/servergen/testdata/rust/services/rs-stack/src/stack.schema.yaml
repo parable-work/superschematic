@@ -1,0 +1,23 @@
+# Three servers, each the default one of its API: rs-stock, a Rust server
+# on rs-db, calls rs-pricing, another Rust server, and rs-orders, a Go
+# server, calls rs-stock; the site rs-web calls rs-stock, which answers
+# CORS for it. Its one environment, Local, runs on the local target.
+kind: Stack
+types:
+  Stock:
+    name: Stock
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: rs-stock, kind: API }
+        - { name: rs-pricing, kind: API }
+        - { name: rs-orders, kind: API }
+        - { name: rs-web, kind: Site }
+      expose:
+        - service: { name: rs-stock, kind: API }
+        - service: { name: rs-orders, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

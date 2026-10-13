@@ -1527,11 +1527,13 @@ environment changes (`stack.Servers`), and writes a Go module per Go
 server at `<output-root>/server/<stack>/<server>/`, holding `main.go`,
 `go.mod` and a Dockerfile (section 8.2), and in the same pass a package
 per TypeScript server at the same place, which Bun runs (section 8.6,
-D51). A server takes its name in the stack: a declared server's class
-name, or the API service a default server serves. Each job of a Go API
-gets a module of its own beside them, under its deployable's name
-(section 8.7). The output root's `server/<stack>` directory holds only
-what the last build wrote. A Rust server gets no entrypoint yet.
+D51), and a crate per Rust server there, a member of the output root's
+Cargo workspace, whose `main.rs` does what `main.go` does below on tokio
+(section 8.6, D57). A server takes its name in the stack: a declared
+server's class name, or the API service a default server serves. Each job
+of a Go API gets a module of its own beside them, under its deployable's
+name (section 8.7). The output root's `server/<stack>` directory holds
+only what the last build wrote.
 
 `main` reads its whole configuration from the environment, and:
 
@@ -1672,7 +1674,11 @@ non-root user.
 
 A TypeScript server's Dockerfile builds superscalar's Node addon and
 installs the Bun workspace, frozen to the lockfile the project commits
-(section 8.6). A Rust server gets none yet.
+(section 8.6). A Rust server's builds the server's crate in the output
+root's Cargo workspace with `cargo build --release --locked`, frozen to
+the workspace's lockfile, which the project commits too, on `rust` at the
+release `tools.env` pins, and runs the binary on distroless `cc` as a
+non-root user (section 8.6).
 
 Not taken: a `CGO_ENABLED=0` binary on a static base, which no build of
 the scalar library allows; the archives superscalar's own release
@@ -1882,8 +1888,9 @@ found with no declaration:
 - **Signature.** The API generator writes `Deps` and the constructor's
   signature in `deps.go`: `type Constructor func(deps Deps)
   (Implementations, error)`, which the scaffold asserts with `var _
-  api.Constructor = New`. TypeScript gets the equivalent with its
-  entrypoint (section 8.6), and Rust later (section 12). `Deps` is typed and filled by the entrypoint:
+  api.Constructor = New`. TypeScript and Rust get the equivalent with
+  their entrypoints (section 8.6). `Deps` is typed and filled by the
+  entrypoint:
 
   ```go
   type Deps struct {
@@ -2118,6 +2125,113 @@ built from `Deps`; `shop-stack` deploys and exposes it; and
 its API. The example's other TypeScript, its clients and type tests, is a
 second member, `typescript/clients`, so nothing in the example links a
 package by hand.
+
+#### Rust servers
+
+A Rust server is the TypeScript server's twin on tokio (D57). A server is
+Rust when the APIs it serves are, by `outputs.api.language` `RUST`, and
+its jobs and workers stay Go's.
+
+- **Derived config.** The API crate's `config.rs` declares `EnvConfig`
+  and `load_env_config()`: the `@envVars` settings beside a `Database` per
+  sql edge, a `Service` per `calls` entry, the callers field, the CORS
+  field and, over the user model, the identity config, which the HTTP
+  runtime's `stackconfig` readers and `identity::Config::parse` read from
+  the variables Go's `stackconfig` reads. Its error names every variable
+  missing or invalid.
+- **Implementation.** `[implementation_paths] rust` defaults to
+  `rust/{service}`. The API crate's `deps.rs` declares `Deps` (`config`,
+  `db`, a Postgres pool from the runtime's `postgres`, a client per callee
+  from its Rust SDK, and `span`, the API's `tracing` span) and `Handlers`,
+  which the implementation's `create(deps)` returns; the entrypoint joins
+  them with what it builds through `Implementations::new`. The scaffold
+  writes the crate once, in a directory that holds no `Cargo.toml`, as
+  its own workspace, so no `Cargo.toml` above it claims it. The server's
+  crate depends on it by the package name its `Cargo.toml` gives it.
+- **Workspace.** `<output-root>/Cargo.toml` is a virtual workspace whose
+  members are the Rust server crates of every stack built into the output
+  root, `server/<stack>/<server>`, listed by name since `server/*/*` holds
+  the Go and TypeScript servers too, and Cargo refuses a member without a
+  `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
+  under the output root builds on its own, as before. The generated
+  crates the servers depend on and the implementations are path
+  dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
+  pins every crate they reach. The lockfile lies outside
+  `server/<stack>`, which each build empties, and the project commits it
+  as it commits `bun.lock` (D51, amended): `dist/*` and `!dist/Cargo.lock`
+  take it back from an ignored output root, and the build says so in one
+  line when git ignores it. Each build of a stack with a Rust server brings
+  it up to date with `cargo update --workspace`, which writes it when there
+  is none, adds what a manifest gained, drops what none needs, and changes
+  no version it pinned of a crate still needed. A build without cargo on
+  PATH, or one cargo cannot resolve, as a build of the stack alone before
+  its services, leaves it as it is and says so in one line. The crate's
+  package is `<rust_crate_prefix><stack>-<server>-server`, unique in the
+  workspace whichever stacks share a server's name, and its one binary is
+  the server's name.
+- **Entrypoint.** `src/main.rs`, on a tokio runtime:
+  - installs the runtime's JSON-line log (`logging::init_json`), with the
+    stack and the server on every line;
+  - loads each API's `EnvConfig`, and stops naming the API and each
+    variable when one fails;
+  - opens one pool per database, shared by every API on it
+    (`postgres::connect`), which connects when first used: to a URL, or to
+    a Cloud SQL instance over the socket Cloud Run mounts, as the IAM
+    database user, so a Rust server needs no Cloud SQL connector;
+  - builds one SDK client per API called, shared by every API that calls
+    it, with the token source its credential names
+    (`stackconfig::credential_source`) and its header names; the end user
+    travels per call, `RequestOptions::forward`;
+  - calls each implementation's `create` with its `Deps`, then builds, for
+    an API over the user model, one identity store per database
+    (`identity::store` over `PostgresPool`) and the API's identity service
+    from its identity config field, and, for an API with a service clause,
+    a `JwtServiceAuthenticator` over its callers field, which it joins with
+    the handlers through `Implementations::new`. An API with webhooks has
+    its verifiers checked first, where `build_router` would panic;
+  - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
+    shutdown and 503 `unavailable` with each database whose ping fails
+    within two seconds, and hands every other request to the router of
+    the API whose operations take its method and path, a preflight by the
+    method it asks for, and the routes every router registers, its OpenAPI
+    document and docs, to the first, as Go's dispatch does. The site CORS
+    of the APIs a site calls (`cors::SiteCorsLayer`, from each one's CORS
+    field) is outermost, and each identity API's router answers its
+    trusted origins inside it;
+  - listens on `$PORT`, 8080 when unset, with each peer's address for the
+    rate limits, and on SIGTERM or SIGINT answers `/readyz` 503, stops
+    taking connections and gives those in flight ten seconds; a second
+    signal exits at once.
+- **Image.** The Dockerfile's build stage, on `rust` at the release
+  `tools.env` pins, builds the crate in the workspace with `cargo build
+  --release --locked`, which fails on a lockfile that does not match the
+  crates, and fails first, saying to build and commit it, when the context
+  holds none. The image runs the binary on distroless `cc`, which holds
+  the glibc, libgcc and OpenSSL it links, as the non-root user, with
+  `PORT=8080`. Cargo reads every member and every crate a member reaches
+  by path to check the lockfile, so `Dockerfile.dockerignore` takes in,
+  by pattern, every server crate's manifest and sources, every Rust API
+  crate's manifest, sources and `openapi.json`, the Rust SDKs and types,
+  and every implementation's manifest and sources, then the server's own
+  implementations whole and the checkouts of the HTTP runtime, the schema
+  runtime and superscalar's crate with its workspace's root manifest,
+  whose lints the crate inherits. Without `[paths] scalar_rust` or
+  `schema_runtime_rust`, or with a checkout outside the build context, no
+  Dockerfile is written, and the build says why.
+- **Local.** `stack dev` builds each Rust server's crate with `cargo build
+  --release --locked` into the program directory's Cargo target
+  directory and runs its binary (section 8.3). Its build of the stack has
+  brought the lockfile up to date first, so a manifest the engineer
+  changes reaches the lockfile through `stack dev`.
+- **CI.** The generated `check` sets up the Rust release before the build,
+  refuses a lockfile git does not track or the build changed, and runs
+  `cargo check --locked` in each Rust server's crate (section 11.3).
+
+`TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
+another, and signs an end user in with the identity runtime.
+
+Not built: Rust jobs and workers, buckets from a Rust server, and
+OpenTelemetry export (D57).
 
 ### 8.7 Jobs
 
@@ -3370,6 +3484,18 @@ The GitHub workflow:
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
+  - For a stack with a Rust server, `check` sets up the Rust release
+    `tools.env` pins with the runner's `rustup` before the build, which
+    brings the output root's Cargo lockfile up to date with it (section
+    8.6). After the build it fails, in a step that names the lockfile,
+    when git does not track the lockfile or the build changed it, and says
+    to build every service and commit it. Then each Rust server's crate
+    compiles with `cargo check --locked` (level 2), which checks the
+    implementations it depends on. The crates name the runtime checkouts
+    `[paths]` names by path, so the CI checkout holds them, as the image's
+    context does. Every preview and deploy job, whose build runs the same
+    update, sets up the same release before it, since the runner's own
+    cargo may be another.
   - A `plan` job per cloud environment without parameters runs `stack
     plan` as `planner`, after `check`: the infrastructure diff, the
     migration plans and their hazards (levels 5 and 6).
