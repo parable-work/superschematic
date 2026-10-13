@@ -273,3 +273,216 @@ fn the_guidance_is_the_typescript_engines_text() {
         expected["variants"]
     );
 }
+
+/// StateRules' TypeScript guidance (`stateRulesGuidance`) for the configs
+/// below, on an Invoice whose fields are title, customer, amount, lines and
+/// notes and whose Workflow starts in draft.
+const STATERULES_EXPECTED: &str = r#"{
+  "described": {
+    "summary": "Entering draft needs title, which stays set while it is draft. Entering sent needs customer and amount, which stay set while it is sent; customer and amount do not change while it is sent. No field changes while it is paid. Only a caller with permission invoices.amend changes a frozen field. A field is held when it is neither absent nor null.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "While it is draft, do not clear title; while it is sent, do not change or clear customer or amount; while it is paid, do not change any field (a caller with permission invoices.amend may change a frozen field, but not clear a required one).",
+        "errors": [
+          {
+            "code": "required_fields",
+            "description": "An update that clears a field the instance's state requires; details.details.fields lists them.",
+            "commonCorrection": "Give the field a value instead of clearing it, or move the instance to a state that does not require it first."
+          },
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, move the instance to a state that does not freeze it first, or ask a caller with permission invoices.amend."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move into draft before title holds a value, or sent before customer and amount hold values.",
+        "errors": [
+          {
+            "code": "missing_fields",
+            "description": "A move into draft or sent while a field it requires is absent or null; details.details.fields lists them.",
+            "commonCorrection": "Update the instance to give the fields the state requires, then move it."
+          }
+        ]
+      },
+      "create": {
+        "useWhen": "Give title at create: draft, the state a new Invoice starts in, requires it, and a create without it is refused as invalid_instance, with rule required at the field."
+      },
+      "approve": {
+        "doNotUseWhen": "Do not approve a proposal whose patch breaks the rules of the instance's state: propose accepts it, and approve is refused.",
+        "errors": [
+          {
+            "code": "required_fields",
+            "description": "An update that clears a field the instance's state requires; details.details.fields lists them.",
+            "commonCorrection": "Give the field a value instead of clearing it, or move the instance to a state that does not require it first."
+          },
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, move the instance to a state that does not freeze it first, or ask a caller with permission invoices.amend."
+          }
+        ]
+      }
+    }
+  },
+  "plain": {
+    "summary": "No field changes while it is paid. Nobody changes a frozen field. A field is held when it is neither absent nor null.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "While it is paid, do not change any field.",
+        "errors": [
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, or move the instance to a state that does not freeze it first."
+          }
+        ]
+      }
+    }
+  },
+  "mixed": {
+    "summary": "Entering draft needs title and customer, which stay set while it is draft. Entering sent needs customer, which stays set while it is sent; amount and lines do not change while it is sent. Notes does not change while it is void. Only a caller with permission invoices.amend changes a frozen field. A field is held when it is neither absent nor null.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "While it is draft, do not clear title or customer; while it is sent, do not clear customer or change amount or lines; while it is void, do not change notes (a caller with permission invoices.amend may change a frozen field, but not clear a required one).",
+        "errors": [
+          {
+            "code": "required_fields",
+            "description": "An update that clears a field the instance's state requires; details.details.fields lists them.",
+            "commonCorrection": "Give the field a value instead of clearing it, or move the instance to a state that does not require it first."
+          },
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, move the instance to a state that does not freeze it first, or ask a caller with permission invoices.amend."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move into draft before title and customer hold values, or sent before customer holds a value.",
+        "errors": [
+          {
+            "code": "missing_fields",
+            "description": "A move into draft or sent while a field it requires is absent or null; details.details.fields lists them.",
+            "commonCorrection": "Update the instance to give the fields the state requires, then move it."
+          }
+        ]
+      },
+      "create": {
+        "useWhen": "Give title and customer at create: draft, the state a new Invoice starts in, requires them, and a create without them is refused as invalid_instance, with rule required at the field."
+      }
+    }
+  },
+  "frozenOnly": {
+    "summary": "Amount does not change while it is sent. Only a caller with permission invoices.amend changes a frozen field. A field is held when it is neither absent nor null.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "While it is sent, do not change amount (a caller with permission invoices.amend may change a frozen field).",
+        "errors": [
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, move the instance to a state that does not freeze it first, or ask a caller with permission invoices.amend."
+          }
+        ]
+      },
+      "approve": {
+        "doNotUseWhen": "Do not approve a proposal whose patch breaks the rules of the instance's state: propose accepts it, and approve is refused.",
+        "errors": [
+          {
+            "code": "frozen_fields",
+            "description": "An update that changes a field the instance's state freezes; details.details.fields lists them.",
+            "commonCorrection": "Leave the field as it is, move the instance to a state that does not freeze it first, or ask a caller with permission invoices.amend."
+          }
+        ]
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn the_staterules_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine::behaviors::{DescribedTypeOperation, OperationScope};
+    use superschematic_engine_behaviors::{StateRule, StateRules, StateRulesConfig};
+
+    let expected: Value = serde_json::from_str(STATERULES_EXPECTED).expect("the expected guidance");
+    let fields = names(&["title", "customer", "amount", "lines", "notes"]);
+    let rule = |required: &[&str], frozen: &[&str], all: bool| StateRule {
+        required: names(required),
+        frozen: if all { fields.clone() } else { names(frozen) },
+        frozen_all: all,
+    };
+    let invoice = |approve: bool| DescribeTarget {
+        schema: "invoices".to_owned(),
+        type_name: "Invoice".to_owned(),
+        operations: if approve {
+            vec![DescribedTypeOperation {
+                name: "approve".to_owned(),
+                behavior: Some("Revisions".to_owned()),
+                writes: true,
+                scope: OperationScope::Instance,
+            }]
+        } else {
+            Vec::new()
+        },
+        ..target()
+    };
+    let config = |states: Vec<(&str, StateRule)>, permission: Option<&str>| StateRulesConfig {
+        states: states
+            .into_iter()
+            .map(|(state, rule)| (state.to_owned(), rule))
+            .collect(),
+        permission: permission.map(str::to_owned),
+        initial: Some("draft".to_owned()),
+    };
+    let guidance = StateRules.hooks().guidance.expect("guidance");
+    for (key, config, approve) in [
+        (
+            "described",
+            config(
+                vec![
+                    ("draft", rule(&["title"], &[], false)),
+                    (
+                        "sent",
+                        rule(&["customer", "amount"], &["customer", "amount"], false),
+                    ),
+                    ("paid", rule(&[], &[], true)),
+                ],
+                Some("invoices.amend"),
+            ),
+            true,
+        ),
+        (
+            "plain",
+            config(vec![("paid", rule(&[], &[], true))], None),
+            false,
+        ),
+        (
+            "mixed",
+            config(
+                vec![
+                    ("draft", rule(&["title", "customer"], &[], false)),
+                    ("sent", rule(&["customer"], &["amount", "lines"], false)),
+                    ("void", rule(&[], &["notes"], false)),
+                ],
+                Some("invoices.amend"),
+            ),
+            false,
+        ),
+        (
+            "frozenOnly",
+            config(
+                vec![("sent", rule(&[], &["amount"], false))],
+                Some("invoices.amend"),
+            ),
+            true,
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&StateRules, &config, &invoice(approve))),
+            expected[key],
+            "{key}"
+        );
+    }
+}

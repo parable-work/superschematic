@@ -7,6 +7,7 @@
 
 pub(crate) mod comments;
 pub(crate) mod constants;
+pub(crate) mod staterules;
 pub(crate) mod variants;
 pub(crate) mod workflow;
 

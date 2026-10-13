@@ -25,6 +25,7 @@
 //! document) is skipped and counted.
 
 pub mod behaviors;
+pub mod core_fixtures;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

@@ -32,11 +32,13 @@
 pub mod comments;
 pub mod constants;
 mod guidance;
+pub mod staterules;
 pub mod variants;
 pub mod workflow;
 
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
+pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use variants::{Variants, VariantsConfig};
 pub use workflow::{
     is_terminal_state, state_outcome, Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
