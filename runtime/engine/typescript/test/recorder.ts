@@ -51,8 +51,11 @@ interface Case {
   readonly testBehaviors: Set<string>;
   readonly registered: Set<string>;
   readonly composed: Set<string>;
-  readonly readings: number[];
-  wall: boolean;
+  // What the clocks read while the case ran: the wall clock, whose span
+  // alone symbolize writes as {{time:N}}, and the test's fixed clocks,
+  // whose times it never does.
+  readonly wallReadings: number[];
+  readonly fixedReadings: number[];
   fixedClock: boolean;
   fixedIds: boolean;
   http: boolean;
@@ -75,11 +78,12 @@ interface EngineRecord {
   now?: number;
 }
 
-// The step a call is running in, which the clock and the id generator
+// The step a call is running in, which a fixed clock and the id generator
 // report to: a call's, or an exchange's across its awaits.
 interface Active {
   readonly step: JSONObject;
   readonly engine: EngineRecord | undefined;
+  // What a fixed clock read during the step.
   readonly readings: number[];
   readonly ids: string[];
 }
@@ -167,8 +171,8 @@ function caseNow(): Case {
     testBehaviors: new Set(),
     registered: new Set(),
     composed: new Set(),
-    readings: [],
-    wall: false,
+    wallReadings: [],
+    fixedReadings: [],
     fixedClock: false,
     fixedIds: false,
     http: false,
@@ -253,7 +257,7 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
         const clock = value as () => number;
         wrapped.clock = () => {
           const now = clock();
-          noteReading(now);
+          noteReading(now, 'fixed');
           return now;
         };
         break;
@@ -281,10 +285,9 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
   }
   if (options.clock === undefined) {
     described.clock = 'wall';
-    record.wall = true;
     wrapped.clock = () => {
       const now = wallClock();
-      noteReading(now);
+      noteReading(now, 'wall');
       return now;
     };
   }
@@ -370,12 +373,21 @@ function encodeRequest(request: unknown, record: Case): JSONValue {
   return out;
 }
 
-function noteReading(now: number): void {
+// noteReading notes what a clock read. A fixed clock's reading goes on the
+// step it was read in, which settle writes as its `now` or `clock`, and on
+// the case, whose fixed readings endCase holds apart from the wall clock's;
+// the wall clock's goes on the case alone, whose wall readings make the
+// span symbolize writes times in.
+function noteReading(now: number, clock: 'wall' | 'fixed'): void {
+  if (clock === 'wall') {
+    current?.wallReadings.push(now);
+    return;
+  }
   const where = active ?? exchanges.getStore();
   if (where !== undefined) {
     where.readings.push(now);
   }
-  current?.readings.push(now);
+  current?.fixedReadings.push(now);
 }
 
 function noteId(id: string): void {
@@ -527,7 +539,7 @@ function recordCall(engine: EngineRecord, call: string, args: unknown[], invoke:
 }
 
 // run runs invoke as the step's call, recording its result or its error,
-// and the clock's readings and the ids drawn while it ran.
+// and a fixed clock's readings and the ids drawn while it ran.
 function run<T>(engine: EngineRecord, step: JSONObject, invoke: () => T): T {
   const record = caseNow();
   const previous = active;
@@ -1078,7 +1090,28 @@ export function endCase(context?: TestContextLike): void {
     entry = { source: filePath, cases: [] };
     files.set(file, entry);
   }
-  entry.cases.push({ name: context?.fullName ?? context?.name ?? `case ${entry.cases.length + 1}`, case: record });
+  const name = context?.fullName ?? context?.name ?? `case ${entry.cases.length + 1}`;
+  holdClocksApart(name, record);
+  entry.cases.push({ name, case: record });
+}
+
+// holdClocksApart refuses a case in which a fixed clock's span overlaps
+// the wall clock's: symbolize would write a fixed clock's time in the wall
+// clock's span as a symbol, and a replayer could not set its clock to it.
+// A test that opens engines on both gives its fixed clock times far from
+// today's (7, 1000), as every test does.
+function holdClocksApart(name: string, record: Case): void {
+  if (record.wallReadings.length === 0 || record.fixedReadings.length === 0) {
+    return;
+  }
+  const wall = windowOf(record.wallReadings);
+  const fixed = windowOf(record.fixedReadings);
+  if (fixed.from <= wall.to && wall.from <= fixed.to) {
+    throw new Error(
+      `the recorder cannot tell the times of "${name}" apart: its fixed clock read from ${Math.min(...record.fixedReadings)} to ${Math.max(...record.fixedReadings)}, ` +
+        `within 400 days of what the wall clock read (from ${Math.min(...record.wallReadings)}); give the test's clock times far from today's`
+    );
+  }
 }
 
 // Writing: each case's symbols, then each file.
@@ -1333,13 +1366,17 @@ function isSearchCall(step: JSONObject, record: Case): boolean {
 // symbolize writes what differs between runs as symbols: each id the
 // generator drew as {{id:N}} (its base62 form as {{id:N:62}}), numbered by
 // first appearance; each temporary directory as {{dir:N}}; an opaque
-// cursor that encodes either as {{opaque:N}}; and, in a case whose clock
-// was the wall clock, each instant that clock gave, or a time computed
-// from one (an integer of epoch milliseconds, an RFC 3339 date-time, or,
-// as {{time:N:us}}, an integer of epoch microseconds) as {{time:N}},
-// numbered by instant in order of first appearance.
+// cursor that encodes either as {{opaque:N}}; and, in a case that read the
+// wall clock, each instant that clock gave, or a time computed from one
+// (an integer of epoch milliseconds, an RFC 3339 date-time, or, as
+// {{time:N:us}}, an integer of epoch microseconds) as {{time:N}}, numbered
+// by instant in order of first appearance. A time is a value in the wall
+// clock's span, which its readings alone make: a fixed clock's never widen
+// it, so it starts a day before today and holds no small integer (a seq, a
+// count, a fixed clock's 7), and endCase refuses a case whose fixed clock
+// reads near it.
 function symbolize(scenario: JSONValue, record: Case): JSONValue {
-  const window = record.wall && record.readings.length > 0 ? windowOf(record.readings) : undefined;
+  const window = record.wallReadings.length > 0 ? windowOf(record.wallReadings) : undefined;
   const given = givenValues(scenario);
   const numbering = (): ((key: string | number) => number) => {
     const seen = new Map<string | number, number>();
@@ -1360,8 +1397,8 @@ function symbolize(scenario: JSONValue, record: Case): JSONValue {
   const BASE62 = /(?<![0-9A-Za-z])[0-9A-Za-z]{18,22}(?![0-9A-Za-z])/gu;
   const DATE_TIME = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/gu;
   const EPOCH = /(?<!\d)\d{13}(?:\d{3})?(?!\d)/gu;
-  // isTime says whether a value is an instant of the wall clock's span the
-  // test did not give, and as which unit.
+  // timeUnit says whether a value is an instant of the wall clock's span
+  // the test did not give, and as which unit.
   const timeUnit = (value: number): 'ms' | 'us' | undefined => {
     if (window === undefined || !Number.isInteger(value) || given.numbers.has(value)) {
       return undefined;
@@ -1433,7 +1470,7 @@ interface Window {
 
 const DAY_MS = 86_400_000;
 
-// windowOf is the span a wall clock's times fall in: from a day before its
+// windowOf is the span a clock's times fall in: from a day before its
 // first reading to 400 days after its last, which a deadline, a retry or
 // a schedule the engine computes from the clock stays inside.
 function windowOf(readings: readonly number[]): Window {

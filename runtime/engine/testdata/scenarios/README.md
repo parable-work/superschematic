@@ -181,7 +181,7 @@ recorded value took, or inside a string that held it:
 | `{{id:N:62}}` | The same id in the version graph's base62 form (Branches' refs and commits). |
 | `{{dir:N}}` | The N-th temporary directory to appear. |
 | `{{opaque:N}}` | An opaque cursor (base64url) that encodes an id or a time of this run: the N-th distinct one. |
-| `{{time:N}}` | In a scenario whose clock is the wall clock: the N-th distinct instant to appear, read from that clock or computed from it (a deadline, a retry, a schedule's next run). As a JSON string in place of a number it is that instant in epoch milliseconds; inside a string or in place of one, an RFC 3339 date-time of it. |
+| `{{time:N}}` | In a scenario that read the wall clock: the N-th distinct instant of that clock to appear, read from it or computed from it (a deadline, a retry, a schedule's next run). As a JSON string in place of a number it is that instant in epoch milliseconds; inside a string or in place of one, an RFC 3339 date-time of it. A fixed clock's times are never symbols. |
 | `{{time:N:us}}` | The same instant in epoch microseconds. |
 
 A replayer binds a symbol at its first appearance in an `expect` or an
@@ -205,13 +205,26 @@ symbols, but a hash computed over an id it drew differently will differ.
 **Times.** An engine opened without a clock reads the wall clock, but never
 the same millisecond twice: each reading is `max(Date.now(), last + 1)`. So
 two readings are two instants, and an instant that appears twice in a
-scenario is one reading, which the symbols keep. In such a scenario a number
-is written `{{time:N}}` when it is an integer from a day before the clock's
-first reading in the scenario to 400 days after its last, in epoch
-milliseconds, or in epoch microseconds (`{{time:N:us}}`), and the test did
-not pass that number in an argument; an RFC 3339 date-time in that span that
-the test did not pass is written `{{time:N}}` too, wherever it appears in a
-string. A scenario with a fixed clock writes its times as recorded.
+scenario is one reading, which the symbols keep. In a scenario that read the
+wall clock, a number is written `{{time:N}}` when it is an integer in the
+wall clock's span, from a day before its first reading in the scenario to
+400 days after its last, in epoch milliseconds, or in epoch microseconds
+(`{{time:N:us}}`), and the test did not pass that number in an argument; an
+RFC 3339 date-time in that span that the test did not pass is written
+`{{time:N}}` too, wherever it appears in a string. The span is made of the
+wall clock's readings alone, so it begins a day before the scenario was
+recorded, at an epoch millisecond count of thirteen digits: no sequence
+number, count, version or other small integer falls in it.
+
+A fixed clock's times are never symbols. Its readings are the steps' `now`
+and `clock`, written as the clock read them, and they and every time the
+engine computes from them are written as recorded, in a scenario that also
+opens an engine on the wall clock as in one that does not. So that the two
+clocks' times cannot be taken for each other, the recorder refuses a
+scenario in which a fixed clock's span (from a day before its first reading
+to 400 days after its last) overlaps the wall clock's: the test fails. A
+test that opens engines on both gives its fixed clock times far from today
+(`7`, `1000`). `test/recorder.test.ts` holds the recorder to this.
 
 ## Values JSON cannot hold
 
