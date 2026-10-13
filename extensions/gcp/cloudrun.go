@@ -183,7 +183,7 @@ type workload struct {
 //     to its Secret Manager secret, a derived field as one variable per
 //     member of the value its edge's connector derived, a secret member,
 //     such as the generic connector's signing key, from a Secret Manager
-//     secret of its own (secretMemberNodes, D60);
+//     secret of its own (secretMemberNodes, D63);
 //   - the image's repository path, which the deploy pins to a digest
 //     (section 11.2), and the cpu and memory settings;
 //   - the Cloud SQL volume, holding the instances its connections name,

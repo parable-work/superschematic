@@ -48,7 +48,7 @@ export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParam
 export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
 export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
-export { authorizeService, serviceAuthenticator } from './serviceauth.js';
+export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
 export type {
   PublicJwk,
   ServiceAuthAlgorithm,

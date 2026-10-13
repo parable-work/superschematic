@@ -44,7 +44,7 @@ const parentKey = "parent-stack"
 //     from the parent environment's stack through a stack reference;
 //   - the outputs are Exports(env): every node's `id` and every output the
 //     environment references, but one a secret member of a binding
-//     references, such as the generic connector's private key (D60).
+//     references, such as the generic connector's private key (D63).
 //
 // Render reads nothing but env and writes nothing but Pulumi.yaml: the
 // same environment renders the same bytes, and a parameter's value never
@@ -84,7 +84,7 @@ type Export struct {
 // whole graph. An output a secret member of a binding references
 // (ir.DerivedVariable.Secret) is not exported, though a node's property
 // reads it: a secret's version reads the generic connector's private key
-// (D60), which no reader of the outputs needs.
+// (D63), which no reader of the outputs needs.
 func Exports(env *ir.ResolvedEnvironment) ([]Export, error) {
 	prog, err := newProgram(env, nil)
 	if err != nil {
@@ -219,7 +219,7 @@ func (p *program) collectExports() error {
 		}
 	}
 	// No output a secret member of a binding references is exported, such
-	// as the generic connector's private key (D60): the program hands it
+	// as the generic connector's private key (D63): the program hands it
 	// from node to node, the secret's version reads it, and Outputs leaves
 	// a secret output out anyway, so a stack output would only copy it.
 	for _, d := range p.env.Deployables {

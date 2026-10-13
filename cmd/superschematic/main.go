@@ -39,7 +39,7 @@ func extensions() []registry.Extension {
 		pulumi.Extension{ProviderVersions: map[string]string{
 			"gcp":              gcp.ProviderVersion,
 			cloudflare.Package: cloudflare.ProviderVersion,
-			// The generic connector's key node (D60), which the core
+			// The generic connector's key node (D63), which the core
 			// emits for an http edge between two providers.
 			stack.GenericKeyPackage: stack.GenericKeyProviderVersion,
 		}},

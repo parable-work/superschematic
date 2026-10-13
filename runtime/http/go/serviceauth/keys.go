@@ -1,6 +1,7 @@
 package serviceauth
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -148,6 +149,88 @@ func jwkBytes(name, value string) ([]byte, error) {
 		return nil, fmt.Errorf("key member %s is not base64url: %w", name, err)
 	}
 	return b, nil
+}
+
+// The DER of an Ed25519 key up to the key's own 32 bytes (RFC 8410): the
+// SubjectPublicKeyInfo of a public key, whose bytes are the key, and the
+// PKCS#8 (version 1) PrivateKeyInfo of a private one, whose bytes are its
+// seed. The tls provider writes both, as Go's x509 package and OpenSSL do;
+// no other encoding is read.
+var (
+	ed25519SPKIPrefix  = []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}
+	ed25519PKCS8Prefix = []byte{0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20}
+)
+
+// IsPEM reports whether a key's text is a PEM rather than a JWK's JSON:
+// it begins, after whitespace, with "-----BEGIN ".
+func IsPEM(text []byte) bool {
+	return bytes.HasPrefix(bytes.TrimLeft(text, " \t\r\n"), []byte("-----BEGIN "))
+}
+
+// pemContent returns the DER one PEM block labeled label holds: text,
+// without the whitespace around it, is "-----BEGIN <label>-----", the
+// base64 of the DER, padded, in lines of any length, and "-----END
+// <label>-----". The TypeScript and Rust runtimes read a PEM by the same
+// rule.
+func pemContent(text []byte, label string) ([]byte, error) {
+	begin, end := "-----BEGIN "+label+"-----", "-----END "+label+"-----"
+	trimmed := strings.Trim(string(text), " \t\r\n")
+	if !strings.HasPrefix(trimmed, begin) || !strings.HasSuffix(trimmed, end) || len(trimmed) < len(begin)+len(end) {
+		return nil, fmt.Errorf("no PEM %s block", label)
+	}
+	body := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, trimmed[len(begin):len(trimmed)-len(end)])
+	der, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return nil, fmt.Errorf("the PEM %s block is not base64", label)
+	}
+	return der, nil
+}
+
+// PublicJWKFromPEM reads an Ed25519 public key's PEM, the
+// SubjectPublicKeyInfo `-----BEGIN PUBLIC KEY-----` (RFC 8410) that the
+// generic connector's key node writes into a callee's callers field (D63),
+// as the public JWK a Config's Keys hold: an OKP Ed25519 key whose kid is
+// its RFC 7638 thumbprint, the kid SignedToken writes for the key's
+// private half. Any other key, such as an RSA or a P-256 one, is refused.
+func PublicJWKFromPEM(text []byte) (JWK, error) {
+	der, err := pemContent(text, "PUBLIC KEY")
+	if err != nil {
+		return JWK{}, err
+	}
+	if len(der) != len(ed25519SPKIPrefix)+ed25519.PublicKeySize || !bytes.HasPrefix(der, ed25519SPKIPrefix) {
+		return JWK{}, errors.New("not an Ed25519 public key's SubjectPublicKeyInfo")
+	}
+	return ed25519JWK(der[len(ed25519SPKIPrefix):])
+}
+
+// privateKeyFromPEM reads an Ed25519 private key's PEM, the PKCS#8
+// `-----BEGIN PRIVATE KEY-----` (RFC 8410) that the generic connector's key
+// node writes (D63), and returns the key with its public JWK, whose kid is
+// its thumbprint.
+func privateKeyFromPEM(text []byte) (ed25519.PrivateKey, JWK, error) {
+	der, err := pemContent(text, "PRIVATE KEY")
+	if err != nil {
+		return nil, JWK{}, err
+	}
+	if len(der) != len(ed25519PKCS8Prefix)+ed25519.SeedSize || !bytes.HasPrefix(der, ed25519PKCS8Prefix) {
+		return nil, JWK{}, errors.New("not an Ed25519 private key's PKCS#8")
+	}
+	key := ed25519.NewKeyFromSeed(der[len(ed25519PKCS8Prefix):])
+	public, err := ed25519JWK(key.Public().(ed25519.PublicKey))
+	return key, public, err
+}
+
+// ed25519JWK is the public JWK of an Ed25519 key, its kid its thumbprint.
+func ed25519JWK(public []byte) (JWK, error) {
+	j := JWK{Kty: "OKP", Crv: "Ed25519", X: base64.RawURLEncoding.EncodeToString(public)}
+	kid, err := Thumbprint(j)
+	j.Kid = kid
+	return j, err
 }
 
 // Thumbprint returns the RFC 7638 thumbprint of a public JWK, base64url

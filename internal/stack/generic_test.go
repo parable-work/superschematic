@@ -16,7 +16,7 @@ import (
 // sql connector from each to the fake database platform, as a Workers
 // target's Hyperdrive connector would join a database of another cloud.
 // No connector joins a fake server and one of its own, so the generic
-// connector serves those edges (D60). exact adds one, from fake.run to
+// connector serves those edges (D63). exact adds one, from fake.run to
 // other.run, which wins; literalKey makes it derive its key as a literal.
 type otherProvider struct {
 	exact      bool
@@ -98,7 +98,7 @@ func mixedShop(platform string) (*ir.Stack, []stack.Service) {
 }
 
 // TestGenericConnector: a fake server calling an exposed server of another
-// provider gets the generic connector (D60): the callee's public address,
+// provider gets the generic connector (D63): the callee's public address,
 // a token signed with the edge's key, whose private key is a secret
 // member referencing the key node's PKCS#8 PEM; the key node, a tls
 // provider's Ed25519 private key; and the callee's callers field naming

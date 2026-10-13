@@ -7,7 +7,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{Map, Value};
 
 use super::{process_vars, quote, StackConfigError, Vars};
-use crate::{JwsAlgorithm, ServiceAuthConfig, ServiceCallerConfig, ServiceIssuer};
+use crate::{
+    ed25519_public_jwk_from_pem, JwsAlgorithm, ServiceAuthConfig, ServiceCallerConfig,
+    ServiceIssuer,
+};
 
 /// What the name of an API's callers field adds to the API's name in upper
 /// snake case: `SHOP_API_CALLERS` is shop-api's.
@@ -36,7 +39,8 @@ const JWK_MEMBERS: [&str; 10] = ["kty", "kid", "use", "alg", "crv", "x", "y", "n
 /// field_ISSUERS_<i>_ALGORITHMS           RS256, ES256 or EdDSA, comma-separated
 /// field_ISSUERS_<i>_JWKS_URL             where the issuer's keys are, or
 /// field_ISSUERS_<i>_KEYS                 the number of keys, each
-/// field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON
+/// field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON, or
+/// field_ISSUERS_<i>_KEYS_<j>_PEM         an Ed25519 public key's PEM (D63)
 /// field_ISSUERS_<i>_SUBJECT_CLAIM        the claim that names the caller
 /// field_ISSUERS_<i>_MAX_LIFETIME_SECONDS the longest a token may live
 /// field_ISSUERS_<i>_CALLERS              the number of callers, each
@@ -147,6 +151,41 @@ impl<'a> CallerVars<'a> {
         out
     }
 
+    /// The key whose variables begin with `p`: its JWK's JSON, or the PEM of
+    /// an Ed25519 public key's SubjectPublicKeyInfo, which the generic
+    /// connector's key node writes (D63) and which is read as an Ed25519 JWK
+    /// whose `kid` is its thumbprint. Exactly one is set.
+    fn key(&mut self, p: &str) -> Option<Map<String, Value>> {
+        let jwk_name = format!("{p}JWK");
+        let pem_name = format!("{p}PEM");
+        let jwk = self.get(&jwk_name).unwrap_or_default();
+        let pem = self.get(&pem_name).unwrap_or_default();
+        match (jwk.is_empty(), pem.is_empty()) {
+            (false, false) => self.fail(format!(
+                "environment variables {jwk_name} and {pem_name} are both set; a key is a JWK or \
+                 a PEM"
+            )),
+            (true, false) => match ed25519_public_jwk_from_pem(pem) {
+                Ok(key) => return Some(key),
+                Err(reason) => self.fail(format!(
+                    "environment variable {pem_name} is not an Ed25519 public key's PEM: {reason}"
+                )),
+            },
+            (false, true) => match parse_jwk(jwk) {
+                Ok(key) => return Some(key),
+                Err(reason) => {
+                    self.fail(format!(
+                        "environment variable {jwk_name} is not a JWK: {reason}"
+                    ));
+                }
+            },
+            (true, true) => self.fail(format!(
+                "required environment variable {jwk_name} or {pem_name} is not set"
+            )),
+        }
+        None
+    }
+
     /// The issuer whose variables begin with `p`.
     fn issuer(&mut self, p: &str) -> ServiceIssuer {
         let issuer = self.required(&format!("{p}ISSUER"));
@@ -160,18 +199,8 @@ impl<'a> CallerVars<'a> {
         let mut keys: Option<Vec<Map<String, Value>>> = None;
         if self.get(&format!("{p}KEYS")).is_some() {
             for j in 0..self.count(&format!("{p}KEYS"), 1) {
-                let name = format!("{p}KEYS_{j}_JWK");
-                let text = self.required(&name);
-                if text.is_empty() {
-                    continue;
-                }
-                match parse_jwk(&text) {
-                    Ok(key) => keys.get_or_insert_with(Vec::new).push(key),
-                    Err(reason) => {
-                        self.fail(format!(
-                            "environment variable {name} is not a JWK: {reason}"
-                        ));
-                    }
+                if let Some(key) = self.key(&format!("{p}KEYS_{j}_")) {
+                    keys.get_or_insert_with(Vec::new).push(key);
                 }
             }
         }

@@ -52,6 +52,15 @@ saw, and whether the end-user stub ran. The file's `comment` states the
 harness in full. Every token in it is deterministic, so `-update` on an
 unchanged corpus rewrites the same bytes.
 
+Its `signing` section holds the signed-token source's vectors (D63): a key
+as a signed-token credential holds it, a private JWK's JSON or an Ed25519
+private key's PKCS#8 PEM, which the generic connector's key node writes,
+and the token's header, `kid` included, and claims but its random `jti`.
+Each runtime signs with its own source (`SignedToken`, `signedTokenSource`,
+`SignedKeySource::from_key`), reads the callee's SubjectPublicKeyInfo PEM
+as a JWK whose `kid` is its RFC 7638 thumbprint, and verifies the token
+with it; a key the source refuses, such as a P-256 key, has no `want`.
+
 ## Identity parity vectors
 
 `runtime/http/testdata/identity_parity.json` holds the vectors the Go,

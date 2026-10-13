@@ -1,4 +1,4 @@
-import { base64urlEncode, readTextFile, unverifiedPayload } from './serviceauth.js';
+import { base64urlEncode, ed25519Pkcs8FromPem, ed25519Thumbprint, readTextFile, unverifiedPayload } from './serviceauth.js';
 
 /*
 Service credential sources (D37, section 9.6 of docs/stack-model.md): what a
@@ -129,32 +129,64 @@ export interface SignedTokenSourceOptions {
   readonly now?: () => number;
 }
 
+/** A signing key with the kid its tokens carry. */
+interface SigningKey {
+  readonly key: CryptoKey;
+  readonly kid: string;
+}
+
 /**
  * A compact JWS signed with an edge's Ed25519 key: header `{"alg":"EdDSA",
  * "kid","typ":"JWT"}`, claims `iss`, `sub`, `aud`, `iat`, `exp` (5 minutes
  * after `iat`) and a random `jti`, in that order. It is signed again when
- * less than a minute remains. Throws at once on a key that is not an
- * Ed25519 private JWK.
+ * less than a minute remains. The key is an Ed25519 private JWK, as the
+ * local target's key pair gives it, or the text of its PKCS#8 PEM
+ * (`-----BEGIN PRIVATE KEY-----`, RFC 8410), as the generic connector's key
+ * node gives it, whose kid is the key's RFC 7638 thumbprint (D63). Throws
+ * at once on a key that is neither.
  */
-export function signedTokenSource(privateJwk: Ed25519PrivateJwk, claims: SignedTokenClaims, options: SignedTokenSourceOptions = {}): ServiceTokenSource {
-  const jwk = privateJwk as unknown as Record<string, unknown>;
-  if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || typeof jwk.d !== 'string' || typeof jwk.x !== 'string' || typeof jwk.kid !== 'string' || jwk.kid === '') {
-    throw new Error('signedTokenSource: the key must be an Ed25519 private JWK with d, x and kid');
+export function signedTokenSource(privateKey: Ed25519PrivateJwk | string, claims: SignedTokenClaims, options: SignedTokenSourceOptions = {}): ServiceTokenSource {
+  let load: () => Promise<SigningKey>;
+  if (typeof privateKey === 'string') {
+    let der: Uint8Array<ArrayBuffer>;
+    try {
+      der = ed25519Pkcs8FromPem(privateKey);
+    } catch (error) {
+      throw new Error(`signedTokenSource: the key must be an Ed25519 private JWK with d, x and kid, or an Ed25519 private key's PKCS#8 PEM: ${(error as Error).message}`);
+    }
+    load = async () => {
+      // The PEM holds the seed alone: the public key, whose thumbprint is
+      // the kid, comes from the imported key's JWK.
+      const key = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, true, ['sign']);
+      const { x } = await crypto.subtle.exportKey('jwk', key);
+      if (typeof x !== 'string') throw new Error('signedTokenSource: the PKCS#8 key exports no public key');
+      return { key, kid: ed25519Thumbprint(x) };
+    };
+  } else {
+    const jwk = privateKey as unknown as Record<string, unknown>;
+    if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || typeof jwk.d !== 'string' || typeof jwk.x !== 'string' || typeof jwk.kid !== 'string' || jwk.kid === '') {
+      throw new Error('signedTokenSource: the key must be an Ed25519 private JWK with d, x and kid, or an Ed25519 private key\'s PKCS#8 PEM');
+    }
+    load = async () => ({
+      key: await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', d: privateKey.d, x: privateKey.x }, { name: 'Ed25519' }, false, ['sign']),
+      kid: privateKey.kid,
+    });
   }
   const now = options.now ?? Date.now;
   const encoder = new TextEncoder();
-  let key: Promise<CryptoKey> | undefined;
+  let signing: Promise<SigningKey> | undefined;
   let cached: { token: string; expiresAt: number } | undefined;
   const sign = async (): Promise<string> => {
-    key ??= crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', d: privateJwk.d, x: privateJwk.x }, { name: 'Ed25519' }, false, ['sign']);
+    signing ??= load();
+    const { key, kid } = await signing;
     const iat = Math.floor(now() / 1000);
     const exp = iat + SIGNED_LIFETIME_SECONDS;
     const jti = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-    const header = base64urlEncode(encoder.encode(JSON.stringify({ alg: 'EdDSA', kid: privateJwk.kid, typ: 'JWT' })));
+    const header = base64urlEncode(encoder.encode(JSON.stringify({ alg: 'EdDSA', kid, typ: 'JWT' })));
     const payload = base64urlEncode(
       encoder.encode(JSON.stringify({ iss: claims.issuer, sub: claims.subject, aud: claims.audience, iat, exp, jti }))
     );
-    const signature = await crypto.subtle.sign({ name: 'Ed25519' }, await key, encoder.encode(`${header}.${payload}`));
+    const signature = await crypto.subtle.sign({ name: 'Ed25519' }, key, encoder.encode(`${header}.${payload}`));
     const token = `${header}.${payload}.${base64urlEncode(new Uint8Array(signature))}`;
     cached = { token, expiresAt: exp * 1000 };
     return token;

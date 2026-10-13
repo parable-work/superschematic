@@ -112,7 +112,7 @@ type ServiceCredential struct {
 	// Key is the private key a signed-token source signs with: an Ed25519
 	// private JWK's JSON, as the local target's key pair gives it, or an
 	// Ed25519 private key's PKCS#8 PEM (RFC 8410), `-----BEGIN PRIVATE
-	// KEY-----`, as the generic connector's key node gives it (D60). It is
+	// KEY-----`, as the generic connector's key node gives it (D63). It is
 	// a secret member (SecretDerivedMember): a connector derives it as a
 	// reference to an output, and a platform sets its variable from the
 	// caller's secret store (DerivedVariable.Secret).
@@ -347,7 +347,7 @@ type DerivedVariable struct {
 	// from its secret store, never as a plain value: gcp from a Secret
 	// Manager secret whose version the value references, the local target
 	// from its state directory, which its provisioner resolves the
-	// reference from when it starts the process (D60).
+	// reference from when it starts the process (D63).
 	Secret bool
 }
 

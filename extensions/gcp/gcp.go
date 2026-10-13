@@ -36,7 +36,7 @@ const (
 	// Provider is the provider each platform of the target runs on, Google
 	// Cloud. A deployable of another provider reaches a Cloud Run server,
 	// and a Cloud Run server one of another provider, through the core's
-	// generic connector (D60).
+	// generic connector (D63).
 	Provider = "gcp"
 
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs

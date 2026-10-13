@@ -46,7 +46,7 @@ pub use error::ApiError;
 pub use http_client::HttpFetcher;
 #[cfg(feature = "identity")]
 pub use identity::IdentityAuthenticator;
-pub use jws::JwsAlgorithm;
+pub use jws::{ed25519_public_jwk_from_pem, is_pem, JwsAlgorithm};
 pub use jwt::{JwtServiceAuthenticator, KeyFetcher};
 pub use openapi::{
     openapi_document, openapi_router, rapidoc_html, RouterOptions, DEFAULT_OPENAPI_BASE_URL,

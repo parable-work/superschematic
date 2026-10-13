@@ -568,7 +568,7 @@ func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 // signed-token key of an http edge, already comes from the target's secret
 // store: its value references the key pair node's privateJwk, which the
 // provisioner reads from the environment's state directory when it starts
-// the process, so no file under the output root holds it (D60). claim
+// the process, so no file under the output root holds it (D63). claim
 // refuses a name the platform sets itself.
 func processEnv(d ir.ResolvedDeployable, claim func(string) error) ([]any, error) {
 	var env []any

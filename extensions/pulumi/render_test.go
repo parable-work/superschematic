@@ -60,7 +60,7 @@ func TestRenderGoldens(t *testing.T) {
 		{name: "gcp-shop-preview", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpEnvironment(t, "Preview") },
 			versions: gcpVersions},
 		// The generic connector's key node, the secret version that holds
-		// its private key and the secretKeyRef that mounts it (D60), with
+		// its private key and the secretKeyRef that mounts it (D63), with
 		// the tls provider pinned as the binary pins it.
 		{name: "gcp-mixedshop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpGolden(t, "MixedShop", "Staging") },
 			versions: map[string]string{"gcp": gcp.ProviderVersion, stack.GenericKeyPackage: stack.GenericKeyProviderVersion}},
@@ -111,7 +111,7 @@ func TestRenderGoldens(t *testing.T) {
 // TestExportsLeaveSecretMembersOut: the mixed shop's program exports each
 // generic key node's public key, which a callee's callers field reads, but
 // not its private key, which a secret member references and only the
-// secret's version reads (D60).
+// secret's version reads (D63).
 func TestExportsLeaveSecretMembersOut(t *testing.T) {
 	exports, err := pulumi.Exports(gcpGolden(t, "MixedShop", "Staging"))
 	if err != nil {

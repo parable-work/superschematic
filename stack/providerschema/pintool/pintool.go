@@ -68,7 +68,7 @@ const Command = "go run ./internal/tools/providerschemas"
 func Main(pinFile string) { MainIn("schemas", pinFile) }
 
 // MainIn is Main whose -dir is dir by default: the root module's command
-// pins the provider of the core's generic connector (D60) in
+// pins the provider of the core's generic connector (D63) in
 // internal/stack/generic/schemas.
 func MainIn(dir, pinFile string) {
 	check := flag.Bool("check", false, "exit 1 when a committed file differs from the generated one")

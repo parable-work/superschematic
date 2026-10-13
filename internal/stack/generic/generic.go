@@ -1,5 +1,5 @@
 // Package generic is the core's generic connector (docs/stack-model.md,
-// section 6.2, D60): the connector of an http or a site edge between two
+// section 6.2, D63): the connector of an http or a site edge between two
 // platforms of different providers that no connector names, such as a
 // Cloud Run server calling a server on Cloudflare Workers, or a site in a
 // Cloud Storage bucket whose browser calls a server on another cloud.

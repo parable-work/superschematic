@@ -73,7 +73,11 @@ and TypeScript runtimes' (D51):
   credential into the `TokenSource` it names: `GoogleIdTokenSource` for
   `google-id-token` (with the `http-client` feature), `TokenFileSource`
   for `token-file`, and `SignedKeySource` for `signed-token`, signing as
-  the issuer for the audience. A generated SDK's `ServiceTokenSource` is
+  the issuer for the audience with a private JWK or, from the generic
+  connector, an Ed25519 private key's PKCS#8 PEM (`SignedKeySource::from_pem`,
+  its `kid` the key's thumbprint, D63). A callers field's key may be the
+  public key's SubjectPublicKeyInfo PEM, which `ed25519_public_jwk_from_pem`
+  reads as a JWK. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
 - `cors`, with no feature: a site's CORS (D55), the twin of Go's

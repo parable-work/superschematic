@@ -166,7 +166,7 @@ func TestDerivedVariables(t *testing.T) {
 
 // TestDerivedVariablesMarkSecretMembers: the variable of a signed-token
 // credential's key is Secret, which a platform sets from its secret store,
-// and no other variable is (D60).
+// and no other variable is (D63).
 func TestDerivedVariablesMarkSecretMembers(t *testing.T) {
 	key := Output{Resource: "Orders.calls.shop-edge.key", Name: "privateKeyPemPkcs8"}
 	got, err := DerivedVariables("SHOP_EDGE_SERVICE", ServiceEndpoint{

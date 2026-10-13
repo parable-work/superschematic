@@ -162,7 +162,7 @@ func publicKeyPEM(t *testing.T, seed byte) (string, ed25519.PublicKey) {
 // TestServiceAuthKeyPEM: a key may be an Ed25519 public key's PEM, a
 // literal or a reference such as the generic connector's key node's
 // publicKeyPem, whose kid is its thumbprint; any other PEM, or a key with
-// both members or neither, is refused (D60).
+// both members or neither, is refused (D63).
 func TestServiceAuthKeyPEM(t *testing.T) {
 	text, public := publicKeyPEM(t, 7)
 	got, err := Ed25519PublicKeyOfPEM(text)

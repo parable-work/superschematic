@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +96,112 @@ func TestLoadCallersVerifiesTheEdgesCaller(t *testing.T) {
 	var refusal *serviceauth.Error
 	if _, err := authenticate(other); !errors.As(err, &refusal) || refusal.Code != serviceauth.CodeUnauthorized {
 		t.Errorf("a token signed with another key: %v, want %s", err, serviceauth.CodeUnauthorized)
+	}
+}
+
+// pemKey is an Ed25519 key pair as the generic connector's key node, a tls
+// provider PrivateKey, writes it (D63): the PKCS#8 PEM the caller signs
+// with, which its platform's secret store holds, and the
+// SubjectPublicKeyInfo PEM the callee's callers field holds.
+func pemKey(t *testing.T) (private, public string) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spki, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: spki}))
+}
+
+// TestLoadCallersVerifiesAGenericCaller: the callers field the generic
+// connector writes, the caller's public key as a PEM in
+// SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM, becomes a verifier config whose
+// key is the PEM's Ed25519 JWK, its kid its thumbprint. It admits the token
+// the caller's SignedToken signs with the PKCS#8 PEM, whose kid is the same
+// thumbprint, as Orders, and refuses one signed with another key.
+func TestLoadCallersVerifiesAGenericCaller(t *testing.T) {
+	private, public := pemKey(t)
+	privateKey := private
+	env := localCallers("")
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK=") {
+			env[i] = "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM=" + public
+		}
+	}
+	cfg, err := loadCallers("SHOP_API_CALLERS", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := cfg.Issuers[0].Keys[0]
+	if want, _ := serviceauth.PublicJWKFromPEM([]byte(public)); key != want || key.Kty != "OKP" || key.Crv != "Ed25519" || key.Kid == "" {
+		t.Fatalf("key = %+v, want the PEM's Ed25519 JWK", key)
+	}
+	verifier, err := serviceauth.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticate := func(private string) (*serviceauth.Caller, error) {
+		t.Helper()
+		sign, err := serviceauth.SignedToken([]byte(private), "Orders", "Orders", "shop-api")
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := sign(context.Background(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var header struct {
+			Kid string `json:"kid"`
+		}
+		segment, _ := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[0])
+		if err := json.Unmarshal(segment, &header); err != nil {
+			t.Fatal(err)
+		}
+		if mine, _ := serviceauth.PublicJWKFromPEM([]byte(public)); private == privateKey && header.Kid != mine.Kid {
+			t.Errorf("token header %s; want the kid %s", segment, mine.Kid)
+		}
+		r, _ := http.NewRequest(http.MethodPost, "http://shop-api/api/stock/reindex", nil)
+		r.Header.Set(serviceauth.HeaderName, "Bearer "+token)
+		return verifier.Authenticate(r)
+	}
+	caller, err := authenticate(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (&serviceauth.Caller{Deployable: "Orders", Serves: []string{"shop-orders"}, Subject: "Orders"}); !reflect.DeepEqual(caller, want) {
+		t.Errorf("caller = %+v, want %+v", caller, want)
+	}
+	other, _ := pemKey(t)
+	var refusal *serviceauth.Error
+	if _, err := authenticate(other); !errors.As(err, &refusal) || refusal.Code != serviceauth.CodeUnauthorized {
+		t.Errorf("a token signed with another key: %v, want %s", err, serviceauth.CodeUnauthorized)
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func([]string) []string
+		want string
+	}{
+		{"a JWK and a PEM", func(env []string) []string {
+			return append(env, "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK={}")
+		}, "environment variables SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK and SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM are both set"},
+		{"a private key's PEM", func(env []string) []string {
+			return append(env, "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM="+private)
+		}, "environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not an Ed25519 public key's PEM: no PEM PUBLIC KEY block"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := loadCallers("SHOP_API_CALLERS", tc.edit(slices.Clone(env))); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("loadCallers = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

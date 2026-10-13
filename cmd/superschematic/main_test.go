@@ -59,7 +59,7 @@ func TestEveryTargetApplies(t *testing.T) {
 			cloudflare.Package, got, cloudflare.ProviderVersion)
 	}
 	if got := p.ProviderVersions[stack.GenericKeyPackage]; got != stack.GenericKeyProviderVersion {
-		t.Errorf("pulumi pins the %s provider at %q; the generic connector's key node is pulumi-%s %s (D60)",
+		t.Errorf("pulumi pins the %s provider at %q; the generic connector's key node is pulumi-%s %s (D63)",
 			stack.GenericKeyPackage, got, stack.GenericKeyPackage, stack.GenericKeyProviderVersion)
 	}
 }

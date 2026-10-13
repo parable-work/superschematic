@@ -183,6 +183,101 @@ fn without_leading_zeros(mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
+// An Ed25519 key's PEM (D63). The generic connector's key node, the Pulumi
+// tls provider's PrivateKey, writes the private key as PKCS#8 and the public
+// key as SubjectPublicKeyInfo (RFC 8410), not as JWKs. The DER of each, up
+// to the key's own 32 bytes, is fixed: a PKCS#8 (version 1)
+// PrivateKeyInfo, whose 32 bytes are the seed, and a SubjectPublicKeyInfo,
+// whose 32 bytes are the key. No other encoding is read, as in the Go and
+// TypeScript runtimes.
+const ED25519_SPKI_PREFIX: [u8; 12] = [
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
+const ED25519_PKCS8_PREFIX: [u8; 16] = [
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+];
+
+/// Padded base64, as a PEM's body is. Like Go's `base64.StdEncoding`, it
+/// requires padding and allows nonzero trailing bits.
+const BASE64_PEM: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new()
+        .with_decode_padding_mode(DecodePaddingMode::RequireCanonical)
+        .with_decode_allow_trailing_bits(true),
+);
+
+const PEM_SPACE: [char; 4] = [' ', '\t', '\r', '\n'];
+
+/// Whether a key's text is a PEM rather than a JWK's JSON: it begins, after
+/// whitespace, with `-----BEGIN `.
+#[must_use]
+pub fn is_pem(text: &str) -> bool {
+    text.trim_start_matches(PEM_SPACE)
+        .starts_with("-----BEGIN ")
+}
+
+/// The DER one PEM block labeled `label` holds: the text, without the
+/// whitespace around it, is `-----BEGIN <label>-----`, the base64 of the DER,
+/// padded, in lines of any length, and `-----END <label>-----`.
+fn pem_content(text: &str, label: &str) -> Result<Vec<u8>, String> {
+    let begin = format!("-----BEGIN {label}-----");
+    let end = format!("-----END {label}-----");
+    let trimmed = text.trim_matches(PEM_SPACE);
+    let body = trimmed
+        .strip_prefix(&begin)
+        .and_then(|rest| rest.strip_suffix(&end))
+        .ok_or_else(|| format!("no PEM {label} block"))?;
+    let body: String = body.chars().filter(|c| !PEM_SPACE.contains(c)).collect();
+    BASE64_PEM
+        .decode(body)
+        .map_err(|_| format!("the PEM {label} block is not base64"))
+}
+
+/// The RFC 7638 thumbprint of an Ed25519 public key, base64url: the
+/// SHA-256 of `{"crv","kty","x"}` in that order, with no whitespace.
+pub(crate) fn ed25519_thumbprint(public: &[u8]) -> String {
+    let members = format!(
+        r#"{{"crv":"Ed25519","kty":"OKP","x":"{}"}}"#,
+        encode(public)
+    );
+    encode(ring::digest::digest(&ring::digest::SHA256, members.as_bytes()).as_ref())
+}
+
+/// Reads an Ed25519 public key's PEM, the SubjectPublicKeyInfo `-----BEGIN
+/// PUBLIC KEY-----` the generic connector's key node writes into a callee's
+/// callers field (D63), as the public JWK a config's keys hold: an OKP
+/// Ed25519 key whose `kid` is its RFC 7638 thumbprint, the `kid` a
+/// [`crate::SignedKeySource`] writes for its private half. Any other key is
+/// refused.
+///
+/// # Errors
+///
+/// Why the text is no Ed25519 public key's PEM.
+pub fn ed25519_public_jwk_from_pem(text: &str) -> Result<Map<String, Value>, String> {
+    let der = pem_content(text, "PUBLIC KEY")?;
+    let key = der
+        .strip_prefix(&ED25519_SPKI_PREFIX)
+        .filter(|key| key.len() == 32)
+        .ok_or("not an Ed25519 public key's SubjectPublicKeyInfo")?;
+    let mut jwk = Map::new();
+    jwk.insert("kty".into(), Value::from("OKP"));
+    jwk.insert("crv".into(), Value::from("Ed25519"));
+    jwk.insert("kid".into(), Value::from(ed25519_thumbprint(key)));
+    jwk.insert("x".into(), Value::from(encode(key)));
+    Ok(jwk)
+}
+
+/// The 32-byte seed of an Ed25519 private key's PKCS#8 PEM, `-----BEGIN
+/// PRIVATE KEY-----` (RFC 8410), as the generic connector's key node writes
+/// it (D63).
+pub(crate) fn ed25519_seed_from_pem(text: &str) -> Result<Vec<u8>, String> {
+    let der = pem_content(text, "PRIVATE KEY")?;
+    der.strip_prefix(&ED25519_PKCS8_PREFIX)
+        .filter(|seed| seed.len() == 32)
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| "not an Ed25519 private key's PKCS#8".to_string())
+}
+
 /// Test keys and a signer for tokens, shared by the verifier's and the
 /// sources' tests.
 #[cfg(test)]

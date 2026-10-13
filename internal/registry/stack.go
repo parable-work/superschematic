@@ -94,7 +94,7 @@ type PlatformSpec struct {
 	// `cloudflare`, `fake`. Two platforms of one provider meet only
 	// through a connector that names them both; between two of different
 	// providers that no connector names, the core's generic connector
-	// serves an http or a site edge (section 6.2, D60). Required.
+	// serves an http or a site edge (section 6.2, D63). Required.
 	Provider string
 
 	// Kind is the deployable kind the platform realizes.
@@ -138,7 +138,7 @@ type PlatformSpec struct {
 	// it, with no path. A site edge derives the API's from its server's,
 	// and a site's own is the origin the CORS field of each API it calls
 	// lists (D55). The generic connector, which joins deployables of two
-	// providers, reaches the callee there too (D60). It sees what
+	// providers, reaches the callee there too (D63). It sees what
 	// AddressOf sees, and the Address. Nil, or a nil result, gives the
 	// deployable none: a site edge or a generic one to it fails to
 	// resolve. A site platform must have it.
@@ -217,7 +217,7 @@ type ConnectorSpec struct {
 
 	// Generic makes the connector the one that serves its edge kind
 	// between two platforms of different providers that no connector names
-	// (section 6.2, D60): Registry.Connector falls back to it, and a
+	// (section 6.2, D63): Registry.Connector falls back to it, and a
 	// connector that names both platforms always wins. It serves an http
 	// or a site edge, names no From or To, and is one per edge kind. The
 	// core registers it (internal/stack/generic); a database or a bucket on
@@ -561,7 +561,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return fmt.Errorf("registry: platform %q is already registered", spec.Name)
 	}
 	if spec.Provider == "" {
-		return fmt.Errorf("registry: platform %q names no provider: say which provider it runs on (local, gcp, cloudflare), which tells the generic connector two platforms apart (D60)", spec.Name)
+		return fmt.Errorf("registry: platform %q names no provider: say which provider it runs on (local, gcp, cloudflare), which tells the generic connector two platforms apart (D63)", spec.Name)
 	}
 	if err := checkStackKey("platform "+spec.Name+" provider", spec.Provider); err != nil {
 		return err
@@ -945,7 +945,7 @@ func (r *Registry) Platforms() []string { return keysOf(r.stack.platforms) }
 // Connector returns the connector that realizes an edge of kind from
 // platform from to platform to: the one that names both platforms, or else
 // the generic connector of the edge kind when both platforms are registered
-// and their providers differ (section 6.2, D60). Two platforms of one
+// and their providers differ (section 6.2, D63). Two platforms of one
 // provider that no connector names have none.
 func (r *Registry) Connector(kind ir.EdgeKind, from, to string) (ConnectorSpec, bool) {
 	var generic *ConnectorSpec

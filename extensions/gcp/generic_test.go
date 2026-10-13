@@ -14,7 +14,7 @@ import (
 
 // assembleMixed assembles gcp beside the acceptance extension's fake
 // target, whose platforms are another provider's: the core's generic
-// connector joins a Cloud Run deployable and a fake server (D60).
+// connector joins a Cloud Run deployable and a fake server (D63).
 func assembleMixed(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg, err := registry.Assemble(registry.DefaultNaming(), gcp.Extension{}, pulumiStub{}, &stacktest.Extension{})
@@ -51,7 +51,7 @@ func TestMixedGolden(t *testing.T) {
 }
 
 // TestGenericConnectorOnGCP reads what the generic connector and the two
-// platforms make of MixedShop's Staging (D60):
+// platforms make of MixedShop's Staging (D63):
 //
 //   - a Cloud Run caller of a fake server: the edge's key node, a tls
 //     Ed25519 private key; the callee's public address and a signed-token

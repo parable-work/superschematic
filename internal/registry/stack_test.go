@@ -261,7 +261,7 @@ func TestRegisterConnectorRejects(t *testing.T) {
 // http or a site edge, is one per edge kind and may bring its resource
 // types; Connector falls back to it between two registered platforms of
 // different providers, never between two of one provider, and a connector
-// that names both platforms wins (D60).
+// that names both platforms wins (D63).
 func TestGenericConnector(t *testing.T) {
 	generic := ConnectorSpec{Name: "generic.http", Edge: ir.EdgeHTTP, Generic: true, Connect: connect}
 	for _, tc := range []struct {

@@ -246,7 +246,7 @@ func RegisterCore(reg *registry.Registry) error {
 		return err
 	}
 	// The generic connector joins deployables of two providers that no
-	// connector names (D60), so every binary that links a second target
+	// connector names (D63), so every binary that links a second target
 	// can mix them.
 	if err := generic.Register(reg); err != nil {
 		return err

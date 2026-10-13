@@ -148,7 +148,7 @@ func (r *resolver) addEdge(kind ir.EdgeKind, from *deployable, service string) {
 }
 
 // reachesAcrossProviders checks an http edge the generic connector serves
-// (D60): the deployables are on two providers, and the generic connector
+// (D63): the deployables are on two providers, and the generic connector
 // reaches the callee only at its public address, so its server must be
 // exposed, with a public address its platform gives.
 func (r *resolver) reachesAcrossProviders(e *edge) bool {
@@ -445,7 +445,7 @@ func (r *resolver) connectEdges() {
 			if err := ir.CheckDerivedValue(e.res.Kind, values[id]); err != nil {
 				r.fail(CodeLowering, "connector %s on edge %s derives a value for %s that is no %s: %v", e.connector.Name, id, e.res.Field, contractOf(e.res.Kind), err)
 			} else if name := literalSecret(e.res.Field, values[id]); name != "" {
-				r.fail(CodeLowering, "connector %s on edge %s derives %s, a secret member, as a literal; a connector derives a secret as a reference to an output, so that environment.json never holds it (D60)", e.connector.Name, id, name)
+				r.fail(CodeLowering, "connector %s on edge %s derives %s, a secret member, as a literal; a connector derives a secret as a reference to an output, so that environment.json never holds it (D63)", e.connector.Name, id, name)
 			}
 		}
 		r.checkParameters(where, values[id])

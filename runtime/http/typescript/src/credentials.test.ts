@@ -2,7 +2,17 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { googleIdTokenSource, serviceAuthenticator, signedTokenSource, tokenFileSource, type Ed25519PrivateJwk, type RequestContext } from './index';
+import {
+  ed25519PublicJwkFromPem,
+  googleIdTokenSource,
+  loadCallers,
+  serviceAuthenticator,
+  serviceCredentialFor,
+  signedTokenSource,
+  tokenFileSource,
+  type Ed25519PrivateJwk,
+  type RequestContext,
+} from './index';
 import { base64urlDecode, base64urlEncode } from './serviceauth';
 
 const NOW = 1_767_225_600;
@@ -160,6 +170,57 @@ describe('signedTokenSource', () => {
     const fresh = await source(true);
     expect(fresh).not.toBe(second);
     expect(JSON.parse(decoded(fresh.split('.')[1]!)).jti).not.toBe(JSON.parse(decoded(second.split('.')[1]!)).jti);
+  });
+
+  /** A key pair as the generic connector's key node writes it (D63): a PKCS#8 PEM and a SubjectPublicKeyInfo PEM. */
+  async function pemKey(): Promise<{ privatePem: string; publicPem: string }> {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    const armor = (label: string, der: ArrayBuffer): string => {
+      const body = btoa(String.fromCharCode(...new Uint8Array(der)));
+      return `-----BEGIN ${label}-----\n${body.match(/.{1,64}/gu)!.join('\n')}\n-----END ${label}-----\n`;
+    };
+    return {
+      privatePem: armor('PRIVATE KEY', await crypto.subtle.exportKey('pkcs8', pair.privateKey)),
+      publicPem: armor('PUBLIC KEY', await crypto.subtle.exportKey('spki', pair.publicKey)),
+    };
+  }
+
+  test('signs with a PKCS#8 PEM, its kid the thumbprint, and a callee whose callers field holds the SPKI PEM admits it', async () => {
+    const { privatePem, publicPem } = await pemKey();
+    const config = loadCallers('SHOP_API_CALLERS', {
+      SHOP_API_CALLERS_ISSUERS: '1',
+      SHOP_API_CALLERS_ISSUERS_0_ISSUER: 'orders',
+      SHOP_API_CALLERS_ISSUERS_0_AUDIENCE: 'shop-api',
+      SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS: 'EdDSA',
+      SHOP_API_CALLERS_ISSUERS_0_KEYS: '1',
+      SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM: publicPem,
+      SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS: '300',
+      SHOP_API_CALLERS_ISSUERS_0_CALLERS: '1',
+      SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT: 'orders',
+      SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE: 'orders',
+      SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES: 'shop-orders',
+    });
+    const key = config.issuers[0]!.keys![0]!;
+    expect(key).toEqual(ed25519PublicJwkFromPem(publicPem));
+    const credential = serviceCredentialFor(
+      { source: 'signed-token', audience: 'shop-api', issuer: 'orders', key: privatePem },
+      { signedToken: { now: () => NOW * 1000 } }
+    );
+    const token = await credential.token(false);
+    expect(JSON.parse(decoded(token.split('.')[0]!))).toEqual({ alg: 'EdDSA', kid: key.kid, typ: 'JWT' });
+    const authenticate = serviceAuthenticator(config, { now: () => NOW * 1000 });
+    const headers = new Headers({ 'service-authorization': `Bearer ${token}` });
+    expect(await authenticate({ headers } as RequestContext)).toEqual({ deployable: 'orders', serves: ['shop-orders'], subject: 'orders' });
+
+    const other = await pemKey();
+    const forged = await signedTokenSource(other.privatePem, claims, { now: () => NOW * 1000 })(false);
+    await expect(authenticate({ headers: new Headers({ 'service-authorization': `Bearer ${forged}` }) } as RequestContext)).rejects.toThrow();
+  });
+
+  test('refuses a PEM that is no Ed25519 private key', async () => {
+    const { publicPem } = await pemKey();
+    expect(() => signedTokenSource(publicPem, claims)).toThrow("or an Ed25519 private key's PKCS#8 PEM: no PEM PRIVATE KEY block");
+    expect(() => signedTokenSource('-----BEGIN PRIVATE KEY-----\n!!!!\n-----END PRIVATE KEY-----\n', claims)).toThrow('is not base64');
   });
 
   test('refuses a key that is not an Ed25519 private JWK', async () => {

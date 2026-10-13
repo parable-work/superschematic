@@ -23,7 +23,7 @@ func secretName(stack, secret string) string {
 
 // secretMemberNodes returns a workload's nodes for the variable of one
 // secret member of a derived field (ir.DerivedVariable.Secret), such as
-// the generic connector's private key (D60), whose value references an
+// the generic connector's private key (D63), whose value references an
 // output of another node: a Secret Manager secret of the workload's own, a
 // version of it whose data is that output, and the workload's accessor
 // grant. source is the variable's valueSource: the secret, at the

@@ -1,5 +1,5 @@
 // Package schemas holds the pinned provider schema of the core's generic
-// connector (docs/stack-model.md, sections 6.2 and 6.4, D60): the Pulumi
+// connector (docs/stack-model.md, sections 6.2 and 6.4, D63): the Pulumi
 // `tls` provider's PrivateKey, the key pair the connector generates for
 // each edge, taken from the pulumi-tls release pulumi-tls.json pins, in
 // the format of package providerschema. The file records the type's input

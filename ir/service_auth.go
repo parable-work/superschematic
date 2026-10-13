@@ -131,7 +131,7 @@ type ServiceAuthKey struct {
 	// to an output that holds one, such as the generic connector's key
 	// node's publicKeyPem. The runtimes read it as an Ed25519 JWK whose
 	// kid is its RFC 7638 thumbprint (Ed25519Thumbprint), the kid the
-	// caller's signed-token source writes (D60).
+	// caller's signed-token source writes (D63).
 	PEM any `json:"pem,omitempty"`
 }
 

@@ -60,7 +60,7 @@ const (
 	CodeCrossProviderUnexposed = stack.CodeCrossProviderUnexposed
 )
 
-// The generic connector (D60), which the core registers: the connector of
+// The generic connector (D63), which the core registers: the connector of
 // an http or a site edge between platforms of two providers that no
 // connector names. GenericKeyPackage is the Pulumi package of an http
 // edge's key node, and GenericKeyProviderVersion the release its type is

@@ -11,6 +11,8 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::routing::post;
 use axum::{Json, Router};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use http::request::Parts;
 use http::{HeaderName, HeaderValue, StatusCode};
 use serde::Deserialize;
@@ -21,8 +23,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use superschematic_http_runtime::{
-    bearer_token, ApiError, Authenticator, JwtServiceAuthenticator, KeyFetcher, Principal,
-    RouteControls, ServiceAuthConfig, ServiceAuthenticator, ServiceCaller,
+    bearer_token, ed25519_public_jwk_from_pem, ApiError, Authenticator, JwtServiceAuthenticator,
+    KeyFetcher, Principal, RouteControls, ServiceAuthConfig, ServiceAuthenticator, ServiceCaller,
+    SignedKeySource,
 };
 use tower::ServiceExt;
 
@@ -256,6 +259,148 @@ async fn the_shared_service_auth_vectors() {
         "{} of {} vectors differ:\n{}",
         failures.len(),
         file.vectors.len(),
+        failures.join("\n")
+    );
+}
+
+/// The signed-token source's vectors (D63): the file's comment states the
+/// harness.
+#[derive(Deserialize)]
+struct SigningFile {
+    signing: Vec<Signing>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Signing {
+    name: String,
+    key: String,
+    public_key: String,
+    issuer: String,
+    audience: String,
+    now: u64,
+    want: Option<Signed>,
+}
+
+#[derive(Deserialize)]
+struct Signed {
+    header: String,
+    kid: String,
+    claims: serde_json::Map<String, Value>,
+}
+
+/// The token the signed-token source signs for a vector, or why it refuses
+/// the key.
+async fn sign(vector: &Signing) -> Result<String, String> {
+    let now = UNIX_EPOCH + Duration::from_secs(vector.now);
+    let source = SignedKeySource::from_key(
+        &vector.key,
+        &vector.issuer,
+        &vector.issuer,
+        &vector.audience,
+    )?
+    .with_clock(move || -> SystemTime { now })
+    .build();
+    source(false).await
+}
+
+/// Checks one signing vector, or says how it differs.
+async fn check_signing(vector: &Signing) -> Result<(), String> {
+    let signed = sign(vector).await;
+    let Some(want) = &vector.want else {
+        return match signed {
+            Ok(token) => Err(format!("signed {token} with a key it should refuse")),
+            Err(_) => Ok(()),
+        };
+    };
+    let token = signed?;
+    let segments: Vec<&str> = token.split('.').collect();
+    if segments.first() != Some(&want.header.as_str()) {
+        return Err(format!(
+            "header {:?}, want {}",
+            segments.first(),
+            want.header
+        ));
+    }
+    let payload = URL_SAFE_NO_PAD
+        .decode(segments.get(1).copied().unwrap_or_default())
+        .map_err(|err| err.to_string())?;
+    let mut claims: serde_json::Map<String, Value> =
+        serde_json::from_slice(&payload).map_err(|err| err.to_string())?;
+    let jti = claims
+        .remove("jti")
+        .and_then(|jti| jti.as_str().map(str::to_string))
+        .unwrap_or_default();
+    if URL_SAFE_NO_PAD.decode(&jti).map(|raw| raw.len()) != Ok(16) {
+        return Err(format!("jti {jti:?} is not 16 bytes in base64url"));
+    }
+    if claims != want.claims {
+        return Err(format!("claims {claims:?}, want {:?}", want.claims));
+    }
+    let key = ed25519_public_jwk_from_pem(&vector.public_key)?;
+    if key.get("kid").and_then(Value::as_str) != Some(want.kid.as_str()) {
+        return Err(format!(
+            "the public key's kid {:?}, want {}",
+            key.get("kid"),
+            want.kid
+        ));
+    }
+    let mut callers = serde_json::Map::new();
+    callers.insert(
+        vector.issuer.clone(),
+        json!({ "deployable": vector.issuer, "serves": ["shop-orders"] }),
+    );
+    let config: ServiceAuthConfig = serde_json::from_value(json!({
+        "issuers": [{
+            "issuer": vector.issuer,
+            "audience": vector.audience,
+            "algorithms": ["EdDSA"],
+            "keys": [key],
+            "maxLifetimeSeconds": 300,
+            "callers": callers,
+        }],
+    }))
+    .map_err(|err| err.to_string())?;
+    let now = UNIX_EPOCH + Duration::from_secs(vector.now);
+    let authenticator =
+        JwtServiceAuthenticator::new(config)?.with_clock(move || -> SystemTime { now });
+    let (parts, ()) = http::Request::builder()
+        .header("service-authorization", format!("Bearer {token}"))
+        .body(())
+        .map_err(|err| err.to_string())?
+        .into_parts();
+    match authenticator.authenticate(&parts).await {
+        Ok(Some(caller)) if caller.deployable == vector.issuer => Ok(()),
+        other => Err(format!(
+            "authenticate = {:?}, want {}",
+            other.map(|caller| caller.map(|c| c.deployable)),
+            vector.issuer
+        )),
+    }
+}
+
+#[tokio::test]
+async fn the_shared_signed_token_vectors() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(VECTORS);
+    let Ok(data) = std::fs::read(&path) else {
+        eprintln!(
+            "skipped: {} is absent; the Go runtime writes it",
+            path.display()
+        );
+        return;
+    };
+    let file: SigningFile = serde_json::from_slice(&data).expect("serviceauth_parity.json");
+    assert!(!file.signing.is_empty(), "no signing vectors");
+    let mut failures = Vec::new();
+    for vector in &file.signing {
+        if let Err(why) = check_signing(vector).await {
+            failures.push(format!("{}: {why}", vector.name));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} signing vectors differ:\n{}",
+        failures.len(),
         failures.join("\n")
     );
 }

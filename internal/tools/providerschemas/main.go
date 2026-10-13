@@ -1,5 +1,5 @@
 // Command providerschemas writes the pinned provider schema of the core's
-// generic connector (docs/stack-model.md, sections 6.2 and 6.4, D60) into
+// generic connector (docs/stack-model.md, sections 6.2 and 6.4, D63) into
 // internal/stack/generic/schemas, one file per type its pulumi-tls.json
 // lists, from the pulumi-tls release it pins. It is package pintool over
 // that pin; that package says how.

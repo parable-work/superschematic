@@ -31,7 +31,7 @@ const (
 	// Provider is the provider each fake platform runs on. A platform of
 	// another provider reaches a fake server, and a fake deployable a
 	// server of another provider, through the core's generic connector
-	// (D60).
+	// (D63).
 	Provider = "fake"
 
 	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
@@ -44,7 +44,7 @@ const (
 	// No fake connector reaches either; a deployable of another provider
 	// reaches an exposed server on EdgePlatform through the generic
 	// connector, and one on EdgePlatform calls an exposed server of
-	// another provider the same way (D60).
+	// another provider the same way (D63).
 	EdgePlatform = "fake.edge"
 	LitePlatform = "fake.lite"
 
@@ -106,7 +106,7 @@ const (
 
 	// TypeSecretVersion is a version of a secret that holds a value the
 	// graph references, such as the private key of a generic connector's
-	// key node (D60).
+	// key node (D63).
 	TypeSecretVersion = "fake:secrets/version:Version"
 	TypeDatabase      = "fake:sql/database:Database"
 	TypeRecord        = "fake:dns/record:Record"
@@ -536,7 +536,7 @@ func lowerAccount(ctx registry.PlatformContext) (registry.Lowered, ir.Output, []
 					continue
 				}
 				// A secret member, such as the generic connector's
-				// signing key (D60): a secret of the deployable's own
+				// signing key (D63): a secret of the deployable's own
 				// whose version holds the value, which the variable
 				// reads, as a real platform's secret store does.
 				secret, version := d.Name+".secret."+v.Name, d.Name+".secret-version."+v.Name

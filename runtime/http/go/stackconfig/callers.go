@@ -34,7 +34,8 @@ const maxCount = 1000
 //	field_ISSUERS_<i>_ALGORITHMS           RS256, ES256 or EdDSA, comma-separated
 //	field_ISSUERS_<i>_JWKS_URL             where the issuer's keys are, or
 //	field_ISSUERS_<i>_KEYS                 the number of keys, each
-//	field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON
+//	field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON, or
+//	field_ISSUERS_<i>_KEYS_<j>_PEM         an Ed25519 public key's PEM (D63)
 //	field_ISSUERS_<i>_SUBJECT_CLAIM        the claim that names the caller
 //	field_ISSUERS_<i>_MAX_LIFETIME_SECONDS the longest a token may live
 //	field_ISSUERS_<i>_CALLERS              the number of callers, each
@@ -141,6 +142,37 @@ func loadCallers(field string, environ []string) (serviceauth.Config, error) {
 	return cfg, nil
 }
 
+// key reads the key whose variables begin with p: its JWK's JSON, or the
+// PEM of an Ed25519 public key's SubjectPublicKeyInfo, which the generic
+// connector's key node writes (D63) and which is read as an Ed25519 JWK
+// whose kid is its thumbprint. Exactly one is set.
+func (c *callerVars) key(p string) (serviceauth.JWK, bool) {
+	jwkName, pemName := p+"JWK", p+"PEM"
+	jwk, _ := c.get(jwkName)
+	text, _ := c.get(pemName)
+	switch {
+	case jwk != "" && text != "":
+		c.fail("environment variables %s and %s are both set; a key is a JWK or a PEM", jwkName, pemName)
+	case text != "":
+		key, err := serviceauth.PublicJWKFromPEM([]byte(text))
+		if err != nil {
+			c.fail("environment variable %s is not an Ed25519 public key's PEM: %v", pemName, err)
+			return serviceauth.JWK{}, false
+		}
+		return key, true
+	case jwk != "":
+		var key serviceauth.JWK
+		if err := json.Unmarshal([]byte(jwk), &key); err != nil {
+			c.fail("environment variable %s is not a JWK: %v", jwkName, err)
+			return serviceauth.JWK{}, false
+		}
+		return key, true
+	default:
+		c.fail("required environment variable %s or %s is not set", jwkName, pemName)
+	}
+	return serviceauth.JWK{}, false
+}
+
 // issuer reads the issuer whose variables begin with p.
 func (c *callerVars) issuer(p string) serviceauth.IssuerConfig {
 	issuer := serviceauth.IssuerConfig{
@@ -153,17 +185,9 @@ func (c *callerVars) issuer(p string) serviceauth.IssuerConfig {
 	issuer.JWKSURL, _ = c.get(p + "JWKS_URL")
 	if _, ok := c.get(p + "KEYS"); ok {
 		for j := range c.count(p+"KEYS", 1) {
-			name := fmt.Sprintf("%sKEYS_%d_JWK", p, j)
-			text := c.required(name)
-			if text == "" {
-				continue
+			if key, ok := c.key(fmt.Sprintf("%sKEYS_%d_", p, j)); ok {
+				issuer.Keys = append(issuer.Keys, key)
 			}
-			var key serviceauth.JWK
-			if err := json.Unmarshal([]byte(text), &key); err != nil {
-				c.fail("environment variable %s is not a JWK: %v", name, err)
-				continue
-			}
-			issuer.Keys = append(issuer.Keys, key)
 		}
 	}
 	issuer.SubjectClaim, _ = c.get(p + "SUBJECT_CLAIM")

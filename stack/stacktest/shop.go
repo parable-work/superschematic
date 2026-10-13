@@ -127,7 +127,7 @@ func AllowServiceShop() []stack.Service {
 
 // EdgeShop returns RequireServiceShop with two TypeScript APIs for a
 // platform of another provider, such as EdgePlatform beside a cloud
-// target's servers (D60): shop-pricing, which prices an order, whose one
+// target's servers (D63): shop-pricing, which prices an order, whose one
 // operation, Quotes.price, only shop-orders may call, and which shop-orders
 // now calls; and shop-storefront, which now calls shop-api for its
 // products. WithEdge deploys them.
