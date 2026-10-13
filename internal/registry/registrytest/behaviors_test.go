@@ -1,6 +1,8 @@
 package registrytest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,9 +35,9 @@ const wantItemBehaviors = `"behaviors": [
 
 // The fixture extension's behaviors reach the IR from both data forms, byte
 // for byte the same though the YAML twin writes acme.Stock's config keys in
-// another order; the first generator that does not render behaviors
-// refuses the schema, naming itself (types renders them, D58); a registry
-// without the extension refuses the behaviors by name.
+// another order; the General pipeline builds the schema, the types writing
+// ItemBehaviors with the extension's behavior under its exact name (D58);
+// a registry without the extension refuses the behaviors by name.
 func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	reg := acmeRegistry(t)
 	jsonSchema, cfg, err := loader.LoadServiceWithConfig("testdata/stock-json", loader.WithRegistry(reg))
@@ -66,9 +68,16 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 		t.Errorf("JSON and TypeScript forms produced different IR\njson:\n%s\nts:\n%s", out, tsOut)
 	}
 
-	_, err = generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: t.TempDir(), ServicePath: "testdata/stock-json", Registry: reg})
-	if want := "generator: envConfig does not render behaviors yet: type Item composes behavior acme.Stock"; err == nil || err.Error() != want {
-		t.Fatalf("generator.Run: err = %v, want %q", err, want)
+	root := t.TempDir()
+	if _, err := generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: root, ServicePath: "testdata/stock-json", Registry: reg}); err != nil {
+		t.Fatalf("generator.Run: %v", err)
+	}
+	behaviorsTS, err := os.ReadFile(filepath.Join(generator.TypesDir(root, generator.LangTypeScript, "stock"), "types", "behaviors.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "readonly 'acme.Stock': {"; !strings.Contains(string(behaviorsTS), want) {
+		t.Errorf("behaviors.ts lacks %q:\n%s", want, behaviorsTS)
 	}
 
 	n := naming.Default()

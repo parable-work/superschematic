@@ -62,13 +62,24 @@ and `--emit-ir` prints it. The `types` generator renders it: each
 language's types write `<Type>Behaviors`, the type's behaviors' fields as
 a read returns them, narrowed by the type's config
 ([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
-No other generator of a build renders behaviors yet, so the build fails
-and names the first such generator that would run (`sql` for a DB schema,
-`envConfig` for a General one, `api` for an API one), the type and the
-behavior:
-`generator: envConfig does not render behaviors yet: type Document composes behavior Workflow`.
-An engine runs such a schema; `engine-client` (below) types the engine's
-client for it.
+A General schema with such a type builds. In a DB schema it is an engine
+type, whose instances the engine keeps: `sql` and `orm` leave it out, and
+the `enginedoc` generator writes the schema's engine document,
+`types/go/<service>/engine/<service>.json`, which the types hold as a
+constant too
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+`outputs.engine.namespace` names the engine namespace its documents live
+in, the service's name unless set. The build fails before its generators
+run, one line per problem, when an engine type reaches a table or another
+engine type through a field, a table references an engine type, or an
+engine type declares what only a table has:
+`generator: field Ticket.customer of engine type Ticket is typed as table Customer, but an engine type cannot reach a table: make Customer an engine type too and link to it with the Links behavior (D16), or hold its key in a plain field`.
+An API's own type cannot compose a behavior, and the API generators do
+not serve an engine type yet, so an API that imports or projects one
+fails, naming the first generator that would run:
+`generator: api does not render engine types yet: shop-api imports shop-db.Ticket, which composes behavior Workflow (D58)`.
+An engine runs a General schema's types as they are; `engine-client`
+(below) types the engine's client for it.
 
 A generated package that imports a package the build does not generate
 fails the build:

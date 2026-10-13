@@ -145,6 +145,10 @@ func RegisterCore(reg *registry.Registry) error {
 			// path; a no-op when the schema declares no @envVars class. Its
 			// language follows outputs.types (envLoaderLanguage).
 			Name: "envConfig",
+			// It reads the @envVars class alone, which composes no
+			// behavior, so a General schema whose types compose
+			// behaviors builds: its types write <T>Behaviors (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},

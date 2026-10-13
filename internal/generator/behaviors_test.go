@@ -157,12 +157,11 @@ func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 	}
 }
 
-// Every core generator of the DB pipeline renders behaviors (D58): a DB
-// schema's type that composes one is an engine type, which sql and orm
-// leave out and enginedoc writes the document of. envConfig still
-// refuses a General schema's, naming itself.
-// An API's own type that composes one is refused before any generator
-// runs: behaviors compose on DB types.
+// Every core generator of the DB and General pipelines renders behaviors
+// (D58): a DB schema's type that composes one is an engine type, which sql
+// and orm leave out and enginedoc writes the document of, and a General
+// schema's types write <T>Behaviors. An API's own type that composes one
+// is refused before any generator runs: behaviors compose on DB types.
 func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
 	goTypes := map[string]any{LangGo: enabled}
@@ -172,7 +171,7 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 		want    string
 	}{
 		{ir.SchemaKindDB, map[string]any{"types": goTypes}, ""},
-		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, "generator: envConfig does not render behaviors yet: type Item composes behavior Comments"},
+		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, ""},
 		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled},
 			"generator: type Item of API items composes behavior Comments, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)"},
 	} {

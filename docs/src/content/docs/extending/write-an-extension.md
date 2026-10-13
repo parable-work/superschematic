@@ -766,11 +766,18 @@ registered behaviors and holds each config to its schema. The core's
 `types` generator renders behaviors: its `<Type>Behaviors` holds your
 behavior's fields under its exact name, typed as any JSON, since a
 declaration names a field without a schema, and in Go, Rust and Python
-under the name in PascalCase (`acme.Rating` is `AcmeRating`). Every other
-core generator refuses such a schema yet, so `build` fails and names the
-first of them; `build --emit-ir`, `format` and `json-schema` accept it. A
-generator whose output covers what behaviors add sets
-`GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` and
+under the name in PascalCase (`acme.Rating` is `AcmeRating`). The DB and
+General pipelines build such a schema: on a DB type a behavior makes an
+engine type, which `sql` and `orm` leave out and the `enginedoc`
+generator writes into the engine document, with your behavior and the
+`Package` its `BehaviorSpec` names
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+An API's own type cannot compose one, and the API generators refuse an
+API that uses an engine type, naming themselves. A generator of yours
+whose output covers what behaviors add, or holds nothing a type's
+behaviors add, as acme's manifest lists type names, sets
+`GeneratorSpec.RendersBehaviors`; without it, a build of such a schema
+that runs it fails and names it. acme's `shop-ratings` and
 `shop-ratings-ts` services (`ext/testdata/services`) compose
 `acme.Rating`.
 

@@ -755,12 +755,14 @@ as `returns-api` includes `mcp.ts`.
 `build --emit-ir` prints the behavior in the IR from both forms,
 `json-schema` limits a type's behavior names to `acme.Rating` and checks
 its config, and `format` converts the file to YAML and to TypeScript.
-`build` refuses the service: the `types` generator renders behaviors'
-fields (it would write `ProductBehaviors`), but `envConfig`, the next
-generator of the General pipeline, does not yet, and the error names it.
-The services sit outside `schemas/` so `build-all` does not meet them.
-The core-only binary refuses the behavior by name. The smoke asserts each
-of these (`TestRatingBehavior` covers the load).
+`build` writes the TypeScript types with `ProductBehaviors`, the
+behavior's fields under its exact name (`'acme.Rating'`): every generator
+of the General pipeline renders behaviors, acme's manifest generator
+among them, since it lists the types by name and nothing a behavior adds
+(D58). The services are fixtures of `ext`'s tests, outside `schemas/`, so
+`build-all` does not meet them. The core-only binary refuses the behavior
+by name. The smoke asserts each of these (`TestRatingBehavior` covers the
+load and the build).
 
 What the behavior does when `@superschematic/engine` runs the schema is
 TypeScript: `packages/behaviors` (`@acme/behaviors`) implements it. The

@@ -401,9 +401,10 @@ type GeneratorSpec struct {
 	// without them (D16). Of the core's generators, types sets it, since
 	// it writes each behavior's fields as <T>Behaviors, and so do the ones
 	// a DB schema's engine types build through: sql and orm, which leave
-	// an engine type to the engine, and enginedoc, which writes the engine
-	// document (D58). An API's own type never composes one: behaviors
-	// compose on DB types.
+	// an engine type to the engine, enginedoc, which writes the engine
+	// document, and envConfig, which reads no type that composes one
+	// (D58). An API's own type never composes one: behaviors compose on
+	// DB types.
 	RendersBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps
