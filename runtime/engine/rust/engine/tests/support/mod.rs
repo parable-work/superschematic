@@ -70,6 +70,20 @@ impl Target {
         }
     }
 
+    /// Another target on the same database: a file or a schema of its own.
+    pub fn fresh(&self) -> Target {
+        match &self.place {
+            Place::Sqlite { .. } => Target::sqlite(),
+            Place::Postgres { url, .. } => Target {
+                dialect: Dialect::Postgres,
+                place: Place::Postgres {
+                    url: url.clone(),
+                    schema: unique_name("engine_test"),
+                },
+            },
+        }
+    }
+
     /// The storage the target names, with `busy_timeout`; each call is a
     /// connection (SQLite) or a process's storage (Postgres) of its own.
     #[cfg_attr(not(feature = "sqlite"), allow(unused_variables))]

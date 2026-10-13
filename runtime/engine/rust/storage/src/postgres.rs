@@ -112,9 +112,16 @@ impl Db {
             config.connect_timeout(options.connect_timeout);
         }
         let listen_config = config.clone();
+        // Every execution is planned for its values: the engine's reads
+        // are range reads whose plan turns on them (a partial index on one
+        // schema's rows, a value that names one instance), and a generic
+        // plan, which Postgres switches a prepared statement to after five
+        // runs, can scan the whole table in position order instead. A
+        // statement is still parsed once (Postgres 12 and later).
+        let session = format!("-c search_path={schema} -c plan_cache_mode=force_custom_plan");
         let options_text = match config.get_options() {
-            Some(existing) => format!("{existing} -c search_path={schema}"),
-            None => format!("-c search_path={schema}"),
+            Some(existing) => format!("{existing} {session}"),
+            None => session,
         };
         config.options(&options_text);
         let mut first = PgConn::connect(&config)?;

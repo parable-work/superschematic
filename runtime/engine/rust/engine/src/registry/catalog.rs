@@ -23,7 +23,7 @@
 //! version whose behaviors this engine cannot run is `unavailable`, and not
 //! kept, so an implementation registered later makes it available.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Serialize;
@@ -40,11 +40,14 @@ use crate::composition::{compose, config_changes, BehaviorRegistry, Composition}
 use crate::errors::{EngineError, EngineErrorCode, Error, Result, SchemaChange};
 use crate::events::{append_schema_event, SchemaEvent};
 use crate::indexes::{
-    clash_message, index_issues, own_indexes, sync_own_indexes, unique_clashes, UniqueClash,
+    clash_message, index_issues, ordered_scalar_fields, own_indexes, sync_own_indexes,
+    unique_clashes, OwnIndex, ScalarType, UniqueClash,
 };
+use crate::instances::filters::{filterables_of, Filterable};
 use crate::json::{self, compare_utf16};
 use crate::namespaces::NamespaceView;
 use crate::principal::Actor;
+use crate::values::ValueStore;
 
 /// A stored draft or published version of a schema.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -96,12 +99,20 @@ pub struct PublishResult {
     pub published: bool,
 }
 
-/// What running a published version needs: its validator and its
-/// behaviors. Milestones 4b and 5 add its indexes, filters and behavior
-/// storage.
+/// What running a published version needs: its validator, its behaviors,
+/// the indexes of its instance type's own fields, the fields they keep
+/// inline in a row, and the fields a list filters on. Milestone 5 adds each
+/// behavior's storage prefix and its filters.
 pub(crate) struct VersionRuntime {
     pub validator: Arc<SchemaValidator>,
     pub composition: Composition,
+    /// The indexes of the instance type's own fields (`indexes`).
+    pub indexes: Vec<OwnIndex>,
+    /// The own fields an index covers, which a row keeps inline whatever
+    /// their length.
+    pub inline: BTreeSet<String>,
+    /// The fields a list filters on, in order (`instances::filters`).
+    pub filters: Vec<Filterable>,
 }
 
 /// Who changes the catalog, and when, in epoch milliseconds.
@@ -129,14 +140,20 @@ const COLUMNS: &str =
 pub(crate) struct Catalog {
     loader: SchemaFileLoader,
     behaviors: BehaviorRegistry,
+    values: Arc<ValueStore>,
     runtimes: Mutex<HashMap<(String, String, i64), Arc<VersionRuntime>>>,
 }
 
 impl Catalog {
-    pub fn new(loader: SchemaFileLoader, behaviors: BehaviorRegistry) -> Self {
+    pub fn new(
+        loader: SchemaFileLoader,
+        behaviors: BehaviorRegistry,
+        values: Arc<ValueStore>,
+    ) -> Self {
         Catalog {
             loader,
             behaviors,
+            values,
             runtimes: Mutex::new(HashMap::new()),
         }
     }
@@ -278,6 +295,7 @@ impl Catalog {
         // break refuses it.
         let clashes = sync_own_indexes(
             tx,
+            &self.values,
             namespace,
             name,
             &before
@@ -419,9 +437,23 @@ impl Catalog {
                 ),
             )
         })?;
+        let indexes = own_indexes(&model, &record.namespace);
+        let own: Vec<(String, ScalarType)> =
+            ordered_scalar_fields(&model.document, &model.instance_type)
+                .into_iter()
+                .map(|(key, field)| (key, field.scalar))
+                .collect();
+        // Milestone 5 passes each behavior's filters, with its prefix.
+        let filters = filterables_of(&own, &indexes, &[]);
         let runtime = Arc::new(VersionRuntime {
             validator: Arc::new(SchemaValidator::new(model)?),
             composition,
+            inline: indexes
+                .iter()
+                .flat_map(|index| index.keys.iter().cloned())
+                .collect(),
+            indexes,
+            filters,
         });
         // Two threads that built one version at once keep the first.
         Ok(Arc::clone(self.cache().entry(key).or_insert(runtime)))

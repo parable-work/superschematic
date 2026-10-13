@@ -8,11 +8,13 @@
 //! hashes. Built so far: opening an engine on its storage
 //! ([`Engine::open`]) and running its migrations, the namespaces
 //! ([`Namespaces`]), the schema registry ([`Schemas`]) with its validator
-//! and compatibility rule, the refusals and their codes ([`errors`]), the
-//! principal a call acts for ([`Principal`]), and JSON written as
-//! JavaScript writes it ([`json`]). Until this crate passes the TypeScript
-//! engine's suite through its Node-API addon, `@superschematic/engine` is
-//! the engine.
+//! and compatibility rule, the access policy as data ([`PolicyConfig`]),
+//! the instances ([`Instances`]) with their filters, unique indexes and
+//! the value store that keeps a large member once, the event log
+//! ([`Events`]), the refusals and their codes ([`errors`]), the principal
+//! a call acts for ([`Principal`]), and JSON written as JavaScript writes
+//! it ([`json`]). Until this crate passes the TypeScript engine's suite
+//! through its Node-API addon, `@superschematic/engine` is the engine.
 //!
 //! ```no_run
 //! use serde_json::json;
@@ -43,8 +45,10 @@ mod engine;
 pub mod errors;
 mod events;
 mod indexes;
+pub mod instances;
 pub mod json;
 mod namespaces;
+mod paging;
 mod principal;
 mod registry;
 mod values;
@@ -59,10 +63,19 @@ pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,
     SchemaIssue, ValidationIssue, Veto,
 };
+pub use events::{
+    cursor_refusal, EngineEvent, EventCause, EventPage, Events, EventsAfter, ReadEvents,
+    EVENT_KINDS,
+};
+pub use instances::{
+    is_instance_id, CreateOptions, GetOptions, InstancePage, InstanceRecord, Instances,
+    ListOptions, WriteOptions, FILTER_SCAN_ROWS, INSTANCE_ID, MAX_FILTER_RANGES, MAX_FILTER_VALUES,
+};
 pub use namespaces::{
     is_namespace_name, NamespaceConfig, NamespaceOptions, NamespaceOrigin, NamespaceRecord,
     NamespaceState, Namespaces, DEFAULT_NAMESPACE, NAMESPACE_NAME,
 };
+pub use paging::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 pub use principal::{
     actor_of, check_principal, Actor, Principal, PrincipalService, SERVICE_SUBJECT_PREFIX,
     SYSTEM_SUBJECT,
@@ -74,3 +87,7 @@ pub use registry::{
 };
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;
+pub use values::{
+    is_hash, DriverError, ValueDriver, ValueOptions, DEFAULT_VALUE_CACHE_BYTES,
+    DEFAULT_VALUE_MAX_BYTES, DEFAULT_VALUE_THRESHOLD, MIN_VALUE_THRESHOLD, VALUE_REF_KEY,
+};

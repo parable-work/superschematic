@@ -1,12 +1,14 @@
 //! Opening an engine, the part of `src/engine.ts` built so far (D16, D58):
 //! its storage, brought up to the engine's migrations, the namespaces the
 //! deployment configures, the access policy, the meta-schema schema
-//! documents load against, and the ids and the clock.
+//! documents load against, the value store, and the ids and the clock.
 //!
 //! What the TypeScript engine took as functions is configuration here
-//! (D58), so a Go or Rust host passes the same options as data: the ids are
-//! random UUIDs or a sequence ([`Ids`]), the clock is the system's or a
-//! manual one a test moves ([`Clock`], [`EngineClock::advance`]).
+//! (D58), so a Go or Rust host passes the same options as data: the policy
+//! is rules ([`crate::PolicyConfig`]), the value store's driver one a
+//! deployment's engine crate compiles in ([`crate::ValueDriver`]), the ids
+//! random UUIDs or a sequence ([`Ids`]), the clock the system's or a manual
+//! one a test moves ([`Clock`], [`EngineClock::advance`]).
 //!
 //! The API mirrors the TypeScript `Engine` so the Node-API facade can keep
 //! its synchronous, principal-first signatures: `engine.schemas().define(
@@ -20,16 +22,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use superschematic_engine_storage::{engine_migrations, Db, Dialect, Sql, Tx};
+use superschematic_engine_storage::{engine_migrations, Db, Dialect, Lock, Sql, Tx};
 use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
 use crate::access::{Access, DottedPermissions, PermissionMatcher, Policy};
 use crate::composition::BehaviorRegistry;
 use crate::errors::{Error, Result};
+use crate::events::Events;
 use crate::indexes::{clash_message, own_indexes, sync_own_indexes};
+use crate::instances::Instances;
 use crate::namespaces::{NamespaceConfig, NamespaceOptions, Namespaces};
 use crate::registry::document::model_of;
 use crate::registry::{Catalog, Schemas};
+use crate::values::{ValueOptions, ValueStore};
 
 /// Where the engine keeps its data.
 #[derive(Debug)]
@@ -105,6 +110,9 @@ pub struct EngineOptions {
     pub clock: Clock,
     /// The core registry's meta-schema when absent.
     pub meta_schema: Option<MetaSchema>,
+    /// The value store: its threshold, its driver, its cache and the
+    /// longest value it keeps (D58: the driver is config).
+    pub values: ValueOptions,
 }
 
 impl std::fmt::Debug for EngineOptions {
@@ -115,6 +123,7 @@ impl std::fmt::Debug for EngineOptions {
             .field("namespaces", &self.namespaces)
             .field("ids", &self.ids)
             .field("clock", &self.clock)
+            .field("values", &self.values)
             .finish_non_exhaustive()
     }
 }
@@ -131,6 +140,7 @@ impl EngineOptions {
             ids: Ids::default(),
             clock: Clock::default(),
             meta_schema: None,
+            values: ValueOptions::default(),
         }
     }
 
@@ -218,9 +228,10 @@ struct IdSource {
     next: AtomicU64,
 }
 
-/// The engine: its storage, namespaces, access policy and schemas. More
-/// of the TypeScript engine (instances, events, values, behaviors, the
-/// runner and the routes) arrives with the milestones after 4a (D58).
+/// The engine: its storage, namespaces, access policy, schemas, instances,
+/// event log and value store. More of the TypeScript engine (behaviors,
+/// the runner, the tools and the routes) arrives with the milestones after
+/// 4b (D58).
 pub struct Engine {
     pub(crate) db: Db,
     pub(crate) namespaces: NamespaceConfig,
@@ -229,6 +240,7 @@ pub struct Engine {
     pub(crate) matcher: Arc<dyn PermissionMatcher>,
     pub(crate) clock: EngineClock,
     pub(crate) catalog: Catalog,
+    pub(crate) values: Arc<ValueStore>,
     ids: IdSource,
 }
 
@@ -269,15 +281,22 @@ impl Engine {
                 .map_err(|error| Error::usage(error.to_string()))?,
         };
         let clock = EngineClock::new(options.clock);
+        let values = Arc::new(ValueStore::new(&options.values)?);
         let db = open_storage(options.storage)?;
-        db.migrate(&engine_migrations(unique_indexes), clock.now())?;
+        let migrating = Arc::clone(&values);
+        db.migrate(
+            &engine_migrations(move |tx| unique_indexes(tx, &migrating)),
+            clock.now(),
+        )?;
+        values.settle(&db);
         Ok(Engine {
             db,
             namespaces,
             access,
             matcher,
             clock,
-            catalog: Catalog::new(loader, behaviors),
+            catalog: Catalog::new(loader, behaviors, Arc::clone(&values)),
+            values,
             ids: IdSource {
                 ids: options.ids,
                 next: AtomicU64::new(0),
@@ -296,6 +315,30 @@ impl Engine {
         Namespaces { engine: self }
     }
 
+    /// The instance store.
+    pub fn instances(&self) -> Instances<'_> {
+        Instances { engine: self }
+    }
+
+    /// The event log.
+    pub fn events(&self) -> Events<'_> {
+        Events { engine: self }
+    }
+
+    /// Runs `f` in a write transaction that excludes the writers `lock`
+    /// names, then settles what a value driver's writes left (a value a
+    /// rolled-back write wrote, one a committed write let go): every write
+    /// of the engine's goes through it.
+    pub(crate) fn write<T>(
+        &self,
+        lock: Lock<'_>,
+        f: impl FnOnce(&Tx<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let result = self.db.write(lock, f);
+        self.values.settle(&self.db);
+        result
+    }
+
     /// The engine's storage.
     pub fn db(&self) -> &Db {
         &self.db
@@ -312,14 +355,14 @@ impl Engine {
     }
 
     /// The id of an instance created without one.
-    pub fn new_id(&self) -> String {
-        match &self.ids.ids {
+    pub fn new_id(&self) -> Result<String> {
+        Ok(match &self.ids.ids {
             Ids::Uuid4 => uuid::Uuid::new_v4().to_string(),
             Ids::Sequence { prefix } => {
                 let next = self.ids.next.fetch_add(1, Ordering::SeqCst) + 1;
                 format!("{prefix}{next}")
             }
-        }
+        })
     }
 
     /// Closes the engine: its storage closes once nothing else holds it.
@@ -344,7 +387,7 @@ fn open_storage(storage: Storage) -> Result<Db> {
 /// @unique in a new version, with the engine before this one. A field the
 /// engine refuses @unique on now stays unenforced in the version that has
 /// it, as the define of its next version refuses it.
-fn unique_indexes(tx: &Tx<'_>) -> superschematic_engine_storage::Result<()> {
+fn unique_indexes(tx: &Tx<'_>, values: &ValueStore) -> superschematic_engine_storage::Result<()> {
     let live = tx.all(
         Sql::per(
             "SELECT namespace, name, document FROM engine_schemas AS s
@@ -359,7 +402,14 @@ fn unique_indexes(tx: &Tx<'_>) -> superschematic_engine_storage::Result<()> {
     for row in live {
         let holder = row.text("namespace")?;
         let model = model_of(row.text("document")?)?;
-        let clashes = sync_own_indexes(tx, holder, &model.name, &[], &own_indexes(&model, holder))?;
+        let clashes = sync_own_indexes(
+            tx,
+            values,
+            holder,
+            &model.name,
+            &[],
+            &own_indexes(&model, holder),
+        )?;
         if !clashes.is_empty() {
             let listed: Vec<String> = clashes
                 .iter()

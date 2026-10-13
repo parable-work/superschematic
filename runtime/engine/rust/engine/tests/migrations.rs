@@ -869,10 +869,10 @@ fn an_engine_opens_on_a_storage_the_host_opened() {
 fn ids_are_uuids_or_a_sequence() {
     for target in targets("ids_are_uuids_or_a_sequence") {
         let engine = target.open();
-        let id = engine.new_id();
+        let id = engine.new_id().unwrap();
         assert_eq!(id.len(), 36);
         assert_eq!(id.chars().nth(14), Some('4'));
-        assert_ne!(engine.new_id(), id);
+        assert_ne!(engine.new_id().unwrap(), id);
         drop(engine);
         let counted = target.open_with(|options| {
             options.ids = superschematic_engine::Ids::Sequence {
@@ -880,7 +880,7 @@ fn ids_are_uuids_or_a_sequence() {
             }
         });
         assert_eq!(
-            (counted.new_id(), counted.new_id()),
+            (counted.new_id().unwrap(), counted.new_id().unwrap()),
             ("order-1".to_owned(), "order-2".to_owned())
         );
     }

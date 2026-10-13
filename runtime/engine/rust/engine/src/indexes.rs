@@ -48,7 +48,7 @@ use crate::registry::document::{
     array_depth, field_name, fields_of, flag, is_map, json_key, type_of, types_of, SchemaModel,
 };
 use crate::registry::fields::field_type;
-use crate::values::{self, ValueHolder};
+use crate::values::{self, ValueHolder, ValueStore};
 
 /// The JSON type of a value an index compares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +60,16 @@ pub(crate) enum ScalarType {
 }
 
 impl ScalarType {
+    /// The JSON type's name: `string`, `number`, `integer` or `boolean`.
+    pub fn name(self) -> &'static str {
+        match self {
+            ScalarType::String => "string",
+            ScalarType::Number => "number",
+            ScalarType::Integer => "integer",
+            ScalarType::Boolean => "boolean",
+        }
+    }
+
     fn of(name: &str) -> Option<ScalarType> {
         match name {
             "string" => Some(ScalarType::String),
@@ -99,7 +109,19 @@ pub(crate) fn scalar_fields(
     document: &Value,
     instance_type: &str,
 ) -> BTreeMap<String, ScalarField> {
-    let mut found = BTreeMap::new();
+    ordered_scalar_fields(document, instance_type)
+        .into_iter()
+        .collect()
+}
+
+/// [`scalar_fields`] in the order a list's filters name them: the order the
+/// TypeScript engine's Map holds them, each key where its first field put
+/// it.
+pub(crate) fn ordered_scalar_fields(
+    document: &Value,
+    instance_type: &str,
+) -> Vec<(String, ScalarField)> {
+    let mut found: Vec<(String, ScalarField)> = Vec::new();
     let fields = fields_of(document, instance_type);
     for field in fields {
         let key = json_key(field);
@@ -117,13 +139,14 @@ pub(crate) fn scalar_fields(
             continue;
         };
         if key_issue(key).is_none() {
-            found.insert(
-                key.to_owned(),
-                ScalarField {
-                    name: field_name(field).to_owned(),
-                    scalar,
-                },
-            );
+            let entry = ScalarField {
+                name: field_name(field).to_owned(),
+                scalar,
+            };
+            match found.iter_mut().find(|(known, _)| known == key) {
+                Some((_, known)) => *known = entry,
+                None => found.push((key.to_owned(), entry)),
+            }
         }
     }
     found
@@ -382,6 +405,18 @@ pub(crate) fn value_expression(dialect: Dialect, key: &str, scalar: ScalarType) 
     }
 }
 
+/// The SQL expression of the hash a ref under an own field names, for a
+/// filter that matches a value the row holds by hash.
+pub(crate) fn ref_hash_expression(dialect: Dialect, key: &str) -> String {
+    match dialect {
+        Dialect::Sqlite => format!(
+            "json_extract(data, {})",
+            sql_string(&format!("$.\"{key}\".\"$value\""))
+        ),
+        Dialect::Postgres => format!("(((data::jsonb)->{})->>'$value')", sql_string(key)),
+    }
+}
+
 /// The condition on `engine_instances` an own index is partial on, as SQL
 /// with literals, so a query that repeats it reaches the index: the
 /// schema's rows in the namespace that holds it. Both are names the engine
@@ -403,10 +438,20 @@ fn values_of(dialect: Dialect, index: &OwnIndex) -> Vec<String> {
         .collect()
 }
 
+// create_index_sql is an own index's DDL. A plain index on Postgres ends
+// with position, which SQLite's holds as the rowid every index carries, so
+// a filtered page's range read (equal values, then position past the
+// cursor, in position order) is one index range on both databases; a
+// unique index holds one instance per values, which needs no order.
 fn create_index_sql(dialect: Dialect, index: &OwnIndex, holder: &str, schema: &str) -> String {
     let values = values_of(dialect, index);
+    let ordered = if dialect == Dialect::Postgres && !index.unique {
+        ", position"
+    } else {
+        ""
+    };
     format!(
-        "CREATE {}INDEX \"{}\" ON engine_instances (namespace, {})\n    WHERE {} AND {}",
+        "CREATE {}INDEX \"{}\" ON engine_instances (namespace, {}{ordered})\n    WHERE {} AND {}",
         if index.unique { "UNIQUE " } else { "" },
         index.name,
         values.join(", "),
@@ -513,6 +558,7 @@ fn clashes_of(
 /// publish, whose transaction rolls the rest back.
 pub(crate) fn sync_own_indexes(
     tx: &Tx<'_>,
+    store: &ValueStore,
     holder: &str,
     schema: &str,
     before: &[OwnIndex],
@@ -536,7 +582,7 @@ pub(crate) fn sync_own_indexes(
         .iter()
         .flat_map(|index| index.keys.iter().map(String::as_str))
         .collect();
-    inline_values(tx, holder, schema, &keys)?;
+    inline_values(tx, store, holder, schema, &keys)?;
     let mut clashes = Vec::new();
     for index in missing.iter().filter(|index| index.unique) {
         clashes.extend(clashes_of(tx, holder, schema, index)?);
@@ -554,7 +600,13 @@ pub(crate) fn sync_own_indexes(
 // key the row holds by hash: an index compares values, and a row of a
 // field an index covers keeps its value inline from now on. Only those
 // members change; the row keeps its other refs and holds their values.
-fn inline_values(tx: &Tx<'_>, holder: &str, schema: &str, keys: &BTreeSet<&str>) -> Result<()> {
+fn inline_values(
+    tx: &Tx<'_>,
+    store: &ValueStore,
+    holder: &str,
+    schema: &str,
+    keys: &BTreeSet<&str>,
+) -> Result<()> {
     let pointers: BTreeSet<String> = keys.iter().map(|key| json::pointer(&[key])).collect();
     let rows = tx.all(
         format!(
@@ -573,7 +625,7 @@ fn inline_values(tx: &Tx<'_>, holder: &str, schema: &str, keys: &BTreeSet<&str>)
         let stored: Value = serde_json::from_str(row.text("data")?).map_err(|error| {
             crate::errors::Error::internal(format!("instance data is not JSON: {error}"))
         })?;
-        let data = values::fill(tx, &stored, &filled)?;
+        let data = store.fill(tx, &stored, &filled)?;
         let namespace = row.text("namespace")?;
         let id = row.text("id")?;
         tx.run(
@@ -594,7 +646,7 @@ fn inline_values(tx: &Tx<'_>, holder: &str, schema: &str, keys: &BTreeSet<&str>)
                 values::ref_hash(member).map(str::to_owned)
             })
             .collect();
-        values::hold(
+        store.hold(
             tx,
             &ValueHolder {
                 namespace,

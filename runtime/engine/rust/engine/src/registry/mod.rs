@@ -25,8 +25,8 @@ use serde_json::Value;
 
 use superschematic_engine_storage::Lock;
 
-pub(crate) use catalog::Catalog;
-use catalog::{Change, Which};
+use catalog::Change;
+pub(crate) use catalog::{Catalog, VersionRuntime, Which};
 pub use catalog::{PublishResult, SchemaRecord, SchemaSummary};
 pub use document::{is_schema_name, SchemaModel, SCHEMA_NAME};
 pub use validator::{NormalizeMode, Normalized, SchemaValidator};

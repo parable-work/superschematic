@@ -25,6 +25,29 @@ use crate::errors::{SchemaChange, SchemaIssue};
 use crate::json::{self, compare_utf16};
 use crate::registry::document::{reachable_types, type_of, types_of, SchemaModel};
 
+/// Whether a name is one a behavior may take: an optional namespace of
+/// letters, digits, `_` and `-` and a dot, then a name in PascalCase
+/// (`Workflow`, `acme.Rating`), as the TypeScript engine's `BEHAVIOR_NAME`.
+pub(crate) fn is_behavior_name(name: &str) -> bool {
+    let (namespace, local) = match name.split_once('.') {
+        Some((namespace, local)) => (Some(namespace), local),
+        None => (None, name),
+    };
+    let namespaced = namespace.is_none_or(|namespace| {
+        let bytes = namespace.as_bytes();
+        !bytes.is_empty()
+            && bytes[0].is_ascii_alphabetic()
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-')
+    });
+    let bytes = local.as_bytes();
+    namespaced
+        && !bytes.is_empty()
+        && bytes[0].is_ascii_uppercase()
+        && bytes.iter().all(u8::is_ascii_alphanumeric)
+}
+
 /// A behavior implementation registered with an engine, as the registry
 /// reads it: its name and the fields it adds, each read under the
 /// behavior's name.

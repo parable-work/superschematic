@@ -280,8 +280,11 @@ CREATE TABLE engine_references (
 CREATE INDEX engine_references_source ON engine_references (namespace, source_schema, source_id, behavior);
 ";
 
+// Postgres has no rowid, the order SQLite reads references in (the order
+// they were recorded), so the table keeps it in an identity of its own.
 const POSTGRES_5: &str = "
 CREATE TABLE engine_references (
+  position      BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
   namespace     TEXT NOT NULL,
   target_schema TEXT NOT NULL,
   target_id     TEXT NOT NULL,

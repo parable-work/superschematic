@@ -1,7 +1,7 @@
 //! JSON as the TypeScript engine writes and reads it, which every client of
 //! the engine and every hash it keeps depend on (D58):
 //!
-//! - [`stringify`] is `JSON.stringify`: an object's members in the order a
+//! - [`stringify()`] is `JSON.stringify`: an object's members in the order a
 //!   JavaScript object iterates them (keys that are array indexes first,
 //!   ascending, then the rest as inserted), numbers as JavaScript writes
 //!   them ([`js_number`]) and strings with its escapes. The engine writes
@@ -17,7 +17,7 @@
 //! serde_json keeps each number's text (`arbitrary_precision`), and each
 //! writer here reads it as JavaScript's `JSON.parse` does, as a double:
 //! `1.0` is written `1`, and a literal past the double range is Infinity,
-//! which [`stringify`] writes as `null` and [`canonical_json`] refuses.
+//! which [`stringify()`] writes as `null` and [`canonical_json`] refuses.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -287,6 +287,14 @@ pub fn go_string(text: &str) -> String {
         }
     }
     out
+}
+
+/// `JSON.parse(JSON.stringify(value))`: the value as JavaScript reads it
+/// back, each number its double's shortest text (`1.0` is `1`), each
+/// object's members in the order a JavaScript object holds them, and a
+/// number past the double range `null`.
+pub fn js_copy(value: &Value) -> Value {
+    serde_json::from_str(&stringify(value)).unwrap_or(Value::Null)
 }
 
 /// Whether two JSON values are equal as the TypeScript engine's
