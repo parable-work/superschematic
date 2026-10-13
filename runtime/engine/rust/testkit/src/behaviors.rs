@@ -1802,8 +1802,8 @@ impl Behavior for Dispatch {
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, StateRules,
-        Timers, Variants, Workflow,
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, Search,
+        StateRules, Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
@@ -1812,6 +1812,7 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Revisions" => set.with(Revisions),
         "Dependencies" => set.with(Dependencies),
         "Links" => set.with(Links),
+        "Search" => set.with(Search),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
         "StateRules" => set.with(StateRules),
@@ -1832,6 +1833,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-staterules", "test.Recorder") => set.with(crate::core_fixtures::Recorder),
         ("core-timers", "test.Bounce") => set.with(crate::core_fixtures::Bounce),
         ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
+        ("core-search", "test.Tripwire") => set.with(crate::core_fixtures::Tripwire),
         ("core-revisions", "test.Hold") => set.with(RevisionHold),
         ("core-dependencies", "test.Finisher") => set.with(Finisher),
         ("core-numbering", "test.Refuser") => set.with(Refuser),
