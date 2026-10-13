@@ -126,6 +126,11 @@ A method's arguments say where each value comes from:
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['PlaceOrderLine', 'PlaceOrderInput']} />
 
+`@display` and `@docs` on `PlaceOrderLine` change no route, type or
+check: they name the rows and the product control of the form a Topcoat
+page places an order with
+([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
+
 Before a method runs, the server decodes every argument, checks it
 against its type and constraints, and answers 400 with every failure at
 once, keyed by path, as an RFC 9457 problem body. A top-level key an
