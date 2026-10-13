@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::engine::{actor_id, finish, Engine};
+use crate::engine::{actor_id, finish, Engine, EngineOn};
 use crate::storage::{CommitNode, Tx};
 use crate::Error;
 
@@ -64,15 +64,7 @@ impl Engine {
     /// snapshot the graph's rules call for and it lacks. Nothing calls it
     /// unless a service does.
     pub async fn sweep(&self, options: &SweepOptions) -> Result<SweepReport, Error> {
-        let actor = actor_id(&options.actor)?;
-        let grace = if options.discard_grace.is_zero() {
-            DEFAULT_DISCARD_GRACE
-        } else {
-            options.discard_grace
-        };
-        let mut tx = self.storage.begin().await?;
-        let result = self.sweep_in(&mut *tx, options, grace, &actor).await;
-        finish(tx, result).await
+        self.on(&*self.storage).sweep(options).await
     }
 
     async fn sweep_in(
@@ -205,5 +197,20 @@ impl Engine {
                 _ = ticker.tick() => {}
             }
         }
+    }
+}
+
+impl EngineOn<'_> {
+    /// [`Engine::sweep`], over the borrowed storage.
+    pub async fn sweep(self, options: &SweepOptions) -> Result<SweepReport, Error> {
+        let actor = actor_id(&options.actor)?;
+        let grace = if options.discard_grace.is_zero() {
+            DEFAULT_DISCARD_GRACE
+        } else {
+            options.discard_grace
+        };
+        let mut tx = self.storage.begin().await?;
+        let result = self.engine.sweep_in(&mut *tx, options, grace, &actor).await;
+        finish(tx, result).await
     }
 }

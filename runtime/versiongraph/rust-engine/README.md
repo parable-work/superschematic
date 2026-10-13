@@ -2,7 +2,9 @@
 
 The Rust engine of the version graph (D17, D19 and D32 in
 `docs/DECISIONS.md`): every graph operation, written once over a storage
-adapter, with a Postgres adapter and a SQLite adapter. It calls the core
+adapter, with a Postgres adapter and a SQLite adapter, whose fixed layout
+also runs on Postgres without a trigger and inside a synchronous
+transaction a host holds (D58). It calls the core
 (`../rust`, crate `superschematic-versiongraph`) natively through a path
 dependency. `../README.md` is the contract it keeps: the descriptor,
 canonical rows, the engine's rules and error codes, and the scenario
@@ -10,11 +12,15 @@ format.
 
 ```
 src/engine.rs      Engine: create_primary, branch, save, commit, seal, merge, rebase,
-                   revert, release, released, materialize, compose, diff, history, discard
+                   revert, release, released, materialize, compose, diff, history, discard;
+                   EngineOn, the same over a storage it borrows; Engine::run_on and ready
 src/sweep.rs       Engine::sweep and Engine::run_sweeper
 src/storage.rs     the Storage and Tx traits an adapter implements
 src/postgres/      the Postgres adapter, its Client seam and the tokio-postgres binding
-src/sqlite/        the SQLite adapter, its fixed layout, its Client seam and the rusqlite binding
+src/fixed/         the fixed layout in either dialect (FixedLayout, Dialect), its Client seam,
+                   and HostTx and HostClient, a host's synchronous transaction as its client
+src/sqlite/        the SQLite adapter: the fixed layout on SQLite under its names, the version
+                   check, SQLite's result codes and the rusqlite binding
 src/canonical/     the canonical row rules for what Postgres returns
 src/core.rs        the core's operations over trees of canonical rows
 src/error.rs       Error and its stable codes
@@ -48,6 +54,17 @@ write through a ref the ref's expected version. The engine's errors are
 (`version_conflict`, `primary_merge_only`, ...), or the core's code for an
 input it refused.
 
+`engine.on(&storage)` runs the same operations over a storage the caller
+lends, which need not be `'static`: it may borrow a transaction the
+caller holds. `engine.run_on(&storage, |e| e.save(...))` runs one of them
+synchronously, with no executor: `ready` polls the operation's future
+once, and refuses one that is not ready. An operation awaits nothing but
+its storage, so over a storage whose futures are always ready (the fixed
+layout over a host's transaction, below) it runs to its end on the
+calling thread. `Engine::unbound` builds an engine with no storage of its
+own, for a host that lends one to every operation. The operation's future
+borrows its arguments, so bind them before the closure.
+
 The generated Rust types crate of a schema that declares a graph carries a
 typed facade over this crate (`<Name>Graph` in `src/versiongraph_<name>.rs`),
 which turns typed edits into canonical rows and canonical rows into typed
@@ -70,7 +87,9 @@ implements.
 
 ## The SQLite adapter
 
-`sqlite::Adapter::new(descriptor, options)` reads a version 3 descriptor and
+`sqlite::Adapter` is `fixed::FixedLayout`, and `sqlite::SqliteStorage`
+`fixed::FixedStorage`: the fixed layout on SQLite, under the names it has
+had since D32. `sqlite::Adapter::new(descriptor, options)` reads a version 3 descriptor and
 keeps every graph in one fixed layout of nine `STRICT` tables (D32,
 `../README.md`, "SQLite"), the same for every graph, under the names
 `options.table_name` gives (`graph_ref` and so on by default), with every
@@ -122,15 +141,76 @@ default names is `layout.json`, and the database the TypeScript adapter
 wrote, `typescript.sql`, reads back through it and the engine as
 `typescript.json`.
 
+## The fixed layout on Postgres
+
+`fixed::FixedLayout::with_dialect(fixed::Dialect::Postgres, descriptor,
+options)` keeps a graph in the same nine tables on Postgres, writing
+history itself, so it needs no trigger, which a D16 behavior may not
+create (D58). `fixed::layout(Dialect::Postgres, name)` gives the
+statements that create them. The statements are SQLite's but where the
+two databases word them differently:
+
+| What | SQLite | Postgres |
+|---|---|---|
+| The layout's columns | `INTEGER`, `TEXT`, `STRICT` tables | `BIGINT`, `TEXT COLLATE "C"` (so text compares and orders by bytes, as SQLite's does), no `STRICT` |
+| The ref's keys to its base and head commits | declared with the ref table | `ALTER TABLE ... DROP CONSTRAINT IF EXISTS` and `ADD CONSTRAINT` after the commit table (`ref_base_commit`, `ref_head_commit`), since a key needs its table |
+| A list argument: the pins an image read takes, the commits a patch read takes | `json_each(?3)` and `json_extract(p.value, '$[0]')` | `jsonb_array_elements(CAST(CAST(?3 AS TEXT) AS JSONB))` and `p.value ->> 0` |
+| Whether a commit is snapshotted or tagged, as a read returns it | the condition, an integer | `CASE WHEN ... THEN 1 ELSE 0 END` |
+| A parameter compared with an integer literal or a depth (`seal`, a walk's limit) | `?5` | `CAST(?5 AS BIGINT)` |
+| A new ref whose name is taken | `ref_live_name` refuses it (`SQLITE_CONSTRAINT_UNIQUE`) | `ON CONFLICT (graph, root_id, name) WHERE deleted_at IS NULL DO NOTHING`, and no row is `name_taken`: an error would abort the transaction |
+| A prune with no batch | `LIMIT -1` | `LIMIT NULL` |
+| Binding a client | the version and JSON checks, foreign keys on | nothing |
+
+Every parameter of the Postgres statements is `TEXT` or `BIGINT`, by its
+column or a cast, and every column it reads is text or an integer, so a
+client binds `SqlValue`s as text, `int8` and typed nulls. Both dialects
+keep one writer per graph: `lock_ref` reads a ref as `read_ref` does,
+`next_sequence` is the root's highest sequence plus 1 and `sweep_lock` is
+true, so on Postgres the caller serializes a graph's writers, as D58's
+engine does with a lock on its namespace.
+
+## Inside a host's transaction
+
+A host that holds a synchronous transaction, as D58's engine holds the
+call a behavior runs in, implements `fixed::HostTx` over it: `query` and
+`execute` take a statement whose placeholders are `?`, each taking the
+next argument (a host on Postgres numbers them `$1`, `$2`, ...), and
+return rows of `SqlValue`s; `begin`, `commit` and `rollback` bound each
+engine operation, and issue nothing by default, as the TypeScript
+adapter's `callerTransaction` does, so the host rolls back what a failed
+operation wrote. A host that goes on after an operation fails runs each in
+a savepoint instead: on Postgres a failed statement leaves the
+transaction refusing the rest. `fixed::HostClient::new(&mut host)` is
+then the layout's client: it rewrites each statement's numbered
+placeholders to `?` with the arguments to match and runs it at once, so
+its futures are ready at their first poll. It reaches the host's
+transaction, which need be neither `Send` nor `Sync`, only on the thread
+that bound it. `FixedLayout::bind` binds it without the SQLite checks,
+whose `PRAGMA` and `sqlite_version` a behavior's transaction refuses, so
+a host binds a storage per call:
+
+```rust
+use std::sync::Arc;
+use superschematic_versiongraph_engine::fixed::{Dialect, FixedLayout, HostClient};
+use superschematic_versiongraph_engine::{Engine, Options};
+
+let adapter = Arc::new(FixedLayout::with_dialect(Dialect::Postgres, descriptor, options)?);
+let engine = Engine::unbound(descriptor, Options { schema_epoch: 0, ..Options::default() })?;
+// In each call, over the host's transaction:
+let storage = adapter.bind(HostClient::new(&mut host));
+let main = engine.run_on(&storage, |e| e.create_primary(actor, root, "main"))?;
+```
+
 ## Test
 
 ```
 cargo test --features rusqlite               # the rules, the vectors, the SQLite adapter's tests, the SQLite
-                                             # vectors and every scenario on SQLite, and every Postgres test
-                                             # that has a database
+                                             # vectors and every scenario on SQLite, also inside a host's
+                                             # transaction, and every Postgres test that has a database
 make versiongraph-scenarios-rust             # from the repository root: every scenario and the SQLite adapter's
                                              # tests on SQLite, then every scenario, canonical vector rendering,
-                                             # adapter and sweeper test against Postgres
+                                             # adapter and sweeper test against Postgres, and every scenario on
+                                             # the fixed layout on Postgres inside a host's transaction
 ```
 
 The SQLite tests need no server and run with or without a database. The
@@ -142,3 +222,17 @@ sweeper's tests run side by side and hold and take the graph's sweep lock,
 an advisory lock, which Postgres keys to the database rather than the
 schema, so each creates its schema in a database of its own and drops the
 database after; the variable's role must be able to create databases.
+
+Inside a host's transaction (`tests/host.rs`, and in `tests/scenarios.rs`
+every scenario again), the host is a test's own `HostTx` over plain
+rusqlite or over the synchronous `postgres` crate (`tests/support/hosts.rs`),
+which runs each step in a transaction of the host's and each operation in
+a savepoint, and each operation runs through `Engine::run_on` with no
+executor. The `postgres` client blocks on a runtime of its own, so those
+tests run on none. On Postgres each scenario runs in a schema of its own
+that holds the fixed layout. The runner runs the steps for `sqlite`, the
+fixed layout's backend, and an sql step's `sqlite` statement, on Postgres
+with its placeholders numbered `$1` and SQLite's `json_extract` and
+`CASE ... WHEN 1 THEN 'true'` in Postgres's words. The Postgres test host
+binds only text, `int8` and nulls and reads only text and integers, so
+the layout's Postgres statements are held to that.

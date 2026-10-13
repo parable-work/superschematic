@@ -9,6 +9,17 @@
 //! On SQLite (D32), with the `rusqlite` feature, each scenario runs through
 //! the SQLite adapter over the fixed layout, under its default names, in an
 //! in-memory database of its own, and needs no server.
+//!
+//! Inside a host's transaction (D58), each scenario runs again on the fixed
+//! layout, on SQLite over plain rusqlite (with the `rusqlite` feature) and
+//! on Postgres over the synchronous `postgres` client, in a schema of its
+//! own (with the database variable): each step in a transaction of the
+//! host's, each operation through `Engine::run_on` over a storage bound to
+//! it, synchronously, with no executor. Both run the steps a runner on
+//! `sqlite` runs, since the backend names the layout, and an sql step's
+//! `sqlite` statement; on Postgres with its placeholders numbered `$1`
+//! and SQLite's own words for JSON members and truth values in Postgres's
+//! ([`postgres_words`]).
 
 mod support;
 
@@ -19,14 +30,18 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Map, Value};
+use superschematic_versiongraph_engine::fixed::{self, Dialect, FixedLayout, HostClient, HostTx};
 use superschematic_versiongraph_engine::postgres::{self, PostgresStorage, TokioPostgres};
 #[cfg(feature = "rusqlite")]
 use superschematic_versiongraph_engine::sqlite::{self, Rusqlite, SqliteStorage};
 use superschematic_versiongraph_engine::storage::{Storage, Tx};
 use superschematic_versiongraph_engine::{
-    Change, Commit, CommitOptions, Conflict, Edits, Engine, Error, KindEdits, Options, Ref,
-    Release, Resolution, SweepOptions, SweepReport, TreeResult,
+    ready, Change, Commit, CommitOptions, Conflict, Edits, Engine, EngineOn, Error, KindEdits,
+    Options, Ref, Release, Resolution, SweepOptions, SweepReport, TreeResult,
 };
+#[cfg(feature = "rusqlite")]
+use support::hosts::RusqliteHost;
+use support::hosts::{PostgresHost, PostgresSchema};
 
 /// The backends a runner runs the scenarios on. A step that lists its
 /// backends runs on a runner's only when it lists it, and an sql step runs
@@ -279,14 +294,39 @@ enum Database {
     /// default names, and the adapter's storage, graph `recipe`, over it.
     #[cfg(feature = "rusqlite")]
     Sqlite { store: Arc<SqliteStorage<Rusqlite>> },
+    /// A host's database, which the runner's [`Host`] holds.
+    Host,
+}
+
+/// The database of a runner inside a host's transaction: a connection, on
+/// which each step runs in a transaction of the host's, and the fixed
+/// layout's adapter, graph `recipe`, which binds the transaction for the
+/// step.
+enum Host {
+    /// An in-memory SQLite database with the layout under its default names.
+    #[cfg(feature = "rusqlite")]
+    Sqlite {
+        connection: rusqlite::Connection,
+        adapter: Arc<FixedLayout>,
+    },
+    /// A Postgres schema of its own with the layout under its default names,
+    /// and a connection whose search path is the schema.
+    Postgres {
+        client: Box<::postgres::Client>,
+        adapter: Arc<FixedLayout>,
+        // Last, so the connection above closes before the schema drops.
+        _schema: PostgresSchema,
+    },
 }
 
 /// One scenario's database, engine and named results.
 struct Runner {
-    /// The backend the runner runs on.
+    /// The backend the runner runs on, whose steps it runs.
     backend: &'static str,
     descriptor: String,
-    storage: Arc<dyn Storage>,
+    /// The engine's storage; none inside a host's transaction, where each
+    /// step binds one.
+    storage: Option<Arc<dyn Storage>>,
     engine: Engine,
     refs: HashMap<String, Ref>,
     commits: HashMap<String, Commit>,
@@ -294,22 +334,37 @@ struct Runner {
     step: String,
     // A Mutex, so the runner is Sync while a step awaits.
     holder: std::sync::Mutex<Option<Holder>>,
+    /// The host's database, inside a host's transaction; taken while a step
+    /// runs. A Mutex, so the runner is Sync, as a connection is not.
+    host: std::sync::Mutex<Option<Host>>,
     // Last, so the engines above let go of the storage before it closes.
     database: Database,
 }
 
 /// The fixture's engine over a storage.
 fn fixture_engine(descriptor: &str, storage: Arc<dyn Storage>) -> Engine {
-    Engine::new(
-        descriptor,
-        storage,
-        Options {
-            schema_epoch: support::FIXTURE_SCHEMA_EPOCH,
-            snapshot_every: support::FIXTURE_SNAPSHOT_EVERY,
-            ..Options::default()
-        },
+    Engine::new(descriptor, storage, fixture_options()).expect("the fixture's engine")
+}
+
+/// The fixture graph's schema epoch and snapshot interval.
+fn fixture_options() -> Options {
+    Options {
+        schema_epoch: support::FIXTURE_SCHEMA_EPOCH,
+        snapshot_every: support::FIXTURE_SNAPSHOT_EVERY,
+        ..Options::default()
+    }
+}
+
+/// The fixed layout's adapter, graph `recipe`, in `dialect`.
+fn fixed_adapter(dialect: Dialect) -> Arc<FixedLayout> {
+    let options = fixed::Options {
+        graph: "recipe".to_owned(),
+        ..fixed::Options::default()
+    };
+    Arc::new(
+        FixedLayout::with_dialect(dialect, &support::descriptor(), options)
+            .expect("the fixture's adapter"),
     )
-    .expect("the fixture's engine")
 }
 
 /// What a step returned, for its expectations.
@@ -343,14 +398,75 @@ impl Runner {
             backend,
             engine: fixture_engine(&descriptor, storage.clone()),
             descriptor,
-            storage,
+            storage: Some(storage),
             refs: HashMap::new(),
             commits: HashMap::new(),
             releases: HashMap::new(),
             step: String::new(),
             holder: std::sync::Mutex::new(None),
+            host: std::sync::Mutex::new(None),
             database,
         }
+    }
+
+    /// A runner inside a host's transaction: an engine with no storage of
+    /// its own, over the host's database. It runs the steps a runner on
+    /// `sqlite` runs, since its backend is the fixed layout.
+    fn inside(host: Host) -> Runner {
+        let descriptor = support::descriptor();
+        Runner {
+            backend: SQLITE,
+            engine: Engine::unbound(&descriptor, fixture_options()).expect("the fixture's engine"),
+            descriptor,
+            storage: None,
+            refs: HashMap::new(),
+            commits: HashMap::new(),
+            releases: HashMap::new(),
+            step: String::new(),
+            holder: std::sync::Mutex::new(None),
+            host: std::sync::Mutex::new(Some(host)),
+            database: Database::Host,
+        }
+    }
+
+    /// A runner on the fixed layout on SQLite, in an in-memory database of
+    /// its own, inside a host's transaction over plain rusqlite.
+    #[cfg(feature = "rusqlite")]
+    fn sqlite_inside_a_host() -> Runner {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("open an in-memory database");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON")
+            .expect("turn foreign keys on");
+        for statement in sqlite::layout(&fixed::default_table_name).expect("the layout") {
+            connection
+                .execute_batch(&statement)
+                .expect("create the layout");
+        }
+        Runner::inside(Host::Sqlite {
+            connection,
+            adapter: fixed_adapter(Dialect::Sqlite),
+        })
+    }
+
+    /// A runner on the fixed layout on Postgres, in a schema of its own of
+    /// the database `dsn` names, inside a host's transaction over the
+    /// synchronous `postgres` client.
+    fn postgres_inside_a_host(dsn: &str) -> Runner {
+        let schema = PostgresSchema::create(dsn, "vg_rust_fixed_scenario");
+        let mut client = schema.connect();
+        let mut tx = client.transaction().expect("begin");
+        for statement in
+            fixed::layout(Dialect::Postgres, &fixed::default_table_name).expect("the layout")
+        {
+            tx.batch_execute(&statement).expect("create the layout");
+        }
+        tx.commit().expect("commit the layout");
+        Runner::inside(Host::Postgres {
+            client: Box::new(client),
+            adapter: fixed_adapter(Dialect::Postgres),
+            _schema: schema,
+        })
     }
 
     /// A runner on Postgres, in a schema of its own of the database `dsn`
@@ -397,6 +513,7 @@ impl Runner {
             Database::Postgres { store, .. } => Runner::seed_postgres(store, roots).await,
             #[cfg(feature = "rusqlite")]
             Database::Sqlite { .. } => {}
+            Database::Host => {}
         }
     }
 
@@ -486,7 +603,7 @@ impl Runner {
         if st.schema_epoch.is_some() || st.snapshot_every != 0 {
             engine = Engine::new(
                 &self.descriptor,
-                self.storage.clone(),
+                self.engine.storage().clone(),
                 Options {
                     schema_epoch: st.schema_epoch.unwrap_or(support::FIXTURE_SCHEMA_EPOCH),
                     snapshot_every: if st.snapshot_every != 0 {
@@ -520,17 +637,17 @@ impl Runner {
     }
 
     async fn run(&mut self, st: &Step) {
-        let engine = self.engine_for(st);
-        let actor = st
-            .actor
-            .clone()
-            .unwrap_or_else(|| support::DEFAULT_ACTOR.to_owned());
         let mut out = Returned::default();
-        let result = match st.op.as_str() {
-            "holdSweepLock" | "releaseSweepLock" | "sql" => self.control(st, &mut out).await,
-            "released" | "snapshot" | "materialize" | "compose" | "diff" | "history" | "rows"
-            | "patches" => self.read(st, &engine, &mut out).await,
-            _ => self.write(st, &engine, &actor, &mut out).await,
+        let result = match self.host.get_mut().expect("the host").take() {
+            Some(mut host) => {
+                let result = self.run_inside(&mut host, st, &mut out);
+                *self.host.get_mut().expect("the host") = Some(host);
+                result
+            }
+            None => {
+                let storage = self.storage.clone().expect("the runner's storage");
+                self.execute(st, &*storage, &mut out).await
+            }
         };
 
         let x = &st.expect;
@@ -557,11 +674,95 @@ impl Runner {
         self.check(st, &out);
     }
 
+    /// Runs a step over `storage`.
+    async fn execute(
+        &mut self,
+        st: &Step,
+        storage: &dyn Storage,
+        out: &mut Returned,
+    ) -> Result<(), Error> {
+        let engine = self.engine_for(st);
+        let actor = st
+            .actor
+            .clone()
+            .unwrap_or_else(|| support::DEFAULT_ACTOR.to_owned());
+        match st.op.as_str() {
+            "holdSweepLock" | "releaseSweepLock" | "sql" => self.control(st, out).await,
+            "released" | "snapshot" | "materialize" | "compose" | "diff" | "history" | "rows"
+            | "patches" => self.read(st, engine.on(storage), storage, out).await,
+            _ => self.write(st, engine.on(storage), &actor, out).await,
+        }
+    }
+
+    /// Runs a step inside a transaction of the host's, which it commits: an
+    /// sql step on the transaction itself, and any other over a storage
+    /// bound to it, each engine operation run synchronously through
+    /// `Engine::run_on` in a savepoint of its own.
+    fn run_inside(&mut self, host: &mut Host, st: &Step, out: &mut Returned) -> Result<(), Error> {
+        match host {
+            #[cfg(feature = "rusqlite")]
+            Host::Sqlite {
+                connection,
+                adapter,
+            } => {
+                let tx = connection
+                    .transaction()
+                    .expect("begin the host's transaction");
+                let result = if st.op == "sql" {
+                    let (text, args) = self.sql_step(st);
+                    self.sql_rusqlite(&tx, &text, &args)
+                        .map(|rows| out.rows = rows)
+                } else {
+                    self.step_inside(adapter, &mut RusqliteHost { connection: &tx }, st, out)
+                };
+                tx.commit().expect("commit the host's transaction");
+                result
+            }
+            Host::Postgres {
+                client, adapter, ..
+            } => {
+                let mut tx = client.transaction().expect("begin the host's transaction");
+                let result = if st.op == "sql" {
+                    let (text, args) = self.sql_step(st);
+                    self.sql_fixed_postgres(&mut tx, &text, &args, st.expect.rows.is_some())
+                        .map(|rows| out.rows = rows)
+                } else {
+                    self.step_inside(
+                        adapter,
+                        &mut PostgresHost {
+                            transaction: &mut tx,
+                        },
+                        st,
+                        out,
+                    )
+                };
+                tx.commit().expect("commit the host's transaction");
+                result
+            }
+        }
+    }
+
+    /// Runs a step that is not sql over a storage bound to the host's
+    /// transaction, with no executor: every await in it is ready at once.
+    fn step_inside(
+        &mut self,
+        adapter: &Arc<FixedLayout>,
+        host: &mut dyn HostTx,
+        st: &Step,
+        out: &mut Returned,
+    ) -> Result<(), Error> {
+        let storage = adapter.bind(HostClient::new(host));
+        match ready(self.execute(st, &storage, out)) {
+            Ok(result) => result,
+            Err(error) => fail!(self, "{error}"),
+        }
+    }
+
     /// Runs a step that writes through the engine.
     async fn write(
         &mut self,
         st: &Step,
-        engine: &Engine,
+        engine: EngineOn<'_>,
         actor: &str,
         out: &mut Returned,
     ) -> Result<(), Error> {
@@ -691,7 +892,13 @@ impl Runner {
     }
 
     /// Runs a step that reads through the engine or the adapter.
-    async fn read(&self, st: &Step, engine: &Engine, out: &mut Returned) -> Result<(), Error> {
+    async fn read(
+        &self,
+        st: &Step,
+        engine: EngineOn<'_>,
+        storage: &dyn Storage,
+        out: &mut Returned,
+    ) -> Result<(), Error> {
         match st.op.as_str() {
             "released" => engine.released(&st.root).await.map(|released| {
                 out.release = Some(released.release);
@@ -699,7 +906,7 @@ impl Runner {
             }),
             "snapshot" => {
                 let commit = self.commit_id(&st.commit);
-                self.in_tx(|tx| Box::pin(async move { tx.snapshot(&commit).await }))
+                in_tx(storage, |tx| Box::pin(async move { tx.snapshot(&commit).await }))
                     .await
                     .map(|mut entries| {
                         entries.sort_by(|a, b| (&a.kind, &a.entity_key).cmp(&(&b.kind, &b.entity_key)));
@@ -727,16 +934,18 @@ impl Runner {
                 .map(|history| out.history = history),
             "rows" => {
                 let (kind, ref_id) = (st.kind.clone(), self.ref_id(&st.ref_));
-                self.in_tx(|tx| Box::pin(async move { tx.rows(&kind, &ref_id).await }))
-                    .await
-                    .map(|mut rows| {
-                        rows.sort_by_key(|row| row["entity_key"].to_string());
-                        out.rows = rows;
-                    })
+                in_tx(storage, |tx| {
+                    Box::pin(async move { tx.rows(&kind, &ref_id).await })
+                })
+                .await
+                .map(|mut rows| {
+                    rows.sort_by_key(|row| row["entity_key"].to_string());
+                    out.rows = rows;
+                })
             }
             "patches" => {
                 let commit = self.commit_id(&st.commit);
-                self.in_tx(|tx| Box::pin(async move { tx.patches(&[commit]).await }))
+                in_tx(storage, |tx| Box::pin(async move { tx.patches(&[commit]).await }))
                     .await
                     .map(|mut patches| {
                         patches.sort_by(|a, b| (&a.kind, &a.entity_key).cmp(&(&b.kind, &b.entity_key)));
@@ -766,25 +975,37 @@ impl Runner {
                 None => fail!(self, "no sweep lock is held"),
             },
             "sql" => {
-                let args: Vec<String> = st.args.iter().map(|arg| self.sql_arg(arg)).collect();
-                let backend = self.backend;
-                let text = st
-                    .statement
-                    .as_ref()
-                    .and_then(|statements| statements.get(backend))
-                    .unwrap_or_else(|| fail!(self, "the sql step has no {backend} statement"));
+                let (text, args) = self.sql_step(st);
                 out.rows = match &self.database {
                     Database::Postgres { store, .. } => {
-                        self.sql_postgres(store, text, &args, st.expect.rows.is_some())
+                        self.sql_postgres(store, &text, &args, st.expect.rows.is_some())
                             .await?
                     }
                     #[cfg(feature = "rusqlite")]
-                    Database::Sqlite { store } => self.sql_sqlite(store, text, &args).await?,
+                    Database::Sqlite { store } => {
+                        let connection = store.client().connection().await;
+                        self.sql_rusqlite(&connection, &text, &args)?
+                    }
+                    Database::Host => {
+                        fail!(self, "an sql step inside a host runs on its transaction")
+                    }
                 };
                 Ok(())
             }
             op => fail!(self, "unknown op {op:?}"),
         }
+    }
+
+    /// An sql step's statement for the runner's backend, and its arguments.
+    fn sql_step(&self, st: &Step) -> (String, Vec<String>) {
+        let args: Vec<String> = st.args.iter().map(|arg| self.sql_arg(arg)).collect();
+        let backend = self.backend;
+        let text = st
+            .statement
+            .as_ref()
+            .and_then(|statements| statements.get(backend))
+            .unwrap_or_else(|| fail!(self, "the sql step has no {backend} statement"));
+        (text.clone(), args)
     }
 
     /// Runs an sql step's statement on Postgres, its arguments as text. With
@@ -844,13 +1065,12 @@ impl Runner {
     /// text or NULL is refused: the statement casts what it selects, as on
     /// Postgres every column reads as text.
     #[cfg(feature = "rusqlite")]
-    async fn sql_sqlite(
+    fn sql_rusqlite(
         &self,
-        store: &SqliteStorage<Rusqlite>,
+        connection: &rusqlite::Connection,
         text: &str,
         args: &[String],
     ) -> Result<Vec<Value>, Error> {
-        let connection = store.client().connection().await;
         let mut statement = connection
             .prepare(text)
             .unwrap_or_else(|e| fail!(self, "prepare {text}: {e}"));
@@ -882,6 +1102,58 @@ impl Runner {
             out.push(Value::Object(columns));
         }
         Ok(out)
+    }
+
+    /// Runs an sql step's `sqlite` statement, in Postgres's words
+    /// ([`postgres_words`]), on the fixed layout on Postgres, its arguments
+    /// as text. With rows expected, it returns the statement's rows, each
+    /// column read as text: one that is not text or NULL is refused, as on
+    /// SQLite.
+    fn sql_fixed_postgres(
+        &self,
+        tx: &mut ::postgres::Transaction<'_>,
+        text: &str,
+        args: &[String],
+        want_rows: bool,
+    ) -> Result<Vec<Value>, Error> {
+        let text = postgres_words(text);
+        let params: Vec<&(dyn ::postgres::types::ToSql + Sync)> = args
+            .iter()
+            .map(|arg| arg as &(dyn ::postgres::types::ToSql + Sync))
+            .collect();
+        let statement = tx
+            .prepare(&text)
+            .unwrap_or_else(|e| fail!(self, "prepare {text}: {e}"));
+        if !want_rows {
+            return tx
+                .execute(&statement, &params)
+                .map(|_| Vec::new())
+                .map_err(Error::storage);
+        }
+        let rows = tx.query(&statement, &params).map_err(Error::storage)?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let columns = row.columns().iter().enumerate().map(|(i, column)| {
+                    if *column.type_() != ::postgres::types::Type::TEXT {
+                        fail!(
+                            self,
+                            "column {} is {}, not text: cast it in the statement",
+                            column.name(),
+                            column.type_()
+                        );
+                    }
+                    let text: Option<String> = row
+                        .try_get(i)
+                        .unwrap_or_else(|e| fail!(self, "read {}: {e}", column.name()));
+                    (
+                        column.name().to_owned(),
+                        text.map_or(Value::Null, Value::String),
+                    )
+                });
+                Value::Object(columns.collect())
+            })
+            .collect())
     }
 
     fn check(&self, st: &Step, out: &Returned) {
@@ -992,6 +1264,10 @@ impl Runner {
                 self,
                 "the sweep lock steps run on postgres only: under SQLite's one writer no transaction holds the lock while a sweep runs"
             ),
+            Database::Host => fail!(
+                self,
+                "the sweep lock steps run on postgres only: the fixed layout has one writer, as SQLite does"
+            ),
         };
         // The holder's storage lives as long as the test process, so its
         // transaction outlives this step.
@@ -1010,29 +1286,6 @@ impl Runner {
 
     fn take_holder(&self) -> Option<Holder> {
         self.holder.lock().expect("holder").take()
-    }
-
-    /// Runs `f` in a transaction of the scenario's storage.
-    async fn in_tx<T>(
-        &self,
-        f: impl for<'t> FnOnce(
-            &'t mut (dyn Tx + '_),
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<T, Error>> + Send + 't>,
-        >,
-    ) -> Result<T, Error> {
-        let mut tx = self.storage.begin().await?;
-        let result = f(&mut *tx).await;
-        match result {
-            Ok(value) => {
-                tx.commit().await?;
-                Ok(value)
-            }
-            Err(error) => {
-                let _ = tx.rollback().await;
-                Err(error)
-            }
-        }
     }
 
     /// An sql step's UUID argument: hyphenated on Postgres, and in its
@@ -1234,6 +1487,46 @@ impl Runner {
             }
         }
     }
+}
+
+/// Runs `f` in a transaction of `storage`.
+async fn in_tx<T>(
+    storage: &dyn Storage,
+    f: impl for<'t> FnOnce(
+        &'t mut (dyn Tx + '_),
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<T, Error>> + Send + 't>,
+    >,
+) -> Result<T, Error> {
+    let mut tx = storage.begin().await?;
+    let result = f(&mut *tx).await;
+    match result {
+        Ok(value) => {
+            tx.commit().await?;
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = tx.rollback().await;
+            Err(error)
+        }
+    }
+}
+
+/// An sql step's `sqlite` statement in Postgres's words, for the fixed
+/// layout on Postgres: its numbered placeholders (`?1`) as `$1`; a JSON
+/// member SQLite reads with `json_extract(data, '$.name')` as
+/// `(CAST(data AS JSONB) ->> 'name')`; and a truth SQLite writes with
+/// `CASE a = b WHEN 1 THEN 'true' WHEN 0 THEN 'false' END` as the boolean
+/// cast to text, which Postgres writes `true` or `false`. The scenarios'
+/// other `sqlite` statements are Postgres already.
+fn postgres_words(sqlite: &str) -> String {
+    let placeholders = regex::Regex::new(r"\?(\d+)").expect("a pattern");
+    let members = regex::Regex::new(r"json_extract\((\w+), '\$\.(\w+)'\)").expect("a pattern");
+    let truths = regex::Regex::new(r"CASE (\S+ = \S+) WHEN 1 THEN 'true' WHEN 0 THEN 'false' END")
+        .expect("a pattern");
+    let text = placeholders.replace_all(sqlite, "$$$1");
+    let text = members.replace_all(&text, "(CAST($1 AS JSONB) ->> '$2')");
+    truths.replace_all(&text, "CAST($1 AS TEXT)").into_owned()
 }
 
 fn to_rows<T: serde::Serialize>(values: &[T]) -> Vec<Value> {
@@ -1439,6 +1732,80 @@ async fn scenarios() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scenarios_on_sqlite() {
     every_scenario(SQLITE, Runner::sqlite).await;
+}
+
+/// The message of a panic's payload.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_else(|| "a panic".to_owned())
+}
+
+/// Runs every scenario inside a host's transaction, each on a runner `open`
+/// gives it, synchronously: no executor, each scenario polled once to its
+/// end, each operation through `Engine::run_on`. One that fails reports its
+/// step and the rest still run; each database is dropped whatever
+/// happened. It returns how many scenarios ran.
+fn every_scenario_inside(label: &str, open: impl Fn() -> Runner) -> usize {
+    let mut failures = Vec::new();
+    let files = scenario_files();
+    for path in &files {
+        let scenario = read_scenario(path, SQLITE);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut runner = open();
+            ready(run_scenario(&mut runner, &scenario))
+                .expect("a scenario inside a host's transaction is ready at its first poll");
+            scenario.steps.len()
+        }));
+        match outcome {
+            Ok(steps) => eprintln!("scenario {} on {label}: ok ({steps} steps)", scenario.name),
+            Err(panic) => {
+                let message = panic_message(panic.as_ref());
+                eprintln!("scenario {} on {label}: FAILED: {message}", scenario.name);
+                failures.push(format!("{}: {message}", scenario.name));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} scenarios failed on {label}:\n{}",
+        failures.len(),
+        files.len(),
+        failures.join("\n")
+    );
+    files.len()
+}
+
+/// Every scenario through the fixed layout on SQLite, inside a host's
+/// transaction over plain rusqlite, each in an in-memory database of its
+/// own.
+#[cfg(feature = "rusqlite")]
+#[test]
+fn scenarios_on_sqlite_inside_a_hosts_transaction() {
+    let ran = every_scenario_inside(
+        "sqlite inside a host's transaction",
+        Runner::sqlite_inside_a_host,
+    );
+    assert_eq!(ran, scenario_files().len());
+}
+
+/// Every scenario through the fixed layout on Postgres, inside a host's
+/// transaction over the synchronous `postgres` client, each in a schema of
+/// its own.
+#[test]
+fn scenarios_on_the_fixed_layout_on_postgres_inside_a_hosts_transaction() {
+    let Some(dsn) =
+        support::database("scenarios_on_the_fixed_layout_on_postgres_inside_a_hosts_transaction")
+    else {
+        return;
+    };
+    let ran = every_scenario_inside(
+        "the fixed layout on postgres inside a host's transaction",
+        || Runner::postgres_inside_a_host(&dsn),
+    );
+    assert_eq!(ran, scenario_files().len());
 }
 
 /// A scenario of the given roots (raw JSON, or "" for none) and steps.
@@ -1747,6 +2114,18 @@ async fn scenario_backends() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scenario_backends_on_sqlite() {
     backends_scenario(Runner::sqlite().await).await;
+}
+
+/// Inside a host's transaction the runner runs the steps for `sqlite`, the
+/// fixed layout's backend, on Postgres as on SQLite.
+#[test]
+fn scenario_backends_inside_a_hosts_transaction() {
+    #[cfg(feature = "rusqlite")]
+    ready(backends_scenario(Runner::sqlite_inside_a_host())).expect("ready at its first poll");
+    if let Some(dsn) = support::database("scenario_backends_inside_a_hosts_transaction") {
+        ready(backends_scenario(Runner::postgres_inside_a_host(&dsn)))
+            .expect("ready at its first poll");
+    }
 }
 
 /// On SQLite a scenario's roots need no seeding, since the layout has no
