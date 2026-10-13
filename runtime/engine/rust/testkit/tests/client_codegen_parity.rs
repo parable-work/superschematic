@@ -6,10 +6,9 @@
 //! be the ones the describe document names, by behavior — the first two
 //! cases of `test/client-codegen.test.ts`, on an engine with the core's
 //! behaviors ported so far, as `openTestEngine` opens one. A document that
-//! composes a behavior the engine does not run yet (milestones 9 to 11) is
+//! composes a behavior the engine does not run yet (milestones 10 and 11) is
 //! not published and its schema is counted as skipped: the vectors'
-//! `notes` waits for Revisions, `Spec` for Revisions and Dependencies,
-//! `Task` for Links, Numbering and Dependencies, `Project` for Rollups.
+//! `Project` waits for Rollups.
 //! The test fails if the vectors stop covering the shapes it checks.
 
 mod support;

@@ -21,21 +21,13 @@ const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
 /// scenario and step, the database they differ on (`None` for both), with
 /// the reason. The test reports them and passes; once one gives the
 /// recorded answer, the test fails until it leaves this list.
-const KNOWN: [(&str, &str, Option<Dialect>, &str); 2] = [
-    (
-        "core-dependencies",
-        "Dependencies (node) > deleting a blocker removes its edges through removeBlocker, as the caller, with an event on each dependent > step 19",
-        Some(Dialect::Postgres),
-        "the delete the scenario refused before (step 15) appended its event, then rolled back: SQLite gives its cursor to the next event, and a Postgres identity column, which no rollback takes back, leaves it a gap (D58), so every later cursor is one higher",
-    ),
-    (
-        "core-links-many",
-        "Links, many-valued (node) > a file Links v2 left: the table is built again keyed by the target, its rows, their order and their references kept > step 17",
-        // A storage step: Postgres skips it.
-        Some(Dialect::Sqlite),
-        "between its two opens the test rebuilds the table as Links' second migration left it and drops migration 3 from the ledger, through a Storage of its own the recorder does not see; the replay's file applied all three migrations at the first open, so migration 3's applied_at is not a later instant",
-    ),
-];
+const KNOWN: [(&str, &str, Option<Dialect>, &str); 1] = [(
+    "core-links-many",
+    "Links, many-valued (node) > a file Links v2 left: the table is built again keyed by the target, its rows, their order and their references kept > step 17",
+    // A storage step: Postgres skips it.
+    Some(Dialect::Sqlite),
+    "between its two opens the test rebuilds the table as Links' second migration left it and drops migration 3 from the ledger, through a Storage of its own the recorder does not see; the replay's file applied all three migrations at the first open, so migration 3's applied_at is not a later instant; the recorder is to mark such a scenario js",
+)];
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")

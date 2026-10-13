@@ -10,7 +10,7 @@
 //! skips a scenario only the TypeScript engine can run (`js`), one that
 //! needs a behavior this engine does not have (a test behavior the kit has
 //! not ported, [`behaviors`], or a core behavior not ported yet,
-//! milestones 9 to 11), one that writes the file with SQL of its own on
+//! milestones 10 and 11), one that writes the file with SQL of its own on
 //! Postgres (`dialect: sqlite`), and one that calls a method that changes
 //! the engine and JSON cannot carry ([`UNBUILT_WRITES`]). It opens each
 //! engine as the recording says, with a policy answering from the recorded
@@ -21,9 +21,13 @@
 //! (`behaviors.register` through the kit's behaviors and the core's) and
 //! compares its result or its error (class, code, message and details),
 //! binding the symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`,
-//! `{{opaque:N}}`) at their first appearance in an answer. A read-only call
-//! that lists the core's behaviors ([`UNBUILT_READS`]) is skipped and
-//! counted.
+//! `{{opaque:N}}`) at their first appearance in an answer. On Postgres an
+//! event cursor is opaque too: the recording's are SQLite's, and a write a
+//! rollback undid leaves a gap in a Postgres identity column (D58), so each
+//! recorded cursor binds to the one read in its place, in the recorded
+//! order, and a cursor argument passes the one bound to it. A read of the
+//! registered behaviors that answers from a core behavior not ported yet
+//! ([`UNBUILT_READS`]) is skipped and counted.
 //!
 //! The HTTP corpus (`runtime/engine/testdata/http`) replays through the
 //! same runner: its cases are scenarios whose `app`, exchange and stream
@@ -55,7 +59,7 @@ use superschematic_engine::{
 /// opens. The replayer opens every engine with the ones ported so far
 /// ([`superschematic_engine_behaviors::core`], whose names
 /// [`superschematic_engine_behaviors::NAMES`] lists); a scenario whose
-/// schemas compose one not ported yet (milestones 9 to 11) is skipped.
+/// schemas compose one not ported yet (milestones 10 and 11) is skipped.
 pub const CORE_BEHAVIORS: [&str; 15] = [
     "Workflow",
     "Comments",
@@ -342,7 +346,7 @@ fn skip_reason(
         .collect();
     if !core.is_empty() {
         return Some(format!(
-            "core behaviors not ported yet (milestones 9 to 11): {}",
+            "core behaviors not ported yet (milestones 10 and 11): {}",
             core.join(", ")
         ));
     }
@@ -394,6 +398,21 @@ struct Opened {
     ids: Option<IdQueue>,
 }
 
+// is_cursor is whether a member of an answer holds an event cursor: an
+// event's, a subscription's, its failure's or its last skip's `cursor`; a
+// page of events' `next`; the runner status's `head`; a cause's `event`;
+// retention's `floor` and `heldAt`.
+fn is_cursor(object: &Map<String, Value>, key: &str) -> bool {
+    match key {
+        "cursor" => true,
+        "next" => object.contains_key("events"),
+        "head" => object.contains_key("running"),
+        "event" => object.contains_key("depth"),
+        "floor" | "heldAt" => object.contains_key("pruned"),
+        _ => false,
+    }
+}
+
 /// A symbol's bound value: text, or an instant in epoch milliseconds.
 #[derive(Clone, Debug, PartialEq)]
 enum Bound {
@@ -410,6 +429,9 @@ struct Run<'d> {
     engines: Vec<(String, Opened)>,
     places: Vec<(String, Place)>,
     bindings: HashMap<String, Bound>,
+    /// On Postgres, each recorded event cursor and the one this replay
+    /// read in its place ([`Run::match_cursor`]).
+    cursors: BTreeMap<i64, i64>,
     counter: IdCounter,
     unknown_questions: Arc<Mutex<Vec<String>>>,
     /// The apps a case serves, and its open streams (`http`).
@@ -430,6 +452,7 @@ impl<'d> Run<'d> {
             engines: Vec::new(),
             places: Vec::new(),
             bindings: HashMap::new(),
+            cursors: BTreeMap::new(),
             counter: IdCounter::new(),
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
             http: http::Served::default(),
@@ -455,13 +478,20 @@ impl<'d> Run<'d> {
         if UNBUILT_READS.contains(&call) && reads_unported(call, step) {
             return Ok(Outcome::Skipped);
         }
-        let args = match step.get("args") {
+        let mut args = match step.get("args") {
             Some(Value::Array(args)) => args
                 .iter()
                 .map(|arg| self.substitute(arg))
                 .collect::<Result<Vec<_>, _>>()?,
             _ => Vec::new(),
         };
+        if call.starts_with("events.") && self.database.dialect() == Dialect::Postgres {
+            for arg in &mut args {
+                if let Some(after) = arg.get("after").and_then(Value::as_i64) {
+                    arg["after"] = Value::from(self.cursor_argument(after));
+                }
+            }
+        }
         let compare = !(step.get("dialect").and_then(Value::as_str) == Some("sqlite")
             && self.database.dialect() == Dialect::Postgres);
         let result = match call {
@@ -530,33 +560,20 @@ impl<'d> Run<'d> {
                         .collect::<Result<_, _>>()?,
                     _ => Vec::new(),
                 };
-                let fixed_clock = self.engine_of(step)?.fixed_clock;
-                let (now, times) = if fixed_clock {
-                    let now = step.get("now").and_then(|now| self.clock_time(now));
-                    let times: Option<Vec<i64>> = match step.get("clock") {
-                        Some(Value::Array(times)) => Some(
-                            times
-                                .iter()
-                                .filter_map(|time| self.clock_time(time))
-                                .collect(),
-                        ),
-                        _ => None,
-                    };
-                    (now, times)
-                } else {
-                    (None, None)
-                };
                 let opened = self.engine_of(step)?;
+                let fixed_clock = opened.fixed_clock;
                 let ids = opened.ids.clone();
                 let engine = opened.engine.as_ref().ok_or("the engine is closed")?;
-                if let Some(now) = now {
-                    engine.clock().set(now).map_err(|error| error.to_string())?;
-                }
-                if let Some(times) = times {
-                    engine
-                        .clock()
-                        .script(times)
-                        .map_err(|error| error.to_string())?;
+                if fixed_clock {
+                    if let Some(now) = step.get("now").and_then(Value::as_i64) {
+                        engine.clock().set(now).map_err(|error| error.to_string())?;
+                    }
+                    if let Some(Value::Array(times)) = step.get("clock") {
+                        engine
+                            .clock()
+                            .script(times.iter().filter_map(Value::as_i64))
+                            .map_err(|error| error.to_string())?;
+                    }
                 }
                 if let Some(queue) = &ids {
                     queue.clear();
@@ -700,11 +717,7 @@ impl<'d> Run<'d> {
         };
         let fixed_clock = given.get("clock").and_then(Value::as_str) == Some("fixed");
         options.clock = if fixed_clock {
-            Clock::Manual(
-                step.get("now")
-                    .and_then(|now| self.clock_time(now))
-                    .unwrap_or(0),
-            )
+            Clock::Manual(step.get("now").and_then(Value::as_i64).unwrap_or(0))
         } else {
             Clock::Strict
         };
@@ -896,44 +909,6 @@ impl<'d> Run<'d> {
         }
     }
 
-    // clock_time is a time a fixed clock reads at a step: a number, or a
-    // time symbol, which a scenario that also reads the wall clock writes
-    // for a fixed clock's times too. A symbol no answer has bound yet is
-    // bound here, so the answers that name it read the time the engine's
-    // clock gave: a day before the wall clock, then one past the last time
-    // bound so, so no wall-clock reading of the scenario can be one of
-    // them and they come in the order the recording read them.
-    fn clock_time(&mut self, time: &Value) -> Option<i64> {
-        if let Some(ms) = time.as_i64() {
-            return Some(ms);
-        }
-        let parts = segments(time.as_str()?);
-        let [Segment::Symbol(symbol)] = parts.as_slice() else {
-            return None;
-        };
-        if symbol.kind != "time" {
-            return None;
-        }
-        if let Some(Bound::Time(ms)) = self.bindings.get(&symbol.key()) {
-            return Some(*ms);
-        }
-        const DAY: i64 = 86_400_000;
-        let wall = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-        let ms = self
-            .bindings
-            .values()
-            .filter_map(|bound| match bound {
-                Bound::Time(ms) if *ms < wall - DAY / 2 => Some(*ms + 1),
-                _ => None,
-            })
-            .max()
-            .unwrap_or(wall - DAY);
-        self.bindings.insert(symbol.key(), Bound::Time(ms));
-        Some(ms)
-    }
-
     fn bound_argument(&mut self, symbol: &Symbol, whole: bool) -> Result<Value, String> {
         if symbol.kind == "dir" && !self.bindings.contains_key(&symbol.key()) {
             let dir = format!("/replay/{}", unique("dir"));
@@ -981,7 +956,16 @@ impl<'d> Run<'d> {
                     }
                 }
                 for (key, member) in want {
-                    self.matches(member, &got[key], &format!("{at}/{key}"))?;
+                    let at = format!("{at}/{key}");
+                    match (member.as_i64(), got[key].as_i64()) {
+                        (Some(recorded), Some(read))
+                            if self.database.dialect() == Dialect::Postgres
+                                && is_cursor(want, key) =>
+                        {
+                            self.match_cursor(recorded, read, &at)?;
+                        }
+                        _ => self.matches(member, &got[key], &at)?,
+                    }
                 }
                 Ok(())
             }
@@ -1000,6 +984,48 @@ impl<'d> Run<'d> {
             }
             _ if js_equal(expected, actual) => Ok(()),
             _ => Err(format!("{at}: expected {expected}, got {actual}")),
+        }
+    }
+
+    // match_cursor holds an event cursor read on Postgres to the recorded
+    // one. The recording's cursors are SQLite's, where a write a rollback
+    // undid gives its cursor back to the next event; a Postgres identity
+    // column, which no rollback takes back, leaves a gap there (D58), so
+    // every later cursor reads higher. A cursor is opaque, as the README's
+    // symbols are (`## Symbols`): each recorded cursor binds, at its first
+    // appearance, to the one read in its place, and needs only to keep the
+    // recorded order; at a later appearance it must read the same.
+    fn match_cursor(&mut self, recorded: i64, read: i64, at: &str) -> Result<(), String> {
+        if let Some(&bound) = self.cursors.get(&recorded) {
+            return if bound == read {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{at}: expected cursor {recorded}, bound to {bound}, got {read}"
+                ))
+            };
+        }
+        let below = self.cursors.range(..recorded).next_back();
+        let above = self.cursors.range(recorded + 1..).next();
+        if below.is_some_and(|(_, &bound)| bound >= read)
+            || above.is_some_and(|(_, &bound)| bound <= read)
+        {
+            return Err(format!(
+                "{at}: expected cursor {recorded}, got {read}, out of the recorded order (cursors bound so far: {:?})",
+                self.cursors
+            ));
+        }
+        self.cursors.insert(recorded, read);
+        Ok(())
+    }
+
+    // cursor_argument is the cursor this replay passes on Postgres where
+    // the recording passed `recorded`: the one bound to it, else as far
+    // past the nearest one bound below it as the recording's.
+    fn cursor_argument(&self, recorded: i64) -> i64 {
+        match self.cursors.range(..=recorded).next_back() {
+            Some((&below, &bound)) => bound + (recorded - below),
+            None => recorded,
         }
     }
 
@@ -1598,6 +1624,7 @@ pub fn summarize(reports: &[FileReport]) -> BTreeMap<String, (usize, usize, usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn instants_read_and_write_as_javascript_writes_them() {
@@ -1617,5 +1644,35 @@ mod tests {
         assert_eq!(parts.len(), 3);
         assert!(matches!(&parts[1], Segment::Symbol(symbol) if symbol.key() == "id:1"));
         assert!(matches!(&segments("{{time:3:us}}")[0], Segment::Symbol(symbol) if symbol.micros));
+    }
+
+    #[test]
+    fn a_cursor_on_postgres_binds_to_the_one_read_in_its_place_in_the_recorded_order() {
+        let page = |cursors: &[i64], next: i64| {
+            json!({
+                "events": cursors.iter().map(|cursor| json!({"cursor": cursor, "kind": "create"})).collect::<Vec<_>>(),
+                "next": next,
+                "more": false
+            })
+        };
+        let postgres = Database::Postgres { url: String::new() };
+        let repository = PathBuf::new();
+        let mut run = Run::new(&postgres, &repository, "f", &json!({}));
+        run.matches(&page(&[1, 2], 2), &page(&[1, 2], 2), "")
+            .expect("as recorded");
+        // A rolled-back write took cursor 3: the recording's 3 and 4 read
+        // as 4 and 5, and an argument after 2 passes 2, after 4 passes 5.
+        run.matches(&page(&[3, 4], 4), &page(&[4, 5], 5), "")
+            .expect("a gap");
+        assert_eq!((run.cursor_argument(2), run.cursor_argument(4)), (2, 5));
+        assert_eq!(run.cursor_argument(6), 7);
+        let refused = run.matches(&page(&[4], 4), &page(&[6], 6), "");
+        assert!(refused.is_err_and(|error| error.contains("bound to 5")));
+        let refused = run.matches(&page(&[5], 5), &page(&[3], 3), "");
+        assert!(refused.is_err_and(|error| error.contains("out of the recorded order")));
+        // On SQLite a cursor is compared as it is.
+        let sqlite = Database::Sqlite;
+        let mut run = Run::new(&sqlite, &repository, "f", &json!({}));
+        assert!(run.matches(&page(&[3], 3), &page(&[4], 4), "").is_err());
     }
 }

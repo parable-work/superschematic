@@ -5425,8 +5425,10 @@ retention's and the tools', and those of the ported behaviors'
 `test/core-*.test.ts` against the engine, and replays the scenario and
 HTTP corpora, those behaviors' files included, giving their recorded
 answers on SQLite and Postgres for every case whose behaviors it has,
-but for a step it lists with what explains it (a change the recording
-does not see, a cursor a Postgres rollback leaves a gap). CI tests the
+an event cursor on Postgres held to the recorded order rather than its
+number (a write a rollback undid leaves a gap in a Postgres identity
+column), but for a step it lists with what explains it (a change the
+recording does not see). CI tests the
 workspace on both databases. The Node-API addon is milestone 7, the
 other core behaviors (Rollups, Search and Reactions, then Branches)
 milestones 10 and 11, and the work queue's milestone 12. Until the Rust
