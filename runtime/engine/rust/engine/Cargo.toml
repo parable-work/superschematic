@@ -1,0 +1,14 @@
+[package]
+name = "superschematic-engine"
+description = "The engine: schemas as data, their instances and events, and the behaviors composed on their types (D16, D58)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

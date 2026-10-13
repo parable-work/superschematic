@@ -46,7 +46,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust engine-rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -204,6 +204,13 @@ rust:
 		&& cargo clippy --no-default-features --features rusqlite -- -D warnings \
 		&& cargo test --features rusqlite && cargo test --features rusqlite,serde_json/preserve_order
 
+# The Rust engine's workspace (D58): every crate's format, lints and tests,
+# under the toolchain RUSTUP_TOOLCHAIN names. CI runs the same three
+# commands as the engine-rust job.
+engine-rust:
+	cd runtime/engine/rust && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings \
+		&& cargo test --workspace
+
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
 versiongraph:
@@ -343,7 +350,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behaviors-check ts python rust cli-smoke example-migrations versions
+test: go-test catalog-check schema-file-types-check behaviors-check ts python rust engine-rust cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 
@@ -355,6 +362,7 @@ fmt:
 	cd runtime/versiongraph/rust && cargo fmt
 	cd runtime/versiongraph/rust-engine && cargo fmt
 	cd runtime/versiongraph/python && cargo fmt
+	cd runtime/engine/rust && cargo fmt --all
 
 clean:
 	rm -rf bin

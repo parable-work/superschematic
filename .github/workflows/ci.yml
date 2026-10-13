@@ -14,7 +14,8 @@ name: ci
 # TypeScript authoring packages, schema runtime, http runtime, engine, the
 # engine's work-queue
 # package and the engine example, the
-# Python schema runtime, the Rust http runtime, the version graph (the core
+# Python schema runtime, the Rust http runtime, the Rust engine's workspace
+# (D58), the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
 # Python engines against Postgres), the Starlight docs build, and the
@@ -797,6 +798,36 @@ jobs:
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 
+  engine-rust:
+    name: engine-rust (the Rust engine's workspace)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+
+      # The same three commands as `make engine-rust`, inline: the Makefile
+      # runs the superscalar and version-graph scripts when it is parsed.
+      - name: fmt / clippy / test
+        working-directory: runtime/engine/rust
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
     # The scenarios through each language's engine are the full tier; a pull
@@ -999,6 +1030,7 @@ jobs:
       - typescript
       - python
       - rust
+      - engine-rust
       - versiongraph
       - docs
     runs-on: ubuntu-latest

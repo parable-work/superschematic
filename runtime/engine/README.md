@@ -5,6 +5,11 @@ code (D16 in `docs/DECISIONS.md`). It takes a schema as data, one JSON
 schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
+`rust/` is the Cargo workspace of the Rust engine, which replaces this
+package under D58. It is built in steps, and nothing uses it until it
+passes this package's test suite; until then the TypeScript package is
+the engine.
+
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
 with its compatibility rule, instances, with unique fields, lookups and
