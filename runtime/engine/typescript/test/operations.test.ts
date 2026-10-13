@@ -14,6 +14,7 @@ import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, freshPath, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument, thrown } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
+import { servedApp } from './recorder.ts';
 
 afterEach(cleanup);
 
@@ -27,7 +28,7 @@ const policy: AccessPolicy = ({ principal, action }) =>
 
 function serve(engineOptions: Partial<EngineOptions> = {}): { engine: Engine; app: Hono } {
   const engine = openBehaviorEngine({ policy, ...engineOptions });
-  return { engine, app: engineApp(engine, { authenticate }) };
+  return { engine, app: servedApp(engineApp, engine, { authenticate }) };
 }
 
 interface Call {
@@ -265,7 +266,7 @@ describe('the describe and tools routes', () => {
 
   test("the tools route answers through the mount's tool filter", async () => {
     const { engine } = withItem();
-    const app = engineApp(engine, { authenticate, tools: (principal, tool) => principal.subject !== 'reader' || tool.schema === 'Item' });
+    const app = servedApp(engineApp, engine, { authenticate, tools: (principal, tool) => principal.subject !== 'reader' || tool.schema === 'Item' });
     const tools = (await data(call(app, 'GET', '/namespaces/default/tools', { token: 'reader' }))).data;
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
     assert.deepEqual(visible, ['item.get', 'item.list', 'item.history']);
@@ -293,7 +294,7 @@ describe("the core's behaviors over HTTP", () => {
     engine.schemas.define(alice, documentsDocument());
     engine.schemas.publish(alice, 'documents');
     engine.instances.create(alice, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
-    return { engine, app: engineApp(engine, { authenticate: people }) };
+    return { engine, app: servedApp(engineApp, engine, { authenticate: people }) };
   }
 
   test('a Workflow transition runs through the operation route with If-Match and answers the new ETag', async () => {

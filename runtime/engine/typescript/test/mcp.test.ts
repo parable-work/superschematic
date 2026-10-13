@@ -34,6 +34,7 @@ import {
   tasksDocument,
 } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
+import { appFor, recordedApp } from './recorder.ts';
 
 // The bearer token is the caller's subject; reader may only read.
 const authenticate: Authenticator = async (ctx) => {
@@ -128,9 +129,16 @@ async function served(
     ...engineOptions,
   });
   setup(engine);
-  const app = new Hono();
-  app.route('/api', engineApp(engine, { authenticate }));
-  app.route('/api', engineMcp(engine, { authenticate, ...mcpOptions }));
+  const app = recordedApp(new Hono(), {
+    kind: 'mount',
+    engine,
+    mounts: [
+      { prefix: '/api', kind: 'engine', options: { authenticate } },
+      { prefix: '/api', kind: 'mcp', options: { authenticate, ...mcpOptions } },
+    ],
+  });
+  app.route('/api', appFor(engineApp, engine, { authenticate }));
+  app.route('/api', appFor(engineMcp, engine, { authenticate, ...mcpOptions }));
   const listening = await listen(app);
   servers.push(listening);
   return { engine, url: listening.url };

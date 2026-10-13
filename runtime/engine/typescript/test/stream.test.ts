@@ -17,6 +17,7 @@ import { type AccessPolicy, type Engine, type EngineEvent, type EngineOptions } 
 import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
+import { servedApp } from './recorder.ts';
 
 // The bearer token is the caller's subject.
 const authenticate: Authenticator = async (ctx) => (ctx.bearerToken ? { subject: ctx.bearerToken, permissions: [] } : null);
@@ -188,7 +189,7 @@ const noteDocument = schemaDocument('Note', [{ name: 'body', typeRef: { name: 's
 
 async function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Promise<{ engine: Engine; base: string }> {
   const engine = openTestEngine(engineOptions);
-  const server = await listen(engineApp(engine, { authenticate, ...options }));
+  const server = await listen(servedApp(engineApp, engine, { authenticate, ...options }));
   servers.push(server);
   return { engine, base: server.url };
 }
