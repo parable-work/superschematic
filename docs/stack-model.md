@@ -2018,7 +2018,7 @@ as they are, with no build step (D51). The pieces mirror Go's:
   the project's: the build of a stack with a TypeScript server, in a
   repository whose rules ignore the lockfile, prints one line naming the
   rule and the fix, and changes no ignore file. `stack init` (section
-  11.1), when it is built, writes the rule.
+  11.1) writes the rule, and the take-back where a broader rule needs it.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`
@@ -3139,6 +3139,60 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 and provisioners plug into it; they add no commands of their own. `stack
 dev` runs a local environment (section 8.3), and `stack run` runs a job
 once on demand, locally or in the cloud (section 8.7).
+
+`stack init [<services-root>]` starts a stack in a tree that already has
+API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
+writes files and nothing else: no bootstrap, no build, no deploy.
+
+- **The service.** A Stack service at `<services-root>/<name>`: a
+  `package.json` naming it when its siblings have one, a `tsconfig.json`
+  extending the base an API's does, `schema.config.ts`, and
+  `src/stack.schema.ts`, which the TypeScript writer writes from the
+  declarations, so it follows the authoring package. The schema imports
+  each service's sentinel from its package (`import { ShopApi } from
+  "@acme/shop-api"`), which init writes first, as a build does. The name
+  is `--name`, else the first word the deployed services' names share and
+  `-stack` (`shop-api` and `shop-orders` give `shop-stack`), else the
+  naming file's `npm_scope`, else the project's directory.
+- **`@stack`.** `deploy` lists every API and every Site service of the
+  tree; the DB and Bucket services they reach come with them, as
+  resolution reaches them. `expose` lists each API an end user or a third
+  party calls, one with an operation whose service clause, its own or its
+  set's, is none or `@allowService` (section 9.3), and each API a site
+  calls, which D55 requires. An API whose every operation is
+  `@requireService`, or that has none, is internal. `--expose` names the
+  list in its place, or `none`.
+- **The environments.** `Dev` on the local target. Given a Google Cloud
+  project and region (`--gcp-project`, `--region`), one on gcp,
+  `Staging` unless `--environment` names it, and `src/gcp-target.ts`,
+  which augments `Targets` (section 4.3) with the types init reads from
+  the JSON Schemas the gcp target and its platforms register. A binary
+  that does not link gcp, the core alone, refuses one.
+- **CI.** `--ci github` sets `outputs.ci` to `{ github: {} }` (section
+  11.3).
+- **The ignore rules.** In the `.gitignore` that covers the schemas root,
+  the nearest at or above it in its repository, else a new one there,
+  anchored to the schemas root: `dist/*` and `!dist/bun.lock` (section
+  8.6, D51), and `.superschematic/` (section 8.3). A rule on the output
+  root itself becomes the rule on its contents in place; where git still
+  ignores the lockfile, because a broader rule ignores the directory,
+  init takes the directory back (`!dist/`) after it. A rule already there
+  is not added again.
+
+Every value is a flag. At a terminal init asks for each one no flag
+gives, with the tree's defaults and gcloud's configured `project` and
+`run/region` or `compute/region`, read with no stdin and a deadline, and
+not at all without gcloud. Without a terminal a missing value is an
+error; only the name is needed, and it has a default, so `stack init`
+alone writes `Dev` alone. It refuses a tree with no API service, and a
+tree with a Stack service unless `--force` is given, which replaces the
+stack of that name, its config and `src`, or writes another beside it.
+Last, it loads the stack and resolves each environment as the `stack`
+generator does, reports what does not resolve yet, such as a required
+config field no setting binds, and prints the next commands, `stack dev
+--environment Dev` and, for a gcp environment, `stack bootstrap
+<environment>`, each with the stack's directory when the stack commands
+would not find it on their own.
 
 Each cloud command opens the Stack service as `stack dev` does: the one
 `--stack` names, else the working directory when it is one, else the one

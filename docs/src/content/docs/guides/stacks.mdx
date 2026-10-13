@@ -28,6 +28,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | Built | Not built yet |
 | --- | --- |
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
+| [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON; an environment on a target other than gcp |
 | `calls` in an API's config, and a build ordered by output | |
 | Go: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which dials Cloud SQL through the Cloud SQL connector where an environment places its database there | the same for TypeScript and Rust servers; OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
@@ -43,7 +44,111 @@ balancer and DNS resources that the Pulumi provisioner applies.
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D30, D45, D46 and D47 in `docs/DECISIONS.md` record the decisions.
+and D30, D45, D46, D47 and D59 in `docs/DECISIONS.md` record the decisions.
+
+## Start a stack
+
+In a tree that already has API services, `stack init` writes a Stack
+service over them. It writes files and nothing else:
+
+```sh
+superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+```
+
+Over acme-shop's services, before its stack was written, it writes
+`schemas/services/shop-stack/`, with the `@stack` acme-shop declares by
+hand: a
+`package.json` and `tsconfig.json` like its siblings', `schema.config.ts`
+with `outputs: { ci: { github: {} } }`, `src/gcp-target.ts`, and
+`src/stack.schema.ts`:
+
+```ts
+// schemas/services/shop-stack/src/stack.schema.ts
+import { ShopApi } from "@acme/shop-api";
+import { ShopOrders } from "@acme/shop-orders";
+import { ShopStorefront } from "@acme/shop-storefront";
+import { ShopWeb } from "@acme/shop-web";
+import { environment, stack } from "@superschematic/stack";
+
+// Written by superschematic stack init. ...
+@stack({ deploy: [ShopApi, ShopOrders, ShopStorefront, ShopWeb], expose: [ShopApi, ShopOrders, ShopStorefront] })
+export abstract class Shop {}
+
+// This machine: ...
+@environment({ target: "local" })
+export abstract class Dev {}
+
+// Google Cloud: ...
+@environment({ target: "gcp", gcp: { project: "acme-staging", region: "us-east1" } })
+export abstract class Staging {}
+```
+
+- **`deploy`** lists every API and every site of the tree. The databases
+  and buckets they reach through `authDb`, DB dependencies and `buckets`
+  come with them.
+- **`expose`** lists each API an end user or a third party calls: one
+  with an operation that is not `@requireService`, by its own clause or
+  its set's. An API whose every operation is `@requireService`, or that
+  has none, only other servers call, and stays internal. Each API a site
+  calls is exposed too, since a browser calls it. `--expose shop-api`
+  names the list in its place, and `--expose none` exposes nothing.
+- **`Dev`** runs on the local target, which `stack dev` runs. Given a
+  project and a region, a second environment runs on gcp, `Staging`
+  unless `--environment` names it, and `src/gcp-target.ts` types its
+  values and settings for tsc ([Type a target's values](#type-a-targets-values)).
+  Only the installed binary links gcp; the core alone refuses one.
+- **The name** is `--name`, else the first word the deployed services'
+  names share and `-stack`, else the naming file's `npm_scope`, else the
+  project's directory.
+
+It also adds the stack's ignore rules to the `.gitignore` that covers the
+schemas root, the nearest one at or above it in the repository, or a new
+`schemas/.gitignore`: the output root's contents but its
+[lockfile](#the-generated-server), and `.superschematic`, which holds this
+machine's local secrets:
+
+```gitignore
+/dist/*
+!/dist/bun.lock
+/.superschematic/
+```
+
+A `/dist/` rule there becomes `/dist/*`. Where a broader rule such as a
+repository's `dist/` still hides the lockfile, init adds `!/dist/` to take
+the directory back. Running init again adds nothing.
+
+At a terminal it asks for each value no flag gives: the name, whether to
+add a gcp environment, its name, project and region, CI, and what to
+expose, each with a default from the tree or from `gcloud config`.
+Without a terminal it takes the flags and the defaults, so `stack init`
+alone writes `Dev` alone. A tree with a Stack service already needs
+`--force`, which replaces the stack of the same name or writes another
+beside it.
+
+Last, it loads the stack, resolves each environment as a build would, and
+prints what it decided, anything that does not resolve yet, and the
+commands to run next:
+
+```
+Wrote the Stack service shop-stack in ./schemas/services/shop-stack:
+  ...
+It deploys shop-api, shop-orders, shop-storefront and shop-web; the databases and buckets they reach come with them.
+  shop-api         exposed: Account.login is not @requireService
+  shop-orders      exposed: OrderQueries.getOrder is not @requireService
+  shop-storefront  exposed: StorefrontProbes.getHealth is not @requireService
+  A site is always exposed: shop-web.
+...
+Next:
+  superschematic stack dev --environment Dev
+  superschematic stack bootstrap Staging
+```
+
+A required config field that nothing binds, for instance, is a problem
+only you can fix: set it in the environment's `settings`, as
+[Declare a stack](#declare-a-stack) shows. From there the stack is yours
+to edit; init does not run again over it unless `--force` replaces it.
+The [CLI reference](/superschematic/reference/cli/#stack-init-services-root)
+lists the flags.
 
 ## The model
 
@@ -296,9 +401,10 @@ siblings' handles from the siblings' packages, as a config does, and
 tsc checks a stack in the editor, and the loader reports tsc's errors, so
 a value tsc refuses fails the build at its line. `target` takes a key of
 the `Targets` interface of `@superschematic/stack`, which lists the core's
-`local`. No package augments it for gcp yet, so declare the gcp target's
-types yourself, in a file of the stack's `src/` that its `tsconfig.json`
-includes:
+`local`. No package augments it for gcp yet. `stack init` writes the
+augmentation into `src/gcp-target.ts`, from the JSON Schemas the gcp
+target and its platforms register; a stack written by hand declares it
+in a file of the stack's `src/` that its `tsconfig.json` includes:
 
 ```ts
 // schemas/services/shop-stack/src/gcp-target.ts
@@ -874,9 +980,10 @@ schemas/dist/*
 
 Where a broader rule such as `dist/` already ignores the directory, take
 it back first in `schemas/.gitignore` with `!/dist/`, then `/dist/*` and
-`!/dist/bun.lock`. A stack's build prints one line naming the rule that
-hides the lockfile, and leaves your ignore files as they are. An image
-built without the lockfile resolves the workspace afresh and says so.
+`!/dist/bun.lock`. [`stack init`](#start-a-stack) writes these rules. A
+stack's build prints one line naming the rule that hides the lockfile,
+and leaves your ignore files as they are. An image built without the
+lockfile resolves the workspace afresh and says so.
 
 No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
 `go mod tidy` can fail, because it also resolves the imports of the

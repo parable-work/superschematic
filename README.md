@@ -55,7 +55,7 @@ SDK refuses the request the server would refuse.
 | Types shared across a polyglot stack | a General schema | the same types and validators in all four languages, and a typed loader for environment variables |
 | Row history, branches and merges | `@versioned` and `@versionGraph` on tables | history tables and version-fenced writes; a tree of tables you can branch, commit, merge, release and rebase, with an engine in each language |
 | A backend without generated code | a schema as JSON, published to a running server | [`@superschematic/engine`](runtime/engine/README.md): instances, an event log and access control, with workflow, comments, revisions, links, rollups, full-text and vector search, branches and work queues, over HTTP, an event stream and MCP |
-| The tree, running | a Stack schema: what runs where, in which environments | a Go entrypoint and Dockerfile per server; `stack dev` runs an environment on your machine, with Postgres in Docker and its migrations applied; `stack plan` and `stack deploy` apply one to Cloud Run and Cloud SQL through the gcp target and Pulumi, building changed images on Cloud Build and running migrations between steps |
+| The tree, running | a Stack schema, which `stack init` writes over your APIs: what runs where, in which environments | a Go entrypoint and Dockerfile per server; `stack dev` runs an environment on your machine, with Postgres in Docker and its migrations applied; `stack plan` and `stack deploy` apply one to Cloud Run and Cloud SQL through the gcp target and Pulumi, building changed images on Cloud Build and running migrations between steps |
 | Your own conventions | a Go extension | new schema kinds, decorators, generators, auth providers and commands, without forking the core |
 
 ## A quick look
@@ -255,7 +255,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Database tables](docs/src/content/docs/guides/database-tables.mdx): keys, relations, indexes, text search, JSON columns, soft delete, transactions, and changing tables that hold data.
 - [API routes](docs/src/content/docs/guides/api-routes.mdx): operation sets, the implementation and its `Deps`, parameters, bodies, views, errors, encrypted payloads, traffic controls, webhooks and the Rust server.
 - [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, service callers, and credentials in each SDK.
-- [Stacks and deploys](docs/src/content/docs/guides/stacks.mdx): declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
+- [Stacks and deploys](docs/src/content/docs/guides/stacks.mdx): start a stack over your APIs with `stack init`, declare what runs where, run an environment locally with `stack dev`, and deploy one to Google Cloud.
 - [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
 - [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
 - [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches.
