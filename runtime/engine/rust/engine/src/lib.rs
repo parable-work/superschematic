@@ -55,6 +55,8 @@ mod namespaces;
 mod paging;
 mod principal;
 mod registry;
+mod retention;
+mod runner;
 mod values;
 
 pub use access::{
@@ -96,6 +98,17 @@ pub use registry::{
     is_schema_name, ComposedBehavior, DefineOptions, NormalizeMode, Normalized, PublishResult,
     SchemaCapabilities, SchemaInput, SchemaModel, SchemaRecord, SchemaSummary, SchemaTarget,
     SchemaValidator, Schemas, ValidateOptions, SCHEMA_NAME,
+};
+pub use retention::{
+    RetentionOptions, DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS,
+    MAX_RETENTION_BATCH_SIZE,
+};
+pub use runner::{
+    describe as describe_error, PruneResult, RetentionNamespaceStatus, RetentionStatus, Runner,
+    RunnerOptions, RunnerPass, RunnerStatus, ScheduleState, ScheduleStatus, SubscriptionFailure,
+    SubscriptionKey, SubscriptionSkip, SubscriptionState, SubscriptionStatus, DEFAULT_BATCH_SIZE,
+    DEFAULT_LEASE_RETRY_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_DEPTH, DEFAULT_RETRY_INITIAL_MS,
+    DEFAULT_RETRY_MAX_MS,
 };
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;

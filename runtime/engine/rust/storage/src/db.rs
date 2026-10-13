@@ -89,6 +89,55 @@ pub(crate) trait Backend: Send + Sync {
     fn schemas(&self) -> &[String];
     /// The Postgres channel commits notify; `None` on SQLite.
     fn channel(&self) -> Option<&str>;
+    /// Takes the lease `key` names for this process's session, or `None`
+    /// when another session holds it ([`Db::try_lease`]).
+    fn try_lease(&self, key: i64) -> Result<Option<Lease>>;
+}
+
+/// What holds a lease: on Postgres the connection whose session holds the
+/// advisory lock, which lets go of it when it closes.
+pub(crate) trait LeaseHolder: Send {
+    /// Whether the lease is still held: on Postgres, whether the session's
+    /// connection still answers, since a lost connection lost the lock.
+    fn held(&mut self) -> bool;
+}
+
+/// A lease of the database's that one process holds at a time (D58): on
+/// Postgres a session's advisory lock on a connection of its own, so the
+/// engine's runner works in one process of a server's instances and
+/// another takes over once its holder stops, crashes or loses the
+/// connection; on SQLite, which one process writes, always granted. It
+/// lets go when dropped.
+pub struct Lease {
+    holder: Option<Box<dyn LeaseHolder>>,
+}
+
+impl std::fmt::Debug for Lease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Lease")
+            .field("session", &self.holder.is_some())
+            .finish()
+    }
+}
+
+impl Lease {
+    #[cfg_attr(not(feature = "sqlite"), allow(dead_code))]
+    pub(crate) fn local() -> Lease {
+        Lease { holder: None }
+    }
+
+    #[cfg_attr(not(feature = "postgres"), allow(dead_code))]
+    pub(crate) fn of(holder: Box<dyn LeaseHolder>) -> Lease {
+        Lease {
+            holder: Some(holder),
+        }
+    }
+
+    /// Whether the lease is still held; once it is not, take another
+    /// ([`Db::try_lease`]).
+    pub fn held(&mut self) -> bool {
+        self.holder.as_mut().is_none_or(|holder| holder.held())
+    }
 }
 
 pub(crate) struct Inner {
@@ -209,6 +258,26 @@ impl Db {
     /// What wakes waiters when a transaction that notified commits.
     pub fn notifier(&self) -> &Arc<Notifier> {
         &self.inner.notifier
+    }
+
+    /// Whether this thread holds a transaction on the database: a call that
+    /// opens one of its own (the runner's pass) is refused inside it.
+    pub fn in_transaction(&self) -> bool {
+        let id = Arc::as_ptr(&self.inner) as usize;
+        OPEN.with(|open| open.borrow().contains(&id))
+    }
+
+    /// Takes the lease the key's parts name ([`crate::lock_key`] of
+    /// `lease`, the engine's Postgres schema and `parts`) for this process,
+    /// without waiting: `None` while another session holds it. On Postgres
+    /// it opens a connection of its own, outside the pool, whose session
+    /// holds `pg_try_advisory_lock` until the lease drops; on SQLite it is
+    /// always granted.
+    pub fn try_lease(&self, parts: &[&str]) -> Result<Option<Lease>> {
+        let schema = self.postgres_schema().unwrap_or_default();
+        let mut named = vec!["lease", schema];
+        named.extend_from_slice(parts);
+        self.inner.backend.try_lease(crate::lock_key(&named))
     }
 
     /// Runs `f` in a write transaction that excludes the writers `lock`

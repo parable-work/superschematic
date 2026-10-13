@@ -1032,3 +1032,36 @@ fn a_postgres_connect_is_bounded_by_the_connect_timeout_end_to_end() {
         started.elapsed()
     );
 }
+
+#[test]
+fn a_lease_is_one_processs_at_a_time_and_frees_when_it_drops() {
+    for target in targets("a_lease_is_one_processs") {
+        let first = target.open();
+        let second = target.open();
+        let mut held = first
+            .try_lease(&["runner"])
+            .unwrap()
+            .expect("the first process takes the lease");
+        assert!(held.held());
+        if target.dialect == Dialect::Sqlite {
+            // One process writes a SQLite file: its every engine holds it.
+            assert!(second.try_lease(&["runner"]).unwrap().is_some());
+            continue;
+        }
+        assert!(
+            second.try_lease(&["runner"]).unwrap().is_none(),
+            "a second process waits while the first holds it"
+        );
+        assert!(
+            second.try_lease(&["other"]).unwrap().is_some(),
+            "another lease is another lock"
+        );
+        drop(held);
+        let mut taken = second
+            .try_lease(&["runner"])
+            .unwrap()
+            .expect("once it drops, another process takes it");
+        assert!(taken.held());
+        assert!(first.try_lease(&["runner"]).unwrap().is_none());
+    }
+}

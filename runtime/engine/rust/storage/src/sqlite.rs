@@ -127,6 +127,11 @@ impl Backend for SqliteBackend {
     fn channel(&self) -> Option<&str> {
         None
     }
+
+    // One process writes the file, so its runner holds the lease.
+    fn try_lease(&self, _key: i64) -> Result<Option<crate::db::Lease>> {
+        Ok(Some(crate::db::Lease::local()))
+    }
 }
 
 struct SqliteConn {

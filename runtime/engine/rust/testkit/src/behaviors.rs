@@ -9,7 +9,8 @@
 //! - `test/normalize.test.ts`: [`Mailer`];
 //! - `test/unique.test.ts`: [`Slugger`];
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
-//!   what a test puts in its [`Probe`].
+//!   what a test puts in its [`Probe`], and [`Pacer`], whose interval its
+//!   config or its [`PacerProbe`] gives.
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
@@ -795,12 +796,41 @@ pub type ReactProbe =
     Arc<dyn Fn(&ReactionCx<'_, LedgerConfig>, &EngineEvent) -> Result<()> + Send + Sync>;
 /// What a test makes [`Ledger`]'s schedule do.
 pub type SweepProbe = Arc<dyn Fn(&ScheduleCx<'_, LedgerConfig>) -> Result<()> + Send + Sync>;
+/// What a test makes [`Ledger`]'s `watches` answer, in place of its config's.
+pub type WatchesProbe = Arc<dyn Fn(&LedgerConfig) -> Result<Option<Vec<String>>> + Send + Sync>;
 
 /// A test's hand in [`Ledger`]'s reactions and schedule.
 #[derive(Clone, Default)]
 pub struct Probe {
     pub react: Arc<Mutex<Option<ReactProbe>>>,
     pub sweep: Arc<Mutex<Option<SweepProbe>>>,
+    pub watches: Arc<Mutex<Option<WatchesProbe>>>,
+}
+
+impl Probe {
+    /// Has the reactions do `react`.
+    pub fn on_react(
+        &self,
+        react: impl Fn(&ReactionCx<'_, LedgerConfig>, &EngineEvent) -> Result<()>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        *self.react.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(react));
+    }
+
+    /// Has the schedule do `sweep`.
+    pub fn on_sweep(
+        &self,
+        sweep: impl Fn(&ScheduleCx<'_, LedgerConfig>) -> Result<()> + Send + Sync + 'static,
+    ) {
+        *self.sweep.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(sweep));
+    }
+
+    /// Has `watches` answer `watches`; `None` puts the config's back.
+    pub fn on_watches(&self, watches: Option<WatchesProbe>) {
+        *self.watches.lock().unwrap_or_else(PoisonError::into_inner) = watches;
+    }
 }
 
 /// The config of [`Ledger`].
@@ -947,7 +977,16 @@ impl Behavior for Ledger {
                 Ok(())
             }),
             reactions: Some(Reactions {
-                watches: Some(|_, config, _| {
+                watches: Some(|ledger, config, _| {
+                    let probe = ledger
+                        .probe
+                        .watches
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone();
+                    if let Some(probe) = probe {
+                        return probe(config);
+                    }
                     Ok(if config.off {
                         None
                     } else {
@@ -990,6 +1029,109 @@ impl Behavior for Ledger {
     }
 }
 
+/// The config of [`Pacer`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PacerConfig {
+    /// The interval of its schedule on the schema.
+    pub every_ms: Option<i64>,
+}
+
+/// What a test makes [`Pacer`]'s interval, in place of its config's.
+pub type EveryProbe = Arc<dyn Fn(&PacerConfig) -> Result<Option<i64>> + Send + Sync>;
+/// What a test makes [`Pacer`]'s schedule do.
+pub type TickProbe = Arc<dyn Fn(&ScheduleCx<'_, PacerConfig>) -> Result<()> + Send + Sync>;
+
+/// A test's hand in [`Pacer`]'s interval and schedule.
+#[derive(Clone, Default)]
+pub struct PacerProbe {
+    pub every: Arc<Mutex<Option<EveryProbe>>>,
+    pub tick: Arc<Mutex<Option<TickProbe>>>,
+}
+
+impl PacerProbe {
+    /// Has the interval be what `every` answers for a config.
+    pub fn on_every(
+        &self,
+        every: impl Fn(&PacerConfig) -> Result<Option<i64>> + Send + Sync + 'static,
+    ) {
+        *self.every.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(every));
+    }
+
+    /// Has the schedule do `tick`.
+    pub fn on_tick(
+        &self,
+        tick: impl Fn(&ScheduleCx<'_, PacerConfig>) -> Result<()> + Send + Sync + 'static,
+    ) {
+        *self.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(tick));
+    }
+}
+
+/// test.Pacer (`test/runner-fixtures.ts`): one schedule, whose interval
+/// follows the config of each schema that composes it.
+#[derive(Clone, Default)]
+pub struct Pacer {
+    pub probe: PacerProbe,
+}
+
+static PACER_DECLARATION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    json!({
+        "name": "test.Pacer",
+        "description": "Ticks on each schema at the interval its config gives.",
+        "configSchema": {"type": "object", "additionalProperties": false, "properties": {"everyMs": {"type": "integer"}}}
+    })
+    .to_string()
+});
+
+impl Behavior for Pacer {
+    type Config = PacerConfig;
+
+    fn declaration(&self) -> &str {
+        &PACER_DECLARATION
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<PacerConfig> {
+        Ok(PacerConfig {
+            every_ms: raw.get("everyMs").and_then(Value::as_i64),
+        })
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            config_change: Some(|_, _, _, _| Ok(None)),
+            schedules: vec![(
+                "tick",
+                Schedule {
+                    every: Every::Config(|pacer, config| {
+                        let probe = pacer
+                            .probe
+                            .every
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
+                        match probe {
+                            Some(probe) => probe(config),
+                            None => Ok(Some(config.every_ms.unwrap_or(60_000))),
+                        }
+                    }),
+                    run: |pacer, cx| {
+                        let probe = pacer
+                            .probe
+                            .tick
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
+                        match probe {
+                            Some(probe) => probe(cx),
+                            None => Ok(()),
+                        }
+                    },
+                },
+            )],
+            ..Hooks::default()
+        }
+    }
+}
+
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
 /// fixtures'. `None` for one the test kit has not ported.
@@ -1004,6 +1146,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Mailer") => set.with(Mailer),
         (_, "test.Slugger") => set.with(Slugger),
         (_, "test.Ledger") => set.with(Ledger::default()),
+        (_, "test.Pacer") => set.with(Pacer::default()),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
         _ => return None,
     })

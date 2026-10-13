@@ -46,9 +46,7 @@ pub(crate) struct HookSet {
     pub after_change: bool,
     pub guard_reference: bool,
     pub after_reference_change: bool,
-    #[allow(dead_code)] // milestone 6's runner reads it
     pub reactions: bool,
-    #[allow(dead_code)] // milestone 6's runner reads it
     pub watches: bool,
     pub operations: Vec<String>,
     pub schema_operations: Vec<String>,
@@ -135,11 +133,9 @@ pub(crate) trait Erased: Send + Sync {
         reference: &Reference,
         change: &InstanceChange<'_>,
     ) -> Option<Result<()>>;
-    #[allow(dead_code)] // milestone 6's runner calls it
     fn watches(&self, config: &ConfigBox, schema: &str) -> Option<Result<Option<Vec<String>>>>;
     fn react(&self, core: &dyn Core, config: &ConfigBox, event: &EngineEvent)
         -> Option<Result<()>>;
-    #[allow(dead_code)] // milestone 6's runner calls it
     fn every(&self, schedule: &str, config: &ConfigBox) -> Option<Result<Option<i64>>>;
     fn run_schedule(
         &self,

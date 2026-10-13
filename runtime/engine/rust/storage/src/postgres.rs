@@ -147,6 +147,7 @@ impl Db {
             .iter()
             .map(|row| row.get::<_, String>(0).to_lowercase())
             .collect();
+        let lease_config = config.clone();
         let pool = Pool::new(
             options.pool_max,
             vec![first],
@@ -171,6 +172,8 @@ impl Db {
                 schemas,
                 channel,
                 pool,
+                lease_config,
+                deadline,
             }),
             options.busy_timeout,
             options.migration_timeout,
@@ -223,7 +226,35 @@ struct PostgresBackend {
     schemas: Vec<String>,
     channel: String,
     pool: Pool<PgConn>,
+    /// What a lease's own connection opens with, and how long it may take.
+    lease_config: Config,
+    deadline: Duration,
 }
+
+// A lease's session: the connection that holds the advisory lock.
+struct PgLease {
+    client: Client,
+    key: i64,
+}
+
+impl crate::db::LeaseHolder for PgLease {
+    fn held(&mut self) -> bool {
+        !self.client.is_closed() && self.client.is_valid(LEASE_CHECK).is_ok()
+    }
+}
+
+impl Drop for PgLease {
+    fn drop(&mut self) {
+        // Closing the session lets go of the lock in any case; the unlock
+        // lets go of it at once on a connection that closes slowly.
+        let _ = self
+            .client
+            .batch_execute(&format!("SELECT pg_advisory_unlock({})", self.key));
+    }
+}
+
+/// How long a lease's check of its connection waits for an answer.
+const LEASE_CHECK: Duration = Duration::from_secs(5);
 
 impl Backend for PostgresBackend {
     fn dialect(&self) -> Dialect {
@@ -248,6 +279,15 @@ impl Backend for PostgresBackend {
 
     fn channel(&self) -> Option<&str> {
         Some(&self.channel)
+    }
+
+    fn try_lease(&self, key: i64) -> Result<Option<crate::db::Lease>> {
+        let mut client = connect_within(&self.lease_config, self.deadline)?;
+        let taken: bool = client
+            .query_one("SELECT pg_try_advisory_lock($1)", &[&key])
+            .map_err(pg_error)?
+            .get(0);
+        Ok(taken.then(|| crate::db::Lease::of(Box::new(PgLease { client, key }))))
     }
 }
 

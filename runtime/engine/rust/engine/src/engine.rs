@@ -19,7 +19,7 @@
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -36,6 +36,8 @@ use crate::instances::Instances;
 use crate::namespaces::{NamespaceConfig, NamespaceOptions, Namespaces};
 use crate::registry::document::model_of;
 use crate::registry::{Catalog, Schemas};
+use crate::retention::RetentionOptions;
+use crate::runner::{Runner, RunnerCore, RunnerOptions};
 use crate::values::{ValueOptions, ValueStore, Values};
 
 /// Where the engine keeps its data.
@@ -118,7 +120,9 @@ impl IdCounter {
         self.0.load(Ordering::SeqCst)
     }
 
-    fn next(&self) -> u64 {
+    /// Draws the next number, from 1: what a host that shares the counter
+    /// with an engine (a replay's request ids) takes its own ids from.
+    pub fn next(&self) -> u64 {
         self.0.fetch_add(1, Ordering::SeqCst) + 1
     }
 }
@@ -229,6 +233,12 @@ pub struct EngineOptions {
     /// `engine.behaviors().register` adds more later. A schema that
     /// composes a behavior without one is refused.
     pub behaviors: BehaviorSet,
+    /// The runner of behaviors' reactions and schedules: the principal
+    /// they act as and its limits. Without it the runner refuses to run.
+    pub runner: Option<RunnerOptions>,
+    /// How long the event log keeps events, pruned on the runner. Without
+    /// it the log keeps every event.
+    pub retention: Option<RetentionOptions>,
 }
 
 impl std::fmt::Debug for EngineOptions {
@@ -241,6 +251,8 @@ impl std::fmt::Debug for EngineOptions {
             .field("clock", &self.clock)
             .field("values", &self.values)
             .field("behaviors", &self.behaviors)
+            .field("runner", &self.runner)
+            .field("retention", &self.retention)
             .finish_non_exhaustive()
     }
 }
@@ -259,6 +271,8 @@ impl EngineOptions {
             meta_schema: None,
             values: ValueOptions::default(),
             behaviors: BehaviorSet::default(),
+            runner: None,
+            retention: None,
         }
     }
 
@@ -392,9 +406,7 @@ struct IdSource {
 }
 
 /// The engine: its storage, namespaces, access policy, schemas, instances,
-/// event log and value store. More of the TypeScript engine (behaviors,
-/// the runner, the tools and the routes) arrives with the milestones after
-/// 4b (D58).
+/// event log, value store, behaviors and runner.
 pub struct Engine {
     pub(crate) db: Db,
     pub(crate) namespaces: NamespaceConfig,
@@ -409,6 +421,14 @@ pub struct Engine {
     /// was held: the engine refuses every later call, so its host fails
     /// its readiness (D58).
     poisoned: AtomicBool,
+    /// Set by [`Engine::shutdown`]: every later call is refused, and every
+    /// event stream ends.
+    closed: AtomicBool,
+    /// The runner's options, state, driver and lease.
+    pub(crate) runner: RunnerCore,
+    /// The engine itself, once [`Engine::shared`] put it in an `Arc`: what
+    /// the runner's driver thread and an event stream hold.
+    this: OnceLock<Weak<Engine>>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -445,6 +465,9 @@ impl Engine {
         };
         let clock = EngineClock::new(options.clock);
         let values = Arc::new(ValueStore::new(&options.values)?);
+        // Checked before the storage opens, so a bad option leaves nothing
+        // open.
+        let runner = RunnerCore::new(options.runner.as_ref(), options.retention.as_ref())?;
         let db = open_storage(options.storage)?;
         let migrating = Arc::clone(&values);
         db.migrate(
@@ -465,9 +488,54 @@ impl Engine {
                 next: AtomicU64::new(0),
             },
             poisoned: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            runner,
+            this: OnceLock::new(),
         };
         engine.behaviors().register_set(options.behaviors)?;
         Ok(engine)
+    }
+
+    /// The engine in an `Arc`, as a host keeps it: what the runner's
+    /// driver thread ([`crate::Runner::start`]) and an event stream
+    /// ([`crate::api`]) need, since they outlive the call that starts them.
+    pub fn shared(self) -> Arc<Engine> {
+        let shared = Arc::new(self);
+        let _ = shared.this.set(Arc::downgrade(&shared));
+        shared
+    }
+
+    /// The engine opened and shared ([`Engine::shared`]).
+    pub fn open_shared(options: EngineOptions) -> Result<Arc<Engine>> {
+        Ok(Engine::open(options)?.shared())
+    }
+
+    /// The shared engine, when [`Engine::shared`] made it one.
+    pub fn handle(&self) -> Option<Arc<Engine>> {
+        self.weak()?.upgrade()
+    }
+
+    pub(crate) fn weak(&self) -> Option<Weak<Engine>> {
+        self.this.get().cloned()
+    }
+
+    /// The runner of reactions and schedules, and of retention.
+    pub fn runner(&self) -> Runner<'_> {
+        Runner { engine: self }
+    }
+
+    /// Stops the runner, ends every event stream and refuses every later
+    /// call, as the TypeScript engine's `close` does; the storage closes
+    /// once nothing holds the engine. A host calls it on SIGTERM.
+    pub fn shutdown(&self) {
+        self.runner.close(self.db.notifier());
+        self.closed.store(true, Ordering::SeqCst);
+        self.db.notifier().bump();
+    }
+
+    /// Whether [`Engine::shutdown`] closed the engine.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 
     /// The behaviors the engine runs: registered, and registered later.
@@ -530,6 +598,9 @@ impl Engine {
     }
 
     fn usable(&self) -> Result<()> {
+        if self.is_closed() {
+            return Err(Error::internal("the engine is closed"));
+        }
         if self.poisoned() {
             return Err(Error::internal(
                 "the engine panicked inside a transaction and refuses every call; restart it",
@@ -590,8 +661,19 @@ impl Engine {
         })
     }
 
-    /// Closes the engine: its storage closes once nothing else holds it.
-    pub fn close(self) {}
+    /// Closes the engine: its runner stops, and its storage closes once
+    /// nothing else holds it.
+    pub fn close(self) {
+        self.shutdown();
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // The driver holds the engine only during a pass; a driver that
+        // dropped the last hold of it ends on its own thread.
+        self.runner.close(self.db.notifier());
+    }
 }
 
 fn open_storage(storage: Storage) -> Result<Db> {
