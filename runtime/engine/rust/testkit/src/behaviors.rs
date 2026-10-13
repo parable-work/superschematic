@@ -10,11 +10,16 @@
 //! - `test/unique.test.ts`: [`Slugger`];
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
 //!   what a test puts in its [`Probe`];
-//! - `test/core-workflow.test.ts`: [`Dispatch`].
+//! - `test/core-workflow.test.ts`: [`Dispatch`];
+//! - `test/core-revisions.test.ts`: [`RevisionHold`] (its test.Hold).
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
+
+mod core_revisions;
+
+pub use core_revisions::RevisionHold;
 
 use std::sync::{Arc, Mutex, PoisonError};
 

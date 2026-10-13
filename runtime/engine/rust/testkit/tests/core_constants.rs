@@ -7,8 +7,8 @@
 //! names the type's own fields, and any change to it is allowed, the
 //! behavior's adding and removing included), on SQLite and, with the
 //! variable set, on Postgres. The TypeScript file holds an operation's
-//! `update()` to it through Revisions, not ported yet (wave 2); a test
-//! behavior of this file calls `update()` and `validate_update()` instead.
+//! `update()` to it through Revisions' propose and approve; a test behavior
+//! of this file also calls `update()` and `validate_update()` directly.
 //! The describe document is milestone 6's.
 
 mod support;
@@ -360,6 +360,79 @@ fn an_operations_update_is_held_to_it_too_and_validate_update_reports_it() {
             invoke("check", json!({"kind": "x"})).expect("check"),
             json!([])
         );
+    }
+}
+
+/// The documents document the core binary loads with no extension linked
+/// (`fixture-behaviors-json`), as the TypeScript tests'
+/// `documentsDocument()` reads it: Workflow, Comments and Revisions.
+fn documents_document() -> Value {
+    let path = repository()
+        .join("internal/loader/testdata/services/fixture-behaviors-json/src/document.schema.json");
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("the documents document"))
+        .expect("JSON")
+}
+
+#[test]
+fn revisions_refuses_the_proposal_and_the_approval_of_one_made_before() {
+    for target in targets("constants_revisions") {
+        let engine = target.open_core_with(|options| {
+            options.behaviors = superschematic_engine::BehaviorSet::new()
+                .with(superschematic_engine_behaviors::Workflow)
+                .with(superschematic_engine_behaviors::Comments)
+                .with(superschematic_engine_behaviors::Constants)
+                .with(superschematic_engine_behaviors::Revisions);
+        });
+        let reviewer = Principal::new("rae", ["documents.review"]);
+        let mut document = documents_document();
+        publish(&engine, &document);
+        create(&engine, "documents", json!({"title": "Plan"}), "d1");
+        let invoke = |principal: &Principal, operation: &str, params: Value| -> Result<Value> {
+            engine.instances().invoke(
+                principal,
+                "documents",
+                "d1",
+                operation,
+                &params,
+                WriteOptions::default(),
+            )
+        };
+        invoke(&alice(), "propose", json!({"patch": {"title": "Plan B"}})).expect("propose");
+        // A later version keeps the title, and the instance already holds
+        // one.
+        document["types"]["Document"]["behaviors"]
+            .as_array_mut()
+            .expect("behaviors")
+            .push(keep(&["title"], None));
+        publish(&engine, &document);
+        let rules = |error: &EngineError| -> Vec<(String, String)> {
+            issues(error)
+                .into_iter()
+                .map(|(path, rule, _)| (path, rule))
+                .collect()
+        };
+        let proposed = refusal(invoke(
+            &alice(),
+            "propose",
+            json!({"patch": {"title": "Plan C", "body": "x"}}),
+        ));
+        assert_eq!(rules(&proposed), [constant("title")]);
+        let approved = refusal(invoke(&reviewer, "approve", json!({"proposal": 1})));
+        assert_eq!(rules(&approved), [constant("title")]);
+        let read = |field: &str| {
+            engine
+                .instances()
+                .get(&alice(), "documents", "d1", Default::default())
+                .expect("get")
+                .expect("d1")
+                .data
+                .get(field)
+                .cloned()
+        };
+        assert_eq!(read("title"), Some(json!("Plan")));
+        invoke(&alice(), "propose", json!({"patch": {"body": "The plan."}})).expect("propose");
+        invoke(&reviewer, "approve", json!({"proposal": 2})).expect("approve");
+        assert_eq!(read("body"), Some(json!("The plan.")));
     }
 }
 

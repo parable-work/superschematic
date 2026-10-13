@@ -10,8 +10,8 @@ use serde_json::{json, Map, Value};
 use superschematic_engine::behaviors::{BehaviorGuidance, DescribeTarget};
 use superschematic_engine::Behavior;
 use superschematic_engine_behaviors::{
-    Comments, Constants, ConstantsConfig, Variants, VariantsConfig, Workflow, WorkflowConfig,
-    WorkflowOutcome, WorkflowTransition,
+    Comments, Constants, ConstantsConfig, Revisions, RevisionsConfig, RevisionsReview, Variants,
+    VariantsConfig, Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
 };
 
 /// The TypeScript guidance for the configs below.
@@ -271,5 +271,132 @@ fn the_guidance_is_the_typescript_engines_text() {
     assert_eq!(
         as_json(&variants(&Variants, &config, &target())),
         expected["variants"]
+    );
+}
+
+/// Revisions' TypeScript guidance (`revisionsGuidance`), without a review
+/// step and with one.
+const REVISIONS: &str = r#"{
+  "revisionsPlain": {
+    "summary": "Every change of the own fields of a Order records a numbered revision of them; behaviors.Revisions.revision holds the latest. There is no review step.",
+    "operations": {
+      "listRevisions": {
+        "useWhen": "Use to read the instance's revisions, oldest first: each its number and the own fields as that change left them.",
+        "doNotUseWhen": "Do not page through them for one revision; call getRevision with its number.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "getRevision": {
+        "useWhen": "Use to read one revision by its number, the one a pinned link or a proposal names say: the own fields as that change left them.",
+        "success": "Returns the revision; a number the instance has not reached is not_found."
+      },
+      "propose": {
+        "doNotUseWhen": "Do not use: Order has no review step, so a proposal is refused (no_review).",
+        "errors": [
+          {
+            "code": "no_review",
+            "commonCorrection": "None on this type: change the instance with update instead."
+          }
+        ]
+      },
+      "approve": {
+        "doNotUseWhen": "Do not use: Order has no review step, so an approval is refused (no_review).",
+        "errors": [
+          {
+            "code": "no_review",
+            "commonCorrection": "None on this type: change the instance with update instead."
+          }
+        ]
+      },
+      "reject": {
+        "doNotUseWhen": "Do not use: Order has no review step, so a rejection is refused (no_review).",
+        "errors": [
+          {
+            "code": "no_review",
+            "commonCorrection": "None on this type: change the instance with update instead."
+          }
+        ]
+      },
+      "listProposals": {
+        "doNotUseWhen": "Do not use: Order has no review step, so listing proposals is refused (no_review).",
+        "errors": [
+          {
+            "code": "no_review",
+            "commonCorrection": "None on this type: change the instance with update instead."
+          }
+        ]
+      },
+      "update": {
+        "success": "A change of the own fields records the next revision."
+      }
+    }
+  },
+  "revisionsReview": {
+    "summary": "Every change of the own fields of a Order records a numbered revision of them; behaviors.Revisions.revision holds the latest. A change may also be proposed, and a caller with permission orders.review approves or rejects it; behaviors.Revisions.pendingProposals counts the proposals waiting.",
+    "operations": {
+      "listRevisions": {
+        "useWhen": "Use to read the instance's revisions, oldest first: each its number and the own fields as that change left them.",
+        "doNotUseWhen": "Do not page through them for one revision; call getRevision with its number.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "getRevision": {
+        "useWhen": "Use to read one revision by its number, the one a pinned link or a proposal names say: the own fields as that change left them.",
+        "success": "Returns the revision; a number the instance has not reached is not_found."
+      },
+      "propose": {
+        "useWhen": "Use to propose a change of the own fields, as a JSON merge patch, for a caller with permission orders.review to approve. evidence cites instances the proposer may read, each optionally at a revision it has had.",
+        "doNotUseWhen": "Do not use to change the instance at once; call update.",
+        "success": "Returns the pending proposal with its id and its evidence; the instance does not change until it is approved."
+      },
+      "approve": {
+        "useWhen": "Use to apply a pending proposal; it needs permission orders.review, else the call is forbidden.",
+        "success": "Returns the proposal, approved, with the revision its patch made.",
+        "errors": [
+          {
+            "code": "not_pending",
+            "commonCorrection": "Read the proposal with listProposals: someone has already settled it."
+          }
+        ]
+      },
+      "reject": {
+        "useWhen": "Use to turn a pending proposal down, with an optional reason; it needs permission orders.review, else the call is forbidden.",
+        "success": "Returns the proposal, rejected; the instance does not change.",
+        "errors": [
+          {
+            "code": "not_pending",
+            "commonCorrection": "Read the proposal with listProposals: someone has already settled it."
+          }
+        ]
+      },
+      "listProposals": {
+        "useWhen": "Use to read the instance's proposals, oldest first, each with the evidence it cites; with state, only the pending, approved or rejected ones.",
+        "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+      },
+      "update": {
+        "success": "A change of the own fields records the next revision."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn revisions_guidance_is_the_typescript_engines_text() {
+    let expected: Value = serde_json::from_str(REVISIONS).expect("the expected guidance");
+    let guidance = Revisions.hooks().guidance.expect("guidance");
+    assert_eq!(
+        as_json(&guidance(
+            &Revisions,
+            &RevisionsConfig::default(),
+            &target()
+        )),
+        expected["revisionsPlain"]
+    );
+    let review = RevisionsConfig {
+        review: Some(RevisionsReview {
+            permission: "orders.review".to_owned(),
+        }),
+    };
+    assert_eq!(
+        as_json(&guidance(&Revisions, &review, &target())),
+        expected["revisionsReview"]
     );
 }
