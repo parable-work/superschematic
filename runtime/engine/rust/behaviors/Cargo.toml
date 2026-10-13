@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-engine-behaviors"
-description = "The core's behaviors (D16) for the Rust engine (D58): Workflow, Comments, Constants and Variants so far, each over the declaration the compiler registers"
+description = "The core's behaviors (D16) for the Rust engine (D58): Workflow, Comments, Revisions, Dependencies, Links, Constants, Variants and Numbering so far, each over the declaration the compiler registers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -38,8 +38,9 @@ operations, with the runner and the describe and tools documents still to
 come; `superschematic-engine-behaviors` (`rust/behaviors`), the core's
 behaviors, each over the copy of its declaration `make behaviors` writes
 into `rust/behaviors/declarations`, which a host passes in its options
-(`core()`): so far Workflow, Comments, Constants and Variants, with the
-rest to come; and `superschematic-engine-testkit` (`rust/testkit`), which
+(`core()`): so far Workflow, Comments, Constants and Variants (wave 1)
+and Revisions, Dependencies, Links (with what a move of a link's target
+moves on) and Numbering (wave 2a), with the rest to come; and `superschematic-engine-testkit` (`rust/testkit`), which
 ports this package's test behaviors, runs the cases of
 `test/behavior-*.test.ts` and of those behaviors' `test/core-*.test.ts`
 against the Rust engine, and replays the scenario corpus

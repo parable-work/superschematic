@@ -25,9 +25,12 @@
 //! # Ok::<(), superschematic_engine::Error>(())
 //! ```
 //!
-//! Ported so far (milestone 8, wave 1): [`Workflow`], [`Comments`],
-//! [`Constants`] and [`Variants`]. The other core behaviors come in waves 2
-//! to 4 ([`NAMES`] lists the ones [`core`] registers).
+//! Ported so far: wave 1 (milestone 8), [`Workflow`], [`Comments`],
+//! [`Constants`] and [`Variants`]; wave 2a (milestone 9a), [`Revisions`],
+//! [`Dependencies`], [`Links`] (with D56's many-valued links, and
+//! [`revised`], what a move of a link's target moves on) and [`Numbering`].
+//! The other core behaviors come in the waves after ([`NAMES`] lists the
+//! ones [`core`] registers).
 
 pub mod comments;
 pub mod constants;
@@ -56,7 +59,16 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 4] = ["Workflow", "Comments", "Constants", "Variants"];
+pub const NAMES: [&str; 8] = [
+    "Workflow",
+    "Comments",
+    "Revisions",
+    "Dependencies",
+    "Links",
+    "Constants",
+    "Variants",
+    "Numbering",
+];
 
 /// The core's behaviors this crate has ported, in the order the TypeScript
 /// engine registers them: what a host passes as `EngineOptions::behaviors`,
@@ -65,6 +77,10 @@ pub fn core() -> BehaviorSet {
     BehaviorSet::new()
         .with(Workflow)
         .with(Comments)
+        .with(Revisions)
+        .with(Dependencies)
+        .with(Links)
         .with(Constants)
         .with(Variants)
+        .with(Numbering)
 }

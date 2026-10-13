@@ -1061,13 +1061,19 @@ impl Behavior for Dispatch {
 /// an open that names one: the engine refuses it, as the TypeScript engine
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
-    use superschematic_engine_behaviors::{Comments, Constants, Variants, Workflow};
+    use superschematic_engine_behaviors::{
+        Comments, Constants, Dependencies, Links, Numbering, Revisions, Variants, Workflow,
+    };
     let set = BehaviorSet::new();
     Some(match name {
         "Workflow" => set.with(Workflow),
         "Comments" => set.with(Comments),
+        "Revisions" => set.with(Revisions),
+        "Dependencies" => set.with(Dependencies),
+        "Links" => set.with(Links),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
+        "Numbering" => set.with(Numbering),
         _ => return None,
     })
 }
@@ -1079,6 +1085,10 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
     let set = BehaviorSet::new();
     Some(match (file, name) {
         ("core-workflow", "test.Dispatch") => set.with(Dispatch),
+        ("core-revisions", "test.Hold") => set.with(RevisionHold),
+        ("core-dependencies", "test.Finisher") => set.with(Finisher),
+        ("core-numbering", "test.Refuser") => set.with(Refuser),
+        (_, "test.Reader") => set.with(Reader),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),
