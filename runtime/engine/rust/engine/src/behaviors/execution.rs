@@ -1425,10 +1425,11 @@ fn reference(
                 ),
             ));
         }
+        // JSON.stringify writes NaN and the infinities as null.
         if crosses.is_some_and(|crosses| !crosses.is_finite()) {
             return Err(Error::behavior(
                 behavior,
-                "references.add: hears is 'delete' or { path, crosses? }, its crosses a finite number",
+                "references.add: hears is 'delete' or { path, crosses? }, its crosses a finite number, not null",
             ));
         }
     }
@@ -1441,7 +1442,8 @@ fn reference(
 }
 
 // is_target_pointer: a JSON pointer, /data/<field>... or
-// /behaviors/<behavior>/<field>...
+// /behaviors/<behavior>/<field>..., with something after the part's slash
+// (`^\/(data|behaviors\/([^~/]|~[01])+)\/.` in TypeScript).
 fn is_target_pointer(path: &str) -> bool {
     let well_formed = path.starts_with('/')
         && path[1..].split('/').all(|token| {
@@ -1459,7 +1461,11 @@ fn is_target_pointer(path: &str) -> bool {
     let tokens: Vec<&str> = path[1..].split('/').collect();
     match tokens.first() {
         Some(&"data") => tokens.len() >= 2 && !tokens[1].is_empty() || tokens.len() > 2,
-        Some(&"behaviors") => tokens.len() >= 3 && !tokens[1].is_empty(),
+        Some(&"behaviors") => {
+            tokens.len() >= 3
+                && !tokens[1].is_empty()
+                && (tokens.len() > 3 || !tokens[2].is_empty())
+        }
         _ => false,
     }
 }
@@ -1933,6 +1939,8 @@ mod tests {
             "/data/lines/0",
             "/behaviors/Workflow/status",
             "/data/a~1b",
+            "/data//",
+            "/behaviors/Workflow//",
         ] {
             assert!(is_target_pointer(path), "{path}");
         }
@@ -1941,6 +1949,9 @@ mod tests {
             "data/title",
             "/data",
             "/behaviors/Workflow",
+            "/behaviors/Workflow/",
+            "/behaviors//status",
+            "/data/",
             "/other/x",
             "/data/~2",
         ] {

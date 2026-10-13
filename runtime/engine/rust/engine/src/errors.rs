@@ -754,6 +754,11 @@ impl From<superschematic_engine_storage::Error> for Error {
                     "the engine's storage is busy: another writer held its lock past the busy timeout ({message}); nothing was written, and the call may be tried again"
                 ),
             )),
+            // A behavior's SQL the checker refused, or a use of its
+            // storage the engine does not allow: a defect of the behavior's.
+            StorageError::Behavior { behavior, message } => {
+                Error::Behavior(BehaviorError { behavior, message })
+            }
             StorageError::External(inner) => match inner.downcast::<Error>() {
                 Ok(engine) => *engine,
                 Err(other) => Error::Storage(StorageError::External(other)),
