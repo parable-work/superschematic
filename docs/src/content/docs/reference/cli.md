@@ -526,6 +526,77 @@ runs wherever the client does. It is a command of its own rather than a
 `build` target: an engine schema has no service config, and one module
 types schemas that link to each other.
 
+## `stack init [<services-root>]`
+
+Write a Stack service over a tree that already has API services, with a
+local environment, a gcp one when given a project and a region, and the
+ignore rules a stack needs. It writes files and nothing else. The design
+is section 11.1 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
+and D59 records it; [Stacks](/superschematic/guides/stacks/#start-a-stack)
+walks through it.
+
+1. Write each service's sentinel, as a build does, and discover the
+   services under `<services-root>`, `./schemas/services` without one.
+2. Read each API's operations. An API is exposed when an end user or a
+   third party calls one of its operations: one whose service clause,
+   its own or its set's, is none or `@allowService`. An API whose every
+   operation is `@requireService`, or that has none, is internal. Each
+   API a site calls is exposed.
+3. Ask for each value no flag gives, at a terminal.
+4. Write `<services-root>/<name>/`: `package.json` when the first API
+   that has a `tsconfig.json` also has one, `tsconfig.json` extending
+   that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
+   `@stack` deploys every API and every Site service and exposes as step 2
+   decided, with `Dev` on the local target and the gcp environment, and,
+   for a gcp environment, `src/gcp-target.ts`, the gcp target's values and
+   settings types read from the JSON Schemas it registers.
+5. Add the ignore rules to the `.gitignore` that covers the schemas root,
+   the nearest at or above it in its repository, else a new one in the
+   schemas root, anchored there: `/dist/*`, `!/dist/bun.lock` and
+   `/.superschematic/`. A `/dist/` or `/dist` rule there becomes
+   `/dist/*`. When git still ignores the lockfile after them, because a
+   broader rule ignores the output root, it adds `!/dist/`; when another
+   rule ignores the lockfile itself, it names the rule. A rule already
+   there is not added again.
+6. Load the stack and resolve each environment as the `stack` generator
+   does, and print what it wrote and why, each problem that does not
+   resolve yet, and the next commands: `superschematic stack dev
+   --environment Dev` and `superschematic stack bootstrap <environment>`,
+   each naming the stack's directory when the stack commands would not
+   find it on their own.
+
+At a terminal, init asks for the name, whether to add a gcp environment
+and its name, project and region, whether to turn the GitHub workflow on,
+and what to expose. Each question shows its default in brackets: the
+tree's, or the project and region gcloud's active configuration names
+(`project`, then `run/region` or `compute/region`), read with no stdin and
+a ten-second deadline, and skipped without `gcloud`. Without a terminal,
+each value comes from its flag or its default, and a gcp environment needs
+both `--gcp-project` and `--region`.
+
+It refuses a tree with no API service; a tree with a Stack service, unless
+`--force`; a name that is another kind of service's; and a gcp
+environment in a binary that does not link the gcp target, the core
+alone.
+
+```
+superschematic stack init
+superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+superschematic stack init ./schemas/services --name shop-stack --expose shop-api --force
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--name` | the first word the deployed services' names share, then `-stack`; else the naming file's `npm_scope`, then `-stack`; else the project directory's | the Stack service's name and directory |
+| `--gcp-project` | none | the Google Cloud project of a gcp environment |
+| `--region` | none | the gcp environment's region, such as `us-east1` |
+| `--environment` | `Staging` | the gcp environment's name, a class name |
+| `--ci` | none | the CI renderer `outputs.ci` turns on, `github` |
+| `--expose` | the APIs end users and sites call | the API services to expose, comma-separated, or `none` |
+| `--force` | false | write the stack though the tree has one: replace the Stack service of the same name, its config and `src`, or add another |
+| `--naming` | `<services-root>/../superschematic.toml` | naming config file |
+
 ## `stack dev [<stack-service-dir>]`
 
 Run an environment of a stack on the `local` target until Ctrl-C. The

@@ -4605,7 +4605,8 @@ No TypeScript server has run on Cloud Run.
 Not built:
 - passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
-- `stack init`, which would write the amendment's ignore rule.
+- `stack init`, which would write the amendment's ignore rule; D59
+  builds it.
 
 The rule is reversible until the first release.
 
@@ -4678,7 +4679,7 @@ CI installed nothing of the workspace and set up an unpinned Bun.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | The project commits `<output-root>/bun.lock`. No build removes it: each generator empties only directories of its own under the output root, such as `server/<stack>`, never the root. The root's `package.json` is the same bytes on every build of the same schemas, so a committed lockfile stays current until a manifest changes. Nothing else under the output root is committed for it: the build writes the root and every generated member's manifest before an install, and the implementations' manifests are the project's. The lockfile to commit is the one an install writes after `build-all`: a frozen install needs every member it names that another member depends on, and an install after a partial build drops the members it did not find. | Resolving afresh in every image and CI run, which lets two deploys of one commit differ and keeps dependency changes out of review. Moving the workspace's root to the repository's `package.json`, the project's own file, which the generator would then edit, and whose lockfile would mix the project's packages with the generated ones. |
-| A project ignores the output root's contents, not the directory, and takes the lockfile back: `dist/*` and `!dist/bun.lock`, since git cannot take back a file under an ignored directory. Where a broader rule ignores the directory, the schemas root's `.gitignore` takes it back first (`!/dist/`). The rules are the project's: the build of a stack with a TypeScript server asks git whether it ignores the lockfile (`git check-ignore`) and, when it does, prints one line naming the rule and the fix. `stack init` (section 11.1 of `docs/stack-model.md`), which is not built, will write the rule. | The build editing `.gitignore`, a file the project owns, behind its back. Committing the whole output root, which puts every generated file in review twice. |
+| A project ignores the output root's contents, not the directory, and takes the lockfile back: `dist/*` and `!dist/bun.lock`, since git cannot take back a file under an ignored directory. Where a broader rule ignores the directory, the schemas root's `.gitignore` takes it back first (`!/dist/`). The rules are the project's: the build of a stack with a TypeScript server asks git whether it ignores the lockfile (`git check-ignore`) and, when it does, prints one line naming the rule and the fix. `stack init` (section 11.1 of `docs/stack-model.md`, D59) writes the rule. | The build editing `.gitignore`, a file the project owns, behind its back. Committing the whole output root, which puts every generated file in review twice. |
 | A server's image keeps installing frozen when its context holds the lockfile, and keeps resolving afresh without one, now printing that it does. The generated CI enforces the lockfile instead: `check` refuses a missing or stale one, and every plan, preview and deploy job waits for `check`. | The image refusing a missing lockfile when `CI=true`, a build argument the deploy would pass and a second rule for one file, which would still leave a deploy from an engineer's machine resolving afresh. Refusing it always, which would stop a deploy from a checkout where no install has run and no lockfile is committed yet. |
 | For a stack with a TypeScript server, the `github` renderer's `check` installs the output root's workspace after the build, `bun install --frozen-lockfile` in a step named for the lockfile, which first refuses a missing lockfile, since Bun's frozen install installs without one, and says to run `bun install` after `build-all` and commit it. Then each TypeScript server's entrypoint package and the implementation of each API one serves type-checks, `bun x --no-install tsc --noEmit -p tsconfig.json`. The ci generator finds the implementations where the server generator does and hands them to the renderer, `CIStack.TypeScriptImplementations`. Every job that sets up Bun pins `oven-sh/setup-bun` to `tools.env`'s release, `servergen.BunVersion`. | `bunx tsc`, which downloads the npm package named `tsc` where none is installed. Building the runtime checkouts `[paths]` names in the workflow, as the image does, which repeats the image's knowledge of each checkout for a project whose CI checkout may not hold them; the published packages carry their declarations. |
 | `stack dev` runs a plain `bun install`, as an engineer would: it writes the lockfile, or brings the committed one up to date with the build's packages, so the lockfile follows the schemas through normal use, and it never fails on a missing lockfile. `CI=true` does not make Bun 1.4's install frozen. | A frozen install in `stack dev`, which would refuse every schema change until someone installed by hand. |
@@ -5725,5 +5726,44 @@ Not built:
 - type-checking a TypeScript job's or worker's package in the generated
   CI, which checks the servers';
 - a Rust worker.
+
+The rule is reversible until the first release.
+
+## D59. `stack init` writes a stack over a tree's APIs, from flags and the answers to what they leave out, and runs nothing
+
+Section 11.1 of `docs/stack-model.md` listed `stack init` among the stack
+commands and said nothing more, and D51's amendment left it the ignore
+rule to write. A project that had API services had to write its first
+stack by hand: the Stack kind's config, the schema that imports each
+service's handle, the environments, the gcp target's types for tsc, and
+the rules that keep the output root out of git but its lockfile.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| init starts a stack in a tree that already has API services. It writes one Stack service, `<services-root>/<name>/`: its `package.json` when its siblings have one, a `tsconfig.json` extending the base theirs do, `schema.config.ts`, and `src/stack.schema.ts`, which the TypeScript writer writes from the stack's declarations, so it follows the authoring package. It writes the ignore rules in the `.gitignore` that covers the schemas root, and creates no other project file. A tree with no API service is refused. | Scaffolding a whole project, schemas root, naming file, a DB and an API, which `superschematic` has no other command for and which the first-project pages walk through. A template of the schema, which drifts from `@superschematic/stack` as it grows. |
+| `deploy` lists every API and every Site service of the tree, by name; the DB and Bucket services come with them, as resolution reaches them. `expose` lists each API an end user or a third party calls, one with an operation whose service clause, its own or its set's (`ir.EffectiveServiceCallers`), is none or `@allowService`, so a `@publicRoute` in a `@requireService` set counts, and each API a site calls, which D55 requires. An API whose every operation is `@requireService`, or that has none, is internal. The summary says why for each API, and `--expose` replaces the list. | Exposing every API, which puts every internal API on the load balancer. Exposing none, which gives the stack no way in. Reading the `calls` graph, leaving out each API another one calls, which hides an API that end users and servers both call. APIs alone in `deploy`, which leaves a tree's site out of its stack. |
+| Its environments are `Dev` on the local target and, given a Google Cloud project and region, one on gcp, `Staging` unless `--environment` names it. A gcp environment comes with `src/gcp-target.ts`, the augmentation of `Targets` (section 4.3), each type read from the JSON Schema the target or its platform registers, so the file says what the binary that wrote it checks. A binary that does not link the gcp target, the core alone, refuses a gcp environment. `--ci github` sets `outputs.ci`. | A hand-written gcp augmentation in the CLI, which the gcp target's next setting would outdate. An authoring package for gcp, which no extension ships yet. Asking for every target the binary links, when gcp is the one the installed binary deploys to. |
+| Every value is a flag: `--name`, `--gcp-project`, `--region`, `--environment`, `--ci`, `--expose` and `--force`. At a terminal init asks for each value no flag gives, through a line prompter beside the secret prompter `stack secrets set` uses, each question with a default from the tree or from gcloud's active configuration (`project`, then `run/region` or `compute/region`), which init reads in the background with no stdin, its prompts off and a ten-second deadline, and skips without `gcloud`. Without a terminal, a missing value is an error. Only the name is required, and it has a default: the first word the deployed services' names share and `-stack`, else the naming file's `npm_scope`, else the project's directory. So `stack init` alone writes `Dev` alone. | Prompts only, which a script cannot drive. Flags only, which leave a person to look up a project and a region gcloud already knows. A terminal UI library, a dependency for a few questions. gcloud's defaults without a terminal, which makes a script's output depend on the machine. |
+| init writes files and runs nothing: no bootstrap, no build, no deploy. It loads the stack and resolves each environment as the `stack` generator does, prints each problem that does not resolve yet, such as a required config field no setting binds, which only a person can fill, and ends with the commands to run next: `stack dev --environment Dev` and, for a gcp environment, `stack bootstrap <environment>`, each naming the stack's directory when the stack commands would not find it. | Bootstrapping a gcp environment, which needs an owner's credentials and changes a cloud project, from a command that otherwise only writes files. Failing on a stack that does not resolve, which it has written all the same. |
+| The ignore rules go in the nearest `.gitignore` at or above the schemas root, no higher than its repository's root, else in a new `<schemas-root>/.gitignore`, anchored to the schemas root: `dist/*`, `!dist/bun.lock` and `.superschematic/`. A rule on the output root itself, anchored there, becomes the rule on its contents in place. When git still ignores the lockfile, because a broader rule ignores the directory, init adds `!dist/` after it; when another rule ignores the lockfile itself, init names it and leaves it. A rule already there is not added again, so a second run changes nothing. | Always writing `<schemas-root>/.gitignore`, beside a repository's own that already covers it. Rewriting a broader rule such as a repository's `dist/`, which ignores other trees' output too. |
+| A tree with a Stack service is refused without `--force`, which replaces the Stack service of the name given, removing its config in every form and its `src`, so no file of the old stack is read with the new one, or writes another stack beside the first. A name that is another kind of service's is refused. | Refusing only a stack of the same name, which lets a second stack appear in a tree whose stack commands then need `--stack` every time. Merging into an existing stack, which a person edits from then on. |
+
+The TypeScript writer now closes a class with no fields of its own on its
+line (`export abstract class Dev {}`), as it writes `@job` and `@worker`
+classes and as the Stack schemas the docs show are written.
+
+Status: built. `internal/stackinit` holds the rules and renders the files;
+`cli/stack_init.go` is the command. `internal/stackinit`'s goldens hold
+the files of a stack with both environments on stacktest's fake target in
+gcp's place, and its tests the expose rule, the default name, the class
+name and the ignore rules in and out of a repository, twice over.
+`cli/stack_init_test.go` drives the command over
+`internal/stackinit/testdata/tree`, two APIs, one of them internal, a
+database and a site: with no flag, every flag, a scripted terminal and a
+gcloud that never answers, each refusal, `--force`, and the ignore rules
+in a repository whose root ignores every `dist`, and builds the stack it
+wrote. `cmd/superschematic` writes a gcp environment over the same tree,
+which loads and resolves, and over a copy of acme-shop's services writes
+the `@stack` acme-shop's `shop-stack` declares by hand.
 
 The rule is reversible until the first release.
