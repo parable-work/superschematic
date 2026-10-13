@@ -5026,7 +5026,7 @@ backing by picking the database.
 | A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
 | On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
 
-Status: built.
+Status: built, as narrowed below.
 - #336 adds queues and Go workers, on the local target:
   - `@queue` and `ir.QueueDef` on a DB class, whose table sqlgen writes
     in each dialect the service lists and the migration plan carries;
@@ -5061,12 +5061,16 @@ its refusals.
 
 No worker has run on Google Cloud.
 
+#348 adds TypeScript workers, which claim through the HTTP runtime with
+the Go ORM's statements (the amendment below).
+
 Not built:
-- TypeScript and Rust workers, and claims in their runtimes;
-- claims on SQLite and D1, in a write transaction;
+- Rust workers;
+- claims on SQLite and D1, in a write transaction (the amendment below);
 - removing `done` messages, and an operator's command to read and retry
   dead ones;
-- a backoff that grows with each attempt.
+- a backoff that grows with each attempt;
+- scaling a worker with its queue's depth.
 
 The rule is reversible until the first release.
 
@@ -5085,7 +5089,7 @@ can see it.
 | `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
 | On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
 
-Status: built.
+Status: built, as amended below.
 - #334 adds buckets on the local target:
   - the `Bucket` kind and its sentinel, and `buckets` on an API's
     config, which the IR records as `Schema.Buckets`;
@@ -5124,10 +5128,13 @@ grants and `buckets-never-public`.
 
 No bucket has run on Google Cloud. A live run should check whether a new
 bucket's IAM policy carries the project's convenience bindings, through
-which `planner`'s `roles/viewer` would read its objects.
+which `planner`'s `roles/viewer` would read its objects. A project bootstrapped before #338 needs `stack
+bootstrap` again for `deployer`'s new role.
 
-Not built: a `Bucket` in the Rust runtime, so gcp's connectors refuse a
-bucket edge from a Rust server or job.
+Not built:
+- a `Bucket` in the Rust runtime, so gcp's connectors refuse a bucket
+  edge from a Rust server or job;
+- buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5148,7 +5155,7 @@ is a TypeScript or Rust server, not a site.
 | `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
 | superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
 
-Status: built.
+Status: built, as amended below.
 - #333 adds sites on the local target, the first half:
   - the `Site` kind, with `site: { build, output, fallback }`, and
     `[implementation_paths] site`, where the build scaffolds a site once
@@ -5184,12 +5191,13 @@ fallback, the publisher, and a deploy (`TestDeploySiteOnGCP`).
 No site has run on Google Cloud; the second amendment below says what to
 check first.
 
-Not built:
-- a site's SDK clients in the browser, which wait on superscalar's
-  browser build (the first amendment below);
-- Bun in the deploy job the generated CI writes for a schemas root on
-  npm, which a site's build needs;
-- the CORS field on a Rust server, which waits on D57.
+#347 builds each site in the generated CI's `check`, and sets up Bun for
+the deploy and preview jobs of an environment with a site. #349 reads
+the CORS field on a Rust server (D57), and #344 lets the identity runtime
+answer its trusted origins on an API a site calls (the amendment below).
+
+Not built: a site's SDK clients in the browser, which wait on
+superscalar's browser build (the first amendment below).
 
 The rule is reversible until the first release.
 
@@ -5981,3 +5989,30 @@ keys a stack, but not an API, by its checkout. `cli`'s
 of no checkout, which it names and which `--remove-data` leaves.
 
 The rule is reversible until the first release.
+
+### D53, amended: a worker's queue claims only on Postgres for now
+
+D53 named Postgres, SQLite and D1 as a queue's backings. The Go ORM speaks
+only Postgres through pgx, and D1 exists only in the migration runner. So
+SQLite gets a queue's table and its migrations, but no claim.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
+
+Status: built in #336.
+
+### D54, amended: a workload links the GCS client whenever its APIs list a bucket
+
+D54 said only a workload some environment places on gcp links the GCS
+client, as the Cloud SQL connector is linked. The local storage emulator
+speaks the same API, and the runtimes reach it through the same client
+(`STORAGE_EMULATOR_HOST`), so a workload that uses a bucket anywhere needs
+it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The `server` generator writes `buckets.go` into a Go server's, job's or worker's entrypoint, and adds `cloud.google.com/go/storage` to its `go.mod`, when its APIs list a bucket. A TypeScript server depends on `@google-cloud/storage` then. Against the emulator, the runtimes sign real V4 URLs with a key the process generates, since the emulator checks that a signature is present but not what it signs. | A filesystem implementation for local runs, a second code path the emulator choice (D54) set out to avoid. Linking per environment, which gives the local build a client it would not have. |
+| `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
+
+Status: built in #334.
