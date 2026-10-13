@@ -19,11 +19,7 @@ const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
 /// Steps whose answers differ for a reason outside this engine, by file,
 /// scenario and step, with the reason. The test reports them and passes; once one
 /// gives the recorded answer, the test fails until it leaves this list.
-const KNOWN: [(&str, &str, &str); 1] = [(
-    "registry",
-    "schema documents (node) > a document the loader refuses is refused with its issues, and nothing is written > step 3",
-    "JSON.parse's wording: the corpus was recorded on Node.js 24, whose V8 says \"Expected double-quoted property name in JSON at position 19 (line 1 column 20)\"; the schema reader (superschematic-schema-ir's JSON reader) writes an earlier V8's \"Unexpected end of JSON input\"",
-)];
+const KNOWN: [(&str, &str, &str); 0] = [];
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
