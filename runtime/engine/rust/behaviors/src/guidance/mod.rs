@@ -12,6 +12,7 @@ pub(crate) mod dependencies;
 pub(crate) mod links;
 pub(crate) mod numbering;
 pub(crate) mod revisions;
+pub(crate) mod rollups;
 pub(crate) mod staterules;
 pub(crate) mod timers;
 pub(crate) mod variants;

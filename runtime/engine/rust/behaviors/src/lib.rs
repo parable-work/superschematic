@@ -42,6 +42,7 @@ pub mod links;
 pub mod numbering;
 pub mod revised;
 pub mod revisions;
+pub mod rollups;
 pub mod staterules;
 pub mod timers;
 pub mod variants;
@@ -55,6 +56,7 @@ pub use links::{link_many, link_pin, LinkPin, LinkSpec, Links, LinksConfig};
 pub use numbering::{Numbering, NumberingConfig};
 pub use revised::{linked_to, moved_on, target_move, TargetMove};
 pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
+pub use rollups::{RollupFunction, RollupSpec, Rollups, RollupsConfig, MAX_ROLLUP_READ};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
     parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart, TimersThen, TimersUntil,

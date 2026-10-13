@@ -2231,3 +2231,126 @@ fn numbering_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// The TypeScript guidance for the Rollups configs below
+/// (`rollupsGuidance`).
+const ROLLUPS: &str = r#"{
+  "gated": {
+    "summary": "behaviors.Rollups.values holds values computed from linked instances at each read: tasks, how many of the Task instances whose project points here there are; byStatus, how many of the Task instances whose project points here hold each value of Workflow.status; estimate, the sum of estimate over the Task instances whose project points here; smallest, the min of estimate over the Task instances whose project points here; longest, the max of hours over the Task instances whose project points here; last, the kind of the one of the Task instances whose project points here created last; finished, whether every one of the Task instances whose project points here is in a terminal state; started, whether one of the Task instances whose project points here is in a terminal state with outcome success or neutral; failed, whether one of the Task instances whose project points here is in a terminal state with outcome failure. A rollup over more than 500 linked instances reads {\"over\": true}. A move into done waits until finished holds; a move into done or dropped waits until started holds.",
+    "operations": {
+      "transition": {
+        "doNotUseWhen": "Read behaviors.Rollups.values before a move: a move into done waits until finished holds; a move into done or dropped waits until started holds.",
+        "errors": [
+          {
+            "code": "not_held",
+            "description": "A move into a state a rollup gates while the rollup does not hold; details names the rollup and counts the linked instances it read and counted.",
+            "commonCorrection": "Read behaviors.Rollups.values, and finish the linked work the rollup waits on, then try again."
+          }
+        ]
+      }
+    }
+  },
+  "plain": {
+    "summary": "behaviors.Rollups.values holds values computed from linked instances at each read: tasks, how many of the Task instances whose project points here there are; boards, how many of the Board instances whose project points here there are. A rollup over more than 500 linked instances reads {\"over\": true}.",
+    "operations": {}
+  }
+}"#;
+
+#[test]
+fn rollups_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{RollupFunction, RollupSpec, Rollups, RollupsConfig};
+
+    let expected: Value = serde_json::from_str(ROLLUPS).expect("the expected guidance");
+    let rollup = |schema: &str,
+                  function: RollupFunction,
+                  field: Option<&str>,
+                  gated: &[&str],
+                  outcomes: Option<&[WorkflowOutcome]>| RollupSpec {
+        schema: schema.to_owned(),
+        link: "project".to_owned(),
+        function,
+        field: field.map(str::to_owned),
+        gated_states: names(gated),
+        outcomes: outcomes.map(<[WorkflowOutcome]>::to_vec),
+    };
+    let config = |rollups: Vec<(&str, RollupSpec)>| RollupsConfig {
+        rollups: rollups
+            .into_iter()
+            .map(|(name, spec)| (name.to_owned(), spec))
+            .collect(),
+    };
+    let gated = config(vec![
+        (
+            "tasks",
+            rollup("Task", RollupFunction::Count, None, &[], None),
+        ),
+        (
+            "byStatus",
+            rollup(
+                "Task",
+                RollupFunction::CountBy,
+                Some("Workflow.status"),
+                &[],
+                None,
+            ),
+        ),
+        (
+            "estimate",
+            rollup("Task", RollupFunction::Sum, Some("estimate"), &[], None),
+        ),
+        (
+            "smallest",
+            rollup("Task", RollupFunction::Min, Some("estimate"), &[], None),
+        ),
+        (
+            "longest",
+            rollup("Task", RollupFunction::Max, Some("hours"), &[], None),
+        ),
+        (
+            "last",
+            rollup("Task", RollupFunction::Latest, Some("kind"), &[], None),
+        ),
+        (
+            "finished",
+            rollup("Task", RollupFunction::All, None, &["done"], None),
+        ),
+        (
+            "started",
+            rollup(
+                "Task",
+                RollupFunction::Any,
+                None,
+                &["done", "dropped"],
+                Some(&[WorkflowOutcome::Success, WorkflowOutcome::Neutral]),
+            ),
+        ),
+        (
+            "failed",
+            rollup(
+                "Task",
+                RollupFunction::Any,
+                None,
+                &[],
+                Some(&[WorkflowOutcome::Failure]),
+            ),
+        ),
+    ]);
+    let plain = config(vec![
+        (
+            "tasks",
+            rollup("Task", RollupFunction::Count, None, &[], None),
+        ),
+        (
+            "boards",
+            rollup("Board", RollupFunction::Count, None, &[], None),
+        ),
+    ]);
+    let guidance = Rollups.hooks().guidance.expect("guidance");
+    for (name, config) in [("gated", gated), ("plain", plain)] {
+        assert_eq!(
+            as_json(&guidance(&Rollups, &config, &target())),
+            expected[name],
+            "{name}"
+        );
+    }
+}
