@@ -242,6 +242,11 @@ type ModuleOutput struct {
 	// src/identity.rs. Empty when the schema has no User table.
 	IdentityDescriptor string
 
+	// EngineDocument is the schema's engine document (D58) as a Rust raw
+	// string literal, the ENGINE_DOCUMENT constant of src/engine.rs.
+	// Empty when no type of the DB schema composes a behavior.
+	EngineDocument string
+
 	// VersionGraphDepPath is the Cargo.toml path entry for the version
 	// graph's Rust engine crate (Naming.VersionGraphRustCrate), relative to
 	// the output directory, set by SetVersionGraphPath. Empty names the
@@ -293,6 +298,11 @@ type Options struct {
 	// fields src/behaviors.rs types; a schema that composes none needs
 	// none.
 	Registry *registry.Registry
+
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which src/engine.rs holds.
+	// Nil writes no src/engine.rs.
+	EngineDocument []byte
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -410,6 +420,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
 		return nil, err
+	}
+	if opts.EngineDocument != nil {
+		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
 	}
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
 		return nil, err

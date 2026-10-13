@@ -160,6 +160,7 @@ func newRun(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, outputs *registry
 		LoadDependency: memo.loadDependency,
 		APIOutput:      memo.buildAPIOutput,
 		EnvConfig:      memo.buildEnvConfig,
+		EngineDocument: memo.buildEngineDocument,
 		Result:         &registry.Result{Outputs: make(map[string]string)},
 	}}
 	memo.r = r
@@ -257,15 +258,19 @@ func (r run) hasEngineTypes() bool {
 // the engine types of a DB schema cannot be engine types
 // (enginedoc.Problems): sql and orm leave them out, so a table that names
 // one, or an engine type that reaches a table, would be written against a
-// table that is not there.
+// table that is not there. It refuses a namespace the engine would refuse
+// too (enginedoc.Namespace), before sql writes anything.
 func (r run) refuseEngineTypes() error {
 	if !r.hasEngineTypes() {
 		return nil
 	}
 	problems := enginedoc.Problems(r.Schema)
-	errs := make([]error, 0, len(problems))
+	errs := make([]error, 0, len(problems)+1)
 	for _, problem := range problems {
 		errs = append(errs, fmt.Errorf("generator: %s", problem))
+	}
+	if _, err := enginedoc.Namespace(r.Config.Name, r.Outputs.EngineNamespace()); err != nil {
+		errs = append(errs, fmt.Errorf("generator: %w", err))
 	}
 	return errors.Join(errs...)
 }

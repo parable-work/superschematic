@@ -52,6 +52,9 @@ if errors.HasErrors() {
 {{- if .Identity}}
 | `identity.go` | `IdentityDescriptor`, the identity descriptor (D50); `identity/{{.Identity.FileName}}.json` holds the same document |
 {{- end}}
+{{- if .Engine}}
+| `engine.go` | `EngineDocument`, the engine document of the schema's engine types (D58), which a server defines and publishes in the engine; `engine/{{.Engine.FileName}}.json` holds the same document |
+{{- end}}
 {{- if .Behaviors}}
 | `behaviors.go` | `<Type>Behaviors` for each type that composes behaviors: each behavior's fields as a read returns them under `behaviors`, narrowed by the type's config |
 {{- end}}

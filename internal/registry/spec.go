@@ -399,9 +399,11 @@ type GeneratorSpec struct {
 	// it on a schema one of whose types composes a behavior, or that
 	// imports a DB service's type that does, rather than generate the type
 	// without them (D16). Of the core's generators, types sets it, since
-	// it writes each behavior's fields as <T>Behaviors, and so do sql and
-	// orm, which leave a DB schema's engine type to the engine (D58). An
-	// API's own type never composes one: behaviors compose on DB types.
+	// it writes each behavior's fields as <T>Behaviors, and so do the ones
+	// a DB schema's engine types build through: sql and orm, which leave
+	// an engine type to the engine, and enginedoc, which writes the engine
+	// document (D58). An API's own type never composes one: behaviors
+	// compose on DB types.
 	RendersBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps
@@ -446,7 +448,13 @@ type GenerateContext struct {
 	// schemas resolved) for generators that emit configuration derived
 	// from it. (nil, nil) means the schema declares no @envVars type.
 	EnvConfig func() (*envgen.ConfigOutput, error)
-	Result    *Result
+	// EngineDocument memoises the engine document of a schema whose kind's
+	// structs are DB tables (D58), as engine/<schema>.json holds it, so the
+	// enginedoc generator and the types generator, which holds it as a
+	// constant, write the same bytes. (nil, nil) means no type of the
+	// schema composes a behavior, or the kind has no tables.
+	EngineDocument func() ([]byte, error)
+	Result         *Result
 }
 
 // Logf writes to the run's log when one is configured.

@@ -219,6 +219,13 @@ type ModuleOutput struct {
 	// when the schema has no User table.
 	IdentityDescriptor string
 
+	// EngineDocument is the schema's engine document (D58), the object
+	// literal engine.ts exports as engineDocument, which package.json
+	// exports as "./engine" and index.ts does not re-export, so a client
+	// of the types does not load it. Empty when no type of the DB schema
+	// composes a behavior.
+	EngineDocument string
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -307,6 +314,11 @@ type Options struct {
 	// none.
 	Registry *registry.Registry
 
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which engine.ts exports.
+	// Nil writes no engine.ts.
+	EngineDocument []byte
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -379,6 +391,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
 		return nil, err
 	}
+	output.EngineDocument = strings.TrimSuffix(string(opts.EngineDocument), "\n")
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
 		return nil, err
 	}

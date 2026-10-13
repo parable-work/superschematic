@@ -127,6 +127,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: true, Template: "index.tmpl", Filename: "index.ts"},
 		{Condition: true, Template: "readme.tmpl", Filename: "README.md"},
 		{Condition: output.IdentityDescriptor != "", Template: "identity.tmpl", Filename: "identity.ts"},
+		{Condition: output.EngineDocument != "", Template: "engine.tmpl", Filename: "engine.ts"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(rootFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templateName, outputPath, output)

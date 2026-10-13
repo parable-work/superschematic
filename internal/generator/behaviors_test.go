@@ -159,7 +159,8 @@ func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 
 // Every core generator of the DB pipeline renders behaviors (D58): a DB
 // schema's type that composes one is an engine type, which sql and orm
-// leave out. envConfig still refuses a General schema's, naming itself.
+// leave out and enginedoc writes the document of. envConfig still
+// refuses a General schema's, naming itself.
 // An API's own type that composes one is refused before any generator
 // runs: behaviors compose on DB types.
 func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
@@ -199,10 +200,19 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 			if _, err := os.Stat(behaviorsGo); err != nil {
 				t.Errorf("the types write no behaviors.go: %v", err)
 			}
-			// Item is the schema's only type and an engine type: no table,
-			// no repository.
-			if !slices.Contains(result.Skipped, "sql") || !slices.Contains(result.Skipped, "orm") {
-				t.Errorf("Skipped = %v, want sql and orm", result.Skipped)
+			engineDocument := EngineDocumentPath(root, "items")
+			_, statErr := os.Stat(engineDocument)
+			if tc.kind == ir.SchemaKindDB {
+				if statErr != nil || result.Outputs["engine"] != engineDocument {
+					t.Errorf("the DB build wrote no engine document: %v (outputs %v)", statErr, result.Outputs)
+				}
+				// Item is the schema's only type and an engine type: no
+				// table, no repository.
+				if !slices.Contains(result.Skipped, "sql") || !slices.Contains(result.Skipped, "orm") {
+					t.Errorf("Skipped = %v, want sql and orm", result.Skipped)
+				}
+			} else if statErr == nil {
+				t.Errorf("a %s build wrote an engine document", tc.kind)
 			}
 		})
 	}

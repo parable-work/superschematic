@@ -305,6 +305,12 @@ type ModuleOutput struct {
 	// table.
 	Identity *DescriptorFile
 
+	// Engine is the schema's engine document (D58), written as the
+	// constant EngineDocument in engine.go; the enginedoc generator writes
+	// the same document as engine/<schema>.json beside the types. Nil when
+	// no type of the DB schema composes a behavior.
+	Engine *DescriptorFile
+
 	// Behaviors are the types that compose behaviors, each with its
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as behaviors.go. Nil when no type composes one.
@@ -324,6 +330,13 @@ type DescriptorFile struct {
 // its trailing newline.
 func (d *DescriptorFile) Text() string {
 	return strings.TrimSuffix(string(d.JSON), "\n")
+}
+
+// GoLiteral is Text as a Go string literal: a raw string, with each
+// backquote the text holds, which a raw string cannot, spliced in as an
+// interpreted string.
+func (d *DescriptorFile) GoLiteral() string {
+	return "`" + strings.ReplaceAll(d.Text(), "`", "` + \"`\" + `") + "`"
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -365,6 +378,11 @@ type Options struct {
 	// Registry declares the behaviors the schema's types compose, whose
 	// fields behaviors.go types; a schema that composes none needs none.
 	Registry *registry.Registry
+
+	// EngineDocument is the schema's engine document (D58), as
+	// GenerateContext.EngineDocument builds it, which engine.go holds as
+	// a constant. Nil writes no engine.go.
+	EngineDocument []byte
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -494,6 +512,13 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 			name = schema.Name
 		}
 		output.Identity = &DescriptorFile{FileName: name, JSON: descriptor}
+	}
+	if opts.EngineDocument != nil {
+		name := opts.SchemaName
+		if name == "" {
+			name = schema.Name
+		}
+		output.Engine = &DescriptorFile{FileName: name, JSON: opts.EngineDocument}
 	}
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)

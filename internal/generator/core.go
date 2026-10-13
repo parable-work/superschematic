@@ -57,8 +57,8 @@ const ormGenerator = "orm"
 // registry cannot import. Core registers no documents and no build-all
 // hooks; extensions do.
 //
-// Registration order fixes Registry.OutputKeys: types, sql, api, sdk, ci is the
-// order the ParseOutputs error lists.
+// Registration order fixes Registry.OutputKeys: types, sql, api, sdk, ci,
+// engine is the order the ParseOutputs error lists.
 func RegisterCore(reg *registry.Registry) error {
 	specs := []registry.GeneratorSpec{
 		{
@@ -211,6 +211,24 @@ func RegisterCore(reg *registry.Registry) error {
 			Enabled: cigen.Enabled,
 			Generate: func(c registry.GenerateContext) error {
 				return run{c}.measure("output.ci", func() error { return cigen.Generate(c) })
+			},
+		},
+		{
+			// The engine document of a DB schema whose types compose
+			// behaviors, its engine types (D58): engine/<schema>.json in
+			// the Go types module, which the types generator holds as a
+			// constant in Go, TypeScript and Rust too
+			// (internal/generator/enginedoc). It writes nothing for a
+			// schema with no engine type, and claims no directory: the
+			// document sits in the Go types module, which the types
+			// generator claims. outputs.engine names the namespace.
+			Name:             enginedocGenerator,
+			OutputKey:        "engine",
+			OutputSchema:     engineOutputSchema,
+			RendersBehaviors: true,
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.engine", r.generateEngineDocument)
 			},
 		},
 	}

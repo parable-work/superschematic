@@ -141,6 +141,8 @@ type runMemo struct {
 	apiOutputReady    bool
 	envConfig         *envgen.ConfigOutput
 	envConfigReady    bool
+	engineDocument    []byte
+	engineDocReady    bool
 }
 
 // buildEnvConfig resolves the schema's @envVars contract once per run for
@@ -217,6 +219,10 @@ func (r run) generateGoTypes() error {
 		return err
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	var output *typegen.ModuleOutput
 	if err := r.measure("output.types-go.generate", func() error {
 		var err error
@@ -228,6 +234,7 @@ func (r run) generateGoTypes() error {
 			ModuleClosure:     closure,
 			Naming:            r.Options.Naming,
 			Registry:          r.Registry,
+			EngineDocument:    engineDocument,
 			Clock:             r.Options.Clock,
 		})
 		return err
@@ -271,6 +278,10 @@ func (r run) generateTSTypes() error {
 		return err
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	var output *tsgen.ModuleOutput
 	if err := r.measure("output.types-typescript.generate", func() error {
 		var err error
@@ -280,6 +291,7 @@ func (r run) generateTSTypes() error {
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
 			Registry:           r.Registry,
+			EngineDocument:     engineDocument,
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -372,12 +384,17 @@ func (r run) generateRustTypes() error {
 		depCrates[name] = r.Options.Naming.RustTypesCrate(name)
 	}
 
+	engineDocument, err := r.engineDocument()
+	if err != nil {
+		return err
+	}
 	output, err := rustgen.Generate(r.Schema, rustgen.Options{
 		SchemaName:       r.Config.Name,
 		Dependencies:     deps,
 		DependencyCrates: depCrates,
 		Naming:           r.Options.Naming,
 		Registry:         r.Registry,
+		EngineDocument:   engineDocument,
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {
