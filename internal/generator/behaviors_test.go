@@ -158,8 +158,10 @@ func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 
 // Every core generator but types still refuses a type that composes a
 // behavior, and the refusal names the first that would run: sql in a DB
-// pipeline, envConfig in a General one, api in an API one.
-func TestCoreGeneratorsButTypesRefuseBehaviors(t *testing.T) {
+// pipeline, envConfig in a General one. An API's own type is refused
+// before any generator runs, whatever its outputs: behaviors compose on
+// DB types (D58).
+func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
 	goTypes := map[string]any{LangGo: enabled}
 	for _, tc := range []struct {
@@ -167,18 +169,132 @@ func TestCoreGeneratorsButTypesRefuseBehaviors(t *testing.T) {
 		outputs map[string]any
 		want    string
 	}{
-		{ir.SchemaKindDB, map[string]any{"types": goTypes}, "sql"},
-		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, "envConfig"},
-		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled}, "api"},
+		{ir.SchemaKindDB, map[string]any{"types": goTypes}, "generator: sql does not render behaviors yet: type Item composes behavior Comments"},
+		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, "generator: envConfig does not render behaviors yet: type Item composes behavior Comments"},
+		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled},
+			"generator: type Item of API items composes behavior Comments, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {
 			schema := ir.NewSchema("items", tc.kind)
 			schema.Types["Item"] = &ir.TypeDef{Name: "Item", Role: ir.RoleEmbeddedStruct, Behaviors: []ir.BehaviorRef{{Name: "Comments"}}}
 			cfg := &schemaconfig.SchemaConfig{Name: "items", Kind: tc.kind, Outputs: tc.outputs}
 			_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default())})
-			if want := "generator: " + tc.want + " does not render behaviors yet: type Item composes behavior Comments"; err == nil || err.Error() != want {
-				t.Fatalf("Run: err = %v, want %q", err, want)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Run: err = %v, want %q", err, tc.want)
 			}
 		})
 	}
+}
+
+// engineDB is a DB service whose Ticket composes Workflow, an engine type,
+// beside a table, for the API refusals.
+func engineDB() *ir.Schema {
+	db := ir.NewSchema("desk-db", ir.SchemaKindDB)
+	db.Types["Ticket"] = &ir.TypeDef{Name: "Ticket", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Workflow"}},
+		Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
+	db.Types["Agent"] = &ir.TypeDef{Name: "Agent", Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
+	return db
+}
+
+// The API generators do not serve an engine type yet (D58): an API that
+// imports one, or projects one with @source, is refused before any
+// generator runs, naming the first generator that does not render
+// behaviors. A table of the same DB is no engine type.
+func TestAPIGeneratorsRefuseAnImportedEngineType(t *testing.T) {
+	enabled := map[string]any{"enabled": true}
+	goTypes := map[string]any{LangGo: enabled}
+	deps := map[string]*ir.Schema{"desk-db": engineDB()}
+	load := func(name string) (*ir.Schema, error) {
+		if dep := deps[name]; dep != nil {
+			return dep, nil
+		}
+		return nil, errors.New("no such service")
+	}
+	api := func(use func(*ir.Schema)) *ir.Schema {
+		schema := ir.NewSchema("desk-api", ir.SchemaKindAPI)
+		use(schema)
+		return schema
+	}
+	importType := func(name string) func(*ir.Schema) {
+		return func(s *ir.Schema) { s.Imports = []ir.Import{{Package: "@schemas/desk-db", Types: []string{name}}} }
+	}
+	project := func(s *ir.Schema) {
+		s.Types["TicketView"] = &ir.TypeDef{Name: "TicketView", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "desk-db.Ticket"},
+			Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
+	}
+	for _, tc := range []struct {
+		name    string
+		schema  *ir.Schema
+		outputs map[string]any
+		want    string
+	}{
+		{"import", api(importType("Ticket")), map[string]any{"types": goTypes, "api": enabled},
+			"generator: api does not render engine types yet: desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)"},
+		{"sdk alone", api(importType("Ticket")), map[string]any{"types": goTypes, "sdk": goTypes},
+			"generator: sdks does not render engine types yet: desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)"},
+		{"source", api(project), map[string]any{"types": goTypes, "api": enabled},
+			"generator: api does not render engine types yet: type TicketView of desk-api projects desk-db.Ticket, which composes behavior Workflow (D58)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI, Outputs: tc.outputs,
+				Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
+			_, err := Run(tc.schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default()), LoadDependency: load})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Run: err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	// A table of the same DB is no engine type: the refusal lets the API
+	// pipeline's generators run on an API that imports one.
+	cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI, Outputs: map[string]any{"types": goTypes},
+		Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
+	if err := refuseImportedEngineTypesOf(t, api(importType("Agent")), cfg, load); err != nil {
+		t.Fatalf("an imported table: %v", err)
+	}
+}
+
+// The server generator refuses a server that serves an API which uses an
+// engine type, naming the stack, the server and the API (D58).
+func TestServerGeneratorRefusesAnAPIThatUsesAnEngineType(t *testing.T) {
+	deps := map[string]*ir.Schema{"desk-db": engineDB()}
+	load := func(name string) (*ir.Schema, error) {
+		if dep := deps[name]; dep != nil {
+			return dep, nil
+		}
+		return nil, errors.New("no such service")
+	}
+	reg := CoreRegistry(naming.Default())
+	cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI,
+		Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
+	for name, want := range map[string]string{
+		"Ticket": "generator: server does not render engine types yet: stack desk: server web serves desk-api, and desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)",
+		"Agent":  "",
+	} {
+		api := ir.NewSchema("desk-api", ir.SchemaKindAPI)
+		api.Imports = []ir.Import{{Package: "@schemas/desk-db", Types: []string{name}}}
+		served, _ := newRun(api, cfg, &registry.Outputs{}, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
+		err := served.refuseServedEngineTypes("desk", "web")
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Errorf("%s: err = %v, want %q", name, err, want)
+		}
+	}
+}
+
+// refuseImportedEngineTypesOf runs the refusal alone, as runPipeline does
+// with the API pipeline's generators enabled.
+func refuseImportedEngineTypesOf(t *testing.T, schema *ir.Schema, cfg *schemaconfig.SchemaConfig, load func(string) (*ir.Schema, error)) error {
+	t.Helper()
+	reg := CoreRegistry(naming.Default())
+	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := newRun(schema, cfg, outputs, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
+	return r.refuseImportedEngineTypes(reg.Pipeline(string(ir.SchemaKindAPI)))
 }

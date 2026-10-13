@@ -575,7 +575,30 @@ func (r run) servedRun(stackName, server, service string) (run, error) {
 	opts := r.Options
 	opts.Stage = registry.StageAll
 	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
+	if err := served.refuseServedEngineTypes(stackName, server); err != nil {
+		return run{}, err
+	}
 	return served, nil
+}
+
+// refuseServedEngineTypes fails when the API a server serves uses an engine
+// type of a DB service, a type that composes a behavior: the generated
+// servers do not open the engine yet (D58). A dependency the build cannot
+// load is left to the API's generators, which report it.
+func (r run) refuseServedEngineTypes(stackName, server string) error {
+	used := usedDependencyTypes(r.Schema)
+	if len(used) == 0 {
+		return nil
+	}
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return nil
+	}
+	if use, found := findEngineType(used, deps); found {
+		return fmt.Errorf("generator: %s does not render engine types yet: stack %s: server %s serves %s, and %s %s, which composes behavior %s (D58)",
+			serverGenerator, stackName, server, r.Config.Name, use.how, use.qualified(), use.behavior)
+	}
+	return nil
 }
 
 // implementation finds the implementation of service: its package at the
