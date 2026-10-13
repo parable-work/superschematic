@@ -747,7 +747,7 @@ jobs:
           uv run --python 3.9 --isolated pytest -q
 
   rust:
-    name: rust (http and schema runtime crates)
+    name: rust (http and schema runtime crates, and the engine's schema reader)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -768,6 +768,21 @@ jobs:
           workspaces: |
             runtime/http/rust
             runtime/schema/rust
+            runtime/schema/rust-ir
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Check out the superscalar sources
+        # The engine's schema reader (runtime/schema/rust-ir) depends on
+        # superscalar's core by path ([paths] scalar_rust). Nothing of
+        # superscalar is built here but that crate.
+        run: scripts/superscalar-dep.sh --checkout
 
       # superscalar's default lossless-json feature turns on serde_json's
       # arbitrary_precision and preserve_order, and Cargo unifies them into
@@ -796,6 +811,20 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+
+      # The engine's schema reader links superscalar's core, which keeps
+      # preserve_order on; it runs with its schemafile feature and without,
+      # and again with arbitrary_precision.
+      - name: engine schema reader fmt / clippy / test (every vector of both corpora)
+        working-directory: runtime/schema/rust-ir
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings
+          cargo test
+          cargo test --all-features
+          cargo test --all-features --features serde_json/arbitrary_precision
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)

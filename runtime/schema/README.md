@@ -5,20 +5,26 @@ documents (the IR that `superschematic build` emits) in Go, TypeScript and
 Python. It is the compiler's runtime, not scalar behaviour: it calls the
 scalar functions in superscalar and adds nothing to them. The Rust crate is
 narrower: it reads no IR, and holds only what the validators in a generated
-Rust types crate share (see [`rust/README.md`](rust/README.md)).
+Rust types crate share (see [`rust/README.md`](rust/README.md)). The
+behavior engine's Rust schema reader is a crate of its own beside it,
+unpublished: the IR reader with validation and parse and the strict
+schema-file loader, ported from the TypeScript runtime (D58; see
+[`rust-ir/README.md`](rust-ir/README.md)).
 
 ```
 go/          github.com/parable-work/superschematic/runtime/schema/go: ir, parse, validate, mask, merge, serialize
 typescript/  @superschematic/schema-runtime: JSON/YAML reader and writer, IR reader, strict schema-file loader, parse, validate, mask, merge
 python/      superschematic-schema-runtime: JSON/YAML reader, parse, validate, mask, merge, serialize
 rust/        superschematic-schema-runtime: the helpers the generated Rust validators call
+rust-ir/     superschematic-schema-ir (unpublished): the engine's IR reader, parse, validate and strict schema-file loader
 testdata/    fixtures the runtime suites share
 ```
 
 `testdata/validation_parity.json` is the validation corpus every runtime
 asserts: the matrix schema's IR and one vector table with the expected
 verdicts, the same table the generated Go, TypeScript, Python and Rust
-validators run in `internal/generator/parity`. That package writes it
+validators run in `internal/generator/parity`, and the engine's Rust schema
+reader runs through its IR reader. That package writes it
 (`go test ./internal/generator/parity -update`); the TypeScript suite keeps
 `testdata/validation_parity.document.json`, the schema JSON form the Python
 runtime reads, equal to it (`UPDATE_PARITY_DOCUMENT=1 bun run test`).
@@ -31,8 +37,8 @@ the rest against a registry with its own kind, extension decorators,
 documents, invocation policy and behaviors, whose meta-schema is
 `testdata/schema_file_parity.meta-schema.json`. `internal/loader/schemafile`
 writes both (`go test ./internal/loader/schemafile -run
-TestSchemaFileParityCorpus -update`), and the TypeScript suite asserts
-every row.
+TestSchemaFileParityCorpus -update`), and the TypeScript suite and the
+engine's Rust schema reader assert every row.
 
 ## Schema-file loader (TypeScript)
 
@@ -118,15 +124,19 @@ library free of schema knowledge.
 
 The Go runtime reads `scalars.ScalarMetadataByCanonical` from
 `github.com/parable-work/superscalar/go` at run time. The TypeScript and
-Python runtimes cannot import Go, so the same rows are written out once and
-committed:
+Python runtimes and the engine's Rust schema reader cannot import Go, so
+the same rows are written out once and committed:
 
 ```
 typescript/src/runtime/builtin-scalars.generated.ts
 python/superschematic_schema_runtime/_generated_default_registry.py
+rust-ir/src/builtin_scalars.json
 ```
 
-Regenerate both from the repository root after moving `superscalar.pin`:
+The Rust catalog is JSON holding the TypeScript catalog's rows and value
+classes, which the Rust IR reader reads as it reads an IR document's
+scalars. Regenerate all three from the repository root after moving
+`superscalar.pin`:
 
 ```
 go run ./internal/tools/scalarcatalog
@@ -139,19 +149,22 @@ although the row says `String`:
 
 - A scalar whose mapping is `any` (`Generic.JSON`) holds any JSON value
   but null. Each runtime keys that off the mapping
-  (`ir.ScalarDef.IsAnyJSON`, `isAnyJSONScalar`, `ScalarDef.is_any_json`),
+  (`ir.ScalarDef.IsAnyJSON`, `isAnyJSONScalar`, `ScalarDef.is_any_json`,
+  and the Rust reader's `is_any_json_scalar`),
   passes the value through parse, and validates only that it is a JSON
   value. A null or missing required one is `required`.
 - A scalar whose mapping is `object` or `array` (`Generic.StringMap`,
   `Geo.Location`, `Embedding.Vector`) holds that JSON object or array, or
   its JSON text (`ir.ScalarDef.StructuredJSONType`, `structuredJSONType`,
-  `ScalarDef.structured_json_type`). Parse reads the text into the object
-  or array; validation refuses any other JSON type as `type` and hands the
-  scalar core the value's JSON text, which names what it refuses its own
-  way (`pattern` in the Go runtime, the core's name in the TypeScript
-  runtime, `custom` in the Python runtime, whose registries read a scalar's
-  flat name as its canonical one). An empty string is no value. A scalar
-  that also has a pattern or a length keeps the `String` checks.
+  `ScalarDef.structured_json_type`, and the Rust reader's
+  `structured_json_type`). Parse reads the text into the object or array;
+  validation refuses any other JSON type as `type` and hands the scalar
+  core the value's JSON text, which names what it refuses its own way
+  (`pattern` in the Go runtime, the core's name in the TypeScript runtime
+  and the Rust reader, `custom` in the Python runtime, whose registries
+  read a scalar's flat name as its canonical one). An empty string is no
+  value. A scalar that also has a pattern or a length keeps the `String`
+  checks.
 
 The TypeScript catalog also exports `BUILTIN_SCALAR_VALUE_CLASSES`, keyed
 as `BUILTIN_SCALARS` is: the value class (D19) the graph descriptor gives
@@ -174,10 +187,13 @@ nothing to carry a class on.
 napi addon and TypeScript output. The TypeScript package symlinks that
 checkout and `ir/typescript` into its `node_modules`
 (`scripts/link-local-deps.mjs`); the Python package points `uv` at the
-checkout through `[tool.uv.sources]`.
+checkout through `[tool.uv.sources]`; the engine's Rust schema reader
+depends on its `crates/core` by path, for which
+`scripts/superscalar-dep.sh --checkout` is enough.
 
 ```
 cd runtime/schema/go && go test ./...
 cd runtime/schema/typescript && bun install && bun run build && bun run test
 cd runtime/schema/python && uv sync --group dev && uv run pytest
+cd runtime/schema/rust-ir && cargo test --all-features
 ```
