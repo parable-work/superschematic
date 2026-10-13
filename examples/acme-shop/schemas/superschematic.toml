@@ -32,6 +32,14 @@ versiongraph_go = "../../runtime/versiongraph/go"
 # runtime modules above as well as this example.
 build_context = "../.."
 
+# Where each API's implementation lives, relative to the parent of the
+# schemas root. Go and TypeScript keep their defaults (go/{service},
+# typescript/{service}); rust/ is the shop-orders client crate, so the Rust
+# implementations, shop-stock's, live beside it in rust-impl/ instead of
+# inside it.
+[implementation_paths]
+rust = "rust-impl/{service}"
+
 # The Topcoat extension's table, read only by a binary that links it
 # (extensions/topcoat's superschematic-topcoat): shop-orders gets the crate
 # the Topcoat app in topcoat/ depends on, when its server is built in Rust.

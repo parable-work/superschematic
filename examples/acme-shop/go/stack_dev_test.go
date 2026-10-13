@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,9 +19,11 @@ import (
 	apisdk "example.com/acme/sdk/go/shop-api"
 	"example.com/acme/sdk/go/shop-api/namespaces"
 	orderssdk "example.com/acme/sdk/go/shop-orders"
+	stocksdk "example.com/acme/sdk/go/shop-stock"
 	apitypes "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
 	orderstypes "example.com/acme/types/go/shop-orders"
+	stocktypes "example.com/acme/types/go/shop-stock"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
@@ -32,21 +35,28 @@ import (
 // does: Postgres in a container with shop-db migrated; fake-gcs-server in a
 // container with shop-media, the bucket shop-api lists (D54); shop-api and
 // shop-orders each on its generated Go entrypoint, built with the
-// implementations in go/shop-api and go/shop-orders; and shop-storefront on
-// its generated TypeScript entrypoint, which Bun runs with the
-// implementation in typescript/shop-storefront (D51). Every connection
-// string, URL and port the test uses comes from the environment the build
-// resolved. The test waits for each server's /readyz, creates a user in
-// shop-db with the identity runtime's store, as staff would through the
-// administration routes, signs them in through shop-api's generated login,
-// calls each Go API through its generated Go SDK with the session and the
+// implementations in go/shop-api and go/shop-orders; shop-stock on its
+// generated Rust entrypoint, which cargo builds with the implementation in
+// rust-impl/shop-stock (D57); and shop-storefront on its generated
+// TypeScript entrypoint, which Bun runs with the implementation in
+// typescript/shop-storefront (D51). Every connection string, URL and port
+// the test uses comes from the environment the build resolved. The test
+// waits for each server's /readyz, creates a user in shop-db with the
+// identity runtime's store, as staff would through the administration
+// routes, signs them in through shop-api's generated login, calls each Go
+// and Rust API through its generated Go SDK with the session and the
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
-// would, and reads back from shop-media. PlaceOrder enqueues an
-// OrderPlaced message on shop-db's queue in the order's transaction, and
-// shop-orders' worker FulfilOrders, a process of its own on its generated
-// entrypoint with the implementation's NewWorkers, claims it and fulfils
-// the order (section 8.8, D53). It reads the static site shop-web, which
+// would, and reads back from shop-media. Anyone lists shop-stock's stock,
+// and staff set the product's level. PlaceOrder reserves the order's stock
+// on shop-stock through its Go SDK, which sends shop-orders' service
+// credential and forwards the shopper, and an order beyond the stock is
+// refused 409; a reservation with the shopper's session and no service
+// credential is refused 401. PlaceOrder enqueues an OrderPlaced message on
+// shop-db's queue in the order's transaction, and shop-orders' worker
+// FulfilOrders, a process of its own on its generated entrypoint with the
+// implementation's NewWorkers, claims it and fulfils the order (section
+// 8.8, D53). It reads the static site shop-web, which
 // stack dev built and serves with its config, and asks shop-api, as a
 // browser would, whether the site's origin may call it, and another origin
 // (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
@@ -57,8 +67,9 @@ import (
 // with --remove-data removes the containers.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
-// SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary, or
-// without Docker, the test skips.
+// SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
+// without Docker, or without cargo, which builds shop-stock's server, the
+// test skips.
 func TestStackDevRunsTheShop(t *testing.T) {
 	binary := os.Getenv("ACME_SHOP_SUPERSCHEMATIC")
 	if binary == "" {
@@ -67,27 +78,21 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skipf("Docker is not available: %v", err)
 	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo is not available to build shop-stock's Rust server")
+	}
 
-	// The build goes to an output root of the test's own, so schemas/dist,
-	// which scripts/check.sh compares with testdata/generated/, is left as
-	// build-all wrote it.
-	outputRoot := t.TempDir()
-	// stack dev installs the Bun workspace of that output root, whose
-	// members include the packages in typescript/, which the install links
-	// to it. Installing schemas/dist's workspace again links them back,
-	// frozen to its committed lockfile, which it leaves as it is.
-	t.Cleanup(func() {
-		if _, err := os.Stat(filepath.Join("..", "schemas", "dist", "package.json")); err != nil {
-			return
-		}
-		install := exec.Command("bun", "install", "--frozen-lockfile")
-		install.Dir = filepath.Join("..", "schemas", "dist")
-		if out, err := install.CombinedOutput(); err != nil {
-			t.Errorf("link typescript/ back to schemas/dist: %v\n%s", err, out)
-		}
-	})
+	// stack dev builds into the example's output root, schemas/dist, as the
+	// tutorial's does, which build-all has just written: its build writes
+	// the same files again, and its install of the Bun workspace there
+	// leaves the committed bun.lock as it is. Only there does shop-stock's
+	// server build: the Cargo.toml of its implementation names the API
+	// crate by its path under schemas/dist, as the scaffold wrote it, so a
+	// server crate in another output root would reach a second crate of
+	// that name. It builds frozen to the committed Cargo.lock.
+	outputRoot := filepath.Join("..", "schemas", "dist")
 	output := &lockedBuffer{}
-	stack := exec.Command(binary, "stack", "dev", "--remove-data", "--out", outputRoot)
+	stack := exec.Command(binary, "stack", "dev", "--remove-data")
 	stack.Dir = ".."
 	stack.Stdout, stack.Stderr = output, output
 	if err := stack.Start(); err != nil {
@@ -115,8 +120,11 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	})
 
-	// stack dev prints the summary once every server answers /readyz.
-	deadline := time.Now().Add(5 * time.Minute)
+	// stack dev prints the summary once every server answers /readyz. Its
+	// first run compiles every crate shop-stock's server builds with; later
+	// runs reuse them from the environment's Cargo target directory under
+	// schemas/dist, until the output root is emptied.
+	deadline := time.Now().Add(10 * time.Minute)
 	for !strings.Contains(output.String(), "is running:") {
 		select {
 		case err := <-exited:
@@ -125,14 +133,14 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the stack did not come up in 5 minutes")
+			t.Fatal("the stack did not come up in 10 minutes")
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 
 	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
 	containers = env.containers
-	for _, server := range []string{"shop-api", "shop-orders", "shop-storefront"} {
+	for _, server := range []string{"shop-api", "shop-orders", "shop-stock", "shop-storefront"} {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
 		}
@@ -206,8 +214,35 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
 
+	// shop-stock, on its Rust server (D57): anyone reads the stock, which
+	// holds none of the new product, and is refused setting it; staff, who
+	// hold stock.write, set the product's level to three, and anyone sees it.
+	anyone, err := stocksdk.New(stocksdk.SDKConfig{BaseURL: env.servers["shop-stock"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 0 {
+		t.Fatalf("GetStock of a product never stocked = %+v, %v; want none", level, err)
+	}
+	_, err = anyone.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3})
+	var unauthenticated *stocksdk.AuthenticationError
+	if !errors.As(err, &unauthenticated) {
+		t.Fatalf("SetStock without a session: %v", err)
+	}
+	staff, err := stocksdk.New(stocksdk.SDKConfig{BaseURL: env.servers["shop-stock"], Auth: &stocksdk.AuthConfig{Token: token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3}); err != nil || level.Quantity != 3 {
+		t.Fatalf("SetStock = %+v, %v", level, err)
+	}
+	stock, err := anyone.StockNamespace.ListStock(ctx)
+	if err != nil || stockOf(stock, product.Id) != 3 {
+		t.Fatalf("ListStock = %+v, %v; want three of %s", stock, err, product.Id)
+	}
+
 	// shop-orders: a shopper orders two of it, in one transaction over
-	// the order and its lines.
+	// the order and its lines, which reserves them on shop-stock.
 	orders, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
 	if err != nil {
 		t.Fatal(err)
@@ -221,6 +256,36 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if order.Status != orderstypes.OrderStatus_Placed || order.TotalCents != 900 || len(order.Lines) != 1 {
 		t.Fatalf("PlaceOrder returned %+v", order)
+	}
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 1 {
+		t.Fatalf("after the order, GetStock = %+v, %v; want one left", level, err)
+	}
+	// shop-stock logged the reservation, for shop-orders' server and the
+	// shopper it forwarded.
+	for _, want := range []string{"[shop-stock] ", `"msg":"reserved stock"`, `"caller":"shop-orders"`, `"api":"shop-stock"`} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("stack dev printed no %q", want)
+		}
+	}
+
+	// An order beyond the stock is refused with shop-stock's reason, and
+	// reserves nothing.
+	_, err = orders.OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
+		Lines:           []orderstypes.PlaceOrderLine{{ProductId: product.Id, Quantity: 2}},
+		ShippingAddress: address,
+	})
+	var refused *orderssdk.APIError
+	if !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict || !strings.Contains(refused.Message, "the warehouse holds 1 of product") {
+		t.Fatalf("PlaceOrder beyond the stock: %v, want 409", err)
+	}
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 1 {
+		t.Fatalf("after the refused order, GetStock = %+v, %v; want one left", level, err)
+	}
+	// Only shop-orders' server reserves: the shopper's session alone, with
+	// no service credential, is refused.
+	reservation := fmt.Sprintf(`{"lines": [{"productId": %q, "quantity": 1}]}`, product.Id.String())
+	if status, body := call(t, http.MethodPost, env.servers["shop-stock"]+"/api/stock/reservations", token, reservation); status != http.StatusUnauthorized || !strings.Contains(string(body), "service_unauthorized") {
+		t.Fatalf("a reservation without a service credential: %d %s, want 401", status, body)
 	}
 
 	// shop-orders' worker FulfilOrders claims the OrderPlaced message
@@ -300,7 +365,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// shop-orders' job ShipOrders ships every fulfilled order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
-	run := runJob(t, binary, outputRoot)
+	run := runJob(t, binary)
 	for _, want := range []string{
 		"job " + shipOrders + ": start the run stack run asked for, try 1 of 2",
 		"job " + shipOrders + ": the run stack run asked for, try 1 of 2 succeeded",
@@ -327,6 +392,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("PlaceOrder: %v", err)
 	}
 	waitForStatus(ctx, t, orders, next.Id, orderstypes.OrderStatus_Shipped, 3*time.Minute)
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 0 {
+		t.Fatalf("after the last order, GetStock = %+v, %v; want none left", level, err)
+	}
 	for _, want := range []string{"job " + shipOrders + ": start the run due at ", "[" + shipOrders + "] "} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("stack dev printed no %q", want)
@@ -387,10 +455,10 @@ func waitForStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrde
 // the example's directory as a person would, and returns what it printed.
 // A run from stack dev's every-minute schedule may hold the job while it
 // goes on; then stack run refuses, and runJob tries again.
-func runJob(t *testing.T, binary, outputRoot string) string {
+func runJob(t *testing.T, binary string) string {
 	t.Helper()
 	for try := 1; ; try++ {
-		cmd := exec.Command(binary, "stack", "run", "Dev", shipOrders, "--out", outputRoot)
+		cmd := exec.Command(binary, "stack", "run", "Dev", shipOrders)
 		cmd.Dir = ".."
 		out, err := cmd.CombinedOutput()
 		if err == nil {
@@ -478,7 +546,7 @@ func readEnvironment(t *testing.T, path string) environment {
 }
 
 // signInOnTheStack creates a user in shop-db with a role that holds
-// products and orders, through the identity runtime's store over the
+// products, orders and stock, through the identity runtime's store over the
 // database, as staff would through shop-api's administration routes; signs
 // them in through shop-api's generated login with a bearer session, and
 // returns its token. It also signs in with a cookie session, which the
@@ -505,7 +573,7 @@ func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI st
 	if err != nil {
 		t.Fatalf("create the user: %v", err)
 	}
-	role, err := store.CreateRole(ctx, fmt.Sprintf("staff-%d", n), []string{"products", "orders"})
+	role, err := store.CreateRole(ctx, fmt.Sprintf("staff-%d", n), []string{"products", "orders", "stock"})
 	if err != nil {
 		t.Fatalf("create the role: %v", err)
 	}
@@ -538,6 +606,17 @@ func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI st
 		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
 	}
 	return result.Token
+}
+
+// stockOf is how many units of the product stock lists, or -1 when it
+// lists none.
+func stockOf(stock []stocktypes.StockView, id apitypes.IdentityUUID) stocktypes.GenericInt64 {
+	for _, level := range stock {
+		if level.ProductId == id {
+			return level.Quantity
+		}
+	}
+	return -1
 }
 
 func containsProduct(products []apitypes.ProductView, id apitypes.IdentityUUID) bool {
