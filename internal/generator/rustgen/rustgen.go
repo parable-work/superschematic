@@ -19,9 +19,11 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -256,6 +258,11 @@ type ModuleOutput struct {
 	// relative to the output directory, set by SetSchemaRuntimePath. Empty
 	// names the crate's version instead.
 	SchemaRuntimeDepPath string
+
+	// Behaviors are the types that compose behaviors, each with its
+	// <T>Behaviors and the structs and enums its behaviors' fields hold
+	// (D58), written as src/behaviors.rs. Nil when no type composes one.
+	Behaviors []behaviortypes.Type
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -281,6 +288,11 @@ type Options struct {
 	// Naming supplies the crate prefix and the scalar crate coordinates.
 	// Empty fields fall back to naming.Default().
 	Naming naming.Naming
+
+	// Registry declares the behaviors the schema's types compose, whose
+	// fields src/behaviors.rs types; a schema that composes none needs
+	// none.
+	Registry *registry.Registry
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -397,6 +409,12 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
+		return nil, err
+	}
+	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
+	}
+	if err := checkBehaviorNames(output.Behaviors); err != nil {
 		return nil, err
 	}
 	output.UsesHashMap = hasMapFields(output.Types)
@@ -1020,6 +1038,10 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	}
 	// The validators read and parse serde_json values.
 	if output.Validators != nil {
+		crateNames["serde_json"] = struct{}{}
+	}
+	// A behavior's field of any JSON is a serde_json::Value.
+	if behaviortypes.UsesKind(output.Behaviors, behaviortypes.KindJSON) {
 		crateNames["serde_json"] = struct{}{}
 	}
 

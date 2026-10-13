@@ -376,6 +376,7 @@ func (r run) generateRustTypes() error {
 		Dependencies:     deps,
 		DependencyCrates: depCrates,
 		Naming:           r.Options.Naming,
+		Registry:         r.Registry,
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {
