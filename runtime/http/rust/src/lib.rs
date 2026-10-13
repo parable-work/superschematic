@@ -32,6 +32,8 @@ pub mod postgres;
 mod ratelimit;
 mod request_id;
 mod response;
+// The words, LIKE patterns and case folding of a SearchQuery (D62).
+pub mod search;
 mod service_auth;
 // The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;

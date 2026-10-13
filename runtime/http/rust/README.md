@@ -93,6 +93,14 @@ and TypeScript runtimes' (D51):
   router answers the origins its identity config trusts (D55, amended).
   `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`
   holds the three runtimes to; `tests/cors_parity.rs` runs every vector.
+- `search`, with no feature: what an implementation needs to answer a
+  `SearchQuery` argument (D62), the twin of Go's `search` package and
+  TypeScript's `searchTerms`. `search::terms(q)` is the text's words (runs
+  of non-`White_Space`, the first 8), `search::like_pattern(word)` the
+  value of one `search_text LIKE ? ESCAPE '\'` condition (`ILIKE` on
+  Postgres), and `search::matches(text, &terms)` an in-memory match, by
+  `search::fold`, each character's simple lowercase.
+  `tests/search_parity.rs` runs `runtime/http/testdata/search_parity.json`.
 - The `postgres` feature's `postgres` module: `connect(&Database)` opens a
   `deadpool-postgres` pool, which connects when first used, and
   `ping(&Pool)` is the `SELECT 1` a server's `/readyz` makes. A URL
