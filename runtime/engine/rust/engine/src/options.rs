@@ -82,6 +82,30 @@ impl EngineOptions {
             )));
         }
         let member = |key: &str| members.get(key).filter(|value| !value.is_null());
+        // In the order the TypeScript engine checks its options, the
+        // storage's last.
+        let policy = member("policy").map(Policy::from_json).transpose()?;
+        let namespaces = member("namespaces")
+            .map(NamespaceOptions::from_json)
+            .transpose()?;
+        let tools = member("tools").map(ToolOptions::from_json).transpose()?;
+        let meta_schema = match member("metaSchema") {
+            None => None,
+            Some(Value::String(text)) => Some(MetaSchema::Text(text.clone())),
+            Some(document @ Value::Object(_)) => Some(MetaSchema::Document(document.clone())),
+            Some(_) => {
+                return Err(Error::usage(
+                    "metaSchema is the meta-schema's document, parsed or as JSON text",
+                ))
+            }
+        };
+        let runner = member("runner").map(RunnerOptions::from_json).transpose()?;
+        let values = member("values").map(ValueOptions::from_json).transpose()?;
+        let retention = member("retention")
+            .map(RetentionOptions::from_json)
+            .transpose()?;
+        let ids = member("ids").map(ids_of).transpose()?;
+        let clock = member("clock").map(clock_of).transpose()?;
         let busy_timeout = match member("busyTimeoutMs") {
             None => None,
             Some(given) => Some(
@@ -99,40 +123,24 @@ impl EngineOptions {
         };
         let storage = storage_of(member("path"), member("postgres"), busy_timeout)?;
         let mut options = EngineOptions::new(storage);
-        options.policy = match member("policy") {
-            None => None,
-            Some(policy) => Some(Policy::from_json(policy)?),
-        };
-        if let Some(namespaces) = member("namespaces") {
-            options.namespaces = namespaces_of(namespaces)?;
+        options.policy = policy;
+        options.meta_schema = meta_schema;
+        options.runner = runner;
+        options.retention = retention;
+        if let Some(namespaces) = namespaces {
+            options.namespaces = namespaces;
         }
-        if let Some(ids) = member("ids") {
-            options.ids = ids_of(ids)?;
+        if let Some(tools) = tools {
+            options.tools = tools;
         }
-        if let Some(clock) = member("clock") {
-            options.clock = clock_of(clock)?;
+        if let Some(values) = values {
+            options.values = values;
         }
-        options.meta_schema = match member("metaSchema") {
-            None => None,
-            Some(Value::String(text)) => Some(MetaSchema::Text(text.clone())),
-            Some(document @ Value::Object(_)) => Some(MetaSchema::Document(document.clone())),
-            Some(_) => {
-                return Err(Error::usage(
-                    "metaSchema is the meta-schema's document, parsed or as JSON text",
-                ))
-            }
-        };
-        if let Some(values) = member("values") {
-            options.values = values_of(values)?;
+        if let Some(ids) = ids {
+            options.ids = ids;
         }
-        if let Some(runner) = member("runner") {
-            options.runner = Some(RunnerOptions::from_json(runner)?);
-        }
-        if let Some(retention) = member("retention") {
-            options.retention = Some(RetentionOptions::from_json(retention)?);
-        }
-        if let Some(tools) = member("tools") {
-            options.tools = ToolOptions::from_json(tools)?;
+        if let Some(clock) = clock {
+            options.clock = clock;
         }
         Ok(options)
     }
@@ -265,26 +273,29 @@ fn postgres_storage(_given: &Value, _busy_timeout: Option<std::time::Duration>) 
     ))
 }
 
-// namespaces_of reads `{ names?, shared? }`; a name that is no namespace
-// name is refused when the engine opens, in the TypeScript engine's words.
-fn namespaces_of(given: &Value) -> Result<NamespaceOptions> {
-    let Value::Object(members) = given else {
-        return Err(Error::usage("namespaces is { names?, shared? }"));
-    };
-    let names = match members.get("names") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(names)) => names.iter().map(js_string).collect(),
-        Some(_) => {
-            return Err(Error::usage(
-                "namespaces.names is a list of namespace names",
-            ))
-        }
-    };
-    let shared = match members.get("shared") {
-        None | Some(Value::Null) => None,
-        Some(shared) => Some(js_string(shared)),
-    };
-    Ok(NamespaceOptions { names, shared })
+impl NamespaceOptions {
+    /// Reads `{ names?, shared? }`, the `namespaces` member of an engine's
+    /// options; a name that is no namespace name is refused when the
+    /// engine opens, in the TypeScript engine's words.
+    pub fn from_json(given: &Value) -> Result<NamespaceOptions> {
+        let Value::Object(members) = given else {
+            return Err(Error::usage("namespaces is { names?, shared? }"));
+        };
+        let names = match members.get("names") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(names)) => names.iter().map(js_string).collect(),
+            Some(_) => {
+                return Err(Error::usage(
+                    "namespaces.names is a list of namespace names",
+                ))
+            }
+        };
+        let shared = match members.get("shared") {
+            None | Some(Value::Null) => None,
+            Some(shared) => Some(js_string(shared)),
+        };
+        Ok(NamespaceOptions { names, shared })
+    }
 }
 
 fn ids_of(given: &Value) -> Result<Ids> {
@@ -328,59 +339,63 @@ fn clock_of(given: &Value) -> Result<Clock> {
     }
 }
 
-// values_of reads the value store's options, refusing a member that is no
-// integer as the TypeScript engine's checkValueOptions does; the engine
-// checks the ranges when it opens. A driver is code, which a deployment
-// compiles into its engine (ValueDriver).
-fn values_of(given: &Value) -> Result<ValueOptions> {
-    let Value::Object(members) = given else {
-        return Err(Error::usage(
-            "values is { thresholdBytes?, cacheBytes?, maxBytes? }",
-        ));
-    };
-    if members
-        .get("driver")
-        .is_some_and(|driver| !driver.is_null())
-    {
-        return Err(Error::usage(
-            "values.driver is a Rust ValueDriver compiled into the engine; a binding passes none",
-        ));
+impl ValueOptions {
+    /// Reads the value store's options, the `values` member of an engine's
+    /// options (`{ thresholdBytes?, cacheBytes?, maxBytes? }`), refusing a
+    /// member that is no integer as the TypeScript engine's
+    /// checkValueOptions does; the engine checks the ranges when it opens.
+    /// A driver is code, which a deployment compiles into its engine
+    /// ([`crate::ValueDriver`]).
+    pub fn from_json(given: &Value) -> Result<ValueOptions> {
+        let Value::Object(members) = given else {
+            return Err(Error::usage(
+                "values is { thresholdBytes?, cacheBytes?, maxBytes? }",
+            ));
+        };
+        if members
+            .get("driver")
+            .is_some_and(|driver| !driver.is_null())
+        {
+            return Err(Error::usage(
+                "values.driver is a Rust ValueDriver compiled into the engine; a binding passes none",
+            ));
+        }
+        let member = |key: &str| members.get(key).filter(|value| !value.is_null());
+        let threshold = match member("thresholdBytes") {
+            None => None,
+            Some(given) => Some(non_negative(given).ok_or_else(|| {
+                Error::usage(format!(
+                    "values.thresholdBytes is an integer of at least {MIN_VALUE_THRESHOLD}, got {}",
+                    js_string(given)
+                ))
+            })?),
+        };
+        let max_bytes = match member("maxBytes") {
+            None => None,
+            Some(given) => Some(non_negative(given).ok_or_else(|| {
+                Error::usage(format!(
+                    "values.maxBytes is an integer of at least values.thresholdBytes ({}), got {}",
+                    threshold.unwrap_or(crate::values::DEFAULT_VALUE_THRESHOLD),
+                    js_string(given)
+                ))
+            })?),
+        };
+        let cache_bytes = match member("cacheBytes") {
+            None => None,
+            Some(given) => Some(non_negative(given).ok_or_else(|| {
+                Error::usage(format!(
+                    "values.cacheBytes is a non-negative integer, got {}",
+                    js_string(given)
+                ))
+            })?),
+        };
+        Ok(ValueOptions {
+            threshold_bytes: threshold,
+            driver: None,
+            cache_bytes,
+            max_bytes,
+        })
     }
-    let member = |key: &str| members.get(key).filter(|value| !value.is_null());
-    let threshold = match member("thresholdBytes") {
-        None => None,
-        Some(given) => Some(non_negative(given).ok_or_else(|| {
-            Error::usage(format!(
-                "values.thresholdBytes is an integer of at least {MIN_VALUE_THRESHOLD}, got {}",
-                js_string(given)
-            ))
-        })?),
-    };
-    let max_bytes = match member("maxBytes") {
-        None => None,
-        Some(given) => Some(non_negative(given).ok_or_else(|| {
-            Error::usage(format!(
-                "values.maxBytes is an integer of at least values.thresholdBytes ({}), got {}",
-                threshold.unwrap_or(crate::values::DEFAULT_VALUE_THRESHOLD),
-                js_string(given)
-            ))
-        })?),
-    };
-    let cache_bytes = match member("cacheBytes") {
-        None => None,
-        Some(given) => Some(non_negative(given).ok_or_else(|| {
-            Error::usage(format!(
-                "values.cacheBytes is a non-negative integer, got {}",
-                js_string(given)
-            ))
-        })?),
-    };
-    Ok(ValueOptions {
-        threshold_bytes: threshold,
-        driver: None,
-        cache_bytes,
-        max_bytes,
-    })
 }
 
 // safe_integer is a JSON number that is a safe integer

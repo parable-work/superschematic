@@ -50,8 +50,8 @@ use serde_json::{Map, Value};
 use superschematic_engine::json::js_equal;
 use superschematic_engine::storage::{Dialect, Lock, Row, SqlValue};
 use superschematic_engine::{
-    calls, AccessPolicy, AccessRequest, Clock, Engine, EngineError, EngineErrorKind, EngineOptions,
-    Error, IdCounter, IdQueue, Ids, MetaSchema, NamespaceOptions, Policy, Principal, Storage,
+    calls, AccessPolicy, AccessRequest, Clock, Engine, EngineError, EngineOptions, Error,
+    IdCounter, IdQueue, Ids, MetaSchema, NamespaceOptions, Policy, Principal, Storage,
     ValueOptions, SCENARIO_SEED,
 };
 
@@ -684,24 +684,12 @@ impl<'d> Run<'d> {
                 ))))
             }
         };
-        if let Some(Value::Object(namespaces)) = given.get("namespaces") {
-            options.namespaces = NamespaceOptions {
-                names: namespaces
-                    .get("names")
-                    .and_then(Value::as_array)
-                    .map(|names| {
-                        names
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                shared: namespaces
-                    .get("shared")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            };
+        // What a binding passes as it is, read as the engine reads a
+        // binding's options (EngineOptions::from_json): the namespaces and,
+        // below, the runner, retention, tools and value store.
+        if let Some(namespaces) = given.get("namespaces") {
+            options.namespaces =
+                NamespaceOptions::from_json(namespaces).map_err(|error| error_json(&error))?;
         }
         let mut queue = None;
         options.ids = match given.get("ids").and_then(Value::as_str) {
@@ -744,29 +732,25 @@ impl<'d> Run<'d> {
                 options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
             }
         }
+        // In the order the TypeScript engine checks them.
+        if let Some(tools) = given.get("tools") {
+            options.tools = superschematic_engine::ToolOptions::from_json(tools)
+                .map_err(|error| error_json(&error))?;
+        }
         if let Some(runner) = given.get("runner") {
             options.runner = Some(
                 superschematic_engine::RunnerOptions::from_json(runner)
                     .map_err(|error| error_json(&error))?,
             );
         }
+        if let Some(values) = given.get("values") {
+            options.values = ValueOptions::from_json(values).map_err(|error| error_json(&error))?;
+        }
         if let Some(retention) = given.get("retention") {
             options.retention = Some(
                 superschematic_engine::RetentionOptions::from_json(retention)
                     .map_err(|error| error_json(&error))?,
             );
-        }
-        if let Some(tools) = given.get("tools") {
-            options.tools = superschematic_engine::ToolOptions::from_json(tools)
-                .map_err(|error| error_json(&error))?;
-        }
-        if let Some(Value::Object(values)) = given.get("values") {
-            options.values = ValueOptions {
-                threshold_bytes: values.get("thresholdBytes").and_then(Value::as_u64),
-                cache_bytes: values.get("cacheBytes").and_then(Value::as_u64),
-                max_bytes: values.get("maxBytes").and_then(Value::as_u64),
-                driver: None,
-            };
         }
         let engine = Engine::open_shared(options).map_err(|error| error_json(&error))?;
         self.engines.push((
@@ -1346,83 +1330,20 @@ pub fn open_meta_schema(repository: &Path) -> Result<Value, String> {
 }
 
 /// An error as the corpus records it: its class, its code, its message,
-/// and its other members as `details`.
+/// and its other members as `details`, as the TypeScript engine throws it
+/// ([`Error::thrown`], which the Node-API addon throws too).
 pub fn error_json(error: &Error) -> Value {
+    let thrown = error.thrown();
     let mut out = Map::new();
-    match error {
-        Error::Engine(refusal) => {
-            out.insert("class".into(), Value::from(refusal.name()));
-            out.insert("code".into(), Value::from(refusal.code().as_str()));
-            out.insert("message".into(), Value::from(refusal.message()));
-            if let Some(details) = recorded_details(refusal) {
-                out.insert("details".into(), details);
-            }
-        }
-        Error::Behavior(defect) => {
-            out.insert("class".into(), Value::from("BehaviorError"));
-            out.insert("message".into(), Value::from(defect.to_string()));
-            let mut details = Map::new();
-            details.insert("behavior".into(), Value::from(defect.behavior.as_str()));
-            out.insert("details".into(), Value::Object(details));
-        }
-        Error::Usage(message) => {
-            out.insert("class".into(), Value::from("TypeError"));
-            out.insert("message".into(), Value::from(message.as_str()));
-        }
-        Error::Config(message) => {
-            out.insert("class".into(), Value::from("BehaviorConfigError"));
-            out.insert("message".into(), Value::from(message.as_str()));
-        }
-        Error::Storage(failure) => {
-            match failure.sqlite_code() {
-                Some(code) => {
-                    out.insert("class".into(), Value::from("SqliteError"));
-                    out.insert("code".into(), Value::from(code));
-                }
-                None => {
-                    out.insert("class".into(), Value::from("Error"));
-                }
-            }
-            out.insert("message".into(), Value::from(failure.to_string()));
-        }
-        other => {
-            out.insert("class".into(), Value::from("Error"));
-            out.insert("message".into(), Value::from(other.to_string()));
-        }
+    out.insert("class".into(), Value::from(thrown.class));
+    if let Some(code) = thrown.code {
+        out.insert("code".into(), code);
+    }
+    out.insert("message".into(), Value::from(thrown.message));
+    if let Some(members) = thrown.members {
+        out.insert("details".into(), Value::Object(members));
     }
     Value::Object(out)
-}
-
-// recorded_details is what a refusal holds beyond its code and message, by
-// the TypeScript error's own members.
-fn recorded_details(refusal: &EngineError) -> Option<Value> {
-    match refusal.kind() {
-        EngineErrorKind::BehaviorVeto {
-            behavior,
-            action,
-            reason,
-            veto_code,
-            veto_details,
-        } => {
-            let mut details = Map::new();
-            details.insert("behavior".into(), Value::from(behavior.as_str()));
-            details.insert("action".into(), Value::from(action.as_str()));
-            details.insert("reason".into(), Value::from(reason.as_str()));
-            if let Some(code) = veto_code {
-                details.insert("vetoCode".into(), Value::from(code.as_str()));
-            }
-            if let Some(inner) = veto_details {
-                details.insert("vetoDetails".into(), Value::Object(inner.clone()));
-            }
-            Some(Value::Object(details))
-        }
-        EngineErrorKind::UnknownTool { tool } => {
-            let mut details = Map::new();
-            details.insert("tool".into(), Value::from(tool.as_str()));
-            Some(Value::Object(details))
-        }
-        _ => refusal.details(),
-    }
 }
 
 // storage_call runs a step's SQL on the engine's SQLite file, as the
