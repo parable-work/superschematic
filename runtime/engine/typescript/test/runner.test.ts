@@ -10,7 +10,6 @@ import { afterEach, describe, test } from 'node:test';
 import {
   EngineError,
   allowAll,
-  openEngine,
   type AccessRequest,
   type Engine,
   type EngineEvent,
@@ -18,7 +17,7 @@ import {
   type SubscriptionStatus,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, thrown, track } from './helpers.ts';
 import {
   ledger,
   ledgerDocument,
@@ -36,9 +35,9 @@ import {
   waitFor,
 } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 function notes(engine: Engine, schema: string, id: string): unknown {

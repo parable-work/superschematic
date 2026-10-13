@@ -93,14 +93,14 @@ async function listen(app: Hono): Promise<Listening> {
 const servers: Listening[] = [];
 const clients: Client[] = [];
 
-afterEach(async () => {
+afterEach(async (t) => {
   for (const client of clients.splice(0)) {
     await client.close();
   }
   for (const server of servers.splice(0)) {
     await server.close();
   }
-  cleanup();
+  cleanup(t);
 });
 
 interface Served {

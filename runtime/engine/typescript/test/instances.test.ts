@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, IncompatibleChangeError, InstanceValidationError, allowAll, openEngine, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
-import { alice, cleanup, clone, drivers, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { EngineError, IncompatibleChangeError, InstanceValidationError, allowAll, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+import { alice, cleanup, clone, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 

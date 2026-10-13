@@ -5,7 +5,6 @@
 import {
   allowAll,
   defineBehavior,
-  openEngine,
   type BehaviorDeclaration,
   type Engine,
   type EngineEvent,
@@ -16,7 +15,7 @@ import {
   type ScheduleContext,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, freshPath, schemaDocument, track } from './helpers.ts';
+import { alice, freshPath, openEngine, schemaDocument, track } from './helpers.ts';
 
 /** The principal the runner acts as in these tests. */
 export const runnerPrincipal: Principal = { subject: 'runner', permissions: [] };

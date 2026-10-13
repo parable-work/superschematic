@@ -1,6 +1,8 @@
 // Shared test setup: every test opens real SQLite files under a fresh
 // temporary directory (not :memory:, so write-ahead logging behaves as it
-// does in a deployment), and cleanup closes and removes them.
+// does in a deployment), and cleanup closes and removes them. With
+// ENGINE_RECORD set, the engines they open record the test's calls
+// (recorder.ts).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +11,7 @@ import { join } from 'node:path';
 import {
   allowAll,
   isBun,
-  openEngine,
+  openEngine as openDistEngine,
   type DriverName,
   type Engine,
   type EngineOptions,
@@ -17,6 +19,7 @@ import {
   type InstanceRecord,
   type Principal,
 } from '../dist/index.js';
+import { endCase, recordOpen, registerDirectory, type TestContextLike } from './recorder.ts';
 
 /** The principal most tests act as; openTestEngine allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
@@ -31,6 +34,7 @@ const open: Array<{ close(): void }> = [];
 export function freshPath(): string {
   const directory = mkdtempSync(join(tmpdir(), 'superschematic-engine-'));
   directories.push(directory);
+  registerDirectory(directory);
   return join(directory, 'engine.db');
 }
 
@@ -40,12 +44,25 @@ export function track<T extends { close(): void }>(item: T): T {
   return item;
 }
 
+/**
+ * openEngine is the engine's openEngine, recording the engine's calls when
+ * ENGINE_RECORD is set; tests open engines through it or openTestEngine.
+ */
+export function openEngine(options: EngineOptions): Engine {
+  return recordOpen(options, openDistEngine);
+}
+
 export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
   return track(openEngine({ path: freshPath(), policy: allowAll, ...options }));
 }
 
-/** cleanup closes what the test opened and removes its files; register it with afterEach. */
-export function cleanup(): void {
+/**
+ * cleanup closes what the test opened and removes its files; register it
+ * with afterEach, which passes the test's context, under which a
+ * recording names the test's scenario.
+ */
+export function cleanup(context?: TestContextLike): void {
+  endCase(context);
   for (const item of open.splice(0)) {
     try {
       item.close();

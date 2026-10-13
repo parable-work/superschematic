@@ -28,9 +28,9 @@ import { alice, cleanup, drivers, thrown } from './helpers.ts';
 /** What the test behaviors saw, in order. */
 const seen: Array<Record<string, unknown>> = [];
 
-afterEach(() => {
+afterEach((t) => {
   seen.length = 0;
-  cleanup();
+  cleanup(t);
 });
 
 const tagsDeclaration: BehaviorDeclaration = {

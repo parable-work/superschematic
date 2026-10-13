@@ -20,12 +20,11 @@ import {
   Storage,
   allowAll,
   appliedMigrations,
-  openEngine,
   type Engine,
   type EngineOptions,
   type SubscriptionStatus,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
 import { runnerPrincipal } from './runner-fixtures.ts';
 
 afterEach(cleanup);

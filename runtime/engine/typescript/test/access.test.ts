@@ -5,7 +5,6 @@ import { afterEach, describe, test } from 'node:test';
 
 import {
   EngineError,
-  openEngine,
   servicePrincipal,
   standsIn,
   type AccessPolicy,
@@ -14,7 +13,7 @@ import {
   type Engine,
   type Principal,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, freshPath, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 

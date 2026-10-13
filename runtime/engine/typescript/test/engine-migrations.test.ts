@@ -18,17 +18,16 @@ import {
   canonicalJSON,
   engineMigrations,
   migrate,
-  openEngine,
   type Engine,
 } from '../dist/index.js';
 import { counter, itemDocument, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { holder } from './reach-fixtures.ts';
 import { ledger, ledgerDocument, mark, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 interface Seed {

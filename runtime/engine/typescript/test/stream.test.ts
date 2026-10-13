@@ -84,14 +84,14 @@ interface Client {
 const clients: Client[] = [];
 const servers: Listening[] = [];
 
-afterEach(async () => {
+afterEach(async (t) => {
   for (const client of clients.splice(0)) {
     client.disconnect();
   }
   for (const server of servers.splice(0)) {
     await server.close();
   }
-  cleanup();
+  cleanup(t);
 });
 
 /** open connects to the stream and reads its frames as they arrive. */

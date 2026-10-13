@@ -5,13 +5,13 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, Namespaces, allowAll, openEngine, type AccessPolicy, type AccessRequest, type Engine, type Principal } from '../dist/index.js';
-import { alice, cleanup, drivers, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { EngineError, Namespaces, allowAll, type AccessPolicy, type AccessRequest, type Engine, type Principal } from '../dist/index.js';
+import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 import { ledgerDocument, mark, openRunnerEngine, plainDocument, probe, resetProbe, testClock } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 /** publish defines and publishes a document as alice, in a namespace. */
