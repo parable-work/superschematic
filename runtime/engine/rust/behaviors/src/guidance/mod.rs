@@ -7,6 +7,7 @@
 
 pub(crate) mod comments;
 pub(crate) mod constants;
+pub(crate) mod dependencies;
 pub(crate) mod links;
 pub(crate) mod revisions;
 pub(crate) mod variants;

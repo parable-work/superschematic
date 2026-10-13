@@ -11,15 +11,22 @@
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
 //!   what a test puts in its [`Probe`];
 //! - `test/core-workflow.test.ts`: [`Dispatch`];
-//! - `test/core-revisions.test.ts`: [`RevisionHold`] (its test.Hold).
+//! - `test/core-revisions.test.ts`: [`RevisionHold`] (its test.Hold);
+//! - `test/reach-fixtures.ts`: [`Reader`], which
+//!   `test/core-dependencies.test.ts` composes too;
+//! - `test/core-dependencies.test.ts`: [`Finisher`].
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
 
+mod core_dependencies;
 mod core_revisions;
+mod reach;
 
+pub use core_dependencies::Finisher;
 pub use core_revisions::RevisionHold;
+pub use reach::{Reader, ReaderConfig};
 
 use std::sync::{Arc, Mutex, PoisonError};
 

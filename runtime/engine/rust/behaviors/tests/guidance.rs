@@ -11,9 +11,9 @@ use superschematic_engine::behaviors::{BehaviorGuidance, DescribeTarget};
 use superschematic_engine::json::stringify;
 use superschematic_engine::Behavior;
 use superschematic_engine_behaviors::{
-    Comments, Constants, ConstantsConfig, LinkPin, LinkSpec, Links, LinksConfig, Revisions,
-    RevisionsConfig, RevisionsReview, Variants, VariantsConfig, Workflow, WorkflowConfig,
-    WorkflowOutcome, WorkflowTransition,
+    Comments, Constants, ConstantsConfig, Dependencies, DependenciesConfig, LinkPin, LinkSpec,
+    Links, LinksConfig, Revisions, RevisionsConfig, RevisionsReview, Variants, VariantsConfig,
+    Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
 };
 
 /// The TypeScript guidance for the configs below.
@@ -1039,6 +1039,332 @@ fn links_guidance_and_create_parameters_are_the_typescript_engines() {
         // parameters are hashed as written.
         assert_eq!(
             stringify(&create_params(&Links, &config, &task)),
+            stringify(&expected[name]["createParams"]),
+            "{name}"
+        );
+    }
+}
+
+/// Dependencies' TypeScript guidance and create parameters
+/// (`dependenciesGuidance`, `dependenciesCreateParams`) for a Task: blockers
+/// of its own schema or another's, gated on a terminal state; of another
+/// schema alone, gated on states a transition leaves; and gated on none.
+const DEPENDENCIES: &str = r#"{
+  "own": {
+    "guidance": {
+      "summary": "Each Task waits on blockers, each an instance of Task or Milestone (the instance's own schema when schema is absent). A transition into done waits until every blocker has finished: its status is a terminal state of its own Workflow whose outcome is success. blocked says whether one is open.",
+      "operations": {
+        "addBlocker": {
+          "useWhen": "Use to make an instance of Task or Milestone (the instance's own schema when schema is absent) block this one. It holds up the transition into done until it finishes.",
+          "doNotUseWhen": "Do not use at create; give the blockers in behaviors.Dependencies.blockers instead.",
+          "success": "Returns the blocker, with its status and whether it is open; blocked is true while one is.",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            },
+            {
+              "code": "gated",
+              "commonCorrection": "Add only finished blockers to an instance in a gated state no transition leaves, or none."
+            }
+          ]
+        },
+        "removeBlocker": {
+          "useWhen": "Use to stop an instance blocking this one, as when a blocker failed or was cancelled and the work goes on without it.",
+          "success": "Returns the blocker it removed; blocked is false once no open blocker is left."
+        },
+        "listBlockers": {
+          "useWhen": "Use to read the instance's blockers, each with its status and whether it is open.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "listDependents": {
+          "useWhen": "Use to read the instances this one blocks, in schemas the caller may read.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Dependencies.blockers gives the instance its blockers from the create, at most 500, each an instance of Task or Milestone (the instance's own schema when schema is absent).",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            },
+            {
+              "code": "gated",
+              "commonCorrection": "Add only finished blockers to an instance in a gated state no transition leaves, or none."
+            }
+          ]
+        },
+        "transition": {
+          "doNotUseWhen": "Do not move into done while blocked is true.",
+          "errors": [
+            {
+              "code": "blocked",
+              "description": "A move into done while a blocker is open; details.details.blockers lists the open ones.",
+              "commonCorrection": "Wait for the open blockers to finish, or remove the ones the work goes on without, then try again."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "description": "The instance's blockers from its create, each held to addBlocker's rules: an instance of Task or Milestone.",
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "schema": {
+                "description": "The blocker's schema; Task when absent.",
+                "type": "string",
+                "enum": [
+                  "Task",
+                  "Milestone"
+                ]
+              },
+              "id": {
+                "description": "The blocker's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "other": {
+    "guidance": {
+      "summary": "Each Task waits on blockers, each an instance of Milestone, named by schema. A transition into doing or review waits until every blocker has finished: its status is a terminal state of its own Workflow whose outcome is success or neutral. blocked says whether one is open.",
+      "operations": {
+        "addBlocker": {
+          "useWhen": "Use to make an instance of Milestone, named by schema block this one. It holds up the transition into doing or review until it finishes.",
+          "doNotUseWhen": "Do not use at create; give the blockers in behaviors.Dependencies.blockers instead.",
+          "success": "Returns the blocker, with its status and whether it is open; blocked is true while one is.",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            }
+          ]
+        },
+        "removeBlocker": {
+          "useWhen": "Use to stop an instance blocking this one, as when a blocker failed or was cancelled and the work goes on without it.",
+          "success": "Returns the blocker it removed; blocked is false once no open blocker is left."
+        },
+        "listBlockers": {
+          "useWhen": "Use to read the instance's blockers, each with its status and whether it is open.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "listDependents": {
+          "useWhen": "Use to read the instances this one blocks, in schemas the caller may read.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Dependencies.blockers gives the instance its blockers from the create, at most 500, each an instance of Milestone, named by schema.",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            }
+          ]
+        },
+        "transition": {
+          "doNotUseWhen": "Do not move into doing or review while blocked is true.",
+          "errors": [
+            {
+              "code": "blocked",
+              "description": "A move into doing or review while a blocker is open; details.details.blockers lists the open ones.",
+              "commonCorrection": "Wait for the open blockers to finish, or remove the ones the work goes on without, then try again."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "description": "The instance's blockers from its create, each held to addBlocker's rules: an instance of Milestone.",
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "schema"
+            ],
+            "properties": {
+              "schema": {
+                "description": "The blocker's schema.",
+                "type": "string",
+                "enum": [
+                  "Milestone"
+                ]
+              },
+              "id": {
+                "description": "The blocker's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "open": {
+    "guidance": {
+      "summary": "Each Task waits on blockers, each an instance of Task (the instance's own schema when schema is absent). No state is gated, so blockers hold up no transition; blocked says whether one is open.",
+      "operations": {
+        "addBlocker": {
+          "useWhen": "Use to make an instance of Task (the instance's own schema when schema is absent) block this one.",
+          "doNotUseWhen": "Do not use at create; give the blockers in behaviors.Dependencies.blockers instead.",
+          "success": "Returns the blocker, with its status and whether it is open; blocked is true while one is.",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            }
+          ]
+        },
+        "removeBlocker": {
+          "useWhen": "Use to stop an instance blocking this one, as when a blocker failed or was cancelled and the work goes on without it.",
+          "success": "Returns the blocker it removed; blocked is false once no open blocker is left."
+        },
+        "listBlockers": {
+          "useWhen": "Use to read the instance's blockers, each with its status and whether it is open.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "listDependents": {
+          "useWhen": "Use to read the instances this one blocks, in schemas the caller may read.",
+          "success": "Returns items and next; pass next as cursor for the page after, until it is null."
+        },
+        "create": {
+          "useWhen": "behaviors.Dependencies.blockers gives the instance its blockers from the create, at most 500, each an instance of Task (the instance's own schema when schema is absent).",
+          "errors": [
+            {
+              "code": "already_blocking",
+              "commonCorrection": "Leave it: that instance already blocks this one."
+            },
+            {
+              "code": "cycle",
+              "commonCorrection": "Remove the edge that makes the other instance wait on this one first, or leave this edge out."
+            }
+          ]
+        }
+      }
+    },
+    "createParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "description": "The instance's blockers from its create, each held to addBlocker's rules: an instance of Task.",
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "schema": {
+                "description": "The blocker's schema; Task when absent.",
+                "type": "string",
+                "enum": [
+                  "Task"
+                ]
+              },
+              "id": {
+                "description": "The blocker's id.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn dependencies_guidance_and_create_parameters_are_the_typescript_engines() {
+    let expected: Value = serde_json::from_str(DEPENDENCIES).expect("the expected guidance");
+    let configs = [
+        (
+            "own",
+            DependenciesConfig {
+                schemas: names(&["Task", "Milestone"]),
+                gated_states: names(&["done"]),
+                satisfied_by: vec![WorkflowOutcome::Success],
+                terminal_gated_states: names(&["done"]),
+            },
+        ),
+        (
+            "other",
+            DependenciesConfig {
+                schemas: names(&["Milestone"]),
+                gated_states: names(&["doing", "review"]),
+                satisfied_by: vec![WorkflowOutcome::Success, WorkflowOutcome::Neutral],
+                terminal_gated_states: Vec::new(),
+            },
+        ),
+        (
+            "open",
+            DependenciesConfig {
+                schemas: names(&["Task"]),
+                gated_states: Vec::new(),
+                satisfied_by: vec![WorkflowOutcome::Success],
+                terminal_gated_states: Vec::new(),
+            },
+        ),
+    ];
+    let hooks = Dependencies.hooks();
+    let guidance = hooks.guidance.expect("guidance");
+    let create_params = hooks.create_params_schema.expect("createParamsSchema");
+    let mut task = target();
+    task.schema = "Task".to_owned();
+    task.type_name = "Task".to_owned();
+    for (name, config) in configs {
+        assert_eq!(
+            as_json(&guidance(&Dependencies, &config, &task)),
+            without_empty_errors(expected[name]["guidance"].clone()),
+            "{name}"
+        );
+        assert_eq!(
+            stringify(&create_params(&Dependencies, &config, &task)),
             stringify(&expected[name]["createParams"]),
             "{name}"
         );
