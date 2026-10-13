@@ -5204,3 +5204,85 @@ cancel's 409 as the form's message, and a signed-out post of 4,000 or
 50,000 lines rendered with 51.
 
 The rule is reversible until the first release.
+
+## D58. The engine is one Rust library every server links, over Postgres in a stack and SQLite in one process, and it serves its own routes
+
+D16 built the engine as the TypeScript package `@superschematic/engine`:
+one SQLite file, one process writing it, behavior code synchronous inside
+the write transaction. A generated server refuses a type that composes a
+behavior, so behaviors reach only a deployment written by hand in
+TypeScript, as `examples/engine-notes` and `examples/engine-jobs` are. A
+stack's servers are Go, TypeScript and Rust (D51, D57); Cloud Run runs
+each as many instances, and their data is in Postgres. This entry puts
+the engine in every one of them, as one implementation, so a type's
+behaviors do the same thing whichever language serves it: the engine
+becomes a Rust library each server links through a binding.
+
+It departs from D19 for the engine. The version graph's core is pure, so
+each language keeps an engine of its own around it, over its own driver.
+The behavior engine's logic is the SQL its behaviors run; split by
+language, it would be three implementations of every behavior, which is
+what D17 turned down for the merge rules.
+
+The engine:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine is the Cargo workspace `runtime/engine/rust`: `superschematic-engine` (the engine, the behavior API and its transport-neutral HTTP layer), `superschematic-engine-storage` (both databases), `superschematic-engine-behaviors` (the core's behaviors), a test kit, and a crate per binding. The work-queue behaviors are `superschematic-engine-workqueue` in `runtime/engine-workqueue/rust`, on the engine's public API alone, as the TypeScript package is. Every crate builds with the toolchain `tools.env` pins. | An engine in Go, which a TypeScript server would reach through a subprocess or wasm; keeping the TypeScript engine and adding a Go and a Rust one held equal by vectors, three implementations of every behavior |
+| The engine is synchronous. A call runs on one thread; behavior hooks run inside its transaction and call back into the engine, each nested call in a savepoint, sixteen deep at most, as D16 has them. It reaches Postgres through the `postgres` crate, the synchronous client over the tokio-postgres the version graph's Rust engine uses, and SQLite through rusqlite and the SQLite it bundles. A binding gives its host an asynchronous call by running the synchronous one off the host's event loop. | Asynchronous hooks, which make every behavior's code a future that holds the transaction across awaits; an engine that owns a scheduler of its own inside every server |
+| A behavior is a Rust type that implements the engine's `Behavior` trait: its declaration, the JSON file D16 copies into the crate; a config typed in Rust, parsed from the declared JSON; and its hooks, each optional, since an absent hook means something of its own, as in TypeScript. An extension's behavior is a crate implementing the same trait. A project's engine is a value its build assembles from the core's behaviors, the work queue's and its extensions', not a registry the linker collects. A project that uses an extension's behavior builds its engine from a crate the compiler writes; one that uses the core's alone takes the release's build. | WebAssembly plugins, one engine for every project but a plugin interface, a runtime and slower hooks; behaviors in the host's language called back across the binding, which a server in another language cannot run; registration the linker collects, which a static archive's link can drop |
+
+Storage:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine keeps its data in Postgres or SQLite. In a stack it uses the database of the DB service its types belong to, its tables in a Postgres schema of their own (`engine` unless configured). SQLite is a file one process writes: a test, a local run, a Topcoat app (D44). | SQLite alone, which two instances of a server cannot share; Postgres alone, which takes the engine out of a Topcoat app and puts a database server under every test |
+| Behaviors keep writing SQL text with `?` placeholders, which the engine numbers for Postgres. A statement the two databases word differently is written once for each, as JSON access and a parameter whose type Postgres cannot infer need, a few dozen of some 165. A behavior declares its tables as specs the engine writes for each database, `STRICT` and SQLite's types or Postgres's, and keeps `up()` for the rest. Full-text search is the engine's own: FTS5 on SQLite, a `tsvector` with a GIN index on Postgres. Search ranks differently on each, and its documentation says so. | A dialect layer every statement passes through, which D16 turned down; a query builder, which rewrites every statement and has neither JSON nor full-text search |
+| Postgres keeps D16's one writer per namespace. A write transaction runs at READ COMMITTED and takes an advisory lock on its namespace and a shared one on the catalog; a define, a publish, a change of namespaces and a migration take the catalog's alone; a lock that waits past the busy timeout is the `busy` error SQLite gives. Migrations at start hold a lock of the session, so instances that start together migrate once. | SERIALIZABLE with retries, which runs a behavior's code twice; a row lock per instance, which every behavior that reads another instance would have to take |
+| Postgres aborts a transaction at any error, so a statement whose error the engine handles runs in a savepoint, a behavior handles one through `try_run`, and a unique conflict is `ON CONFLICT DO NOTHING` and a count. `unchanged()` reads a count of the rows the call wrote, which never goes down, as SQLite's `total_changes()` never does. An instance's data stays JSON text in both, its keys and numbers as written, and a Postgres filter casts the member it reads. | Catching errors as SQLite allows, which leaves a Postgres transaction refusing every later statement |
+| On Postgres a commit notifies (`pg_notify`) and each process listens, so an event stream, `watch` and the runner wake on every instance; a cache holds only what never changes; the runner runs while its process holds a lock of the session. The engine keeps its migration ledger, and a file the TypeScript engine wrote opens and migrates. | A notifier inside the process, which one process writing the file allowed |
+
+Schemas, messages and access:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine reads schema-file documents and validates instances against their IR in Rust. The schema runtime's Rust crate gains an IR reader and validator and the strict schema-file loader, held to Go's and TypeScript's by `runtime/schema/testdata/validation_parity.json` and `schema_file_parity.json`. JSON Schema, for configs and operations' parameters and results, is the `jsonschema` crate, its messages written as ajv writes them and in one defined order, since clients and agents read them. Numbers are written as JavaScript writes them. | Validators generated per schema, which a schema defined while the engine runs has none of; new wording, which every client that matches a message would see change |
+| Access is a policy the engine reads as data: ordered rules, the first that matches deciding, each naming a permission the principal must hold (`hasAnyPermission`); `allowAll` and `permission`, today's `permissionPolicy`, are shorthands. A deployment that needs more compiles a Rust policy into its engine. What D16's deployment passed as functions, the ids, the clock, the value store's driver and the permission matcher, is config. A `system` principal, which no request can be, publishes when a server starts. | A policy function the host supplies and the engine asks on every call, which a Go or Rust host would answer through a callback across the binding |
+
+What it serves, and the bindings:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine serves its own routes. A request goes in, with its method, prefix, path, query, headers, body and the caller the host authenticated, and a response comes out, its body bytes or a stream. Routing, decoding, ETags and preconditions, the success envelope and RFC 9457 problems (D15), the service-caller rule (D37), the event stream's frames and the MCP endpoint's JSON-RPC are the engine's. Authentication (D50, D37), request ids, body and rate limits, timeouts and CORS stay with the host's HTTP runtime, which mounts the engine at a prefix. MCP is the stateless streamable transport, so instances share nothing for it. | Routes in each runtime held equal by vectors, as D50's identity routes are: twenty-six routes, an event stream and MCP in three languages |
+| Go reaches the engine through a C ABI over a static archive, in the module `runtime/engine/go`, as the version graph's Go binding does (D17, D47 amended): JSON in and out, output the engine allocates and frees, a panic caught at every export and returned as an `internal` error, and an engine that panicked inside a transaction refusing every later call, so its server's readiness fails. The release's archives gain the engine's. The version graph's C functions go behind a feature the engine leaves off, so a binary that links both archives defines each symbol once. | One archive carrying superscalar's, the version graph's and the engine's C functions, which superscalar's Go binding, linking its own archive by name, cannot use |
+| TypeScript reaches it through a Node-API addon, which Bun loads as it loads superscalar's. `@superschematic/engine` keeps its API: `openEngine` returns the synchronous `Engine` it returns today, over SQLite, and `openEngineAsync` the same methods returning promises, for a server on Postgres. `engineApp` and `engineMcp` become Hono adapters over the engine's routes. `@superschematic/engine/client` stays TypeScript. | The version graph's wasm build, which opens no socket and no file; an asynchronous API everywhere, which rewrites every test and local use for a server's sake |
+| A Rust server links the crate, mounts the engine's axum router at a prefix and calls the engine through `spawn_blocking`. | |
+
+Servers:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type in a DB schema that composes a behavior is an engine type: its instances are the engine's, in that DB service's database, and `sql`, `orm` and D27's migrations leave it and the engine's schema out. A behavior on an API's own type stays refused. The types generators write a behavior's fields under its name (D16, amended), so each generator that meets an engine type renders behaviors. A new generator writes each engine database's document: its namespace, the meta-schema, the D11 tool options, the behaviors and their crates, and a schema-file document per engine type. | A service kind of its own for engine types, a fourth kind for what a DB service already is |
+| A server whose API's database holds engine types opens the engine on it, reaching Cloud SQL through the socket Cloud Run mounts, with an IAM token, as D57 does. It migrates and publishes the document before it reports ready, under a lock, and does nothing when the live versions match. It mounts the engine at the database's `engine.mount` (`/engine/<db>` unless set), behind its API's identity and service callers. On gcp the engine's runner is a worker pool of its own, one instance of the server's image, since Cloud Run gives a request-serving instance CPU only while it serves (D53); on `local` the server runs it. | A runner in every server instance, idle between requests; publishing from CI, which a server that migrates its database at start does not need |
+
+Proving it:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Before the TypeScript engine goes, its behavior is recorded as data: scenarios of calls and their results, with fixed ids and a fixed clock, in `runtime/engine/testdata/scenarios`; its HTTP, event-stream and MCP exchanges; and SQLite files at each migration version. The Rust engine, each binding and each server runtime replay them, on SQLite and on Postgres. The engine's TypeScript suite runs against the addon, a list of the files not yet passing shrinking to none; a test that defines a behavior in TypeScript runs it through a bridge built into the test addon alone. One script drives a Go, a TypeScript and a Rust server, and their transcripts must match. | The TypeScript suite alone, which the Go and Rust bindings cannot run |
+
+This entry amends D16: the engine is the Rust library, not the
+TypeScript package; its storage is Postgres or SQLite; the access policy
+is data; an extension that declares a behavior ships it as a Rust crate;
+and generators render behaviors on DB types. It amends D19 for the
+engine alone; D32 for Branches, which runs the version graph's Rust
+engine over the behavior's transaction in place of the TypeScript
+`SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
+the engine mounts in.
+
+Status: not built. `runtime/engine/rust` holds the workspace and an
+empty `superschematic-engine`, which CI lints and tests. Until the Rust
+engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
+
+The rule is reversible until the first release.
