@@ -9,14 +9,16 @@
 //! each returned or threw. The replayer resolves the file's shared values,
 //! skips a scenario only the TypeScript engine can run (`js`), one that
 //! needs a behavior this engine does not have (a test behavior the kit has
-//! not ported, [`behaviors`], or a core behavior, milestones 8 to 12), one
-//! that writes the file with SQL of its own on Postgres (`dialect: sqlite`),
-//! and one that calls a method that changes the engine and is not built yet
-//! (the runner, the tools). It opens each engine as the recording says,
-//! with a policy answering from the recorded answer table, seeded or fixed
-//! ids, a wall (strict) or fixed clock, and the test behaviors it names,
-//! then makes each step's call through [`superschematic_engine::calls`]
-//! (`behaviors.register` through the kit's behaviors) and compares its
+//! not ported, [`behaviors`], or a core behavior not ported yet,
+//! milestones 9 to 11), one that writes the file with SQL of its own on
+//! Postgres (`dialect: sqlite`), and one that calls a method that changes
+//! the engine and is not built yet (the runner, the tools). It opens each
+//! engine as the recording says, with a policy answering from the recorded
+//! answer table, seeded or fixed ids, a wall (strict) or fixed clock, the
+//! core's behaviors ported so far ([`superschematic_engine_behaviors`]) and
+//! the test behaviors it names, then makes each step's call through
+//! [`superschematic_engine::calls`] (`behaviors.register` through the kit's
+//! behaviors and the core's) and compares its
 //! result or its error (class, code, message and details), binding the
 //! symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`, `{{opaque:N}}`) at their
 //! first appearance in an answer. A read-only call not built yet (the tools
@@ -40,9 +42,11 @@ use superschematic_engine::{
     ValueOptions, SCENARIO_SEED,
 };
 
-/// The core's behaviors, which the TypeScript engine registers and this one
-/// does not yet (milestones 8 to 12): a scenario whose schemas compose one
-/// is skipped.
+/// The core's behaviors, which the TypeScript engine registers when it
+/// opens. The replayer opens every engine with the ones ported so far
+/// ([`superschematic_engine_behaviors::core`], whose names
+/// [`superschematic_engine_behaviors::NAMES`] lists); a scenario whose
+/// schemas compose one not ported yet (milestones 9 to 11) is skipped.
 pub const CORE_BEHAVIORS: [&str; 15] = [
     "Workflow",
     "Comments",
@@ -276,11 +280,14 @@ fn skip_reason(
     }
     let core: Vec<String> = names("behaviors")
         .into_iter()
-        .filter(|name| CORE_BEHAVIORS.contains(&name.as_str()))
+        .filter(|name| {
+            CORE_BEHAVIORS.contains(&name.as_str())
+                && !superschematic_engine_behaviors::NAMES.contains(&name.as_str())
+        })
         .collect();
     if !core.is_empty() {
         return Some(format!(
-            "core behaviors (milestones 8 to 12): {}",
+            "core behaviors not ported yet (milestones 9 to 11): {}",
             core.join(", ")
         ));
     }
@@ -409,6 +416,7 @@ impl<'d> Run<'d> {
                     .unwrap_or_default()
                     .to_owned();
                 let set = behaviors::test_behavior(self.file, &name)
+                    .or_else(|| behaviors::core_behavior(&name))
                     .ok_or_else(|| format!("the test kit has no behavior {name}"))?;
                 let engine = self
                     .engine_of(step)?
@@ -626,13 +634,18 @@ impl<'d> Run<'d> {
             )),
             Some(document) => Some(MetaSchema::Document(document.clone())),
         };
+        // The core's behaviors first, as the TypeScript engine registers
+        // them, then the ones the recording names.
+        options.behaviors = superschematic_engine_behaviors::core();
         if let Some(Value::Array(names)) = given.get("behaviors") {
             for name in names.iter().filter_map(Value::as_str) {
-                let set = behaviors::test_behavior(self.file, name).ok_or_else(|| {
-                    error_json(&Error::Usage(format!(
-                        "the test kit has no behavior {name}"
-                    )))
-                })?;
+                let set = behaviors::test_behavior(self.file, name)
+                    .or_else(|| behaviors::core_behavior(name))
+                    .ok_or_else(|| {
+                        error_json(&Error::Usage(format!(
+                            "the test kit has no behavior {name}"
+                        )))
+                    })?;
                 options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
             }
         }
@@ -1379,10 +1392,17 @@ impl AccessPolicy for AnswerPolicy {
 }
 
 /// The files of the corpus a replay runs by default: the engine's own
-/// test files, whose scenarios need no behavior or few.
-pub const ENGINE_FILES: [&str; 9] = [
+/// test files, whose scenarios need no behavior or few, and the core
+/// behaviors' files whose behaviors this engine has (a scenario that also
+/// composes one not ported yet is skipped).
+pub const ENGINE_FILES: [&str; 14] = [
     "access",
     "compat",
+    "core-behaviors",
+    "core-comments",
+    "core-constants",
+    "core-variants",
+    "core-workflow",
     "events",
     "instances",
     "list-filters",

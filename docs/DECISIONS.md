@@ -5391,14 +5391,23 @@ veto codes and preconditions, validate, operations and schema-level
 operations through invoke, operate and invokeSchema, update and
 unchanged, the fields it adds, afterChange, reads, invokes and creates of
 other instances, references with their guards and hooks, and the relation
-over its columns), a panic in a hook a BehaviorError; and
+over its columns), a panic in a hook a BehaviorError, and the paging of
+a behavior's list operations; `superschematic-engine-behaviors`, the
+core's behaviors, each over the copy of its declaration that `make
+behaviors` writes into the crate and CI checks, which a host passes in
+its options (`core()`) since the engine cannot depend on them: wave 1
+(milestone 8) has ported Workflow (with D56's enteredAt), Comments,
+Constants and Variants, with their guidance, migrations on both
+databases, configs, guards, fields, operations and veto codes; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts` against the API,
-and replays the scenario corpus, giving its recorded answers on SQLite
-and Postgres for every scenario whose behaviors it has. CI tests the
-workspace on both databases. The core's behaviors are milestones 8 to 12,
-and the runner (which runs reactions and schedules), retention, the tools
-and the routes are milestone 6's. Until the Rust engine passes the
+behaviors, runs the cases of `test/behavior-*.test.ts` and of the four
+behaviors' `test/core-*.test.ts` against the API, and replays the
+scenario corpus, the four behaviors' files included, giving its recorded
+answers on SQLite and Postgres for every scenario whose behaviors it has.
+CI tests the workspace on both databases. The other core behaviors are
+milestones 9 to 11 and the work queue's milestone 12, and the runner
+(which runs reactions and schedules), retention, the tools and the
+routes are milestone 6's. Until the Rust engine passes the
 TypeScript suite, `@superschematic/engine` is the TypeScript
 implementation and nothing uses the workspace.
 

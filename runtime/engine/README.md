@@ -33,11 +33,16 @@ codes and preconditions, validate, operations and schema-level operations
 through `invoke`, `operate` and `invoke_schema`, update and unchanged, the
 fields it adds, afterChange, reads, invokes and creates of other
 instances, references with their guards and hooks, and the read-only
-relation over its own columns), with the runner, the describe and tools
-documents and the core's behaviors still to come; and
-`superschematic-engine-testkit` (`rust/testkit`), which ports this
-package's test behaviors, runs the cases of `test/behavior-*.test.ts`
-against the behavior API, and replays the scenario corpus
+relation over its own columns), and the paging of a behavior's list
+operations, with the runner and the describe and tools documents still to
+come; `superschematic-engine-behaviors` (`rust/behaviors`), the core's
+behaviors, each over the copy of its declaration `make behaviors` writes
+into `rust/behaviors/declarations`, which a host passes in its options
+(`core()`): so far Workflow, Comments, Constants and Variants, with the
+rest to come; and `superschematic-engine-testkit` (`rust/testkit`), which
+ports this package's test behaviors, runs the cases of
+`test/behavior-*.test.ts` and of those behaviors' `test/core-*.test.ts`
+against the Rust engine, and replays the scenario corpus
 (`testdata/scenarios`), all on both databases.
 
 Built: the storage layer and its migrations, namespaces, configured or

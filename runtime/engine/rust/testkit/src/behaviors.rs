@@ -1042,6 +1042,21 @@ impl Behavior for Dispatch {
     }
 }
 
+/// A core behavior by name, alone, for a step that registers one again or
+/// an open that names one: the engine refuses it, as the TypeScript engine
+/// refuses a name already registered. `None` for one not ported yet.
+pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
+    use superschematic_engine_behaviors::{Comments, Constants, Variants, Workflow};
+    let set = BehaviorSet::new();
+    Some(match name {
+        "Workflow" => set.with(Workflow),
+        "Comments" => set.with(Comments),
+        "Constants" => set.with(Constants),
+        "Variants" => set.with(Variants),
+        _ => return None,
+    })
+}
+
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
 /// fixtures'. `None` for one the test kit has not ported.
