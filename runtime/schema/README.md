@@ -71,7 +71,10 @@ The default meta-schema is the core registry's,
 binary's `superschematic json-schema` output, which adds its kinds,
 extension decorators, documents, invocation policy and behaviors. A
 refused payload throws `SchemaFileError`, with the source and a JSON
-pointer per issue.
+pointer per issue. The meta-schema's issues come sorted by that pointer,
+then by the ajv keyword that failed, then by message, each compared by
+Unicode code point, not in the order ajv finds them, so another
+implementation of the loader can give the same list.
 
 `canonical` is the document as `ir.CanonicalJSON` writes the document the
 Go reader decodes: compact, object keys sorted by their UTF-8 bytes, arrays

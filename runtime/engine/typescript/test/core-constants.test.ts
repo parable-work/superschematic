@@ -123,7 +123,10 @@ for (const driver of drivers) {
       assert.deepEqual(refused(['key', 'nope']), [
         { path: '/types/runs/behaviors/0/config', message: 'type runs: behavior Constants config: fields: nope is not a field of runs (its fields: key, kind, title, labels, owner)' },
       ]);
-      assert.match(refused([])[0].message, /must NOT have fewer than 1 items/);
+      assert.deepEqual(refused([]), [
+        { path: '/types/runs/behaviors/0', message: 'must match "then" schema' },
+        { path: '/types/runs/behaviors/0/config/fields', message: 'must NOT have fewer than 1 items' },
+      ]);
       // status is Workflow's, not the type's own.
       const flow = { name: 'Workflow', config: { states: ['open', 'closed'], transitions: [{ from: 'open', to: 'closed' }] } };
       assert.match(thrown(() => engine.schemas.define(alice, runDocument([flow, keep(['status'])])), SchemaDocumentError).message, /fields: status is not a field of runs/);

@@ -297,17 +297,28 @@ for (const driver of drivers) {
       ]);
       // status is Workflow's, not the type's own.
       assert.match(refused({ states: { sent: { frozen: ['status'] } } })[0].message, /states\.sent\.frozen: status is not a field of Invoice/);
-      assert.match(refused({ states: {} })[0].message, /must NOT have fewer than 1 properties/);
-      assert.match(refused({ states: { sent: {} } })[0].message, /must NOT have fewer than 1 properties/);
+      assert.deepEqual(refused({ states: {} }), [
+        { path: '/types/Invoice/behaviors/1', message: 'must match "then" schema' },
+        { path: '/types/Invoice/behaviors/1/config/states', message: 'must NOT have fewer than 1 properties' },
+      ]);
+      assert.deepEqual(refused({ states: { sent: {} } }), [
+        { path: '/types/Invoice/behaviors/1', message: 'must match "then" schema' },
+        { path: '/types/Invoice/behaviors/1/config/states/sent', message: 'must NOT have fewer than 1 properties' },
+      ]);
+      // By path, then keyword (const, oneOf, type), as the engine orders ajv's issues.
       assert.deepEqual(
-        refused({ states: { sent: { frozen: 'some' } } }).map((issue) => [issue.path, issue.message]).slice(0, 3),
+        refused({ states: { sent: { frozen: 'some' } } }).map((issue) => [issue.path, issue.message]),
         [
-          ['/types/Invoice/behaviors/1/config/states/sent/frozen', 'must be array'],
+          ['/types/Invoice/behaviors/1', 'must match "then" schema'],
           ['/types/Invoice/behaviors/1/config/states/sent/frozen', 'must be equal to constant'],
           ['/types/Invoice/behaviors/1/config/states/sent/frozen', 'must match exactly one schema in oneOf'],
+          ['/types/Invoice/behaviors/1/config/states/sent/frozen', 'must be array'],
         ]
       );
-      assert.match(refused({ states: { sent: { required: [] } } })[0].message, /must NOT have fewer than 1 items/);
+      assert.deepEqual(refused({ states: { sent: { required: [] } } }), [
+        { path: '/types/Invoice/behaviors/1', message: 'must match "then" schema' },
+        { path: '/types/Invoice/behaviors/1/config/states/sent/required', message: 'must NOT have fewer than 1 items' },
+      ]);
       const unflowed = clone(invoicesDocument()) as unknown as InvoiceDocument;
       unflowed.types.Invoice.behaviors.shift();
       assert.match(thrown(() => engine.schemas.define(alice, unflowed as unknown as Record<string, unknown>), SchemaDocumentError).message, /behavior StateRules requires behavior Workflow, which the type does not list/);

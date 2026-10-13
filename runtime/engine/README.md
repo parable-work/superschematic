@@ -1243,6 +1243,22 @@ the call named: `name_taken` in the shared namespace does not say which
 namespace holds the name. "Statuses" under "HTTP" gives each code's
 status.
 
+An issue the engine checks with JSON Schema (ajv, draft 2020-12, every
+error and no format checks) carries ajv's message: a behavior's config
+against its `configSchema`, a create's parameters, a call's
+preconditions, an operation's parameters and its result, and the
+parameters of a search across schemas, as well as what the schema-file
+loader's meta-schema refuses in a document. The engine does not keep
+ajv's order, which follows ajv's compiled code: the issues of one check
+come sorted by their JSON pointer, then by the keyword that failed, then
+by message, each compared by Unicode code point (as UTF-8 bytes compare).
+A composite keyword's issue (`must match "then" schema`) sits at the
+shorter pointer, so before the issues inside it. Where a call checks
+several behaviors' entries (a create's parameters, a call's
+preconditions), each entry's issues keep that order and the entries come
+in the order the call gives them, then, for a create, those of the
+type's behaviors it gave none, in the type's order.
+
 A defect in a behavior's code is a `BehaviorError`, not an `EngineError`,
 so a server answers it as an internal error: a result its `resultSchema`
 refuses, a field value that is not JSON, SQL outside its own storage, a

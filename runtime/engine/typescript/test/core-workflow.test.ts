@@ -164,9 +164,9 @@ for (const driver of drivers) {
     test('transition takes to and nothing else: no alias reaches the guard or the handler', () => {
       const engine = published();
       const alias = thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'transition', { status: 'open' }), OperationParamsError);
-      assert.deepEqual(alias.issues.map((issue) => issue.message).sort(), [
-        'must NOT have additional properties: status',
-        "must have required property 'to'",
+      assert.deepEqual(alias.issues, [
+        { path: '', message: 'must NOT have additional properties: status' },
+        { path: '', message: "must have required property 'to'" },
       ]);
       thrown(() => engine.instances.invoke(alice, 'Order', 'o1', 'transition', { to: 'open', status: 'shipped' }), OperationParamsError);
       assert.equal(engine.instances.get(alice, 'Order', 'o1')?.behaviors.Workflow.status, 'draft');

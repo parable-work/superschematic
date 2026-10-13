@@ -237,13 +237,10 @@ for (const driver of drivers) {
         { path: '/behaviors/test.Nope', message: 'Item does not compose behavior test.Nope (its behaviors that take create parameters: test.Tags, test.Reason)' },
       ]);
       assert.deepEqual(issues({ ...reasonGiven, 'test.Counter': {} }), [{ path: '/behaviors/test.Counter', message: 'behavior test.Counter takes no create parameters' }]);
-      assert.deepEqual(
-        issues({ ...reasonGiven, 'test.Tags': { tags: ['', 'b', 'c', 'd'] } }).sort((a, b) => a.path.localeCompare(b.path)),
-        [
-          { path: '/behaviors/test.Tags/tags', message: 'must NOT have more than 3 items' },
-          { path: '/behaviors/test.Tags/tags/0', message: 'must NOT have fewer than 1 characters' },
-        ]
-      );
+      assert.deepEqual(issues({ ...reasonGiven, 'test.Tags': { tags: ['', 'b', 'c', 'd'] } }), [
+        { path: '/behaviors/test.Tags/tags', message: 'must NOT have more than 3 items' },
+        { path: '/behaviors/test.Tags/tags/0', message: 'must NOT have fewer than 1 characters' },
+      ]);
       assert.deepEqual(issues({ ...reasonGiven, 'test.Tags': { tags: [Number.NaN] } }), [{ path: '/behaviors/test.Tags/tags/0', message: 'NaN is not a JSON number' }]);
       assert.deepEqual(issues(['test.Tags']), [{ path: '/behaviors', message: "behaviors is the create's parameters by behavior name: a JSON object" }]);
       // A behavior whose createParamsSchema refuses {} needs an entry at every create.
