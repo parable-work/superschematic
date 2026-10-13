@@ -69,6 +69,10 @@ pub enum Lock<'a> {
 pub(crate) enum TxKind<'a> {
     Read,
     Write(Lock<'a>),
+    /// A migration: a catalog write whose locks wait up to `timeout`.
+    Migrate {
+        timeout: Duration,
+    },
 }
 
 /// What a backend keeps about its database.
@@ -90,6 +94,8 @@ pub(crate) trait Backend: Send + Sync {
 pub(crate) struct Inner {
     backend: Box<dyn Backend>,
     busy_timeout: Duration,
+    /// How long a migration waits for the locks it needs.
+    migration_timeout: Duration,
     notifier: Arc<Notifier>,
     /// What runs as the database closes (the Postgres listener's stop).
     closers: Vec<Box<dyn FnOnce() + Send + Sync>>,
@@ -157,6 +163,7 @@ impl Db {
     pub(crate) fn new(
         backend: Box<dyn Backend>,
         busy_timeout: Duration,
+        migration_timeout: Duration,
         notifier: Arc<Notifier>,
         closers: Vec<Box<dyn FnOnce() + Send + Sync>>,
     ) -> Db {
@@ -164,6 +171,7 @@ impl Db {
             inner: Arc::new(Inner {
                 backend,
                 busy_timeout,
+                migration_timeout,
                 notifier,
                 closers,
             }),
@@ -237,6 +245,80 @@ impl Db {
         let result = f(&tx);
         tx.finish(result).0
     }
+
+    /// A connection of the pool for work that spans transactions (the
+    /// migrations at start), with this thread's place held.
+    pub(crate) fn session(&self) -> Result<Session<'_>> {
+        let opened = Opened::enter(Arc::as_ptr(&self.inner) as usize)?;
+        let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
+        Ok(Session {
+            inner: &self.inner,
+            conn: Some(conn),
+            _opened: opened,
+        })
+    }
+}
+
+/// A connection held across transactions.
+pub(crate) struct Session<'db> {
+    inner: &'db Inner,
+    conn: Option<Box<dyn Conn + 'db>>,
+    _opened: Opened,
+}
+
+impl<'db> Session<'db> {
+    pub fn dialect(&self) -> Dialect {
+        self.inner.backend.dialect()
+    }
+
+    pub fn label(&self) -> &str {
+        self.inner.backend.label()
+    }
+
+    pub fn postgres_schema(&self) -> Option<&str> {
+        self.inner.backend.postgres_schema()
+    }
+
+    /// How long a migration waits for the locks it needs.
+    pub fn migration_timeout(&self) -> Duration {
+        self.inner.migration_timeout
+    }
+
+    /// Runs transaction control on the session's connection, outside any
+    /// transaction (a lock of the session).
+    pub fn control(&mut self, sql: &str) -> Result<()> {
+        match self.conn.as_mut() {
+            Some(conn) => conn.control(sql),
+            None => Err(closed()),
+        }
+    }
+
+    /// Drops the connection rather than returning it to the pool.
+    pub fn discard(&mut self) {
+        if let Some(conn) = self.conn.as_mut() {
+            conn.discard();
+        }
+    }
+
+    /// Runs `f` in a transaction of `kind` on the session's connection.
+    pub fn transaction<T, E, F>(&mut self, kind: TxKind<'_>, f: F) -> Result<T, E>
+    where
+        E: From<Error>,
+        F: FnOnce(&Tx<'db>) -> Result<T, E>,
+    {
+        let conn = self.conn.take().ok_or_else(closed)?;
+        let tx = match Tx::begin(self.inner, conn, kind) {
+            Ok(tx) => tx,
+            Err((error, conn)) => {
+                self.conn = Some(conn);
+                return Err(error.into());
+            }
+        };
+        let result = f(&tx);
+        let (result, conn) = tx.finish(result);
+        self.conn = conn;
+        result
+    }
 }
 
 fn closed() -> Error {
@@ -277,7 +359,7 @@ impl<'db> Tx<'db> {
         let sql = match backend.dialect() {
             Dialect::Sqlite => match kind {
                 TxKind::Read => "BEGIN".to_owned(),
-                TxKind::Write(_) => "BEGIN IMMEDIATE".to_owned(),
+                TxKind::Write(_) | TxKind::Migrate { .. } => "BEGIN IMMEDIATE".to_owned(),
             },
             Dialect::Postgres => {
                 let schema = backend.postgres_schema().unwrap_or_default();
@@ -285,6 +367,10 @@ impl<'db> Tx<'db> {
                     TxKind::Read => (inner.busy_timeout, String::new()),
                     TxKind::Write(Lock::Catalog) => (
                         inner.busy_timeout,
+                        format!("pg_advisory_xact_lock({})", catalog_lock_key(schema)),
+                    ),
+                    TxKind::Migrate { timeout } => (
+                        timeout,
                         format!("pg_advisory_xact_lock({})", catalog_lock_key(schema)),
                     ),
                     TxKind::Write(Lock::Namespace(namespace)) => {
@@ -328,7 +414,7 @@ impl<'db> Tx<'db> {
             aborted: RefCell::new(None),
             committed: RefCell::new(Vec::new()),
             ended: RefCell::new(Vec::new()),
-            catalog: matches!(kind, TxKind::Write(Lock::Catalog)),
+            catalog: matches!(kind, TxKind::Write(Lock::Catalog) | TxKind::Migrate { .. }),
             namespaces: RefCell::new(namespaces),
             done: Cell::new(false),
         })

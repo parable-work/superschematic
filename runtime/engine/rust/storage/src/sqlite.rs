@@ -72,6 +72,7 @@ impl Db {
                 _path: path,
             }),
             options.busy_timeout,
+            options.busy_timeout,
             Arc::new(Notifier::new()),
             Vec::new(),
         ))

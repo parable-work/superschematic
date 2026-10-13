@@ -7,13 +7,16 @@
 //! types. A behavior's statements pass the checker ([`sql_refusal`])
 //! before they run.
 
+pub mod behavior;
 mod checker;
 mod conn;
 mod db;
 mod ddl;
 mod dialect;
+mod engine_migrations;
 mod error;
 mod ident;
+mod migrations;
 mod notifier;
 #[cfg(feature = "postgres")]
 mod postgres;
@@ -29,12 +32,17 @@ pub use checker::{
 pub use db::{Db, Lock, Tx, DEFAULT_BUSY_TIMEOUT};
 pub use ddl::{is_column_name, ColumnSpec, ColumnType, IndexSpec, TableSpec, MAX_SAFE_INTEGER};
 pub use dialect::{Dialect, Sql};
+pub use engine_migrations::{engine_migrations, ENGINE_OWNER};
 pub use error::{
     DbCode, Error, Result, SQLITE_BUSY, SQLITE_CONSTRAINT_PRIMARYKEY, SQLITE_CONSTRAINT_UNIQUE,
 };
 pub use ident::{
     catalog_lock_key, identifier, lock_key, migration_lock_key, namespace_lock_key,
     postgres_identifier, quote_identifier, sql_string, POSTGRES_IDENTIFIER_MAX,
+};
+pub use migrations::{
+    applied_migrations, AppliedMigration, Migration, MigrationResult, MigrationSet, MigrationUp,
+    OWNER_NAME,
 };
 pub use notifier::Notifier;
 #[cfg(feature = "postgres")]

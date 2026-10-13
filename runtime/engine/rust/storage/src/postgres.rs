@@ -42,7 +42,7 @@ use crate::dialect::Dialect;
 use crate::error::{DbCode, Error, Result};
 use crate::ident::{postgres_identifier, quote_identifier};
 use crate::notifier::Notifier;
-use crate::tokens::{postgres_placeholders, statement_writes};
+use crate::tokens::{postgres_placeholders, statement_changes_tables, statement_writes};
 use crate::value::SqlValue;
 
 /// How a Postgres storage opens.
@@ -62,6 +62,10 @@ pub struct PostgresOptions {
     pub listen: bool,
     /// How long opening a connection may take, unless the URL says.
     pub connect_timeout: Duration,
+    /// How long a migration at start waits for the lock its process holds
+    /// while it migrates (another process migrating first) and for the
+    /// tables it changes (an open read).
+    pub migration_timeout: Duration,
 }
 
 /// The schema the engine's tables live in unless configured.
@@ -78,6 +82,7 @@ impl Default for PostgresOptions {
             pool_max: DEFAULT_POOL_MAX,
             listen: true,
             connect_timeout: Duration::from_secs(10),
+            migration_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -145,6 +150,7 @@ impl Db {
                 pool,
             }),
             options.busy_timeout,
+            options.migration_timeout,
             notifier,
             closers,
         ))
@@ -222,6 +228,9 @@ struct Prepared {
     columns: Arc<[String]>,
     /// Whether it changes rows, so the rows Postgres reports count.
     writes: bool,
+    /// Whether it changes tables (CREATE, ALTER, DROP), after which the
+    /// connection prepares every statement afresh.
+    ddl: bool,
 }
 
 struct PgConn {
@@ -254,8 +263,12 @@ impl PgConn {
                 .map(|column| column.name().to_owned())
                 .collect(),
             writes: statement_writes(&text, Dialect::Postgres),
+            ddl: statement_changes_tables(&text, Dialect::Postgres),
             statement,
         };
+        if prepared.ddl {
+            return Ok(prepared);
+        }
         if self.statements.len() >= STATEMENT_CACHE {
             self.statements.clear();
         }
@@ -301,7 +314,47 @@ impl RawConn for PgConn {
             .map_err(Failure::refused)?;
         let width = prepared.columns.len();
         let mut rows = Vec::new();
-        let affected = {
+        let ran = self.read_rows(&prepared, &bound, width, &mut rows);
+        if prepared.ddl {
+            // A table changed: what a statement prepared before returns
+            // may have too (SELECT * after ADD COLUMN).
+            self.statements.clear();
+        }
+        let affected = match ran {
+            Ok(affected) => affected,
+            Err(failure) => {
+                // Postgres refuses to replan a statement whose result
+                // changed shape (0A000); prepare it afresh next time.
+                if failure.error.sqlstate() == Some("0A000") {
+                    self.statements.remove(sql);
+                }
+                return Err(failure);
+            }
+        };
+        Ok(Outcome {
+            columns: prepared.columns,
+            rows,
+            changes: if prepared.writes { affected } else { 0 },
+            last_insert_rowid: None,
+        })
+    }
+
+    fn healthy(&self) -> bool {
+        !self.client.is_closed()
+    }
+}
+
+impl PgConn {
+    // read_rows runs a prepared statement and reads every row into rows,
+    // returning the rows Postgres reports it affected.
+    fn read_rows(
+        &mut self,
+        prepared: &Prepared,
+        bound: &[PgParam],
+        width: usize,
+        rows: &mut Vec<Vec<SqlValue>>,
+    ) -> Result<u64, Failure> {
+        {
             let mut iter = self
                 .client
                 .query_raw(&prepared.statement, bound.iter())
@@ -321,18 +374,8 @@ impl RawConn for PgConn {
                 }
                 rows.push(values);
             }
-            iter.rows_affected().unwrap_or(0)
-        };
-        Ok(Outcome {
-            columns: prepared.columns,
-            rows,
-            changes: if prepared.writes { affected } else { 0 },
-            last_insert_rowid: None,
-        })
-    }
-
-    fn healthy(&self) -> bool {
-        !self.client.is_closed()
+            Ok(iter.rows_affected().unwrap_or(0))
+        }
     }
 }
 

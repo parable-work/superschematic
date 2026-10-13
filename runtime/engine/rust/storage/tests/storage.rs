@@ -625,7 +625,7 @@ fn a_nested_transaction_on_one_thread_is_refused_and_a_read_does_not_write() {
 #[test]
 fn the_notifier_wakes_a_waiter_when_a_write_that_notified_commits() {
     for target in targets("the_notifier_wakes_a_waiter") {
-        let db = target.open();
+        let db = target.open_listening();
         notes(&db);
         let notifier = Arc::clone(db.notifier());
         // Let a listener's first connection move the epoch first.
@@ -787,7 +787,7 @@ fn postgres_notifies_every_process_listening() {
         return;
     };
     let writer = target.open();
-    let listener = target.open();
+    let listener = target.open_listening();
     notes(&writer);
     wait_listening(&listener);
     let notifier = Arc::clone(listener.notifier());

@@ -408,6 +408,15 @@ pub(crate) fn statement_writes(sql: &str, dialect: Dialect) -> bool {
     WRITE_VERBS.contains(&verb.as_str()) || verb == "MERGE"
 }
 
+/// Whether a statement changes tables: a CREATE, ALTER or DROP.
+#[cfg(feature = "postgres")]
+pub(crate) fn statement_changes_tables(sql: &str, dialect: Dialect) -> bool {
+    let tokens = tokenize(sql, dialect);
+    tokens
+        .first()
+        .is_some_and(|first| matches!(first.keyword().as_str(), "CREATE" | "ALTER" | "DROP"))
+}
+
 /// The statement with each `?` placeholder numbered for Postgres: a bare
 /// `?` is `$k`, one past the largest number before it, as SQLite numbers
 /// it, and `?NNN` is `$NNN`. A `?` in a string, a quoted name or a comment
@@ -608,5 +617,13 @@ mod tests {
         ] {
             assert!(!statement_writes(sql, Dialect::Postgres), "{sql}");
         }
+        assert!(statement_changes_tables(
+            "/* x */ alter table t add column c text",
+            Dialect::Postgres
+        ));
+        assert!(!statement_changes_tables(
+            "SELECT 'CREATE'",
+            Dialect::Postgres
+        ));
     }
 }

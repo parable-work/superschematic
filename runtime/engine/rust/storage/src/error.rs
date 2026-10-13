@@ -141,6 +141,19 @@ impl Error {
             message: message.into(),
         }
     }
+
+    pub(crate) fn behavior(behavior: &str, message: impl Into<String>) -> Self {
+        Error::Behavior {
+            behavior: behavior.to_owned(),
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn migration(message: impl Into<String>) -> Self {
+        Error::Migration {
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for Error {

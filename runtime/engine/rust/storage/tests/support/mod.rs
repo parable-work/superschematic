@@ -98,15 +98,25 @@ impl Target {
         }
     }
 
-    /// Opens the target with the default options.
+    /// Opens the target with the default options, but on Postgres with no
+    /// listener, which only the notifier's tests need.
     pub fn open(&self) -> Db {
         self.open_with(superschematic_engine_storage::DEFAULT_BUSY_TIMEOUT)
     }
 
+    /// Opens the target with a listener on Postgres.
+    pub fn open_listening(&self) -> Db {
+        self.open_as(superschematic_engine_storage::DEFAULT_BUSY_TIMEOUT, true)
+    }
+
     /// Opens the target with `busy_timeout`; a second open is a second
     /// connection (SQLite) or a second process's storage (Postgres).
-    #[cfg_attr(not(feature = "sqlite"), allow(unused_variables))]
     pub fn open_with(&self, busy_timeout: Duration) -> Db {
+        self.open_as(busy_timeout, false)
+    }
+
+    #[cfg_attr(not(feature = "sqlite"), allow(unused_variables))]
+    fn open_as(&self, busy_timeout: Duration, listen: bool) -> Db {
         match &self.place {
             Place::Sqlite { .. } => {
                 #[cfg(feature = "sqlite")]
@@ -123,13 +133,14 @@ impl Target {
                     let options = superschematic_engine_storage::PostgresOptions {
                         schema: schema.clone(),
                         busy_timeout,
+                        listen,
                         ..Default::default()
                     };
                     Db::open_postgres(url, options).expect("open Postgres")
                 }
                 #[cfg(not(feature = "postgres"))]
                 {
-                    let _ = (url, schema);
+                    let _ = (url, schema, listen);
                     unreachable!("no Postgres target without the postgres feature")
                 }
             }
