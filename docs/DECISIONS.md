@@ -6050,6 +6050,6 @@ when the storefront and a D1-backed API have run live. Section 18 of
 | `stack dev` stays on the `local` target: Bun servers, a SQLite file per sqlite-first database, the storage emulator for buckets. CI's `check` bundles every Workers server for `workerd`, and the runtime's tests run fixture bundles under the `workerd` binary. | Miniflare in `stack dev`, a Node toolchain and a second local mechanism. |
 | acme-shop's storefront proves it first: a `storefront-stack` runs it alone on Workers, at workers.dev and then under a domain. The target is done when that, and a D1-backed TypeScript API, have run live. | Every Cloudflare kind live before calling it done. |
 
-Status: not built.
+Status: the core's artifacts are built, proved on `stack/stacktest`'s `fake.bundle` platform and fake bundle store: `PlatformSpec.Artifact` and the deployable's `artifact`; `{bundle-digest}`, `{bundle-sha256:<file>}` and `PinBundles`; the bundle's build, digest and publish through `TargetSpec.Bundles`, and its fetch (`registry.ArtifactFetcher`, also on a `SitePublisher`) and placement under the program's `artifacts/`; the manifest's `bundles` and `--bundle`; `StateBackend.Env`; and `TargetSpec.PreDestroy`. The cloudflare target itself is not built.
 
 The rule is reversible until the first release.

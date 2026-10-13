@@ -2828,7 +2828,9 @@ config may leave `outputs` out.
   it pins an image, so the graph stays a function of the schemas. The
   deploy publishes a site before the wave that rolls it out applies, and
   the apply switches the site to the new files at once. The manifest
-  records each site's digest (`sites`).
+  records each site's digest (`sites`). A publisher that is also a
+  `registry.ArtifactFetcher` has the deploy place each site's files
+  beside the provisioner's program (section 18.5, D64).
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
   fallback and the Cache-Control the gcp target gives each file (below),
@@ -3520,7 +3522,9 @@ file.
    the stack's build writes (section 8.2), unless its build context is the
    one the image the manifest records was built from; else the image the
    manifest records. One with none of them is refused, and `--no-build`
-   builds nothing;
+   builds nothing. A server, job or worker whose platform's artifact is a
+   bundle has no image: its bundle is the one `--bundle` names, else a
+   build, else the manifest's (section 18.5, D64);
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
@@ -3534,7 +3538,10 @@ file.
    writes a server's image into the graph as its repository path, and the
    deploy pins it: every string property of the server's own nodes equal
    to the repository becomes `<repository>@<digest>`, so the program the
-   provisioner renders names each image by digest;
+   provisioner renders names each image by digest. It builds each site and
+   each bundle there too, publishes the bundles whose digest is new and
+   fetches the ones it did not build, pins them, renders the program and
+   places each bundle's files beside it (section 18.5);
 4. applies infrastructure;
 5. needs a value for every secret (section 4.2);
 6. runs each database's `expand` steps (`superschematic-migrate apply
@@ -3553,8 +3560,10 @@ file.
 10. writes a deploy manifest to the state bucket after every step and at
     the end: the resolved environment, the IR digest of each service, the
     image of each server and job with the digest of the build context the
-    deploy built it from, and each database's applied model with the servers
-    its runner last saw connect.
+    deploy built it from, the digest of each site's files, the bundle of
+    each server, job or worker that runs one with each file's hash, and
+    each database's applied model with the servers its runner last saw
+    connect.
 
 A build context is the repository root as the server's
 `Dockerfile.dockerignore` cuts it down, read by BuildKit's rules, written
@@ -3610,7 +3619,10 @@ bindings generator reads (section 6.6).
 
 `stack plan` builds nothing: it plans each server and job at the image
 `--image` names or the manifest records, and lists one with neither among
-those with no image yet.
+those with no image yet. It plans a server that runs a bundle at the
+bundle `--bundle` names or the manifest records, which it fetches from the
+target's store and places beside the program, and lists one with neither
+among those with no bundle yet (D64).
 
 ### 11.3 Generated CI
 
@@ -4191,7 +4203,7 @@ There is no `worker` key: resolution refuses the kind on this target.
 | job | A Worker per job, whose version runs the job's bundle, `scheduled.ts`, under a `workersCronTrigger` on the job's schedule in UTC. A job with no schedule has a Worker and no trigger. |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
 | exposure | A `workersCustomDomain` for `<name>.<domain>`, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`. |
-| parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the bucket is emptied before the member's destroy. Secrets are the environment's. |
+| parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
 
 A Worker reaches a callee through its binding, exposed or not, so no
 caller waits for the exposure step. A call between two APIs that one
@@ -4218,9 +4230,10 @@ so a callee exists before any caller's version binds to it, and the waves
   `…/<run>/<RFC 3339>.json`, since R2 keeps no versions.
 - Bundles are kept under `superschematic/bundles/<stack>/<deployable>/<hex>/`
   and site files under `superschematic/sites/<stack>/<site>/<hex>/`. Each
-  prefix gets a marker object written last, as gcp's site publisher does.
-  No lifecycle rule applies, since these are what `--bundle` and `--site`
-  roll back to.
+  prefix gets a marker object written last, as gcp's site publisher does,
+  and each file the mode it was published with as metadata, which `Fetch`
+  restores. No lifecycle rule applies, since these are what `--bundle` and
+  `--site` roll back to.
 
 **Bootstrap.** `stack bootstrap <environment>` runs per account with the
 engineer's token, which needs to:
@@ -4299,21 +4312,49 @@ next deploy.
 
 ### 18.5 Bundles and the Workers entrypoint
 
-**Build.** For each deployable whose artifact is a bundle, the deploy and
-`stack build`:
-1. run one frozen `bun install` at the output root;
-2. run `bun bundle.ts <dir>` in the deployable's package;
+**Build.** A platform says what a deployable's artifact is:
+`PlatformSpec.Artifact` is `image`, the default, or `bundle`, and
+resolution records it as the deployable's `artifact` in
+`environment.json`. For each deployable whose artifact is a bundle, the
+deploy and `stack build`:
+1. run one frozen `bun install` at the output root, shared with the
+   sites' builds;
+2. run `bun bundle.ts <dir>` in the deployable's package,
+   `server/<stack>/<deployable>/`, `<dir>` being a new, empty directory;
 3. digest `<dir>` as a site's output is digested, and record each file's
    SHA-256;
-4. publish through `TargetSpec.Bundles` when the digest is new.
+4. publish through `TargetSpec.Bundles` when the digest is not the one the
+   manifest records, before the deploy's first step.
 
-`PinBundles` replaces `{bundle-digest}` and `{bundle-sha256:<file>}` in
-the deployable's own nodes, as `PinSites` replaces `{site-digest}`. After
-`Render` and before every `Plan`, `Apply` or `Destroy`, the core places
-each pinned bundle's files at `<program>/artifacts/<deployable>/<hex>/`.
-It copies files it just built, or asks the store to fetch them, as for a
-plan in CI or a `--bundle` rollback. `stack plan` builds nothing: it
-fetches the manifest's bundles, and `--no-build` keeps them.
+A bundle is built on every deploy, as a site is, and its digest decides
+whether anything goes up. A `bundle.ts` that fails stops the deploy before
+any step, and a deployable with no `bundle.ts` keeps the manifest's
+bundle, as one with no Dockerfile keeps its image.
+
+**Pin and place.** The platform names each file's path relative to the
+program as `ir.BundlePath`, `artifacts/<deployable>/{bundle-digest}/<file>`,
+and its hash as `ir.BundleFileToken`, `{bundle-sha256:<file>}`.
+`PinBundles` replaces both in the deployable's own nodes, as `PinSites`
+replaces `{site-digest}`, and refuses a token of a file the bundle does not
+hold. After `Render` and before every `Plan`, `Apply` or `Destroy`, the
+core places each pinned bundle's files at
+`<program>/artifacts/<deployable>/<hex>/`, in place of what `artifacts/`
+held. It copies files it just built, or fetches them through the store's
+`registry.ArtifactFetcher` and checks them against the digest, as for a
+plan in CI, a `--bundle` rollback, a `--no-build` deploy or a destroy. A
+store that fetches writes each file back executable when it was published
+so, since the digest covers the bit. `stack plan` builds nothing: it
+fetches the manifest's bundles, or those `--bundle` names, and lists a
+deployable with none as having no bundle yet. `stack outputs` pins the
+manifest's bundles with the hashes it records, and fetches nothing. A site
+publisher that is an `ArtifactFetcher` gets the same placement for each
+site's files, at `artifacts/<site>/<hex>/`; gcp's is not one, and places
+nothing.
+
+The manifest records `bundles` beside `images` and `sites`: each bundle's
+digest and the SHA-256 of each of its files. `stack build` prints each as
+a `--bundle <deployable>=sha256:<hex>` flag, which `stack deploy` and
+`stack plan` take.
 
 **`bundle.ts`** (generated) calls `Bun.build` with:
 - `entrypoints: ['fetch.ts']`, or `['scheduled.ts']` for a job;

@@ -815,9 +815,12 @@ superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
 of every resource, with each server's image pinned, and each database's
-migration plan from the schema the deploy manifest records. It also lists
-the secrets with no value, the servers and jobs with no image yet and the
-sites with no files yet (which a deploy builds), the migration
+migration plan from the schema the deploy manifest records. It builds
+nothing: a server whose platform runs a bundle is planned with the bundle
+the manifest records or `--bundle` names, fetched from the target and
+placed beside the program. It also lists
+the secrets with no value, the servers and jobs with no image or bundle
+yet and the sites with no files yet (which a deploy builds), the migration
 phases a failed deploy left part-way, and the records to create by hand
 for a domain no DNS platform holds. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
@@ -826,6 +829,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | --- | --- | --- |
 | `--image` | the manifest's | a server's, job's or worker's image, `<deployable>=<repository>@sha256:<digest>`; repeatable |
 | `--site` | the manifest's | the files a site serves, `<site>=sha256:<digest>`; repeatable |
+| `--bundle` | the manifest's | the bundle a server, job or worker runs, `<deployable>=sha256:<digest>`; repeatable |
 | `--fail-on` | `all` | hazard classes, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
@@ -843,8 +847,11 @@ build runs on Cloud Build and pushes to the stack's Artifact Registry
 repository. Each site builds with its package's build script after a
 frozen install of the Bun workspace, and its files go up where the target
 serves sites from, under their digest, when they are new; they serve
-nothing until a deploy takes them. It prints each image and each site's
-files as a `stack deploy` flag:
+nothing until a deploy takes them. A server, job or worker whose platform
+runs a bundle builds with `bun bundle.ts` in its package after the same
+install, and the target keeps its files under their digest when they are
+new. It prints each image, each site's files and each bundle as a
+`stack deploy` flag:
 
 ```
 $ superschematic stack build Staging
@@ -861,7 +868,7 @@ A build writes no deploy manifest.
 | `--server` | none | build this server only; repeatable. `--deployable` takes a job, a worker or a site too |
 | `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
-| `--format` | `text` | print `--image` and `--site` flags (`text`) or the result as `json` |
+| `--format` | `text` | print `--image`, `--site` and `--bundle` flags (`text`) or the result as `json` |
 
 ### `stack deploy <environment>`
 
@@ -875,9 +882,13 @@ manifest's image. It builds each site `--site` names no files for, and
 before the wave that rolls the site out it uploads the site's files under
 their digest when they are new and writes the site's config for the run,
 each API it calls with its public address; the wave's apply then serves
-them. The deploy manifest records each step, the
-context each image it built came from, and the digest of each site's
-files, which `--site` takes to serve them again: a rollback. Every secret needs a value before
+them. A server, job or worker whose platform runs a bundle builds with
+`bun bundle.ts` in its package, and its files go up under their digest
+when they are new, before any step; the deploy places them beside the
+provisioner's program. The deploy manifest records each step, the
+context each image it built came from, the digest of each site's
+files, which `--site` takes to serve them again, and each bundle, which
+`--bundle` takes to run it again, fetched from the target: a rollback. Every secret needs a value before
 the first step after infrastructure; at a terminal the deploy asks for
 each one missing. On gcp each migration phase runs as an execution of the
 stack's Cloud Run job, `<stack>-migrate`, which also gives each server
@@ -902,7 +913,8 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 | --- | --- | --- |
 | `--image` | a build, else the manifest's | a server's or job's image, `<deployable>=<repository>@sha256:<digest>`; repeatable. One with none of them is refused |
 | `--site` | a build, else the manifest's | the files a site serves, published by an earlier deploy or build, `<site>=sha256:<digest>`; repeatable. One with none of them is refused |
-| `--no-build` | false | build no image and no site: take each from `--image`, `--site` or the manifest |
+| `--bundle` | a build, else the manifest's | the bundle a server, job or worker runs, published by an earlier deploy or build, `<deployable>=sha256:<digest>`; repeatable. One with none of them is refused |
+| `--no-build` | false | build no image, no site and no bundle: take each from `--image`, `--site`, `--bundle` or the manifest |
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
