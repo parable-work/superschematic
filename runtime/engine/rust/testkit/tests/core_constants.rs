@@ -9,7 +9,8 @@
 //! variable set, on Postgres. The TypeScript file holds an operation's
 //! `update()` to it through Revisions, not ported yet (wave 2); a test
 //! behavior of this file calls `update()` and `validate_update()` instead.
-//! The describe document is milestone 6's.
+//! The describe document's case replays from the recording
+//! (`core-constants.json`).
 
 mod support;
 

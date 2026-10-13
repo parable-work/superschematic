@@ -6,9 +6,10 @@
 //! version keeps each value's type and may give a new value one; the types
 //! it checks are held to the compatibility rule; the JSON Schema of each
 //! variant), on SQLite and, with the variable set, on Postgres. The
-//! describe document and the tools that carry the rules are milestone 6's:
-//! here the rules are the behavior's own `instance_schema`, over a stand-in
-//! for the describe document's type schemas.
+//! describe document and the tools that carry the rules replay from the
+//! recording (`core-variants.json`); here the rules are the behavior's own
+//! `instance_schema`, over a stand-in for the describe document's type
+//! schemas.
 
 mod support;
 

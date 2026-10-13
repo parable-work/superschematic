@@ -80,10 +80,11 @@ pub const CORE_BEHAVIORS: [&str; 15] = [
 /// runs on the core's Search (milestone 10).
 pub const UNBUILT_WRITES: [&str; 3] = ["storage.transaction", "events.watch", "search"];
 
-/// Calls that only read but answer from what this engine does not have
-/// yet: the step is skipped and counted. The registered behaviors' names
-/// and declarations, and the behavior catalog, list every core behavior,
-/// which this engine registers only in part until milestone 11.
+/// Calls that read the registered behaviors, which answer from what this
+/// engine does not have yet where they list every core behavior (the names
+/// and the behavior catalog) or read one by name not ported yet: the step
+/// is skipped and counted ([`reads_unported`]). This engine registers the
+/// core's behaviors only in part until milestone 11.
 pub const UNBUILT_READS: [&str; 5] = [
     "behaviors.has",
     "behaviors.names",
@@ -91,6 +92,24 @@ pub const UNBUILT_READS: [&str; 5] = [
     "tools.listBehaviors",
     "tools.describeBehavior",
 ];
+
+/// Whether a read of the registered behaviors ([`UNBUILT_READS`]) answers
+/// from a core behavior this engine does not register yet: a list of every
+/// behavior does, and a read of one by name does when it names one not
+/// ported.
+pub fn reads_unported(call: &str, step: &Value) -> bool {
+    match call {
+        "behaviors.names" | "tools.listBehaviors" => true,
+        _ => step
+            .get("args")
+            .and_then(|args| args.get(0))
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                CORE_BEHAVIORS.contains(&name)
+                    && !superschematic_engine_behaviors::NAMES.contains(&name)
+            }),
+    }
+}
 
 /// A scenario file, its shared values resolved.
 #[derive(Clone, Debug)]
@@ -418,6 +437,11 @@ impl<'d> Run<'d> {
     }
 
     fn step(&mut self, step: &Value) -> Result<Outcome, String> {
+        // A step only the TypeScript engine can make, or one during which a
+        // test behavior read a hook the test had set (the README's `js`).
+        if step.get("js").is_some_and(|js| js == &Value::Bool(true)) {
+            return Ok(Outcome::Skipped);
+        }
         if step.get("app").is_some() && step.get("request").is_none() {
             return http::app(self, step);
         }
@@ -428,10 +452,7 @@ impl<'d> Run<'d> {
             return http::stream(self, step);
         }
         let call = step.get("call").and_then(Value::as_str).unwrap_or_default();
-        if step.get("js").is_some_and(|js| js == &Value::Bool(true)) {
-            return Ok(Outcome::Skipped);
-        }
-        if UNBUILT_READS.contains(&call) {
+        if UNBUILT_READS.contains(&call) && reads_unported(call, step) {
             return Ok(Outcome::Skipped);
         }
         let args = match step.get("args") {

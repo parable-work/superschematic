@@ -10,8 +10,9 @@
 //! field; any config change is allowed, an instance that predates a
 //! requirement keeping on), on SQLite and, with the variable set, on
 //! Postgres. The case that approves a Revisions proposal waits for
-//! Revisions (wave 2a); the guidance, which milestone 6's describe document
-//! shows, is held to the TypeScript text in `behaviors/tests/guidance.rs`.
+//! Revisions (wave 2a), and so does the describe document's, which tells
+//! an approval what each state requires; the guidance is held to the
+//! TypeScript text in `behaviors/tests/guidance.rs`.
 
 mod support;
 

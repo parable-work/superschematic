@@ -12,14 +12,14 @@
 //! `test/core-behaviors.test.ts`'s requests document, on SQLite and, with
 //! the variable set, on Postgres.
 //!
-//! The runner is milestone 6's: where the TypeScript file's sweep calls
-//! `runner.runDue()`, these run the fire schedule once through
-//! `Behaviors::run_schedule` as the runner's principal, each sweep moving
-//! the clock at least the schedule's interval, so every sweep is due. What
-//! only the runner shows waits for it: `runner.status()`'s schedules and
-//! their failures, and the case a Reactions rule hears a fire in (Reactions
-//! is wave 3). The guidance, which milestone 6's describe document shows,
-//! is held to the TypeScript text in `behaviors/tests/guidance.rs`.
+//! Each engine opens with the runner, as the TypeScript file's do, which
+//! finds the fire schedule once the schema is published; a sweep moves the
+//! clock at least the schedule's interval and runs what is due
+//! (`run_due`), and `status()` shows the schedule, its state and its
+//! failures. The case a Reactions rule hears a fire in waits for Reactions
+//! (wave 3). The guidance is held to the TypeScript text in
+//! `behaviors/tests/guidance.rs`, and the describe document that shows it
+//! to the recording (`core-timers.json`).
 
 mod support;
 
@@ -27,8 +27,8 @@ use serde_json::{json, Value};
 
 use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineErrorCode, EngineEvent, Error,
-    GetOptions, InstanceRecord, NamespaceOptions, Policy, Principal, ReadEvents, SchemaTarget,
-    WriteOptions,
+    GetOptions, InstanceRecord, NamespaceOptions, Policy, Principal, ReadEvents, RunnerOptions,
+    RunnerPass, ScheduleState, ScheduleStatus, SchemaTarget, WriteOptions,
 };
 use superschematic_engine_testkit::core_fixtures::{Bounce, FireHold};
 use support::{alice, refusal, repository, schema_document, targets, veto, Target};
@@ -227,35 +227,49 @@ impl Opened {
     }
 
     // sweep moves the clock on by ms, at least the sweep's interval, and
-    // runs the fire schedule as the runner, as runner.runDue() runs it
-    // once it is due.
-    fn sweep(&self, ms: i64) -> Result<(), Error> {
+    // runs what is due.
+    fn sweep(&self, ms: i64) -> Result<RunnerPass, Error> {
         self.advance(ms);
-        fire(&self.engine, None, "Ticket")
+        self.engine.runner().run_due()
+    }
+
+    fn timers_schedule(&self) -> ScheduleStatus {
+        timers_schedules(&self.engine)
+            .into_iter()
+            .next()
+            .expect("Timers' schedule")
     }
 }
 
-// fire runs Timers' fire schedule once on a schema in a namespace, as the
-// runner.
-fn fire(engine: &Engine, namespace: Option<&str>, schema: &str) -> Result<(), Error> {
+// timers_schedules is what the runner's status lists of Timers' schedules.
+fn timers_schedules(engine: &Engine) -> Vec<ScheduleStatus> {
     engine
-        .behaviors()
-        .run_schedule(&runner(), namespace, schema, "Timers", "fire", None)
+        .runner()
+        .status()
+        .expect("the runner's status")
+        .schedules
+        .into_iter()
+        .filter(|schedule| schedule.behavior == "Timers")
+        .collect()
 }
 
+// open_with opens an engine on a clock at T0 with the runner, test.Bounce
+// and test.Hold, its options changed by `configure`.
 fn open_with(
     target: &Target,
     configure: impl FnOnce(&mut superschematic_engine::EngineOptions),
 ) -> Engine {
     target.open_with(core().with(Bounce).with(FireHold), |options| {
         options.clock = Clock::Manual(T0);
+        options.runner = Some(RunnerOptions::new(runner()));
         configure(options);
     })
 }
 
-// opened opens an engine on a clock at T0, with the open meta-schema,
-// test.Bounce and test.Hold, and publishes the Ticket schema with its
-// Timers config, extra behaviors after it, and a Workflow config.
+// opened opens an engine on a clock at T0, with the open meta-schema, the
+// runner, test.Bounce and test.Hold, publishes the Ticket schema with its
+// Timers config, extra behaviors after it, and a Workflow config, and lets
+// the runner find the fire schedule, which runs an interval later.
 fn opened_with(
     target: &Target,
     timers: Value,
@@ -268,6 +282,7 @@ fn opened_with(
         &engine,
         &ticket_schema_named(timers, extra, workflow, "Ticket"),
     );
+    engine.runner().run_due().expect("the runner's first pass");
     Opened { engine }
 }
 
@@ -298,7 +313,7 @@ fn an_enters_deadline_arms_as_the_status_enters_its_state_and_the_sweep_fires_it
         );
 
         // Not due: the sweep and a caller's fireTimer change nothing.
-        t.sweep(4 * HOUR - MINUTE).expect("sweep");
+        assert_eq!(t.sweep(4 * HOUR - MINUTE).expect("sweep").scheduled, 1);
         assert_eq!(t.status("t1"), "open");
         assert_eq!(
             t.invoke("t1", "fireTimer", json!({"deadline": "respond"}), &alice())
@@ -346,7 +361,18 @@ fn an_enters_deadline_arms_as_the_status_enters_its_state_and_the_sweep_fires_it
         );
         t.sweep(HOUR).expect("sweep");
         assert_eq!(t.events("t1").len(), 2);
-        // runner.status()'s schedules wait for the runner (milestone 6).
+        assert_eq!(
+            timers_schedules(&t.engine)
+                .iter()
+                .map(|schedule| (
+                    schedule.schedule.as_str(),
+                    schedule.schema.as_str(),
+                    schedule.state,
+                    schedule.every_ms
+                ))
+                .collect::<Vec<_>>(),
+            [("fire", "Ticket", ScheduleState::Active, Some(5000))]
+        );
         let (behavior, _, reason, code, _) =
             veto(t.invoke("t1", "fireTimer", json!({"deadline": "answer"}), &alice()));
         assert_eq!(
@@ -926,10 +952,14 @@ fn a_runner_the_policy_refuses_write_on_the_schema_fails_the_sweep_and_fires_not
             },
         );
         t.create("t1", json!({}));
-        let failed = refusal(t.sweep(HOUR));
-        assert_eq!(failed.code(), EngineErrorCode::Forbidden, "{failed}");
-        // The runner records the failure and its status shows it
-        // (milestone 6).
+        assert_eq!(t.sweep(HOUR).expect("sweep").failed, 1);
+        let status = t.timers_schedule();
+        assert_eq!(status.state, ScheduleState::Retrying);
+        let error = status.error.unwrap_or_default();
+        assert!(
+            error.contains("forbidden") || error.contains("may not"),
+            "{error}"
+        );
         assert_eq!(t.deadlines("t1")["respond"]["fired"], false);
     }
 }
@@ -962,7 +992,8 @@ fn the_sweep_pages_by_due_time_past_the_deadlines_whose_fire_is_refused() {
             t.create(id, json!({}));
         }
         for _ in 0..2 {
-            t.sweep(2 * HOUR).expect("sweep");
+            let pass = t.sweep(2 * HOUR).expect("sweep");
+            assert_eq!((pass.scheduled, pass.failed), (1, 0));
             for id in ["f1", "f2", "f3"] {
                 assert_eq!(t.deadlines(id)["ping"]["fired"], true, "{id}");
                 assert_eq!(t.events(id).len(), 2, "{id}");
@@ -976,6 +1007,7 @@ fn the_sweep_pages_by_due_time_past_the_deadlines_whose_fire_is_refused() {
                 (json!(false), json!(false), 1)
             );
         }
+        assert_eq!(t.timers_schedule().state, ScheduleState::Active);
     }
 }
 
@@ -985,6 +1017,7 @@ fn the_sweep_runs_per_schema_and_per_namespace_each_firing_its_own_deadlines() {
         let engine = target.open_core_with(|options| {
             options.behaviors = core();
             options.clock = Clock::Manual(T0);
+            options.runner = Some(RunnerOptions::new(runner()));
             options.namespaces = NamespaceOptions {
                 names: vec!["east".to_owned(), "west".to_owned()],
                 shared: None,
@@ -1035,19 +1068,14 @@ fn the_sweep_runs_per_schema_and_per_namespace_each_firing_its_own_deadlines() {
                 .behaviors["Timers"]["deadlines"]["ping"]["fired"]
                 .clone()
         };
-        let sweep_all = || {
-            for namespace in ["east", "west"] {
-                for schema in ["Ticket", "Task"] {
-                    fire(&engine, Some(namespace), schema).expect("sweep");
-                }
-            }
-        };
+        engine.runner().run_due().expect("the runner's first pass");
+        let run_due = || engine.runner().run_due().expect("run due");
         create("east", "Ticket");
         create("east", "Task");
         engine.clock().set(T0 + 2 * HOUR).expect("set");
         create("west", "Ticket");
         create("west", "Task");
-        sweep_all();
+        assert_eq!(run_due().scheduled, 4);
         assert_eq!(
             [
                 fired("east", "Ticket"),
@@ -1058,10 +1086,19 @@ fn the_sweep_runs_per_schema_and_per_namespace_each_firing_its_own_deadlines() {
             [json!(true), json!(true), json!(false), json!(false)]
         );
         engine.clock().set(T0 + 4 * HOUR).expect("set");
-        sweep_all();
+        run_due();
         assert_eq!(
             [fired("west", "Ticket"), fired("west", "Task")],
             [json!(true), json!(true)]
+        );
+        let mut schedules = timers_schedules(&engine)
+            .iter()
+            .map(|schedule| format!("{} {}", schedule.namespace, schedule.schema))
+            .collect::<Vec<_>>();
+        schedules.sort();
+        assert_eq!(
+            schedules,
+            ["east Task", "east Ticket", "west Task", "west Ticket"]
         );
         let west = engine
             .events()
@@ -1306,7 +1343,7 @@ fn requests_document() -> Value {
 }
 
 /// The case of `test/core-behaviors.test.ts` that runs the requests
-/// document, its runner's passes the fire schedule's runs.
+/// document on an engine with the runner.
 #[test]
 fn it_runs_the_requests_document_a_request_open_four_hours_is_escalated_and_a_visit_reminded() {
     for target in targets("timers_requests_document") {
@@ -1315,6 +1352,7 @@ fn it_runs_the_requests_document_a_request_open_four_hours_is_escalated_and_a_vi
         let engine = target.open_core_with(|options| {
             options.behaviors = core();
             options.clock = Clock::Manual(T0);
+            options.runner = Some(RunnerOptions::new(runner()));
         });
         publish(&engine, &requests_document());
         assert_eq!(
@@ -1327,6 +1365,7 @@ fn it_runs_the_requests_document_a_request_open_four_hours_is_escalated_and_a_vi
                 .collect::<Vec<_>>(),
             ["Workflow", "Timers"]
         );
+        engine.runner().run_due().expect("the runner's first pass");
         let start = T0;
         let created = engine
             .instances()
@@ -1386,7 +1425,7 @@ fn it_runs_the_requests_document_a_request_open_four_hours_is_escalated_and_a_vi
         };
         let run = |at: i64| {
             engine.clock().set(at).expect("set");
-            fire(&engine, None, "requests").expect("the fire schedule");
+            engine.runner().run_due().expect("run due");
         };
         run(start + 5 * HOUR);
         assert_eq!(

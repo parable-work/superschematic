@@ -11,9 +11,9 @@
 //! The TypeScript file's operation `update()` is Revisions' approve (wave
 //! 2a); here test.Recorder's `update()` stands in for it, and the approval
 //! itself waits for Revisions. The move a Reactions rule makes on the
-//! runner waits for Reactions (wave 3) and the runner (milestone 6). The
-//! guidance, which milestone 6's describe document shows, is held to the
-//! TypeScript text in `behaviors/tests/guidance.rs`.
+//! runner waits for Reactions (wave 3). The guidance is held to the
+//! TypeScript text in `behaviors/tests/guidance.rs`, and the describe
+//! document that shows it to the recording (`core-approvals.json`).
 
 mod support;
 
@@ -743,7 +743,7 @@ fn entering_a_gated_state_consumes_its_sign_offs_so_a_return_to_it_is_signed_aga
             ]
         );
         // The move a Reactions rule makes on the runner waits for Reactions
-        // (wave 3) and the runner (milestone 6).
+        // (wave 3).
     }
 }
 

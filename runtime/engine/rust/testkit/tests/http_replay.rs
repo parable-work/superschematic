@@ -4,8 +4,8 @@
 //! Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one. A case
 //! is skipped only when only the TypeScript engine can run it (`js`: a
 //! function the host gave the app), or when it composes a core behavior
-//! (milestones 8 to 12); the counts of what ran and what was skipped, and
-//! why, print per file.
+//! not ported yet (milestones 9 to 11); the counts of what ran and what
+//! was skipped, and why, print per file.
 //!
 //! The corpus is `runtime/engine/testdata/http`, in the tree;
 //! `ENGINE_HTTP_CORPUS_DIR` names another directory, and `ENGINE_HTTP_ONLY`
@@ -26,12 +26,12 @@ const KNOWN: [(&str, &str, &str); 2] = [
     (
         "http",
         "the behavior catalog > lists every behavior the engine runs, to any caller, and describes one by name",
-        "the catalog lists the core's behaviors beside the test's; the Rust engine registers none of them until milestones 8 to 12 port them",
+        "the catalog lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 9 to 11 port the rest",
     ),
     (
         "mcp",
         "tools/call > list_behaviors and describe_behavior read the behaviors the engine runs, for any caller",
-        "list_behaviors lists the core's behaviors beside the test's; the Rust engine registers none of them until milestones 8 to 12 port them",
+        "list_behaviors lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 9 to 11 port the rest",
     ),
 ];
 

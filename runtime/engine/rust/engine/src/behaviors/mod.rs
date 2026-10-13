@@ -58,8 +58,7 @@ pub use crate::instances::references::{Hears, Reference};
 use serde_json::Value;
 
 use crate::engine::Engine;
-use crate::errors::{Error, Result};
-use crate::principal::Principal;
+use crate::errors::Result;
 
 /// The behaviors an engine runs (`engine.behaviors`).
 pub struct Behaviors<'e> {
@@ -106,83 +105,5 @@ impl Behaviors<'_> {
             .registry()
             .lookup(name)
             .map(|behavior| behavior.declaration.json.clone())
-    }
-
-    /// Runs one schedule of a behavior once on a schema's live version in a
-    /// namespace (`default` when `None`), as the runner's work runs it: as
-    /// `principal`, at the engine clock's time, in a write of the
-    /// namespace, the events it writes recording the schedule as their
-    /// cause at depth 1, and `previous` as when its last run committed. A
-    /// failure rolls the run back and is returned; the runner (milestone 6)
-    /// records it, backs off and runs the schedule again.
-    ///
-    /// A test's entry point to a behavior's schedule until the runner
-    /// drives schedules: it keeps no record of the run, and neither asks
-    /// whether the schedule is due nor skips an archived namespace.
-    #[doc(hidden)]
-    pub fn run_schedule(
-        &self,
-        principal: &Principal,
-        namespace: Option<&str>,
-        schema: &str,
-        behavior: &str,
-        schedule: &str,
-        previous: Option<i64>,
-    ) -> Result<()> {
-        use crate::behaviors::execution::{Chain, Execution, Own};
-        use crate::events::EventCause;
-        use crate::instances::reach::Reach;
-        use crate::namespaces::NamespaceView;
-
-        let engine = self.engine;
-        crate::principal::check_principal(principal)?;
-        let lock = superschematic_engine_storage::Lock::Namespace(
-            namespace.unwrap_or(crate::namespaces::DEFAULT_NAMESPACE),
-        );
-        engine.write(lock, |tx| {
-            let view = NamespaceView::load(&engine.namespaces, tx)?;
-            let namespace = view.resolve(namespace)?;
-            let record = crate::instances::live(&engine.catalog, tx, &view, &namespace, schema)?;
-            let runtime = engine.catalog.runtime_of(tx, &record)?;
-            let index = runtime
-                .composition
-                .position(behavior)
-                .filter(|&index| {
-                    runtime.composition.behaviors[index]
-                        .behavior
-                        .hooks
-                        .schedules
-                        .iter()
-                        .any(|(name, _)| name == schedule)
-                })
-                .ok_or_else(|| {
-                    Error::Usage(format!(
-                        "schema {schema} composes no behavior {behavior} with a schedule {schedule}"
-                    ))
-                })?;
-            let mut chain = Chain::new(principal, &namespace, engine.clock.now());
-            chain.cause = Some(EventCause {
-                behavior: behavior.to_owned(),
-                event: None,
-                schedule: Some(schedule.to_owned()),
-                depth: 1,
-            });
-            let reach = Reach {
-                engine,
-                tx,
-                view: &view,
-                chain: &chain,
-            };
-            Execution::new(
-                reach,
-                std::sync::Arc::clone(&runtime),
-                schema,
-                record.version.unwrap_or_default(),
-                "",
-                Own::None,
-                true,
-            )
-            .schedule(index, schedule, previous)
-        })
     }
 }
