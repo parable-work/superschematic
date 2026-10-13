@@ -41,7 +41,8 @@ use crate::tools::ToolFilter;
 pub use mcp::{McpOptions, MCP_DISCOVER_VERSIONS, MCP_INITIALIZE_VERSIONS, MCP_SERVER_NAME};
 pub use problems::{status_text, Problem};
 pub use stream::{
-    EventStream, Pull, StreamOptions, DEFAULT_HEARTBEAT_MS, DEFAULT_STREAM_PAGE_SIZE,
+    start as start_stream, EventStream, Pull, StreamOptions, DEFAULT_HEARTBEAT_MS,
+    DEFAULT_STREAM_PAGE_SIZE,
 };
 
 /// The service the host's service step verified (D37): the calling
@@ -369,6 +370,11 @@ pub fn route_of(method: &str, path: &str) -> Option<Route> {
 /// prefix, or under it naming no route, is 404.
 pub fn handle(engine: &Engine, options: &ApiOptions, request: &Request) -> Response {
     let request_id = request.request_id.as_str();
+    if engine.is_closed() {
+        // Shut down: the host is draining, and another instance answers.
+        return Problem::new(503, "The engine is shutting down", "unavailable")
+            .response(request_id);
+    }
     let path = match request
         .path
         .strip_prefix(request.prefix.trim_end_matches('/'))

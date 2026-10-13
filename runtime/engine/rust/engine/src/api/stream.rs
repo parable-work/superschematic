@@ -27,13 +27,16 @@
 //! client then reconnects from its last id and gets the refusal as a
 //! problem document.
 
-use std::sync::{Arc, Weak};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use super::problems::Problem;
 use super::{ApiOptions, Body, Request, Response};
+use crate::errors::{EngineError, Error};
 use crate::events::{EventPage, EventsAfter, ReadEvents};
 use crate::json;
 use crate::paging::MAX_PAGE_SIZE;
@@ -156,9 +159,35 @@ pub(crate) fn open(
     principal: &Principal,
     read: &ReadEvents<'_>,
 ) -> Result<Response, Problem> {
-    let (page_size, heartbeat) = options.stream.check().map_err(|_| Problem::internal())?;
+    let stream = start(engine, &options.stream, principal, read).map_err(|error| match error {
+        Error::Engine(_) => Problem::of(&error),
+        _ => Problem::internal(),
+    })?;
+    Ok(Response {
+        status: 200,
+        headers: vec![
+            ("content-type".to_owned(), "text/event-stream".to_owned()),
+            ("cache-control".to_owned(), "no-store".to_owned()),
+            ("x-request-id".to_owned(), request.request_id.clone()),
+        ],
+        body: Body::Stream(Box::new(stream)),
+    })
+}
+
+/// Starts a stream of the log as `principal` reads it: its first page read
+/// now, so a refused read is the read's error. The engine must be shared
+/// ([`Engine::shared`]), since the stream outlives the call.
+pub fn start(
+    engine: &Engine,
+    options: &StreamOptions,
+    principal: &Principal,
+    read: &ReadEvents<'_>,
+) -> Result<EventStream, Error> {
+    let (page_size, heartbeat) = options.check().map_err(EngineError::invalid_argument)?;
     let Some(weak) = engine.weak() else {
-        return Err(Problem::internal());
+        return Err(Error::usage(
+            "an event stream needs a shared engine (Engine::shared)",
+        ));
     };
     let owned = Read {
         namespace: read.namespace.unwrap_or("default").to_owned(),
@@ -171,13 +200,12 @@ pub(crate) fn open(
     let after = read.after.unwrap_or(EventsAfter::Cursor(0));
     let first = engine
         .events()
-        .read(principal, &owned.at(after, page_size))
-        .map_err(|error| Problem::of(&error))?;
+        .read(principal, &owned.at(after, page_size))?;
     let cursor = match after {
         EventsAfter::Head => first.next,
         EventsAfter::Cursor(cursor) => cursor,
     };
-    let stream = EventStream {
+    Ok(EventStream {
         engine: weak,
         principal: principal.clone(),
         read: owned,
@@ -190,16 +218,50 @@ pub(crate) fn open(
         opened: false,
         done: false,
         beat_at: None,
-    };
-    Ok(Response {
-        status: 200,
-        headers: vec![
-            ("content-type".to_owned(), "text/event-stream".to_owned()),
-            ("cache-control".to_owned(), "no-store".to_owned()),
-            ("x-request-id".to_owned(), request.request_id.clone()),
-        ],
-        body: Body::Stream(Box::new(stream)),
     })
+}
+
+/// The event streams a caller of the JSON calls holds open
+/// ([`crate::calls`]: `api.handle` and `stream.open` hand back an id,
+/// `stream.next` pulls and `stream.close` ends one), so a binding that
+/// passes JSON across its boundary can serve them.
+#[derive(Default)]
+pub(crate) struct OpenStreams {
+    next: AtomicU64,
+    open: Mutex<HashMap<u64, Box<EventStream>>>,
+}
+
+impl OpenStreams {
+    /// Holds a stream open and returns its id.
+    pub(crate) fn hold(&self, stream: Box<EventStream>) -> u64 {
+        let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        self.streams().insert(id, stream);
+        id
+    }
+
+    /// Pulls a stream by its id, as [`EventStream::next`]; `None` for an
+    /// id that names no open stream. A stream that ends is let go. The
+    /// stream is out of the map while it waits, so pulls of others go on.
+    pub(crate) fn next(&self, id: u64, timeout: Duration) -> Option<Pull> {
+        let mut stream = self.streams().remove(&id)?;
+        let pulled = stream.next(timeout);
+        if pulled != Pull::End {
+            self.streams().insert(id, stream);
+        }
+        Some(pulled)
+    }
+
+    /// Ends a stream by its id; false for one that is not open.
+    pub(crate) fn close(&self, id: u64) -> bool {
+        self.streams()
+            .remove(&id)
+            .map(|mut stream| stream.close())
+            .is_some()
+    }
+
+    fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Box<EventStream>>> {
+        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl EventStream {

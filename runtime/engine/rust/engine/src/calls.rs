@@ -12,15 +12,27 @@
 //! A call returns `None` where the TypeScript method returns `undefined`.
 //!
 //! The behaviors' calls are here (`instances.invoke`, `operate`,
-//! `invokeSchema`, and `behaviors.has`, `names` and `declaration`);
-//! `behaviors.register` takes an implementation, which JSON cannot carry,
-//! so a host registers through [`crate::Behaviors::register`]. Milestone 6
-//! adds the runner's and the tools'.
+//! `invokeSchema`, and `behaviors.has`, `names` and `declaration`), the
+//! runner's, the tools', `search`, and `close` (the TypeScript engine's,
+//! [`Engine::shutdown`]); `behaviors.register` takes an implementation,
+//! which JSON cannot carry, so a host registers through
+//! [`crate::Behaviors::register`].
+//!
+//! The HTTP API is here too, for a binding that passes JSON across its
+//! boundary: `api.routes`, and `api.handle`, which takes the request as
+//! JSON (its body as text) and returns `{status, headers, body, stream}`;
+//! an event stream it opens, or one `stream.open` opens from a read of the
+//! log, is held by the engine and named by an id, which `stream.next`
+//! pulls (`{data}`, `{pending: true}` or `{end: true}`) and `stream.close`
+//! ends.
 
 use std::borrow::Cow;
 
 use serde_json::{Map, Value};
 
+use crate::api::{
+    self, ApiOptions, Body, Caller, McpOptions, Refusal, Request, ServiceCaller, StreamOptions,
+};
 use crate::engine::Engine;
 use crate::errors::{EngineError, Error, Result};
 use crate::events::{check_filters, cursor_refusal, EventsAfter, ReadEvents};
@@ -34,7 +46,7 @@ use crate::principal::{check_principal, Principal};
 use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions};
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 33] = [
+pub const CALLS: [&str; 54] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -65,9 +77,30 @@ pub const CALLS: [&str; 33] = [
     "values.get",
     "values.sweep",
     "values.thresholdBytes",
+    "values.maxBytes",
+    "tools.listBehaviors",
+    "tools.describeBehavior",
+    "tools.describe",
+    "tools.manifest",
+    "tools.call",
+    "search",
+    "runner.start",
+    "runner.stop",
+    "runner.running",
+    "runner.runDue",
+    "runner.prune",
+    "runner.status",
+    "runner.nextWake",
+    "runner.resume",
     "behaviors.has",
     "behaviors.names",
     "behaviors.declaration",
+    "api.routes",
+    "api.handle",
+    "stream.open",
+    "stream.next",
+    "stream.close",
+    "close",
 ];
 
 /// Calls a method of the engine by name, as `principal` for a method that
@@ -88,6 +121,11 @@ pub fn call(
     };
     let arg = |index: usize| args.get(index).unwrap_or(&Value::Null);
     let options = |index: usize| options_of(args.get(index));
+    // A shut-down engine refuses every call but the pulls that end its
+    // streams.
+    if engine.is_closed() && !matches!(method, "stream.next" | "stream.close" | "close") {
+        return Err(Error::internal("the engine is closed"));
+    }
     let result = match method {
         "schemas.define" => {
             let options = options(1);
@@ -337,41 +375,8 @@ pub fn call(
         "behaviors.declaration" => return Ok(engine.behaviors().declaration(&text(arg(0)))),
         "events.read" => {
             let principal = who()?;
-            let options = options(0);
-            let member = |key: &str| options.and_then(|options| options.get(key));
-            let after = match member("after") {
-                None => None,
-                Some(Value::String(head)) if head == "head" => Some(EventsAfter::Head),
-                Some(given) => Some(EventsAfter::Cursor(
-                    integer(given).ok_or_else(|| cursor_refusal(&js_string(given)))?,
-                )),
-            };
-            let limit = match member("limit") {
-                None => None,
-                Some(given) => {
-                    Some(integer(given).ok_or_else(|| page_size_refusal(&js_string(given)))?)
-                }
-            };
-            let namespace = text_member(options, "namespace");
-            let schema = text_member(options, "schema");
-            let instance_id = text_member(options, "instanceId");
-            // The filters are checked in the TypeScript engine's order,
-            // after the cursor and the page size, before the schema.
-            let [kinds, behaviors, exclude] =
-                check_filters([member("kinds"), member("behaviors"), member("exclude")])?;
-            to_json(engine.events().read(
-                principal,
-                &ReadEvents {
-                    namespace: namespace.as_deref(),
-                    schema: schema.as_deref(),
-                    instance_id: instance_id.as_deref(),
-                    after,
-                    limit,
-                    kinds,
-                    behaviors,
-                    exclude,
-                },
-            )?)
+            let read = ReadArgs::of(options(0))?;
+            to_json(engine.events().read(principal, &read.view())?)
         }
         "events.head" => Ok(Value::from(engine.events().head()?)),
         "events.floor" => {
@@ -401,6 +406,126 @@ pub fn call(
         }
         "values.sweep" => to_json(engine.values().sweep()?),
         "values.thresholdBytes" => Ok(Value::from(engine.values().threshold_bytes())),
+        "values.maxBytes" => Ok(Value::from(engine.values().max_bytes())),
+        "tools.listBehaviors" => engine.tools().list_behaviors(who()?),
+        "tools.describeBehavior" => engine.tools().describe_behavior(who()?, &text(arg(0))),
+        "tools.describe" => {
+            let namespace = text_member(options(1), "namespace");
+            engine.tools().describe(
+                who()?,
+                &text(arg(0)),
+                crate::tools::ToolTarget {
+                    namespace: namespace.as_deref(),
+                    filter: None,
+                },
+            )
+        }
+        "tools.manifest" => {
+            let namespace = text_member(options(0), "namespace");
+            engine.tools().manifest(
+                who()?,
+                crate::tools::ToolTarget {
+                    namespace: namespace.as_deref(),
+                    filter: None,
+                },
+            )
+        }
+        "tools.call" => {
+            let namespace = text_member(options(2), "namespace");
+            engine.tools().call(
+                who()?,
+                &text(arg(0)),
+                arg(1),
+                crate::tools::ToolTarget {
+                    namespace: namespace.as_deref(),
+                    filter: None,
+                },
+            )
+        }
+        "search" => {
+            let namespace = text_member(options(1), "namespace");
+            engine.search(who()?, arg(0), namespace.as_deref())
+        }
+        "runner.start" => {
+            engine.runner().start()?;
+            return Ok(None);
+        }
+        "runner.stop" => {
+            engine.runner().stop();
+            return Ok(None);
+        }
+        "runner.running" => Ok(Value::Bool(engine.runner().running())),
+        "runner.runDue" => to_json(engine.runner().run_due()?),
+        "runner.prune" => to_json(engine.runner().prune()?),
+        "runner.status" => to_json(engine.runner().status()?),
+        "runner.nextWake" => Ok(Value::from(engine.runner().next_wake())),
+        "runner.resume" => {
+            let key = arg(0);
+            let member = |name: &str| text_member(key.as_object(), name).unwrap_or_default();
+            let skip = flag_member(options(1), "skip");
+            to_json(engine.runner().resume(
+                &crate::runner::SubscriptionKey {
+                    behavior: member("behavior"),
+                    namespace: member("namespace"),
+                    schema: member("schema"),
+                },
+                skip,
+            )?)
+        }
+        "api.routes" => to_json(api::routes()),
+        "api.handle" => {
+            let request = request_of(arg(0))?;
+            let options = api_options_of(options(1))?;
+            let response = api::handle(engine, &options, &request);
+            Ok(response_json(engine, response))
+        }
+        "stream.open" => {
+            let principal = who()?;
+            let read = ReadArgs::of(options(0))?;
+            let stream = api::start_stream(
+                engine,
+                &stream_options_of(options(1))?,
+                principal,
+                &read.view(),
+            )?;
+            Ok(Value::from(engine.streams.hold(Box::new(stream))))
+        }
+        "stream.next" => {
+            let id = stream_id(arg(0))?;
+            let timeout = match arg(1) {
+                Value::Null => 0,
+                given => integer(given)
+                    .and_then(|ms| u64::try_from(ms).ok())
+                    .ok_or_else(|| {
+                        EngineError::invalid_argument(format!(
+                            "a stream's pull waits a whole number of milliseconds, got {}",
+                            js_string(given)
+                        ))
+                    })?,
+            };
+            let pulled = engine
+                .streams
+                .next(id, std::time::Duration::from_millis(timeout))
+                .ok_or_else(|| unknown_stream(id))?;
+            Ok(match pulled {
+                api::Pull::Data(bytes) => {
+                    serde_json::json!({"data": String::from_utf8_lossy(&bytes)})
+                }
+                api::Pull::Pending => serde_json::json!({"pending": true}),
+                api::Pull::End => serde_json::json!({"end": true}),
+            })
+        }
+        "stream.close" => {
+            let id = stream_id(arg(0))?;
+            if !engine.streams.close(id) {
+                return Err(unknown_stream(id).into());
+            }
+            return Ok(None);
+        }
+        "close" => {
+            engine.shutdown();
+            return Ok(None);
+        }
         other => {
             return Err(Error::usage(format!(
                 "the engine has no call {}",
@@ -459,6 +584,269 @@ pub fn principal_from_json(given: &Value) -> Result<Principal, EngineError> {
             "a principal is {{ subject, permissions, claims?, service? }}: {error}"
         ))
     })
+}
+
+// ReadArgs is a read of the log a call's options give, owned: the cursor,
+// the page size and the filters checked in the TypeScript engine's order
+// (the cursor, the page size, then the filters).
+struct ReadArgs {
+    namespace: Option<String>,
+    schema: Option<String>,
+    instance_id: Option<String>,
+    after: Option<EventsAfter>,
+    limit: Option<i64>,
+    kinds: Option<Vec<String>>,
+    behaviors: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+}
+
+impl ReadArgs {
+    fn of(options: Option<&Map<String, Value>>) -> Result<ReadArgs> {
+        let member = |key: &str| options.and_then(|options| options.get(key));
+        let after = match member("after") {
+            None => None,
+            Some(Value::String(head)) if head == "head" => Some(EventsAfter::Head),
+            Some(given) => Some(EventsAfter::Cursor(
+                integer(given).ok_or_else(|| cursor_refusal(&js_string(given)))?,
+            )),
+        };
+        let limit = match member("limit") {
+            None => None,
+            Some(given) => {
+                Some(integer(given).ok_or_else(|| page_size_refusal(&js_string(given)))?)
+            }
+        };
+        let [kinds, behaviors, exclude] =
+            check_filters([member("kinds"), member("behaviors"), member("exclude")])?;
+        Ok(ReadArgs {
+            namespace: text_member(options, "namespace"),
+            schema: text_member(options, "schema"),
+            instance_id: text_member(options, "instanceId"),
+            after,
+            limit,
+            kinds,
+            behaviors,
+            exclude,
+        })
+    }
+
+    fn view(&self) -> ReadEvents<'_> {
+        ReadEvents {
+            namespace: self.namespace.as_deref(),
+            schema: self.schema.as_deref(),
+            instance_id: self.instance_id.as_deref(),
+            after: self.after,
+            limit: self.limit,
+            kinds: self.kinds.clone(),
+            behaviors: self.behaviors.clone(),
+            exclude: self.exclude.clone(),
+        }
+    }
+}
+
+// request_of is the request `api.handle` takes as JSON: `method`, `path`,
+// and optionally `prefix`, `query`, `headers` (an object, or pairs),
+// `body` (its text), `caller` (`principal`, `service`, `refused`) and
+// `requestId`.
+fn request_of(given: &Value) -> Result<Request> {
+    let refuse = |what: &str| -> Error {
+        EngineError::invalid_argument(format!("api.handle takes a request whose {what}")).into()
+    };
+    let Value::Object(members) = given else {
+        return Err(refuse("method and path name a route, as a JSON object"));
+    };
+    let string = |key: &str| members.get(key).and_then(Value::as_str).map(str::to_owned);
+    let headers = match members.get("headers") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Object(headers)) => headers
+            .iter()
+            .map(|(name, value)| (name.clone(), js_string(value)))
+            .collect(),
+        Some(Value::Array(pairs)) => pairs
+            .iter()
+            .map(|pair| match pair.as_array().map(Vec::as_slice) {
+                Some([Value::String(name), Value::String(value)]) => {
+                    Ok((name.clone(), value.clone()))
+                }
+                _ => Err(refuse("headers are an object or [name, value] pairs")),
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Some(_) => return Err(refuse("headers are an object or [name, value] pairs")),
+    };
+    let body = match members.get("body") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(text)) => Some(text.clone().into_bytes()),
+        Some(_) => return Err(refuse("body is its text")),
+    };
+    let empty = Map::new();
+    let caller = members
+        .get("caller")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    let principal = match caller.get("principal") {
+        None | Some(Value::Null) => None,
+        Some(given) => Some(
+            serde_json::from_value::<Principal>(given.clone())
+                .map_err(|_| refuse("caller's principal is { subject, permissions, claims? }"))?,
+        ),
+    };
+    let service = match caller.get("service") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(service)) => {
+            let text = |key: &str| service.get(key).and_then(Value::as_str).map(str::to_owned);
+            Some(ServiceCaller {
+                deployable: text("deployable")
+                    .ok_or_else(|| refuse("caller's service is { deployable, serves, subject }"))?,
+                serves: service
+                    .get("serves")
+                    .and_then(Value::as_array)
+                    .map(|serves| {
+                        serves
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                subject: text("subject").unwrap_or_default(),
+            })
+        }
+        Some(_) => {
+            return Err(refuse(
+                "caller's service is { deployable, serves, subject }",
+            ))
+        }
+    };
+    let refused = match caller.get("refused") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(refusal)) => Some(Refusal {
+            status: refusal
+                .get("status")
+                .and_then(Value::as_u64)
+                .and_then(|status| u16::try_from(status).ok())
+                .ok_or_else(|| refuse("caller's refusal is { status, code, detail? }"))?,
+            code: refusal
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            detail: refusal
+                .get("detail")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        }),
+        Some(_) => return Err(refuse("caller's refusal is { status, code, detail? }")),
+    };
+    Ok(Request {
+        method: string("method").ok_or_else(|| refuse("method is a string"))?,
+        prefix: string("prefix").unwrap_or_default(),
+        path: string("path").ok_or_else(|| refuse("path is a string"))?,
+        query: string("query").unwrap_or_default(),
+        headers,
+        body,
+        caller: Caller {
+            principal,
+            service,
+            refused,
+        },
+        request_id: string("requestId").unwrap_or_default(),
+    })
+}
+
+// api_options_of is how `api.handle` serves: `stream` ({pageSize,
+// heartbeatMs}) and `mcp` ({serverInfo: {name, version}, instructions}).
+// A tool filter is a function, which JSON cannot carry.
+fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
+    let member = |key: &str| {
+        options
+            .and_then(|options| options.get(key))
+            .and_then(Value::as_object)
+    };
+    let mcp = member("mcp");
+    let server = mcp
+        .and_then(|mcp| mcp.get("serverInfo"))
+        .and_then(Value::as_object);
+    Ok(ApiOptions {
+        stream: stream_options_of(member("stream"))?,
+        mcp: McpOptions {
+            server_name: text_member(server, "name"),
+            server_version: text_member(server, "version"),
+            instructions: text_member(mcp, "instructions"),
+        },
+        tools: None,
+    })
+}
+
+fn stream_options_of(options: Option<&Map<String, Value>>) -> Result<StreamOptions> {
+    let member = |key: &str| {
+        options
+            .and_then(|options| options.get(key))
+            .filter(|value| !value.is_null())
+    };
+    let page_size = member("pageSize").map(|given| {
+        integer(given).ok_or_else(|| {
+            EngineError::invalid_argument(format!(
+                "stream.pageSize must be an integer, got {}",
+                js_string(given)
+            ))
+        })
+    });
+    let heartbeat_ms = member("heartbeatMs").map(|given| {
+        integer(given)
+            .and_then(|ms| u64::try_from(ms).ok())
+            .ok_or_else(|| {
+                EngineError::invalid_argument(format!(
+                    "stream.heartbeatMs must be a positive integer, got {}",
+                    js_string(given)
+                ))
+            })
+    });
+    let options = StreamOptions {
+        page_size: page_size.transpose()?,
+        heartbeat_ms: heartbeat_ms.transpose()?,
+    };
+    options.check().map_err(EngineError::invalid_argument)?;
+    Ok(options)
+}
+
+// response_json is a response as JSON: its status, its headers as pairs,
+// its body's text, and the id of the stream it holds open, if any.
+fn response_json(engine: &Engine, response: api::Response) -> Value {
+    let headers: Vec<Value> = response
+        .headers
+        .iter()
+        .map(|(name, value)| serde_json::json!([name, value]))
+        .collect();
+    let (body, stream) = match response.body {
+        Body::Empty => (Value::Null, Value::Null),
+        Body::Bytes(bytes) => (
+            Value::from(String::from_utf8_lossy(&bytes).into_owned()),
+            Value::Null,
+        ),
+        Body::Stream(stream) => (Value::Null, Value::from(engine.streams.hold(stream))),
+    };
+    serde_json::json!({
+        "status": response.status,
+        "headers": headers,
+        "body": body,
+        "stream": stream,
+    })
+}
+
+fn stream_id(given: &Value) -> Result<u64> {
+    integer(given)
+        .and_then(|id| u64::try_from(id).ok())
+        .ok_or_else(|| {
+            EngineError::invalid_argument(format!(
+                "a stream is named by the id stream.open or api.handle gave, got {}",
+                js_string(given)
+            ))
+            .into()
+        })
+}
+
+fn unknown_stream(id: u64) -> EngineError {
+    EngineError::invalid_argument(format!("no event stream {id} is open"))
 }
 
 fn to_json(value: impl serde::Serialize) -> Result<Value> {

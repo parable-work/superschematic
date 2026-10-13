@@ -308,6 +308,14 @@ fn an_event_stream_ends_when_the_engine_shuts_down_and_a_refused_read_is_a_probl
         thread::sleep(Duration::from_millis(50));
         engine.shutdown();
         assert!(waiter.join().unwrap(), "the stream ended at the shutdown");
+        // A shut-down engine answers every request 503: the host drains.
+        let after = handle(
+            &engine,
+            &ApiOptions::default(),
+            &request("GET", "/namespaces"),
+        );
+        assert_eq!(after.status, 503);
+        assert_eq!(json_of(&after)["code"], "unavailable");
 
         // A namespace the engine does not have refuses the read before any
         // stream.

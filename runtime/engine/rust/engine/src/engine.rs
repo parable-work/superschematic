@@ -439,6 +439,8 @@ pub struct Engine {
     /// The engine itself, once [`Engine::shared`] put it in an `Arc`: what
     /// the runner's driver thread and an event stream hold.
     this: OnceLock<Weak<Engine>>,
+    /// The event streams the JSON calls hold open, by id.
+    pub(crate) streams: crate::api::stream::OpenStreams,
 }
 
 impl std::fmt::Debug for Engine {
@@ -507,6 +509,7 @@ impl Engine {
             runner,
             tools: ToolsCore::new(tools),
             this: OnceLock::new(),
+            streams: crate::api::stream::OpenStreams::default(),
         };
         engine.behaviors().register_set(options.behaviors)?;
         Ok(engine)
@@ -565,9 +568,11 @@ impl Engine {
         .into())
     }
 
-    /// Stops the runner, ends every event stream and refuses every later
-    /// call, as the TypeScript engine's `close` does; the storage closes
-    /// once nothing holds the engine. A host calls it on SIGTERM.
+    /// Stops the runner and ends every event stream, as the TypeScript
+    /// engine's `close` does; the storage closes once nothing holds the
+    /// engine. Every later call by name ([`crate::calls`]) and request
+    /// ([`crate::api::handle`]: 503 `unavailable`) is refused, and so is
+    /// every instance read and write. A host calls it on SIGTERM.
     pub fn shutdown(&self) {
         self.runner.close(self.db.notifier());
         self.closed.store(true, Ordering::SeqCst);
