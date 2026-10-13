@@ -25,16 +25,23 @@
 //! # Ok::<(), superschematic_engine::Error>(())
 //! ```
 //!
-//! Ported so far: [`Workflow`], [`Comments`], [`Constants`] and
-//! [`Variants`] (milestone 8, wave 1), and D56's [`StateRules`],
-//! [`Approvals`] and [`Timers`] (milestone 9, wave 2). The other core
-//! behaviors come in waves 2 to 4 ([`NAMES`] lists the ones [`core`]
+//! Ported so far: wave 1 (milestone 8), [`Workflow`], [`Comments`],
+//! [`Constants`] and [`Variants`]; wave 2 (milestone 9), [`Revisions`],
+//! [`Dependencies`], [`Links`] (with D56's many-valued links, and
+//! [`revised`], what a move of a link's target moves on), [`Numbering`],
+//! and D56's [`StateRules`], [`Approvals`] and [`Timers`]. The other core
+//! behaviors come in the waves after ([`NAMES`] lists the ones [`core`]
 //! registers).
 
 pub mod approvals;
 pub mod comments;
 pub mod constants;
+pub mod dependencies;
 mod guidance;
+pub mod links;
+pub mod numbering;
+pub mod revised;
+pub mod revisions;
 pub mod staterules;
 pub mod timers;
 pub mod variants;
@@ -43,6 +50,11 @@ pub mod workflow;
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
+pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
+pub use links::{link_many, link_pin, LinkPin, LinkSpec, Links, LinksConfig};
+pub use numbering::{Numbering, NumberingConfig};
+pub use revised::{linked_to, moved_on, target_move, TargetMove};
+pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
     parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart, TimersThen, TimersUntil,
@@ -56,13 +68,17 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 7] = [
+pub const NAMES: [&str; 11] = [
     "Workflow",
     "Comments",
+    "Revisions",
+    "Dependencies",
+    "Links",
     "Constants",
     "Variants",
     "StateRules",
     "Approvals",
+    "Numbering",
     "Timers",
 ];
 
@@ -73,9 +89,13 @@ pub fn core() -> BehaviorSet {
     BehaviorSet::new()
         .with(Workflow)
         .with(Comments)
+        .with(Revisions)
+        .with(Dependencies)
+        .with(Links)
         .with(Constants)
         .with(Variants)
         .with(StateRules)
         .with(Approvals)
+        .with(Numbering)
         .with(Timers)
 }

@@ -14,11 +14,23 @@
 //!   what a test puts in its [`Probe`], and [`Pacer`], whose interval its
 //!   config or its [`PacerProbe`] gives;
 //! - `test/core-workflow.test.ts`: [`Dispatch`];
+//! - `test/core-revisions.test.ts`: [`RevisionHold`] (its test.Hold), and
+//!   `test/core-dependencies.test.ts` composes [`Reader`] too;
+//! - `test/core-dependencies.test.ts`: [`Finisher`];
+//! - `test/core-numbering.test.ts`: [`Refuser`];
 //! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
+
+mod core_dependencies;
+mod core_numbering;
+mod core_revisions;
+
+pub use core_dependencies::Finisher;
+pub use core_numbering::Refuser;
+pub use core_revisions::RevisionHold;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -1790,16 +1802,21 @@ impl Behavior for Dispatch {
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, StateRules, Timers, Variants, Workflow,
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, StateRules,
+        Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
         "Workflow" => set.with(Workflow),
         "Comments" => set.with(Comments),
+        "Revisions" => set.with(Revisions),
+        "Dependencies" => set.with(Dependencies),
+        "Links" => set.with(Links),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
         "StateRules" => set.with(StateRules),
         "Approvals" => set.with(Approvals),
+        "Numbering" => set.with(Numbering),
         "Timers" => set.with(Timers),
         _ => return None,
     })
@@ -1815,6 +1832,9 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-staterules", "test.Recorder") => set.with(crate::core_fixtures::Recorder),
         ("core-timers", "test.Bounce") => set.with(crate::core_fixtures::Bounce),
         ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
+        ("core-revisions", "test.Hold") => set.with(RevisionHold),
+        ("core-dependencies", "test.Finisher") => set.with(Finisher),
+        ("core-numbering", "test.Refuser") => set.with(Refuser),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),

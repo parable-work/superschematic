@@ -7,8 +7,9 @@
 //! schema-level operations, and parseConfig's view of the other behaviors
 //! and, at define and publish, of the other schemas; on SQLite and, with
 //! the variable set, on Postgres. A `hears` that is neither 'delete' nor
-//! `{ path, crosses? }` is a value Rust's [`Hears`] cannot hold; the core's
-//! Links and Dependencies are milestones 8 to 12.
+//! `{ path, crosses? }` is a value Rust's [`Hears`] cannot hold. The core's
+//! Links and Dependencies, which reach other instances the same way, have
+//! tests of their own.
 
 mod support;
 

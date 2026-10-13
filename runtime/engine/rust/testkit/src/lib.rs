@@ -530,20 +530,33 @@ impl<'d> Run<'d> {
                         .collect::<Result<_, _>>()?,
                     _ => Vec::new(),
                 };
+                let fixed_clock = self.engine_of(step)?.fixed_clock;
+                let (now, times) = if fixed_clock {
+                    let now = step.get("now").and_then(|now| self.clock_time(now));
+                    let times: Option<Vec<i64>> = match step.get("clock") {
+                        Some(Value::Array(times)) => Some(
+                            times
+                                .iter()
+                                .filter_map(|time| self.clock_time(time))
+                                .collect(),
+                        ),
+                        _ => None,
+                    };
+                    (now, times)
+                } else {
+                    (None, None)
+                };
                 let opened = self.engine_of(step)?;
-                let fixed_clock = opened.fixed_clock;
                 let ids = opened.ids.clone();
                 let engine = opened.engine.as_ref().ok_or("the engine is closed")?;
-                if fixed_clock {
-                    if let Some(now) = step.get("now").and_then(Value::as_i64) {
-                        engine.clock().set(now).map_err(|error| error.to_string())?;
-                    }
-                    if let Some(Value::Array(times)) = step.get("clock") {
-                        engine
-                            .clock()
-                            .script(times.iter().filter_map(Value::as_i64))
-                            .map_err(|error| error.to_string())?;
-                    }
+                if let Some(now) = now {
+                    engine.clock().set(now).map_err(|error| error.to_string())?;
+                }
+                if let Some(times) = times {
+                    engine
+                        .clock()
+                        .script(times)
+                        .map_err(|error| error.to_string())?;
                 }
                 if let Some(queue) = &ids {
                     queue.clear();
@@ -687,7 +700,11 @@ impl<'d> Run<'d> {
         };
         let fixed_clock = given.get("clock").and_then(Value::as_str) == Some("fixed");
         options.clock = if fixed_clock {
-            Clock::Manual(step.get("now").and_then(Value::as_i64).unwrap_or(0))
+            Clock::Manual(
+                step.get("now")
+                    .and_then(|now| self.clock_time(now))
+                    .unwrap_or(0),
+            )
         } else {
             Clock::Strict
         };
@@ -877,6 +894,44 @@ impl<'d> Run<'d> {
             }
             other => Ok(other.clone()),
         }
+    }
+
+    // clock_time is a time a fixed clock reads at a step: a number, or a
+    // time symbol, which a scenario that also reads the wall clock writes
+    // for a fixed clock's times too. A symbol no answer has bound yet is
+    // bound here, so the answers that name it read the time the engine's
+    // clock gave: a day before the wall clock, then one past the last time
+    // bound so, so no wall-clock reading of the scenario can be one of
+    // them and they come in the order the recording read them.
+    fn clock_time(&mut self, time: &Value) -> Option<i64> {
+        if let Some(ms) = time.as_i64() {
+            return Some(ms);
+        }
+        let parts = segments(time.as_str()?);
+        let [Segment::Symbol(symbol)] = parts.as_slice() else {
+            return None;
+        };
+        if symbol.kind != "time" {
+            return None;
+        }
+        if let Some(Bound::Time(ms)) = self.bindings.get(&symbol.key()) {
+            return Some(*ms);
+        }
+        const DAY: i64 = 86_400_000;
+        let wall = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
+        let ms = self
+            .bindings
+            .values()
+            .filter_map(|bound| match bound {
+                Bound::Time(ms) if *ms < wall - DAY / 2 => Some(*ms + 1),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(wall - DAY);
+        self.bindings.insert(symbol.key(), Bound::Time(ms));
+        Some(ms)
     }
 
     fn bound_argument(&mut self, symbol: &Symbol, whole: bool) -> Result<Value, String> {
@@ -1498,13 +1553,18 @@ impl AccessPolicy for AnswerPolicy {
 /// test files, whose scenarios need no behavior or few, and the core
 /// behaviors' files whose behaviors this engine has (a scenario that also
 /// composes one not ported yet is skipped).
-pub const ENGINE_FILES: [&str; 17] = [
+pub const ENGINE_FILES: [&str; 22] = [
     "access",
     "compat",
     "core-approvals",
     "core-behaviors",
     "core-comments",
     "core-constants",
+    "core-dependencies",
+    "core-links",
+    "core-links-many",
+    "core-numbering",
+    "core-revisions",
     "core-staterules",
     "core-timers",
     "core-variants",

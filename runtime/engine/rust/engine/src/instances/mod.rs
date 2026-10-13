@@ -134,6 +134,17 @@ pub struct InstanceRecord {
     pub value_refs: Option<Vec<String>>,
 }
 
+impl InstanceRecord {
+    /// One behavior field of the record (`behaviorField`): `None` when the
+    /// behavior or the field has no value. A behavior that reads another's
+    /// field through `instances().get` (Links a target's revision,
+    /// Dependencies a blocker's status) reads it here, under the
+    /// behavior's name (D16, amended).
+    pub fn behavior_field(&self, behavior: &str, field: &str) -> Option<&Value> {
+        self.behaviors.get(behavior)?.as_object()?.get(field)
+    }
+}
+
 /// One page of a list.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct InstancePage {

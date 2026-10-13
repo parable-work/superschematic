@@ -5413,20 +5413,24 @@ core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
 its options (`core()`) since the engine cannot depend on them: wave 1
 (milestone 8) has ported Workflow (with D56's enteredAt), Comments,
-Constants and Variants, and wave 2 (milestone 9) D56's StateRules,
-Approvals and Timers, whose deadlines the runner fires, with their
-guidance, migrations on both databases, configs, guards, fields,
-operations, schedules and veto codes; and
+Constants and Variants, and wave 2 (milestone 9) Revisions,
+Dependencies, Links (with D56's many-valued links, and what a move of a
+link's target moves on, which Reactions and Lease hear), and D56's
+Numbering, StateRules, Approvals and Timers, whose deadlines the runner
+fires, with their guidance, migrations on both databases, configs,
+guards, fields, operations, schedules and veto codes; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
 behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
 retention's and the tools', and those of the ported behaviors'
 `test/core-*.test.ts` against the engine, and replays the scenario and
 HTTP corpora, those behaviors' files included, giving their recorded
-answers on SQLite and Postgres for every case whose behaviors it has. CI
-tests the workspace on both databases. The Node-API addon is milestone
-7, the other core behaviors milestones 9 to 11 and the work queue's
-milestone 12. Until the Rust engine passes the TypeScript suite,
-`@superschematic/engine` is the TypeScript implementation and nothing
-uses the workspace.
+answers on SQLite and Postgres for every case whose behaviors it has,
+but for a step it lists with what explains it (a change the recording
+does not see, a cursor a Postgres rollback leaves a gap). CI tests the
+workspace on both databases. The Node-API addon is milestone 7, the
+other core behaviors (Rollups, Search and Reactions, then Branches)
+milestones 10 and 11, and the work queue's milestone 12. Until the Rust
+engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
 
 The rule is reversible until the first release.

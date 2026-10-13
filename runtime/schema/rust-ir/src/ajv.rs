@@ -56,6 +56,9 @@ impl AjvError {
 /// A compiled JSON Schema: an object schema, or `true` or `false`.
 pub struct AjvSchema {
     validator: Validator,
+    // The schema as given, whose `type` lists name a failure's types in
+    // their order, as ajv's message does.
+    schema: Value,
 }
 
 impl std::fmt::Debug for AjvSchema {
@@ -71,7 +74,10 @@ impl AjvSchema {
     pub fn compile(schema: &Value) -> Result<Self, String> {
         options()
             .build(schema)
-            .map(|validator| AjvSchema { validator })
+            .map(|validator| AjvSchema {
+                validator,
+                schema: schema.clone(),
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -84,7 +90,7 @@ impl AjvSchema {
     /// jsonschema's order; empty when it holds.
     pub fn errors(&self, instance: &Value) -> Vec<AjvError> {
         let errors: Vec<ValidationError<'_>> = self.validator.iter_errors(instance).collect();
-        ajv_errors(&errors, instance)
+        errors_in(&errors, instance, Some(&self.schema))
     }
 }
 
@@ -99,6 +105,17 @@ pub(crate) fn options() -> jsonschema::ValidationOptions<'static> {
 /// error's own, and for an error inside an `if`'s branch the branch's own
 /// failure, after the last error inside it.
 pub fn ajv_errors(errors: &[ValidationError<'_>], instance: &Value) -> Vec<AjvError> {
+    errors_in(errors, instance, None)
+}
+
+// errors_in is ajv_errors, naming a `type` failure's types in the order
+// the schema lists them when it has the schema: jsonschema keeps them as a
+// set, in an order of its own.
+fn errors_in(
+    errors: &[ValidationError<'_>],
+    instance: &Value,
+    schema: Option<&Value>,
+) -> Vec<AjvError> {
     let marks: Vec<Vec<BranchMark>> = errors.iter().map(branch_marks).collect();
     let mut out: Vec<AjvError> = Vec::new();
     let mut closed: Option<(String, String)> = None;
@@ -126,7 +143,7 @@ pub fn ajv_errors(errors: &[ValidationError<'_>], instance: &Value) -> Vec<AjvEr
             }
             None => {
                 closed = None;
-                out.extend(errors_of(error));
+                out.extend(errors_of(error, schema));
             }
         }
         let next = marks.get(i + 1);
@@ -225,7 +242,7 @@ fn branch_marks(error: &ValidationError<'_>) -> Vec<BranchMark> {
 /// The failures one jsonschema error stands for, each with ajv's keyword
 /// and message: an `anyOf` or a `oneOf` with each branch's failures before
 /// its own, a `propertyNames` with its name's.
-fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
+fn errors_of(error: &ValidationError<'_>, schema: Option<&Value>) -> Vec<AjvError> {
     let path = error.instance_path().to_string();
     match error.kind() {
         ValidationErrorKind::AdditionalProperties { unexpected } => unexpected
@@ -251,7 +268,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
             let mut out: Vec<AjvError> = context
                 .iter()
                 .flatten()
-                .flat_map(|error| errors_of(error))
+                .flat_map(|error| errors_of(error, schema))
                 .collect();
             if matches!(error.kind(), ValidationErrorKind::AnyOf { .. }) {
                 out.push(AjvError::new(
@@ -269,7 +286,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
             out
         }
         ValidationErrorKind::PropertyNames { error: inner } => {
-            let mut out = errors_of(inner);
+            let mut out = errors_of(inner, schema);
             out.push(AjvError::new(
                 &path,
                 "propertyNames",
@@ -280,7 +297,7 @@ fn errors_of(error: &ValidationError<'_>) -> Vec<AjvError> {
         kind => vec![AjvError::new(
             &path,
             &ajv_keyword(kind, error),
-            ajv_message(kind, error),
+            ajv_message(kind, error, schema),
         )],
     }
 }
@@ -328,13 +345,30 @@ fn ajv_keyword(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> Strin
 }
 
 /// ajv's message for one keyword's failure.
-fn ajv_message(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> String {
+fn ajv_message(
+    kind: &ValidationErrorKind,
+    error: &ValidationError<'_>,
+    schema: Option<&Value>,
+) -> String {
     match kind {
         ValidationErrorKind::Type { kind } => {
-            let names: Vec<&str> = match kind {
+            let mut names: Vec<&str> = match kind {
                 TypeKind::Single(single) => vec![single.as_str()],
                 TypeKind::Multiple(set) => set.iter().map(|one| one.as_str()).collect(),
             };
+            // ajv names the types as the schema lists them.
+            let listed = schema
+                .and_then(|schema| schema.pointer(&error.schema_path().to_string()))
+                .and_then(Value::as_array);
+            if let Some(listed) = listed {
+                let order = |name: &&str| {
+                    listed
+                        .iter()
+                        .position(|one| one.as_str() == Some(*name))
+                        .unwrap_or(usize::MAX)
+                };
+                names.sort_by_key(order);
+            }
             format!("must be {}", names.join(","))
         }
         ValidationErrorKind::Required { property } => format!(
@@ -370,8 +404,9 @@ fn ajv_message(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> Strin
         }
         ValidationErrorKind::Pattern { pattern } => format!("must match pattern \"{pattern}\""),
         ValidationErrorKind::UniqueItems => {
-            let (later, earlier) = duplicate_items(error.instance()).unwrap_or((1, 0));
-            format!("must NOT have duplicate items (items ## {later} and {earlier} are identical)")
+            let types = item_types(schema, &error.schema_path().to_string());
+            let (j, i) = duplicate_items(error.instance(), &types).unwrap_or((1, 0));
+            format!("must NOT have duplicate items (items ## {j} and {i} are identical)")
         }
         ValidationErrorKind::MultipleOf { multiple_of } => {
             format!("must be multiple of {}", js_number(*multiple_of))
@@ -392,13 +427,102 @@ fn ajv_message(kind: &ValidationErrorKind, error: &ValidationError<'_>) -> Strin
     }
 }
 
-/// The indexes of the last item that repeats an earlier one, and of that
-/// earlier one, as ajv names them.
-fn duplicate_items(instance: &Value) -> Option<(usize, usize)> {
+/// The types a `uniqueItems`' sibling `items` names, which choose ajv's
+/// search: empty when the schema is not at hand, or names none.
+fn item_types(schema: Option<&Value>, unique_items: &str) -> Vec<String> {
+    let Some(parent) = unique_items
+        .strip_suffix("/uniqueItems")
+        .and_then(|parent| schema?.pointer(parent))
+    else {
+        return Vec::new();
+    };
+    match parent.get("items").and_then(|items| items.get("type")) {
+        Some(Value::String(one)) => vec![one.clone()],
+        Some(Value::Array(many)) => many
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The two indexes ajv names for the items that repeat, `j` and `i`, as
+/// its two searches find them. With item types it may key by (scalar
+/// ones), it walks from the last item, keeping each one's index, and stops
+/// at the first item seen before: `j` is the later index, `i` the earlier,
+/// and an item of another type is passed over. Otherwise it compares each
+/// item, from the last, with every one before it: `i` is the later index,
+/// `j` the nearest earlier one that equals it.
+fn duplicate_items(instance: &Value, types: &[String]) -> Option<(usize, usize)> {
     let items = instance.as_array()?;
-    (0..items.len())
-        .rev()
-        .find_map(|i| (0..i).rev().find(|j| items[*j] == items[i]).map(|j| (i, j)))
+    let keyed = !types.is_empty() && !types.iter().any(|t| t == "object" || t == "array");
+    if keyed {
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for i in (0..items.len()).rev() {
+            let item = &items[i];
+            if !types.iter().any(|t| of_type(item, t)) {
+                continue;
+            }
+            // JavaScript keys an object by text: a string is marked when
+            // the items may be numbers too.
+            let mut key = match item {
+                Value::String(text) => text.clone(),
+                Value::Number(number) => number
+                    .as_f64()
+                    .map_or_else(|| number.to_string(), js_number),
+                other => other.to_string(),
+            };
+            if types.len() > 1 && item.is_string() {
+                key.push('_');
+            }
+            if let Some(j) = seen.get(&key) {
+                return Some((*j, i));
+            }
+            seen.insert(key, i);
+        }
+        return None;
+    }
+    (0..items.len()).rev().find_map(|i| {
+        (0..i)
+            .rev()
+            .find(|j| js_equal(&items[*j], &items[i]))
+            .map(|j| (j, i))
+    })
+}
+
+// of_type is whether a value is of a JSON Schema type, as ajv checks one
+// with strictNumbers.
+fn of_type(value: &Value, name: &str) -> bool {
+    match (name, value) {
+        ("string", Value::String(_))
+        | ("boolean", Value::Bool(_))
+        | ("null", Value::Null)
+        | ("object", Value::Object(_))
+        | ("array", Value::Array(_)) => true,
+        ("number", Value::Number(number)) => number.as_f64().is_some_and(f64::is_finite),
+        ("integer", Value::Number(number)) => number
+            .as_f64()
+            .is_some_and(|x| x.is_finite() && x.fract() == 0.0),
+        _ => false,
+    }
+}
+
+// js_equal is ajv's deep equality: numbers by value, objects by their
+// members whatever their order.
+fn js_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| js_equal(x, y))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(key, value)| y.get(key).is_some_and(|other| js_equal(value, other)))
+        }
+        _ => a == b,
+    }
 }
 
 #[cfg(test)]
@@ -430,6 +554,66 @@ mod tests {
             .collect();
         errors.sort();
         errors
+    }
+
+    #[test]
+    fn a_repeated_item_is_named_as_ajvs_search_finds_it() {
+        let message = |schema: Value, instance: Value| {
+            listed(schema, instance)
+                .into_iter()
+                .find(|(_, keyword, _)| keyword == "uniqueItems")
+                .map(|(_, _, message)| message)
+                .expect("a uniqueItems failure")
+        };
+        // Scalar item types: ajv keys the items, from the last.
+        let strings = json!({"type": "array", "items": {"type": "string"}, "uniqueItems": true});
+        assert_eq!(
+            message(strings.clone(), json!(["a", "a"])),
+            "must NOT have duplicate items (items ## 1 and 0 are identical)"
+        );
+        assert_eq!(
+            message(strings, json!(["a", "b", "b", "a"])),
+            "must NOT have duplicate items (items ## 2 and 1 are identical)"
+        );
+        // No item type, or objects: ajv compares each item with the ones
+        // before it.
+        let any = json!({"type": "array", "items": {"enum": ["x", "y"]}, "uniqueItems": true});
+        assert_eq!(
+            message(any.clone(), json!(["x", "x"])),
+            "must NOT have duplicate items (items ## 0 and 1 are identical)"
+        );
+        assert_eq!(
+            message(any, json!(["x", "y", "y", "x"])),
+            "must NOT have duplicate items (items ## 0 and 3 are identical)"
+        );
+        // A string is keyed apart from a number when the items may be
+        // either.
+        let mixed =
+            json!({"type": "array", "items": {"type": ["string", "number"]}, "uniqueItems": true});
+        assert_eq!(
+            message(mixed, json!(["1", 1, "1"])),
+            "must NOT have duplicate items (items ## 2 and 0 are identical)"
+        );
+        let objects = json!({"type": "array", "items": {"type": "object"}, "uniqueItems": true});
+        assert_eq!(
+            message(objects, json!([{"a": 1}, {"a": 1.0}])),
+            "must NOT have duplicate items (items ## 0 and 1 are identical)"
+        );
+    }
+
+    #[test]
+    fn a_type_failure_names_the_types_in_the_schemas_order() {
+        let schema = json!({"type": "object", "additionalProperties": {"type": ["string", "object", "array"]}});
+        assert_eq!(
+            listed(schema, json!({"owner": 7})),
+            [(
+                "/owner".to_owned(),
+                "type".to_owned(),
+                "must be string,object,array".to_owned()
+            )]
+        );
+        let items = json!({"type": "array", "items": {"type": ["string", "object"]}});
+        assert_eq!(listed(items, json!([7]))[0].2, "must be string,object");
     }
 
     #[test]
@@ -468,7 +652,7 @@ mod tests {
                 (
                     "/list".to_owned(),
                     "uniqueItems".to_owned(),
-                    "must NOT have duplicate items (items ## 1 and 0 are identical)".to_owned()
+                    "must NOT have duplicate items (items ## 0 and 1 are identical)".to_owned()
                 ),
                 (
                     "/tag".to_owned(),
