@@ -1123,7 +1123,7 @@ over the acme-shop services. Its golden `environment.json` files are under
 | --- | --- | --- | --- |
 | GKE | Kubernetes servers; Cloud SQL databases | GKE to Cloud SQL through Workload Identity and the Cloud SQL proxy; server to server through a Service and a NetworkPolicy derived from the edge | only the Cloud SQL connector; the Kubernetes server platform is shared |
 | Hosted Kubernetes (EKS, AKS, DOKS and others) | Kubernetes servers; the cloud's managed Postgres, or an in-cluster operator | a database connector per cloud; the shared Kubernetes connector between servers | the database platform and its connector |
-| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs |
+| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs; designed as a standalone target in section 18 (D64) |
 
 Resolution refuses a Go or Rust server on Workers, by the languages the
 platform declares (section 5.2).
@@ -3357,12 +3357,9 @@ The callers field has its own tests:
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
   with the first platform that needs it.
-- Workers service bindings. A call over a binding carries no token; the
-  caller's binding config sets `ctx.props`, which Cloudflare documents as
-  safe to trust unsigned, and the platform delivers it beside the request
-  rather than in it. The Workers platform (section 6.8) decides whether the
-  TypeScript service authenticator reads it there, or whether Workers
-  callers sign key-pair tokens like the generic connector's.
+- Workers service bindings, settled by D64: a service binding admits a
+  caller, and Workers callers sign key-pair tokens like the generic
+  connector's (section 18.10). No runtime reads `ctx.props`.
 - The cluster's certificate authority. A Kubernetes API server serves its
   keys over TLS signed by the cluster's own CA, which the runtimes' default
   HTTP clients do not trust. Until the Kubernetes platform lands, a
@@ -3901,7 +3898,8 @@ whatever the deploy decides is affected, and needs no list of its own.
 - **`extensions/cloudflare`**, a Go module of its own: the Cloudflare DNS
   platform and its pinned pulumi-cloudflare schemas (sections 6.4 and
   6.9), kept current by the gcp target's tool, which both share through
-  `stack/providerschema`. Built. Workers and D1 come later.
+  `stack/providerschema`. Built. The cloudflare target (section 18,
+  D64), with Workers, D1, R2, sites and Cron Triggers, joins it.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
@@ -4038,7 +4036,12 @@ model, or retired, when it lands.
      that handle them, on the local target and on gcp as Cloud Run worker
      pools (section 8.8, D53).
    
-   Not yet: a site's SDK clients in the browser, and a second target.
+   Not yet: a site's SDK clients in the browser, and the second target,
+   which is Cloudflare (section 18, D64), with the generic connector
+   (section 6.2, D63).
+   
+   The second target is done when acme-shop's storefront has run live on
+   Workers and a D1-backed TypeScript API has run live (section 18.15).
 
 ## 15. Open questions
 
@@ -4103,3 +4106,442 @@ Not kept:
   see them;
 - raw Helm and YAML strings inside the model;
 - a closed set of environments, and one cloud built into the generators.
+
+## 18. The cloudflare target
+
+`extensions/cloudflare` builds this section beside its Cloudflare DNS
+platform (section 6.9) (D64):
+- the target;
+- its Workers, Cron, D1, R2 and site platforms and their connectors;
+- the policy rules;
+- the pinned schemas at pulumi-cloudflare 6.22.0;
+- bootstrap, with the R2 state bucket, the Secrets Store and the CI
+  tokens;
+- bundles, D1 migrations from the deploying machine, and the site
+  publisher.
+
+An environment on `cloudflare` runs only on Cloudflare. A Worker in a gcp
+environment, or a Worker calling Cloud Run, waits for mixing: the generic
+connector (section 6.2, D63), plus a place for a platform's account and
+token outside its target's values.
+
+### 18.1 What the engineer enters
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
+})
+export abstract class Staging {}
+```
+
+- **`accountId`** is required: 32 hex digits, from the dashboard.
+- **`workersSubdomain` and `secretsStoreId`** are recorded by bootstrap
+  beside `accountId`, through D47's `BootstrapValue`, and a person may
+  correct them:
+  - `workersSubdomain` names the account's workers.dev subdomain, under
+    which an exposed Worker without a domain is reached;
+  - `secretsStoreId` names the account's Secrets Store, which every
+    secret binding names.
+- **`domain`** is optional. With a domain, `dns` must be `cloudflare`, the
+  target's default DNS platform, and its zone must be in the same account.
+- **Secrets** come through `stack secrets set`.
+- **The token and passphrase.** The engineer's token is in
+  `CLOUDFLARE_API_TOKEN` and the state's passphrase in
+  `PULUMI_CONFIG_PASSPHRASE`, in the shell that runs the `stack` commands,
+  as gcp's commands use the shell's application default credentials.
+
+`stack init --cloudflare-account <id>` writes `src/cloudflare-target.ts`
+with the target's types, as it writes gcp's (D59):
+
+```ts
+declare module "@superschematic/stack" {
+  interface Targets {
+    cloudflare: {
+      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string };
+      server: { cpuMs?: number; placement?: "smart"; logs?: boolean; compatibilityDate?: string; compatibilityFlags?: string[] };
+      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" };
+      job: { cpuMs?: number; logs?: boolean };
+      site: {};
+      bucket: { locationHint?: string; jurisdiction?: string; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
+    };
+  }
+}
+```
+
+There is no `worker` key: resolution refuses the kind on this target.
+
+### 18.2 Realization
+
+| Stack concept | cloudflare |
+| --- | --- |
+| server | A `cloudflare:index/worker:Worker` named after the deployable, in infrastructure, with Workers Logs on unless `logs: false`, workers.dev on only for an exposed server without a domain, and previews off. Each rollout makes a `workerVersion` and a `workersDeployment` sending all traffic to it. The version holds the server's bundle (`main.js`, its source map and `superscalar.wasm`, each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins unless set, `limits.cpuMs` and `placement` from the settings, and the server's config as bindings. TypeScript only; a name over 63 characters is refused. |
+| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value's `binding` names. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
+| sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, with the run's token (section 18.6). |
+| http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`, and the callee's callers field gets the edge's issuer. |
+| internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
+| bucket | An `r2Bucket`, `<stack>-<bucket>`, with a suffix under a parameter. `deleteAfterDays` becomes an `r2BucketLifecycle`. |
+| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` scoped to the bucket's objects. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
+| site | A Worker per site, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}`, a fixed script module, an `assets` binding, and `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings. |
+| site edge | The server's public address goes in the site's config, and the site's origin goes in the server's CORS field (section 8.10). |
+| job | A Worker per job, whose version runs the job's bundle, `scheduled.ts`, under a `workersCronTrigger` on the job's schedule in UTC. A job with no schedule has a Worker and no trigger. |
+| secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
+| exposure | A `workersCustomDomain` for `<name>.<domain>`, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`. |
+| parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the bucket is emptied before the member's destroy. Secrets are the environment's. |
+
+A Worker reaches a callee through its binding, exposed or not, so no
+caller waits for the exposure step. A call between two APIs that one
+server serves stays in process. The `worker` node is in infrastructure,
+so a callee exists before any caller's version binds to it, and the waves
+(section 5.3) put each callee's version first.
+
+### 18.3 State, bootstrap and CI
+
+**State.**
+- Pulumi's backend is `s3://superschematic-state` on R2's S3 endpoint,
+  `https://<accountId>.r2.cloudflarestorage.com`, with region `auto` and
+  path-style addressing. One bucket serves every stack in the account.
+- At each run, the store verifies the token through
+  `GET /accounts/{id}/tokens/verify`, falling back to
+  `/user/tokens/verify` for a user token, and returns `StateBackend.Env`:
+  - `AWS_ACCESS_KEY_ID` is the token's id;
+  - `AWS_SECRET_ACCESS_KEY` is the hex SHA-256 of its value;
+  - `PULUMI_CONFIG_PASSPHRASE` comes from the shell.
+- A run without the passphrase is refused before Pulumi starts, with what
+  to set.
+- Deploy manifests are written to
+  `superschematic/manifests/<stack>/<run>.json` and to a history copy,
+  `…/<run>/<RFC 3339>.json`, since R2 keeps no versions.
+- Bundles are kept under `superschematic/bundles/<stack>/<deployable>/<hex>/`
+  and site files under `superschematic/sites/<stack>/<site>/<hex>/`. Each
+  prefix gets a marker object written last, as gcp's site publisher does.
+  No lifecycle rule applies, since these are what `--bundle` and `--site`
+  roll back to.
+
+**Bootstrap.** `stack bootstrap <environment>` runs per account with the
+engineer's token, which needs to:
+- read the account and create R2 buckets;
+- create account API tokens;
+- create or read the Secrets Store;
+- write Workers, D1, and the zone's Workers routes and DNS, if the same
+  token also deploys.
+
+It then:
+1. verifies the token and the account;
+2. creates the state bucket directly, since Pulumi needs it first;
+3. handles the passphrase:
+   - Without one, it generates 32 random bytes and prints them once, saying
+     where to keep them: the password manager, and the GitHub secrets
+     below.
+   - With one, it checks it against `superschematic/passphrase-check`, an
+     object holding a random salt and an HMAC of it under the passphrase,
+     which bootstrap writes on its first run.
+4. finds the account's Secrets Store, or creates it;
+5. applies the bootstrap graph in Pulumi project `<stack>-bootstrap`, a
+   stack per account:
+   - **`<stack>-deployer`**, an `accountToken` with edit on the account's
+     Workers scripts, D1, Workers R2 storage, Secrets Store and account API
+     tokens, and on each environment zone's Workers routes and DNS.
+     Bucket edges mint tokens, so the deployer, like gcp's, can grant
+     itself more.
+   - **`<stack>-planner`**, an `accountToken` with read on those, and
+     object read and write on the state bucket alone, since a preview
+     takes the stack's lock.
+   - Permission group ids are read from the API before the graph renders;
+     the golden holds fixed ids.
+6. with `--github`, sets each token and the passphrase as the workflow's
+   secrets with `gh secret set`, at the scopes the CI seam names. Without
+   `gh`, it prints the commands and each token once.
+7. returns `workersSubdomain`, from `GET /accounts/{id}/workers/subdomain`,
+   and `secretsStoreId` beside `accountId`. An account without a
+   workers.dev subdomain is told to make one in the dashboard; bootstrap
+   does not choose it.
+
+**CI.** `TargetSpec.CI` returns kind `cloudflare-api-token`, whose fields
+`token` and `passphrase` name GitHub secrets:
+
+| Job | Token secret | Passphrase secret |
+| --- | --- | --- |
+| A plain environment's deploy job | `CLOUDFLARE_API_TOKEN`, a secret of the GitHub environment named for it | `PULUMI_CONFIG_PASSPHRASE`, in the same GitHub environment |
+| A plan job | `CLOUDFLARE_PLANNER_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+| A preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+
+The `github` renderer learns the kind and writes job-level `env` from
+those secrets, with no action. Deploy and preview jobs of an environment
+with a Workers server or job set up Bun and install the workspace, as a
+site's do. With a D1 database, they also install `superschematic-migrate`
+from the release, checked against `SHA256SUMS`. `check` runs
+`bun bundle.ts --check` in each Workers server's and job's package
+(level 2). A plan job's credentials decrypt the state, and so the edges'
+private keys in it, as `planner` does on gcp through the KMS key, so they
+are as sensitive as those keys.
+
+### 18.4 Secrets
+
+The secret store keeps values in the Secrets Store:
+- **`Set`** creates or updates the secret. It needs no deploy first: a
+  secret exists apart from any Worker.
+- **`Exists` and `List`** read names, never values.
+- **`Get`** refuses: the Secrets Store gives a value to a Worker alone,
+  and no cloudflare environment has a platform credential to read.
+
+Section 4.2 says a cloud target's secret is a graph node without a value.
+On Cloudflare a secret does not exist without a value, so it is no node.
+The deploy still needs a value for each secret before the rollout, and
+asks for or names the missing ones as before. At run time the Workers
+entry awaits each secret binding's `get()` once per isolate, so a new
+value reaches each isolate when it starts, and every isolate after the
+next deploy.
+
+### 18.5 Bundles and the Workers entrypoint
+
+**Build.** For each deployable whose artifact is a bundle, the deploy and
+`stack build`:
+1. run one frozen `bun install` at the output root;
+2. run `bun bundle.ts <dir>` in the deployable's package;
+3. digest `<dir>` as a site's output is digested, and record each file's
+   SHA-256;
+4. publish through `TargetSpec.Bundles` when the digest is new.
+
+`PinBundles` replaces `{bundle-digest}` and `{bundle-sha256:<file>}` in
+the deployable's own nodes, as `PinSites` replaces `{site-digest}`. After
+`Render` and before every `Plan`, `Apply` or `Destroy`, the core places
+each pinned bundle's files at `<program>/artifacts/<deployable>/<hex>/`.
+It copies files it just built, or asks the store to fetch them, as for a
+plan in CI or a `--bundle` rollback. `stack plan` builds nothing: it
+fetches the manifest's bundles, and `--no-build` keeps them.
+
+**`bundle.ts`** (generated) calls `Bun.build` with:
+- `entrypoints: ['fetch.ts']`, or `['scheduled.ts']` for a job;
+- `target: 'browser'`, `format: 'esm'`, and `conditions: ['workerd',
+  'worker', 'browser']`, which select superscalar's `workerd` build;
+- `minify`, an external `sourcemap`, and `external: ['cloudflare:*']`;
+- `external: ['*.wasm']`, with superscalar's `superscalar_wasm_bg.wasm`
+  copied beside the bundle as `superscalar.wasm`. superscalar's `workerd`
+  build imports it as a `WebAssembly.Module`, since workerd refuses to
+  compile WebAssembly from bytes. Any other WebAssembly module is refused.
+
+The output is `main.js`, `main.js.map` and `superscalar.wasm`, the names
+the platform lists. With `--check`, it writes to a temporary directory and
+fails on a `node:` import, a Bun global or another `.wasm`.
+
+**`fetch.ts`** (generated) declares the few Workers types it uses, as
+`main.ts` declares Bun's:
+- **At module scope**, it imports `env` from `cloudflare:workers` and
+  reads each API's string config through
+  `loadEnvConfig(stackEnvOf(env))`, the string members alone. A refused
+  config throws there, so Cloudflare refuses the version's upload and the
+  rollout step fails, naming each variable: the twin of a server that
+  refuses to start.
+- **On the first request of an isolate**, and again after a failure, it:
+  - awaits each secret binding into the config;
+  - takes each D1, R2 and service binding by the name its value gives;
+  - builds one SDK client per callee, with `fetch` through the service
+    binding and `serviceCredentialFor` the signed token;
+  - builds each `Bucket` over its R2 binding;
+  - builds `Deps` with the logger and calls `create(deps)`, and
+    `authenticate(deps)` where a route needs an end user;
+  - mounts each `buildRouter` on one Hono app, with `authenticateService`
+    where an API has a service clause;
+  - adds the site CORS handler, `notFoundHandler`, `errorHandler`,
+    `/healthz`, and `/readyz`, which pings each D1 with `SELECT 1` within
+    two seconds.
+- **Every request** goes to `app.fetch(request, { requestIP })`, whose
+  `requestIP` reads `CF-Connecting-IP`, so the runtime keys rate limits by
+  the client.
+
+Per isolate it caches config strings, binding objects, SDK clients, the
+service authenticator with its keys, the credential sources with their
+tokens and `CryptoKey`s, the Hono app, and what `create` returned. None
+of these holds a request's I/O. An implementation that keeps a `Response`,
+a stream or a fetch in flight across requests fails on Workers. In-memory
+state belongs to one isolate, and Cloudflare runs many and drops them at
+will: the storefront's carts live per isolate there.
+
+Logs are `createLogger`'s JSON lines on `console.log`, which Workers Logs
+reads. A server needs no `nodejs_compat`. Rate limits are per isolate.
+There is no drain: Cloudflare finishes requests in flight on a new
+deployment.
+
+**Size.** superscalar's WebAssembly module is 2.2 MB, 661 KB gzipped, in
+its size-optimized build; a small Worker's upload is about 2.2 MB, 685 KB
+gzipped. Cloudflare's script limit is 64 MiB on both plans, with no
+compressed limit, since September 2026. Every Worker, servers and jobs
+alike, carries its own copy. Instantiation takes tens of milliseconds
+against the one-second startup limit, and the first parse of a phone
+number or URL costs about 80 ms once. The deploy logs each version's
+`startupTimeMs`.
+
+### 18.6 Databases on D1, and migrations
+
+A TypeScript API's `Deps.db` is typed by its database's DB service's
+first dialect:
+- `postgres` gives the `pg` Pool, as today;
+- `sqlite` gives `SqlDatabase`, the runtime's copy of D1's interface
+  (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`).
+
+A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)`
+over `bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
+`?N`, which both read. D1 has no interactive transaction, and `batch` is
+atomic.
+
+Resolution refuses (`unrealizable`) a TypeScript server, job or worker
+whose database resolves to another dialect than its DB service's first,
+since its `Deps.db` would be the wrong client. acme-shop's `shop-db` lists
+`postgres` first, so nothing of it changes. An identity store over SQLite
+is not built, so a sqlite-first database with the user model is refused
+for a TypeScript API.
+
+The target's migration runner works on the deploying machine:
+- it finds `superschematic-migrate` on `PATH` or at
+  `SUPERSCHEMATIC_MIGRATE`, as the local target does;
+- it looks up each database's uuid by its name through the API;
+- it writes a job document whose databases have
+  `databaseUrl: d1://<accountId>/<uuid>` and no privileges, writes the
+  plans beside it, and runs `superschematic-migrate job --job <path>` with
+  the run's `CLOUDFLARE_API_TOKEN`.
+
+D1 has no roles: every Worker bound to a database reads and writes all of
+it, the runner's state tables included. A phase with no steps whose
+servers changed does nothing. The D1 driver's lease (D27, amended) keeps
+two deploys apart. Before the first D1 deploy, `TestRealD1` must pass
+against a real database, which also verifies D27 amended's REST batch
+assumption.
+
+### 18.7 Buckets on R2
+
+The runtime's `./r2` entry implements D54's `Bucket`:
+- **Objects** are put, got, deleted and listed through the binding.
+- **`signUrl`** presigns a V4 query-string URL for
+  `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
+  WebCrypto HMAC, for at most seven days. The access key is the edge's
+  token id, and the secret is the hex SHA-256 of the token's value, which
+  the runtime computes once.
+
+Unlike gcp, the field carries a credential, since a workload on Workers
+has no identity to sign with. D54 refused credentials in the field only
+because gcp's workload identity makes them unnecessary. The token member
+is flagged secret, so it reaches the Worker as a `secret_text` binding.
+`buckets-never-public` refuses an `r2ManagedDomain` or an `r2CustomDomain`
+on a Bucket service's bucket. A browser's PUT to a signed URL needs the
+bucket's CORS; that gap is shared with gcp and lands for both later.
+
+### 18.8 Sites on Workers static assets
+
+A site's Worker serves the build's files as static assets. Its version
+holds:
+- `assets.directory` set to `artifacts/<site>/{site-digest}`, pinned and
+  placed as a bundle's files are;
+- `assets.config` with `htmlHandling: "none"` and
+  `notFoundHandling: "none"`;
+- an `assets` binding, `ASSETS`;
+- `SITE_CONFIG`, a `plain_text` binding with the JSON of section 8.10,
+  whose values are each API's public address, composed on this target from
+  names alone;
+- `SITE_FALLBACK` when set;
+- a script module the extension embeds, the same bytes in every release.
+
+Cloudflare runs the script only when no file matches. It answers
+`/__superschematic/config.json` with `no-store`, and any other path with
+the fallback's bytes at 200, or 404 without a fallback. The `Sites`
+seam's `Publish` keeps the files in R2 under their digest, and its `Fetch`
+places them for the provider; it writes no config, since the graph carries
+it. Files are served with Cloudflare's asset caching, which revalidates
+each by its ETag; D55's year-long `immutable` for content-hashed names is
+not given here.
+
+### 18.9 Jobs on Cron Triggers
+
+The `cloudflare.cron` platform gives each job a Worker named after the
+deployable, running `scheduled.ts`. `scheduled.ts` builds `Deps` as a
+server's does, with no identity, callers or CORS. Its `scheduled`
+handler:
+- calls `createJobs(deps)`, then the job's method with a signal that
+  aborts at the job's timeout;
+- logs `job started`, then `job done` or `job failed` with how long it
+  took;
+- runs the method again up to its retries, as `stack dev` does;
+- throws after the last failure, so Cloudflare records the run as failed.
+
+A schedule runs in UTC, so a job with another `timeZone` is refused, since
+daylight saving moves an offset. A job whose timeout times its tries
+exceeds Cloudflare's limit for a scheduled run is refused. `cpuMs` sets
+`limits.cpuMs`. Cloudflare starts a run at each firing, as Cloud Run does.
+No `Jobs` seam is built for this target, so `stack run` refuses it.
+
+### 18.10 Service auth on Workers
+
+Admission is the service binding: a Worker that is not exposed has no
+route, so only a Worker holding a binding to it reaches it. Identity is
+D37's signed token. The connector reuses the generic connector's edge key
+(a `tls:index/privateKey:PrivateKey` node per edge, D63) and its callee
+issuer: issuer and subject are the caller's deployable, the audience the
+callee's, EdDSA, at most 300 seconds. The private key's PEM reaches the
+caller as a `secret_text` binding through the secret flag. The value lives
+in Pulumi's state, encrypted with the passphrase, and never in the
+program. This settles section 9.9's Workers question: callers sign
+key-pair tokens, and no runtime reads `ctx.props`.
+
+### 18.11 DNS and exposure
+
+Exposure is a `workersCustomDomain` for `<name>.<domain>`, in the exposure
+step. Cloudflare finds the zone by the hostname within the account,
+writes the record and issues the certificate, so the Workers and site
+platforms return no `Records` and the DNS platform writes nothing for
+them. The rule `domain-on-cloudflare` refuses an environment with a
+domain whose DNS platform is not `cloudflare`, or whose zone the token
+cannot reach. Without a domain, an exposed Worker turns on workers.dev.
+
+### 18.12 Resource graph and provider
+
+The pin grows by `worker`, `workerVersion`, `workersDeployment`,
+`workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
+`r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
+written by `go run ./internal/tools/providerschemas` in
+`extensions/cloudflare`. The `tls` provider's pin comes with the generic
+connector. No provider node exists: every node names `accountId`, and the
+provider reads the token from the run's environment.
+
+### 18.13 Local development
+
+A stack with a cloudflare environment keeps a `Dev` on the `local` target:
+- servers run on Bun from `main.ts`;
+- a sqlite-first database is a file under the environment's state
+  directory, which the runner migrates from the same SQLite plan and the
+  server opens with `openSqlite`;
+- buckets stay on the storage emulator through the same `Bucket`
+  interface;
+- calls travel over loopback with signed tokens.
+
+`stack dev` does not run the Workers entry and its bindings. `check`
+bundles them for `workerd` on every pull request, and superschematic's
+runtime tests run fixture bundles under the `workerd` binary.
+
+### 18.14 Policy rules
+
+- **`nothing-public-unless-exposed`** refuses, for a deployable that is
+  not exposed, a Worker with workers.dev on, a `workersCustomDomain` or a
+  `workersRoute`; and all three for a job's Worker.
+- **`buckets-never-public`** is in section 18.7.
+- **`domain-on-cloudflare`** is in section 18.11.
+
+### 18.15 Not built
+
+- `stack run` on this target.
+- Queue workers, since D53 amended keeps claims on Postgres.
+- Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
+- An identity API on Workers, whose argon2 is `node:crypto`'s (D50).
+- Engine types on Workers, whose binding is a Node-API addon (D58).
+- Rate limits shared across isolates; Workers' `ratelimit` binding is a
+  candidate store.
+- `immutable` caching for a site's hashed files.
+
+Milestone 7's second target is done when acme-shop's storefront has run
+live on Workers (workers.dev, then a domain, through the SDK, with a
+rollback and a destroy), and a D1-backed TypeScript API has run live
+(expand, rollout, contract). Buckets, sites and cron jobs follow as
+breadth.
