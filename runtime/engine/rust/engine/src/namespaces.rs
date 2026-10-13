@@ -41,6 +41,14 @@ pub const DEFAULT_NAMESPACE: &str = "default";
 /// digits and hyphens, starting with a letter, at most 63 characters.
 pub const NAMESPACE_NAME: &str = "^[a-z][a-z0-9-]{0,62}$";
 
+/// The refusal of a name a create cannot make a namespace of, the name as
+/// `JSON.stringify` writes it.
+pub fn name_refusal(given: &str) -> EngineError {
+    EngineError::invalid_argument(format!(
+        "a namespace name is lowercase letters, digits and hyphens, starting with a letter, at most 63 characters, not {given}"
+    ))
+}
+
 /// Whether a name matches [`NAMESPACE_NAME`].
 pub fn is_namespace_name(name: &str) -> bool {
     let bytes = name.as_bytes();
@@ -397,11 +405,7 @@ impl<'e> Namespaces<'e> {
     pub fn create(&self, principal: &Principal, name: &str) -> Result<NamespaceRecord> {
         check_principal(principal)?;
         if !is_namespace_name(name) {
-            return Err(EngineError::invalid_argument(format!(
-                "a namespace name is lowercase letters, digits and hyphens, starting with a letter, at most 63 characters, not {}",
-                json::quote(name)
-            ))
-            .into());
+            return Err(name_refusal(&json::quote(name)).into());
         }
         self.engine
             .access

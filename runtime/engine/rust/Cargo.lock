@@ -1383,6 +1383,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-testkit"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "superschematic-engine",
+]
+
+[[package]]
 name = "superschematic-schema-ir"
 version = "0.0.0"
 dependencies = [

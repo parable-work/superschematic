@@ -40,6 +40,7 @@
 //! ```
 
 mod access;
+pub mod calls;
 mod composition;
 mod engine;
 pub mod errors;
@@ -58,7 +59,10 @@ pub use access::{
     ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate, Policy, PolicyAction,
     PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction, ServiceMatch,
 };
-pub use engine::{Clock, Engine, EngineClock, EngineOptions, Ids, MetaSchema, Storage};
+pub use engine::{
+    seeded_uuid, Clock, Engine, EngineClock, EngineOptions, IdCounter, IdQueue, Ids, MetaSchema,
+    Storage, SCENARIO_SEED,
+};
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,
     SchemaIssue, ValidationIssue, Veto,
@@ -72,8 +76,8 @@ pub use instances::{
     ListOptions, WriteOptions, FILTER_SCAN_ROWS, INSTANCE_ID, MAX_FILTER_RANGES, MAX_FILTER_VALUES,
 };
 pub use namespaces::{
-    is_namespace_name, NamespaceConfig, NamespaceOptions, NamespaceOrigin, NamespaceRecord,
-    NamespaceState, Namespaces, DEFAULT_NAMESPACE, NAMESPACE_NAME,
+    is_namespace_name, name_refusal, NamespaceConfig, NamespaceOptions, NamespaceOrigin,
+    NamespaceRecord, NamespaceState, Namespaces, DEFAULT_NAMESPACE, NAMESPACE_NAME,
 };
 pub use paging::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 pub use principal::{

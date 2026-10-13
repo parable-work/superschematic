@@ -4,7 +4,7 @@
 
 [workspace]
 resolver = "2"
-members = ["engine", "storage"]
+members = ["engine", "storage", "testkit"]
 
 [workspace.package]
 version = "0.0.0"

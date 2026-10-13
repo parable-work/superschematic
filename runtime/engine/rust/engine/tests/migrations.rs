@@ -883,6 +883,42 @@ fn ids_are_uuids_or_a_sequence() {
             (counted.new_id().unwrap(), counted.new_id().unwrap()),
             ("order-1".to_owned(), "order-2".to_owned())
         );
+        drop(counted);
+        // Two engines given one counter draw the recorder's one sequence.
+        let drawn = superschematic_engine::IdCounter::new();
+        let seeded = |drawn: &superschematic_engine::IdCounter| {
+            let drawn = drawn.clone();
+            target.open_with(move |options| {
+                options.ids = superschematic_engine::Ids::Seeded {
+                    prefix: superschematic_engine::SCENARIO_SEED.into(),
+                    drawn,
+                }
+            })
+        };
+        let (first, second) = (seeded(&drawn), seeded(&drawn));
+        assert_eq!(
+            first.new_id().unwrap(),
+            "81af85d2-eaea-4aa9-9131-9573fd47ad9a"
+        );
+        assert_eq!(
+            second.new_id().unwrap(),
+            "adb623a0-36b0-44f2-8f7d-79ba3d38cb0c"
+        );
+        assert_eq!(drawn.drawn(), 2);
+        drop((first, second));
+        // Queued ids are drawn in order, and an empty queue refuses.
+        let queue = superschematic_engine::IdQueue::new();
+        let queued = {
+            let queue = queue.clone();
+            target.open_with(move |options| options.ids = superschematic_engine::Ids::Queue(queue))
+        };
+        queue.push("given-1");
+        queue.push("given-2");
+        assert_eq!(
+            (queued.new_id().unwrap(), queued.new_id().unwrap()),
+            ("given-1".to_owned(), "given-2".to_owned())
+        );
+        assert!(matches!(queued.new_id(), Err(Error::Usage(_))));
     }
 }
 

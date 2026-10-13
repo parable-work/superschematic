@@ -892,6 +892,9 @@ jobs:
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
 
+      # The test kit's replay of milestone 1's scenario corpus
+      # (runtime/engine/testdata/scenarios) runs here too; until that pull
+      # request lands the corpus is absent, and the replay says it skipped.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:

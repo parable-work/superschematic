@@ -16,8 +16,9 @@
 //! document, options)`. An [`Engine`] is `Send + Sync`; a call runs on the
 //! thread that makes it.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -70,7 +71,110 @@ pub enum Ids {
     /// processes on one database count apart, so a deployment uses UUIDs.
     /// An id is checked as a caller's is when a create takes it.
     Sequence { prefix: String },
+    /// The version 4 UUIDs the scenario recorder draws (milestone 1's
+    /// `seededUUID`): the n-th, from 1, is the first 16 bytes of
+    /// SHA-256(`<prefix><n>`), with the version nibble set to 4 and the
+    /// variant bits to `10`, hyphenated in lowercase ([`seeded_uuid`]).
+    /// Engines given one counter draw one sequence, as the recorder's one
+    /// generator serves every engine a test opens. The recorder's prefix is
+    /// [`SCENARIO_SEED`]. For replay, and tests that need ids they can
+    /// compute.
+    Seeded { prefix: String, drawn: IdCounter },
+    /// The ids a host queues before a call ([`IdQueue::push`]), drawn in
+    /// order: a replay of a recording whose test gave the engine ids of
+    /// its own. Drawing from an empty queue is refused.
+    Queue(IdQueue),
 }
+
+/// The prefix of the scenario recorder's seed: its n-th id is
+/// [`seeded_uuid`]`(SCENARIO_SEED, n)`.
+pub const SCENARIO_SEED: &str = "superschematic-engine-scenario/";
+
+/// The n-th seeded id: the version 4 UUID made of the first 16 bytes of
+/// SHA-256(`<prefix><n>`), its version and variant bits set.
+pub fn seeded_uuid(prefix: &str, n: u64) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("{prefix}{n}").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
+
+/// A count of the seeded ids drawn, which engines given one share.
+#[derive(Clone, Debug, Default)]
+pub struct IdCounter(Arc<AtomicU64>);
+
+impl IdCounter {
+    /// A counter at 0: the first id drawn is the first.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// How many ids have been drawn.
+    pub fn drawn(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    fn next(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::SeqCst) + 1
+    }
+}
+
+impl PartialEq for IdCounter {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for IdCounter {}
+
+/// Ids a host queues for the engine to draw, in order.
+#[derive(Clone, Debug, Default)]
+pub struct IdQueue(Arc<Mutex<VecDeque<String>>>);
+
+impl IdQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queues an id; the engine draws the first queued first.
+    pub fn push(&self, id: impl Into<String>) {
+        self.ids().push_back(id.into());
+    }
+
+    /// How many ids wait.
+    pub fn len(&self) -> usize {
+        self.ids().len()
+    }
+
+    /// Whether none waits.
+    pub fn is_empty(&self) -> bool {
+        self.ids().is_empty()
+    }
+
+    /// Drops every id that waits.
+    pub fn clear(&self) {
+        self.ids().clear();
+    }
+
+    fn pop(&self) -> Option<String> {
+        self.ids().pop_front()
+    }
+
+    fn ids(&self) -> std::sync::MutexGuard<'_, VecDeque<String>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl PartialEq for IdQueue {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for IdQueue {}
 
 /// What time it is to the engine, in epoch milliseconds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -79,8 +183,14 @@ pub enum Clock {
     #[default]
     System,
     /// A clock that stands at the given time until a test moves it
-    /// ([`EngineClock::advance`], [`EngineClock::set`]).
+    /// ([`EngineClock::advance`], [`EngineClock::set`],
+    /// [`EngineClock::script`]).
     Manual(i64),
+    /// The system's clock, but never the same millisecond twice: each
+    /// reading is one past the last when the system's has not moved past
+    /// it, so two readings are two instants. The scenario recorder reads
+    /// the wall clock so, and its replay does.
+    Strict,
 }
 
 /// The meta-schema schema documents load against: the `superschematic
@@ -170,28 +280,71 @@ impl EngineOptions {
 #[derive(Debug)]
 pub struct EngineClock {
     manual: Option<AtomicI64>,
+    /// The times a scripted manual clock reads next, in order.
+    script: Mutex<VecDeque<i64>>,
+    /// For a strict clock, its last reading.
+    strict: Option<AtomicI64>,
 }
 
 impl EngineClock {
     fn new(clock: Clock) -> Self {
         EngineClock {
             manual: match clock {
-                Clock::System => None,
                 Clock::Manual(at) => Some(AtomicI64::new(at)),
+                Clock::System | Clock::Strict => None,
             },
+            script: Mutex::new(VecDeque::new()),
+            strict: (clock == Clock::Strict).then(|| AtomicI64::new(0)),
         }
     }
 
     /// The time, in epoch milliseconds.
     pub fn now(&self) -> i64 {
-        match &self.manual {
-            Some(at) => at.load(Ordering::SeqCst),
-            None => SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |since| {
-                    i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-                }),
+        if let Some(at) = &self.manual {
+            let next = self
+                .script
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop_front();
+            if let Some(next) = next {
+                at.store(next, Ordering::SeqCst);
+            }
+            return at.load(Ordering::SeqCst);
         }
+        let system = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+            });
+        match &self.strict {
+            None => system,
+            Some(last) => {
+                let mut seen = last.load(Ordering::SeqCst);
+                loop {
+                    let next = system.max(seen + 1);
+                    match last.compare_exchange(seen, next, Ordering::SeqCst, Ordering::SeqCst) {
+                        Ok(_) => return next,
+                        Err(moved) => seen = moved,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Has a manual clock read these times next, in order, then stand at
+    /// the last: a recorded step's readings, replayed. A set or an advance
+    /// drops what is left.
+    pub fn script(&self, times: impl IntoIterator<Item = i64>) -> Result<()> {
+        self.manual_clock()?;
+        *self.script.lock().unwrap_or_else(PoisonError::into_inner) = times.into_iter().collect();
+        Ok(())
+    }
+
+    fn drop_script(&self) {
+        self.script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// Whether a test moves the clock.
@@ -203,12 +356,14 @@ impl EngineClock {
     /// system's clock cannot be moved.
     pub fn advance(&self, ms: i64) -> Result<i64> {
         let at = self.manual_clock()?;
+        self.drop_script();
         Ok(at.fetch_add(ms, Ordering::SeqCst) + ms)
     }
 
     /// Sets a manual clock to `at`.
     pub fn set(&self, at: i64) -> Result<()> {
         self.manual_clock()?.store(at, Ordering::SeqCst);
+        self.drop_script();
         Ok(())
     }
 
@@ -367,6 +522,12 @@ impl Engine {
                 let next = self.ids.next.fetch_add(1, Ordering::SeqCst) + 1;
                 format!("{prefix}{next}")
             }
+            Ids::Seeded { prefix, drawn } => seeded_uuid(prefix, drawn.next()),
+            Ids::Queue(queue) => queue.pop().ok_or_else(|| {
+                Error::usage(
+                    "the engine's id queue is empty: queue the id a create draws (IdQueue::push)",
+                )
+            })?,
         })
     }
 
@@ -452,5 +613,40 @@ mod tests {
         let system = EngineClock::new(Clock::System);
         assert!(system.now() > 1_700_000_000_000);
         assert!(system.advance(1).is_err());
+        assert!(system.script([1]).is_err());
+    }
+
+    #[test]
+    fn a_scripted_clock_reads_its_times_then_stands_at_the_last() {
+        let clock = EngineClock::new(Clock::Manual(100));
+        clock.script([101, 102, 103]).unwrap();
+        assert_eq!(
+            (clock.now(), clock.now(), clock.now(), clock.now()),
+            (101, 102, 103, 103)
+        );
+        clock.script([200, 201]).unwrap();
+        clock.set(5).unwrap();
+        assert_eq!(clock.now(), 5, "a set drops the script");
+    }
+
+    #[test]
+    fn a_strict_clock_never_reads_one_millisecond_twice() {
+        let clock = EngineClock::new(Clock::Strict);
+        let readings: Vec<i64> = (0..1000).map(|_| clock.now()).collect();
+        assert!(readings.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn seeded_ids_are_the_recorders() {
+        // The recorder's seededUUID (milestone 1, test/recorder.ts) drew
+        // these, run under Node.js; the corpus writes them as {{id:N}}.
+        for (n, id) in [
+            (1, "81af85d2-eaea-4aa9-9131-9573fd47ad9a"),
+            (2, "adb623a0-36b0-44f2-8f7d-79ba3d38cb0c"),
+            (3, "0eefa6f1-884c-4bf1-9193-b9fe654aae6d"),
+            (100, "09b4dd39-1e1c-4b2a-a3c2-6fcb3b4d8a15"),
+        ] {
+            assert_eq!(seeded_uuid(SCENARIO_SEED, n), id);
+        }
     }
 }

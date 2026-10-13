@@ -392,32 +392,107 @@ pub(crate) fn log_floor(
     Ok(own.max(published))
 }
 
-// A filter of a read: absent, or a set of names each the check takes.
-fn filter_list(
-    value: Option<&Vec<String>>,
-    key: &str,
-    what: &str,
-    valid: impl Fn(&str) -> bool,
-    rule: &str,
+// One of a read's filters: its key, what it lists, the names it takes,
+// and whether it may be empty (exclude, which then drops nothing).
+struct FilterSpec {
+    key: &'static str,
+    what: &'static str,
+    valid: fn(&str) -> bool,
+    rule: &'static str,
     empty_allowed: bool,
+}
+
+fn is_event_kind(kind: &str) -> bool {
+    EVENT_KINDS.contains(&kind)
+}
+
+const FILTERS: [FilterSpec; 3] = [
+    FilterSpec {
+        key: "kinds",
+        what: "event kinds",
+        valid: is_event_kind,
+        rule: "one of create, update, delete, operation, publish, define",
+        empty_allowed: false,
+    },
+    FilterSpec {
+        key: "behaviors",
+        what: "behavior names",
+        valid: is_behavior_name,
+        rule: "a behavior name",
+        empty_allowed: false,
+    },
+    FilterSpec {
+        key: "exclude",
+        what: "operation names",
+        valid: is_operation_name,
+        rule: "an operation name, camelCase",
+        empty_allowed: true,
+    },
+];
+
+// filter_list checks one of a read's filters: absent, or a list of names
+// each its rule takes; an empty list keeps nothing, so only exclude, which
+// drops nothing then, may be empty. Each item is JSON, so a binding's
+// non-string is refused as the TypeScript engine refuses it.
+fn filter_list(
+    spec: &FilterSpec,
+    value: Option<&[Value]>,
 ) -> Result<Option<BTreeSet<String>>, EngineError> {
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.is_empty() && !empty_allowed {
+    if value.is_empty() && !spec.empty_allowed {
         return Err(EngineError::invalid_argument(format!(
-            "{key} lists no {what}, so it would keep no event; leave it out to keep every one"
+            "{} lists no {}, so it would keep no event; leave it out to keep every one",
+            spec.key, spec.what
         )));
     }
-    for name in value {
-        if !valid(name) {
-            return Err(EngineError::invalid_argument(format!(
-                "{key}: {} is not {rule}",
-                json::quote(name)
-            )));
+    let mut names = BTreeSet::new();
+    for item in value {
+        match item {
+            Value::String(name) if (spec.valid)(name) => {
+                names.insert(name.clone());
+            }
+            other => {
+                return Err(EngineError::invalid_argument(format!(
+                    "{}: {} is not {}",
+                    spec.key,
+                    json::stringify(other),
+                    spec.rule
+                )))
+            }
         }
     }
-    Ok((!value.is_empty()).then(|| value.iter().cloned().collect()))
+    Ok((!names.is_empty()).then_some(names))
+}
+
+/// Checks a read's kinds, behaviors and exclude as JSON, in that order: a
+/// value that is no list is refused, then the items as the typed read
+/// checks them.
+pub(crate) fn check_filters(
+    given: [Option<&Value>; 3],
+) -> Result<[Option<Vec<String>>; 3], EngineError> {
+    let mut out: [Option<Vec<String>>; 3] = [None, None, None];
+    for ((spec, value), slot) in FILTERS.iter().zip(given).zip(out.iter_mut()) {
+        let Some(value) = value else {
+            continue;
+        };
+        let Value::Array(items) = value else {
+            return Err(EngineError::invalid_argument(format!(
+                "{} is a list of {}",
+                spec.key, spec.what
+            )));
+        };
+        filter_list(spec, Some(items))?;
+        *slot = Some(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+        );
+    }
+    Ok(out)
 }
 
 fn is_operation_name(name: &str) -> bool {
@@ -436,31 +511,20 @@ struct EventFilter {
 
 impl EventFilter {
     fn new(options: &ReadEvents<'_>) -> Result<Self, EngineError> {
+        let as_values = |list: &Option<Vec<String>>| {
+            list.as_ref().map(|names| {
+                names
+                    .iter()
+                    .map(|name| Value::from(name.as_str()))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let [kinds, behaviors, exclude] =
+            [&options.kinds, &options.behaviors, &options.exclude].map(as_values);
         Ok(EventFilter {
-            kinds: filter_list(
-                options.kinds.as_ref(),
-                "kinds",
-                "event kinds",
-                |kind| EVENT_KINDS.contains(&kind),
-                &format!("one of {}", EVENT_KINDS.join(", ")),
-                false,
-            )?,
-            behaviors: filter_list(
-                options.behaviors.as_ref(),
-                "behaviors",
-                "behavior names",
-                is_behavior_name,
-                "a behavior name",
-                false,
-            )?,
-            exclude: filter_list(
-                options.exclude.as_ref(),
-                "exclude",
-                "operation names",
-                is_operation_name,
-                "an operation name, camelCase",
-                true,
-            )?,
+            kinds: filter_list(&FILTERS[0], kinds.as_deref())?,
+            behaviors: filter_list(&FILTERS[1], behaviors.as_deref())?,
+            exclude: filter_list(&FILTERS[2], exclude.as_deref())?,
         })
     }
 
