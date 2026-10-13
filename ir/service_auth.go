@@ -1,7 +1,11 @@
 package ir
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"slices"
@@ -17,7 +21,7 @@ import (
 // field, a ServiceAuth. The value maps onto the HTTP runtimes' serviceauth
 // config: an issuer is a serviceauth issuer, with its callers as a list
 // rather than a map keyed by subject, since a subject may be a reference,
-// and each key as its JWK's JSON, since a key may be an output.
+// and each key as its JWK's JSON or its PEM, since a key may be an output.
 
 // CallersFieldSuffix is what the name of an API's callers field adds to
 // the API's name in upper snake case.
@@ -77,8 +81,8 @@ type ServiceAuth struct {
 
 // ServiceAuthIssuer is one issuer of service credentials: where its keys
 // are, what a token must carry, and the identities it vouches for that
-// are callers. Issuer, Audience, JWKSURL, a key's JWK and a caller's
-// Subject hold a string or a reference; the rest are literals.
+// are callers. Issuer, Audience, JWKSURL, a key's JWK or PEM and a
+// caller's Subject hold a string or a reference; the rest are literals.
 type ServiceAuthIssuer struct {
 	// Issuer is the `iss` the issuer writes.
 	Issuer any `json:"issuer"`
@@ -114,12 +118,21 @@ type ServiceAuthIssuer struct {
 	Callers []ServiceAuthCaller `json:"callers"`
 }
 
-// ServiceAuthKey is a public key an issuer signs with.
+// ServiceAuthKey is a public key an issuer signs with: its JWK or its PEM,
+// exactly one.
 type ServiceAuthKey struct {
 	// JWK is the key's JWK (RFC 7517) as JSON, with a kid and without the
 	// private member d: a string, or a reference to an output that holds
-	// one, such as a key pair node's publicJwk.
-	JWK any `json:"jwk"`
+	// one, such as the local target's key pair node's publicJwk.
+	JWK any `json:"jwk,omitempty"`
+
+	// PEM is an Ed25519 public key as the PEM of its SubjectPublicKeyInfo
+	// (RFC 8410), `-----BEGIN PUBLIC KEY-----`: a string, or a reference
+	// to an output that holds one, such as the generic connector's key
+	// node's publicKeyPem. The runtimes read it as an Ed25519 JWK whose
+	// kid is its RFC 7638 thumbprint (Ed25519Thumbprint), the kid the
+	// caller's signed-token source writes (D60).
+	PEM any `json:"pem,omitempty"`
 }
 
 // ServiceAuthCaller is an identity that is a caller, and the deployable it
@@ -179,10 +192,11 @@ func CheckServiceAuth(v any) error {
 // connector derives one for an edge (registry.Connected.Callee): an
 // issuer and an audience; one or more of the algorithms RS256, ES256 and
 // EdDSA; a JWKS URL or one or more public keys, each a JWK's JSON with a
-// kid; an optional subject claim, maximum lifetime and aliases; and one
-// or more callers, each a subject, the deployable it is, and the APIs that
-// deployable serves. A literal key must be a public JWK, and no two
-// literal subjects may repeat.
+// kid or an Ed25519 public key's PEM; an optional subject claim, maximum
+// lifetime and aliases; and one or more callers, each a subject, the
+// deployable it is, and the APIs that deployable serves. A literal key
+// must be a public JWK or an Ed25519 public key's PEM, no two literal keys
+// may share a kid, and no two literal subjects may repeat.
 func CheckServiceAuthIssuer(v any) error {
 	value, err := jsonForm(v)
 	if err != nil {
@@ -247,8 +261,9 @@ func checkServiceAuthIssuer(v any) error {
 	return checkCallers(m["callers"])
 }
 
-// checkKeys checks an issuer's keys: a non-empty list of {jwk}, each a
-// string or a reference, a literal one a public JWK with a kid.
+// checkKeys checks an issuer's keys: a non-empty list of {jwk} or {pem},
+// each a string or a reference. A literal JWK is a public one with a kid,
+// and a literal PEM an Ed25519 public key's, whose kid is its thumbprint.
 func checkKeys(v any) error {
 	list, ok := v.([]any)
 	if !ok || len(list) == 0 {
@@ -256,29 +271,49 @@ func checkKeys(v any) error {
 	}
 	kids := map[string]bool{}
 	for i, item := range list {
-		key, err := members(item, fmt.Sprintf("keys[%d]", i), "jwk")
+		key, err := members(item, fmt.Sprintf("keys[%d]", i), "jwk", "pem")
 		if err != nil {
 			return err
 		}
-		path := fmt.Sprintf("keys[%d].jwk", i)
-		if err := requiredString(key, fmt.Sprintf("keys[%d].", i), "jwk"); err != nil {
+		_, hasJWK := key["jwk"]
+		_, hasPEM := key["pem"]
+		name := "jwk"
+		switch {
+		case hasJWK && hasPEM:
+			return fmt.Errorf("keys[%d] sets jwk or pem, not both", i)
+		case hasPEM:
+			name = "pem"
+		case !hasJWK:
+			return fmt.Errorf("keys[%d] sets jwk or pem", i)
+		}
+		path := fmt.Sprintf("keys[%d].%s", i, name)
+		if err := requiredString(key, fmt.Sprintf("keys[%d].", i), name); err != nil {
 			return err
 		}
-		literal, ok := key["jwk"].(string)
+		literal, ok := key[name].(string)
 		if !ok {
 			continue
 		}
-		var jwk map[string]any
-		if err := json.Unmarshal([]byte(literal), &jwk); err != nil || jwk == nil {
-			return fmt.Errorf("%s is not a JWK's JSON object", path)
-		}
-		if _, private := jwk["d"]; private {
-			return fmt.Errorf("%s holds the private member d; a callee holds public keys only", path)
-		}
-		kty, _ := jwk["kty"].(string)
-		kid, _ := jwk["kid"].(string)
-		if kty == "" || kid == "" {
-			return fmt.Errorf("%s needs a kty and a kid", path)
+		var kid string
+		if name == "pem" {
+			public, err := Ed25519PublicKeyOfPEM(literal)
+			if err != nil {
+				return fmt.Errorf("%s %w", path, err)
+			}
+			kid = Ed25519Thumbprint(public)
+		} else {
+			var jwk map[string]any
+			if err := json.Unmarshal([]byte(literal), &jwk); err != nil || jwk == nil {
+				return fmt.Errorf("%s is not a JWK's JSON object", path)
+			}
+			if _, private := jwk["d"]; private {
+				return fmt.Errorf("%s holds the private member d; a callee holds public keys only", path)
+			}
+			kty, _ := jwk["kty"].(string)
+			kid, _ = jwk["kid"].(string)
+			if kty == "" || kid == "" {
+				return fmt.Errorf("%s needs a kty and a kid", path)
+			}
 		}
 		if kids[kid] {
 			return fmt.Errorf("%s repeats the kid %s", path, kid)
@@ -286,6 +321,45 @@ func checkKeys(v any) error {
 		kids[kid] = true
 	}
 	return nil
+}
+
+// ed25519SPKIPrefix is the DER of an Ed25519 public key's
+// SubjectPublicKeyInfo (RFC 8410, section 4) up to the key: a SEQUENCE of
+// the algorithm identifier id-Ed25519 (1.3.101.112) and a BIT STRING of
+// the 32-byte key.
+var ed25519SPKIPrefix = []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}
+
+// Ed25519PublicKeyOfPEM returns the 32-byte Ed25519 public key a PEM
+// holds: one `PUBLIC KEY` block, without headers and with nothing but
+// whitespace around it, whose content is the key's SubjectPublicKeyInfo
+// (RFC 8410), as the tls provider's publicKeyPem and `openssl pkey
+// -pubout` write it. Any other key, such as an RSA or a P-256 one, is
+// refused. The error reads after the member's name ("is not a PEM").
+func Ed25519PublicKeyOfPEM(text string) ([]byte, error) {
+	block, rest := pem.Decode([]byte(text))
+	switch {
+	case block == nil:
+		return nil, errors.New("is not a PEM block")
+	case block.Type != "PUBLIC KEY":
+		return nil, fmt.Errorf("is a PEM %s, not a PUBLIC KEY", block.Type)
+	case len(block.Headers) > 0:
+		return nil, errors.New("is a PEM block with headers")
+	case len(bytes.TrimSpace(rest)) > 0:
+		return nil, errors.New("holds more than one PEM block")
+	case len(block.Bytes) != len(ed25519SPKIPrefix)+32 || !bytes.HasPrefix(block.Bytes, ed25519SPKIPrefix):
+		return nil, errors.New("is not an Ed25519 public key's SubjectPublicKeyInfo")
+	}
+	return block.Bytes[len(ed25519SPKIPrefix):], nil
+}
+
+// Ed25519Thumbprint is the RFC 7638 thumbprint of an Ed25519 public key,
+// in base64url without padding: the SHA-256 of {"crv","kty","x"} in that
+// order, with no whitespace. A signed-token source writes it as the kid of
+// a key that comes as a PEM.
+func Ed25519Thumbprint(public []byte) string {
+	x := base64.RawURLEncoding.EncodeToString(public)
+	sum := sha256.Sum256([]byte(`{"crv":"Ed25519","kty":"OKP","x":"` + x + `"}`))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // checkCallers checks an issuer's callers: a non-empty list of {subject,

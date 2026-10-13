@@ -14,6 +14,7 @@ package main
 import (
 	"github.com/parable-work/superschematic/cli"
 	"github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack"
 
 	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
@@ -38,6 +39,9 @@ func extensions() []registry.Extension {
 		pulumi.Extension{ProviderVersions: map[string]string{
 			"gcp":              gcp.ProviderVersion,
 			cloudflare.Package: cloudflare.ProviderVersion,
+			// The generic connector's key node (D60), which the core
+			// emits for an http edge between two providers.
+			stack.GenericKeyPackage: stack.GenericKeyProviderVersion,
 		}},
 	}
 }

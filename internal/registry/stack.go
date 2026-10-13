@@ -89,6 +89,14 @@ type PlatformSpec struct {
 	// Extension is the registering extension's Name().
 	Extension string
 
+	// Provider names the provider the platform runs its deployables on, a
+	// lowercase word or words joined by dots or hyphens: `local`, `gcp`,
+	// `cloudflare`, `fake`. Two platforms of one provider meet only
+	// through a connector that names them both; between two of different
+	// providers that no connector names, the core's generic connector
+	// serves an http or a site edge (section 6.2, D60). Required.
+	Provider string
+
 	// Kind is the deployable kind the platform realizes.
 	Kind ir.DeployableKind
 
@@ -129,10 +137,11 @@ type PlatformSpec struct {
 	// host under the environment's domain, or of a host the platform gives
 	// it, with no path. A site edge derives the API's from its server's,
 	// and a site's own is the origin the CORS field of each API it calls
-	// lists (D55). The generic connector, which joins deployables on two
-	// targets, will read it too. It sees what AddressOf sees, and the
-	// Address. Nil, or a nil result, gives the deployable none: a site
-	// edge to it fails to resolve. A site platform must have it.
+	// lists (D55). The generic connector, which joins deployables of two
+	// providers, reaches the callee there too (D60). It sees what
+	// AddressOf sees, and the Address. Nil, or a nil result, gives the
+	// deployable none: a site edge or a generic one to it fails to
+	// resolve. A site platform must have it.
 	PublicAddressOf func(PlatformContext) any
 
 	// Lower returns the deployable's resources. It is pure: the same
@@ -201,9 +210,25 @@ type ConnectorSpec struct {
 	// job's edges are its API's (D52), and so are a worker's (D53), so a
 	// target that places jobs or workers registers a connector from its
 	// job or worker platform for each edge its servers take. A site edge
-	// runs from a site platform to a server platform (D55).
+	// runs from a site platform to a server platform (D55). A generic
+	// connector names neither.
 	From string
 	To   string
+
+	// Generic makes the connector the one that serves its edge kind
+	// between two platforms of different providers that no connector names
+	// (section 6.2, D60): Registry.Connector falls back to it, and a
+	// connector that names both platforms always wins. It serves an http
+	// or a site edge, names no From or To, and is one per edge kind. The
+	// core registers it (internal/stack/generic); a database or a bucket on
+	// another provider needs a connector that knows both.
+	Generic bool
+
+	// ResourceTypes holds the JSON Schema of the properties of each
+	// resource type Connect emits that no target registers, as a
+	// DNSPlatformSpec's ResourceTypes does: the generic connector, which no
+	// target owns, brings the schema of its key node's type.
+	ResourceTypes map[string]json.RawMessage
 
 	// Connect returns the edge's resources and the derived binding's
 	// value. It is pure.
@@ -519,11 +544,12 @@ func checkStackKey(what, name string) error {
 var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeScript}
 
 // RegisterPlatform adds a platform. It refuses a malformed or duplicate
-// name, an unknown kind, a server, job or worker platform without languages or a
-// database platform without dialects (or either with the other's list), an
-// unknown or repeated language or dialect, a settings schema that does not
-// compile, an identity config that is not a server platform's JSON object,
-// and a missing NameOf, AddressOf or Lower.
+// name, a missing or malformed provider, an unknown kind, a server, job or
+// worker platform without languages or a database platform without
+// dialects (or either with the other's list), an unknown or repeated
+// language or dialect, a settings schema that does not compile, an
+// identity config that is not a server platform's JSON object, and a
+// missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -533,6 +559,12 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if _, dup := r.stack.platforms[spec.Name]; dup {
 		return fmt.Errorf("registry: platform %q is already registered", spec.Name)
+	}
+	if spec.Provider == "" {
+		return fmt.Errorf("registry: platform %q names no provider: say which provider it runs on (local, gcp, cloudflare), which tells the generic connector two platforms apart (D60)", spec.Name)
+	}
+	if err := checkStackKey("platform "+spec.Name+" provider", spec.Provider); err != nil {
+		return err
 	}
 	switch spec.Kind {
 	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
@@ -610,10 +642,13 @@ func checkList(owner, what string, list, known []string) error {
 }
 
 // RegisterConnector adds a connector. It refuses a malformed or duplicate
-// name, an unknown edge kind, a missing platform name or Connect, and a
-// second connector for the same edge kind between the same two platforms.
-// Finalize checks that both platforms are registered and of the kinds the
-// edge joins.
+// name, an unknown edge kind, a missing platform name or Connect, a second
+// connector for the same edge kind between the same two platforms, and a
+// resource type schema that does not compile or that a target, a DNS
+// platform or another connector registered differently. A generic
+// connector names no platform, serves an http or a site edge, and is the
+// only one of its edge kind. Finalize checks that a connector's platforms
+// are registered and of the kinds the edge joins.
 func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 	if err := r.registrable("connector " + spec.Name); err != nil {
 		return err
@@ -627,17 +662,33 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 	if !spec.Edge.Valid() {
 		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket)
 	}
-	if spec.From == "" || spec.To == "" {
+	switch {
+	case spec.Generic && (spec.From != "" || spec.To != ""):
+		return fmt.Errorf("registry: generic connector %q names a platform; it serves any two platforms of different providers that no connector names", spec.Name)
+	case spec.Generic && spec.Edge != ir.EdgeHTTP && spec.Edge != ir.EdgeSite:
+		return fmt.Errorf("registry: generic connector %q serves a %s edge; a generic connector serves an http or a site edge, and a %s edge across providers needs a connector that knows both", spec.Name, spec.Edge, spec.Edge)
+	case !spec.Generic && (spec.From == "" || spec.To == ""):
 		return fmt.Errorf("registry: connector %q needs a From and a To platform", spec.Name)
 	}
 	if spec.Connect == nil {
 		return fmt.Errorf("registry: connector %q has no Connect function", spec.Name)
 	}
 	for _, other := range r.stack.connectors {
-		if other.Edge == spec.Edge && other.From == spec.From && other.To == spec.To {
+		if spec.Generic && other.Generic && other.Edge == spec.Edge {
+			return fmt.Errorf("registry: generic connectors %q and %q both serve %s edges", other.Name, spec.Name, spec.Edge)
+		}
+		if !spec.Generic && !other.Generic && other.Edge == spec.Edge && other.From == spec.From && other.To == spec.To {
 			return fmt.Errorf("registry: connectors %q and %q both connect %s to %s over %s", other.Name, spec.Name, spec.From, spec.To, spec.Edge)
 		}
 	}
+	types, err := r.compileResourceTypes(fmt.Sprintf("connector %q", spec.Name), spec.ResourceTypes)
+	if err != nil {
+		return err
+	}
+	for typ, rt := range types {
+		r.stack.resourceTypes[typ] = rt
+	}
+	spec.ResourceTypes = nil
 	r.stack.connectors[spec.Name] = spec
 	r.noteExtension(spec.Extension)
 	return nil
@@ -811,13 +862,16 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 }
 
 // checkStackReferences is Finalize's part for the stack specs: every
-// connector joins registered platforms of the kinds its edge joins, every
-// platform a target names is registered and of the kind it places, and the
-// DNS platform and provisioner a target names, when it names one, are
-// registered.
+// connector but a generic one, which names no platform, joins registered
+// platforms of the kinds its edge joins, every platform a target names is
+// registered and of the kind it places, and the DNS platform and
+// provisioner a target names, when it names one, are registered.
 func (r *Registry) checkStackReferences() error {
 	for _, name := range keysOf(r.stack.connectors) {
 		spec := r.stack.connectors[name]
+		if spec.Generic {
+			continue
+		}
 		toKind := ir.DeployableServer
 		if spec.Edge == ir.EdgeSQL {
 			toKind = ir.DeployableDatabase
@@ -889,14 +943,31 @@ func (r *Registry) Platform(name string) (PlatformSpec, bool) {
 func (r *Registry) Platforms() []string { return keysOf(r.stack.platforms) }
 
 // Connector returns the connector that realizes an edge of kind from
-// platform from to platform to.
+// platform from to platform to: the one that names both platforms, or else
+// the generic connector of the edge kind when both platforms are registered
+// and their providers differ (section 6.2, D60). Two platforms of one
+// provider that no connector names have none.
 func (r *Registry) Connector(kind ir.EdgeKind, from, to string) (ConnectorSpec, bool) {
-	for _, spec := range r.stack.connectors {
-		if spec.Edge == kind && spec.From == from && spec.To == to {
+	var generic *ConnectorSpec
+	for _, name := range keysOf(r.stack.connectors) {
+		spec := r.stack.connectors[name]
+		switch {
+		case spec.Edge != kind:
+		case spec.Generic:
+			generic = &spec
+		case spec.From == from && spec.To == to:
 			return spec, true
 		}
 	}
-	return ConnectorSpec{}, false
+	if generic == nil {
+		return ConnectorSpec{}, false
+	}
+	fromSpec, fromOK := r.stack.platforms[from]
+	toSpec, toOK := r.stack.platforms[to]
+	if !fromOK || !toOK || fromSpec.Provider == toSpec.Provider {
+		return ConnectorSpec{}, false
+	}
+	return *generic, true
 }
 
 // Connectors returns the registered connector names, sorted.

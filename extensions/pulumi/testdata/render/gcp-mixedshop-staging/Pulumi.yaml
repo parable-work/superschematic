@@ -1,0 +1,1322 @@
+# Rendered by superschematic from the resource graph of environment Staging of
+# stack MixedShop. Do not edit: change the stack and render it again.
+
+name: mixed-shop
+runtime: yaml
+description: Environment Staging of stack MixedShop
+resources:
+  # phase infrastructure; owners Orders
+  Orders-account:
+    name: Orders.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: orders
+      displayName: MixedShop Staging server Orders
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners http:Orders->shop-pricing
+  Orders-calls-shop-pricing-key:
+    name: Orders.calls.shop-pricing.key
+    type: tls:index/privateKey:PrivateKey
+    properties:
+      algorithm: ED25519
+    options:
+      version: 5.6.2
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-cloudsql-client-shop-db:
+    name: Orders.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-cloudsql-login-shop-db:
+    name: Orders.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:Orders->shop-db
+  Orders-database-user-shop-db:
+    name: Orders.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: orders@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-reads-PaymentsSecrets-STRIPE_KEY:
+    name: Orders.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-reads-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: Orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+      version: 9.37.1
+  # phase rollout; owners http:Orders->shop-api
+  Orders-run-invoker-shop-api:
+    name: Orders.run-invoker.shop-api
+    type: gcp:cloudrunv2/serviceIamMember:ServiceIamMember
+    properties:
+      location: us-east1
+      member: ${Orders-account.member}
+      name: ${shop-api-service.name}
+      project: acme-staging
+      role: roles/run.invoker
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${shop-api-service}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secretVersion:SecretVersion
+    properties:
+      secret: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+      secretData: ${Orders-calls-shop-pricing-key.privateKeyPemPkcs8}
+    options:
+      dependsOn:
+        - ${Orders-calls-shop-pricing-key}
+        - ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secret:Secret
+    properties:
+      project: acme-staging
+      replication:
+        auto: {}
+      secretId: MixedShop-Staging-orders-SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    options:
+      version: 9.37.1
+  # phase rollout; owners Orders
+  Orders-service:
+    name: Orders.service
+    type: gcp:cloudrunv2/service:Service
+    properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders
+      deletionProtection: false
+      ingress: INGRESS_TRAFFIC_INTERNAL_ONLY
+      invokerIamDisabled: false
+      location: us-east1
+      name: orders
+      project: acme-staging
+      template:
+        containers:
+          - envs:
+              - name: FULFILLMENT_REGION
+                value: us
+              - name: MAX_LINE_ITEMS
+                value: "50"
+              - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+                value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
+              - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+                value: google-id-token
+              - name: SHOP_API_SERVICE_URL
+                value: ${shop-api-service.uri}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                value: ${shop-db-database-shop-db.name}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                value: ${shop-db-instance.connectionName}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                value: orders@acme-staging.iam
+              - name: SHOP_PRICING_SERVICE_CREDENTIAL_AUDIENCE
+                value: shop-pricing
+              - name: SHOP_PRICING_SERVICE_CREDENTIAL_ISSUER
+                value: Orders
+              - name: SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+                valueSource:
+                  secretKeyRef:
+                    secret: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
+                    version: ${Orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version}
+              - name: SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE
+                value: signed-token
+              - name: SHOP_PRICING_SERVICE_URL
+                value: https://shop-pricing.staging.acme.dev
+              - name: STRIPE_KEY
+                valueSource:
+                  secretKeyRef:
+                    secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+                    version: latest
+            image: us-east1-docker.pkg.dev/acme-staging/mixed-shop/orders
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
+            ports:
+              containerPort: 8080
+            resources:
+              cpuIdle: true
+              limits:
+                cpu: "1"
+                memory: 512Mi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
+            volumeMounts:
+              - mountPath: /cloudsql
+                name: cloudsql
+        serviceAccount: ${Orders-account.email}
+        volumes:
+          - cloudSqlInstance:
+              instances:
+                - ${shop-db-instance.connectionName}
+            name: cloudsql
+        vpcAccess:
+          egress: ALL_TRAFFIC
+          networkInterfaces:
+            - network: ${network.name}
+              subnetwork: ${network-subnet.name}
+    options:
+      dependsOn:
+        - ${Orders-account}
+        - ${Orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+        - ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+        - ${network}
+        - ${network-subnet}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-service}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners Orders
+  Orders-trace-agent:
+    name: Orders.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-api-a:
+    name: dns.shop-api.a
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: shop-api.staging.acme.dev.
+      project: acme-staging
+      rrdatas:
+        - ${shop-api-address.address}
+      ttl: 300
+      type: A
+    options:
+      dependsOn:
+        - ${shop-api-address}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-api-cname:
+    name: dns.shop-api.cname
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: _acme-challenge.shop-api.staging.acme.dev.
+      project: acme-staging
+      rrdatas:
+        - ${shop-api-dns-authorization.dnsResourceRecords[0].data}
+      ttl: 300
+      type: CNAME
+    options:
+      dependsOn:
+        - ${shop-api-dns-authorization}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-pricing-cname:
+    name: dns.shop-pricing.cname
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: shop-pricing.staging.acme.dev.
+      project: acme-staging
+      rrdatas:
+        - ${shop-pricing-route.target}
+      ttl: 300
+      type: CNAME
+    options:
+      dependsOn:
+        - ${shop-pricing-route}
+      version: 9.37.1
+  # phase exposure; owners dns
+  dns-shop-storefront-cname:
+    name: dns.shop-storefront.cname
+    type: gcp:dns/recordSet:RecordSet
+    properties:
+      managedZone: acme-dev
+      name: shop-storefront.staging.acme.dev.
+      project: acme-staging
+      rrdatas:
+        - ${shop-storefront-route.target}
+      ttl: 300
+      type: CNAME
+    options:
+      dependsOn:
+        - ${shop-storefront-route}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-orders-ship-orders
+  network:
+    name: network
+    type: gcp:compute/network:Network
+    properties:
+      autoCreateSubnetworks: false
+      name: mixed-shop
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-orders-ship-orders
+  network-nat:
+    name: network.nat
+    type: gcp:compute/routerNat:RouterNat
+    properties:
+      name: mixed-shop-egress
+      natIpAllocateOption: AUTO_ONLY
+      project: acme-staging
+      region: us-east1
+      router: ${network-router.name}
+      sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+    options:
+      dependsOn:
+        - ${network-router}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-orders-ship-orders
+  network-router:
+    name: network.router
+    type: gcp:compute/router:Router
+    properties:
+      name: mixed-shop-egress
+      network: ${network.id}
+      project: acme-staging
+      region: us-east1
+    options:
+      dependsOn:
+        - ${network}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-orders-ship-orders
+  network-subnet:
+    name: network.subnet
+    type: gcp:compute/subnetwork:Subnetwork
+    properties:
+      ipCidrRange: 10.8.0.0/20
+      name: mixed-shop-egress
+      network: ${network.id}
+      privateIpGoogleAccess: true
+      project: acme-staging
+      region: us-east1
+    options:
+      dependsOn:
+        - ${network}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-api, shop-orders-ship-orders
+  secret-PaymentsSecrets-STRIPE_KEY:
+    name: secret.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secret:Secret
+    properties:
+      project: acme-staging
+      replication:
+        auto: {}
+      secretId: MixedShop-PaymentsSecrets-STRIPE_KEY
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-account:
+    name: shop-api.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: shop-api
+      displayName: MixedShop Staging server shop-api
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-address:
+    name: shop-api.address
+    type: gcp:compute/globalAddress:GlobalAddress
+    properties:
+      ipVersion: IPV4
+      name: shop-api-ip
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-backend:
+    name: shop-api.backend
+    type: gcp:compute/backendService:BackendService
+    properties:
+      backends:
+        - group: ${shop-api-endpoint-group.id}
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-api-backend
+      project: acme-staging
+    options:
+      dependsOn:
+        - ${shop-api-endpoint-group}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate:
+    name: shop-api.certificate
+    type: gcp:certificatemanager/certificate:Certificate
+    properties:
+      managed:
+        dnsAuthorizations:
+          - ${shop-api-dns-authorization.id}
+        domains:
+          - shop-api.staging.acme.dev
+      name: shop-api-cert
+      project: acme-staging
+    options:
+      dependsOn:
+        - ${shop-api-dns-authorization}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate-map:
+    name: shop-api.certificate-map
+    type: gcp:certificatemanager/certificateMap:CertificateMap
+    properties:
+      name: shop-api-certs
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-certificate-map-entry:
+    name: shop-api.certificate-map-entry
+    type: gcp:certificatemanager/certificateMapEntry:CertificateMapEntry
+    properties:
+      certificates:
+        - ${shop-api-certificate.id}
+      hostname: shop-api.staging.acme.dev
+      map: ${shop-api-certificate-map.name}
+      name: shop-api-certs-host
+      project: acme-staging
+    options:
+      dependsOn:
+        - ${shop-api-certificate}
+        - ${shop-api-certificate-map}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-cloudsql-client-shop-db:
+    name: shop-api.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-cloudsql-login-shop-db:
+    name: shop-api.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-api->shop-db
+  shop-api-database-user-shop-db:
+    name: shop-api.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: shop-api@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-dns-authorization:
+    name: shop-api.dns-authorization
+    type: gcp:certificatemanager/dnsAuthorization:DnsAuthorization
+    properties:
+      domain: shop-api.staging.acme.dev
+      name: shop-api-dns-auth
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-endpoint-group:
+    name: shop-api.endpoint-group
+    type: gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup
+    properties:
+      cloudRun:
+        service: ${shop-api-service.name}
+      name: shop-api-neg
+      networkEndpointType: SERVERLESS
+      project: acme-staging
+      region: us-east1
+    options:
+      dependsOn:
+        - ${shop-api-service}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-forwarding-rule:
+    name: shop-api.forwarding-rule
+    type: gcp:compute/globalForwardingRule:GlobalForwardingRule
+    properties:
+      ipAddress: ${shop-api-address.address}
+      ipProtocol: TCP
+      loadBalancingScheme: EXTERNAL_MANAGED
+      name: shop-api-https
+      portRange: "443"
+      project: acme-staging
+      target: ${shop-api-https-proxy.id}
+    options:
+      dependsOn:
+        - ${shop-api-address}
+        - ${shop-api-https-proxy}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-https-proxy:
+    name: shop-api.https-proxy
+    type: gcp:compute/targetHttpsProxy:TargetHttpsProxy
+    properties:
+      certificateMap: //certificatemanager.googleapis.com/${shop-api-certificate-map.id}
+      name: shop-api-https
+      project: acme-staging
+      urlMap: ${shop-api-url-map.id}
+    options:
+      dependsOn:
+        - ${shop-api-certificate-map}
+        - ${shop-api-certificate-map-entry}
+        - ${shop-api-url-map}
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-reads-PaymentsSecrets-STRIPE_KEY:
+    name: shop-api.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase rollout; owners shop-api
+  shop-api-service:
+    name: shop-api.service
+    type: gcp:cloudrunv2/service:Service
+    properties:
+      customAudiences:
+        - //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
+      deletionProtection: false
+      ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
+      invokerIamDisabled: true
+      location: us-east1
+      name: shop-api
+      project: acme-staging
+      template:
+        containers:
+          - envs:
+              - name: LOG_LEVEL
+                value: info
+              - name: SHOP_API_CALLERS_ISSUERS
+                value: "2"
+              - name: SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS
+                value: RS256
+              - name: SHOP_API_CALLERS_ISSUERS_0_AUDIENCE
+                value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS
+                value: "2"
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE
+                value: Orders
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES
+                value: shop-orders
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT
+                value: orders@acme-staging.iam.gserviceaccount.com
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE
+                value: shop-orders-ship-orders
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SERVES
+                value: shop-orders
+              - name: SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT
+                value: shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com
+              - name: SHOP_API_CALLERS_ISSUERS_0_ISSUER
+                value: https://accounts.google.com
+              - name: SHOP_API_CALLERS_ISSUERS_0_ISSUER_ALIASES
+                value: accounts.google.com
+              - name: SHOP_API_CALLERS_ISSUERS_0_JWKS_URL
+                value: https://www.googleapis.com/oauth2/v3/certs
+              - name: SHOP_API_CALLERS_ISSUERS_0_SUBJECT_CLAIM
+                value: email
+              - name: SHOP_API_CALLERS_ISSUERS_1_ALGORITHMS
+                value: EdDSA
+              - name: SHOP_API_CALLERS_ISSUERS_1_AUDIENCE
+                value: shop-api
+              - name: SHOP_API_CALLERS_ISSUERS_1_CALLERS
+                value: "1"
+              - name: SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE
+                value: shop-storefront
+              - name: SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SERVES
+                value: shop-storefront
+              - name: SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT
+                value: shop-storefront
+              - name: SHOP_API_CALLERS_ISSUERS_1_ISSUER
+                value: shop-storefront
+              - name: SHOP_API_CALLERS_ISSUERS_1_KEYS
+                value: "1"
+              - name: SHOP_API_CALLERS_ISSUERS_1_KEYS_0_PEM
+                value: ${shop-storefront-calls-shop-api-key.publicKeyPem}
+              - name: SHOP_API_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS
+                value: "300"
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                value: ${shop-db-database-shop-db.name}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                value: ${shop-db-instance.connectionName}
+              - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                value: shop-api@acme-staging.iam
+              - name: SHOP_MEDIA_BUCKET_NAME
+                value: ${shop-media-bucket.name}
+              - name: STRIPE_KEY
+                valueSource:
+                  secretKeyRef:
+                    secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+                    version: latest
+            image: us-east1-docker.pkg.dev/acme-staging/mixed-shop/shop-api
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /healthz
+                port: 8080
+              periodSeconds: 15
+              timeoutSeconds: 5
+            ports:
+              containerPort: 8080
+            resources:
+              cpuIdle: true
+              limits:
+                cpu: "1"
+                memory: 512Mi
+            startupProbe:
+              failureThreshold: 24
+              httpGet:
+                path: /readyz
+                port: 8080
+              periodSeconds: 5
+              timeoutSeconds: 4
+            volumeMounts:
+              - mountPath: /cloudsql
+                name: cloudsql
+        serviceAccount: ${shop-api-account.email}
+        volumes:
+          - cloudSqlInstance:
+              instances:
+                - ${shop-db-instance.connectionName}
+            name: cloudsql
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-account}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+        - ${shop-media-bucket}
+        - ${shop-storefront-calls-shop-api-key}
+      version: 9.37.1
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-sign-as-self:
+    name: shop-api.sign-as-self
+    type: gcp:serviceaccount/iAMMember:IAMMember
+    properties:
+      member: ${shop-api-account.member}
+      role: roles/iam.serviceAccountTokenCreator
+      serviceAccountId: ${shop-api-account.name}
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase infrastructure; owners bucket:shop-api->shop-media
+  shop-api-storage-shop-media:
+    name: shop-api.storage.shop-media
+    type: gcp:storage/bucketIAMMember:BucketIAMMember
+    properties:
+      bucket: ${shop-media-bucket.name}
+      member: ${shop-api-account.member}
+      role: roles/storage.objectUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+        - ${shop-media-bucket}
+      version: 9.37.1
+  # phase infrastructure; owners shop-api
+  shop-api-trace-agent:
+    name: shop-api.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
+  # phase exposure; owners shop-api
+  shop-api-url-map:
+    name: shop-api.url-map
+    type: gcp:compute/uRLMap:URLMap
+    properties:
+      defaultService: ${shop-api-backend.id}
+      name: shop-api-lb
+      project: acme-staging
+    options:
+      dependsOn:
+        - ${shop-api-backend}
+      version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-database-shop-db:
+    name: shop-db.database.shop-db
+    type: gcp:sql/database:Database
+    properties:
+      instance: ${shop-db-instance.name}
+      name: shop_db
+      project: acme-staging
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-instance:
+    name: shop-db.instance
+    type: gcp:sql/databaseInstance:DatabaseInstance
+    properties:
+      databaseVersion: POSTGRES_16
+      deletionProtection: false
+      name: shop-db
+      project: acme-staging
+      region: us-east1
+      settings:
+        availabilityType: ZONAL
+        backupConfiguration:
+          enabled: true
+          pointInTimeRecoveryEnabled: false
+        connectorEnforcement: REQUIRED
+        databaseFlags:
+          - name: cloudsql.iam_authentication
+            value: on
+        deletionProtectionEnabled: false
+        edition: ENTERPRISE
+        ipConfiguration:
+          ipv4Enabled: true
+        tier: db-custom-1-3840
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-db
+  shop-db-migrator:
+    name: shop-db.migrator
+    type: gcp:sql/user:User
+    properties:
+      databaseRoles:
+        - cloudsqlsuperuser
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: mixed-shop-migrator@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+      version: 9.37.1
+  # phase infrastructure; owners shop-media
+  shop-media-bucket:
+    name: shop-media.bucket
+    type: gcp:storage/bucket:Bucket
+    properties:
+      forceDestroy: false
+      lifecycleRules:
+        - action:
+            type: Delete
+          condition:
+            age: 30
+      location: US-EAST1
+      name: acme-staging-mixed-shop-shop-media
+      project: acme-staging
+      publicAccessPrevention: enforced
+      uniformBucketLevelAccess: true
+      versioning:
+        enabled: false
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-account:
+    name: shop-orders-ship-orders.account
+    type: gcp:serviceaccount/account:Account
+    properties:
+      accountId: shop-orders-ship-orders
+      displayName: MixedShop Staging job shop-orders-ship-orders
+      project: acme-staging
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners http:shop-orders-ship-orders->shop-pricing
+  shop-orders-ship-orders-calls-shop-pricing-key:
+    name: shop-orders-ship-orders.calls.shop-pricing.key
+    type: tls:index/privateKey:PrivateKey
+    properties:
+      algorithm: ED25519
+    options:
+      version: 5.6.2
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-cloudsql-client-shop-db:
+    name: shop-orders-ship-orders.cloudsql-client.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.client
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-cloudsql-login-shop-db:
+    name: shop-orders-ship-orders.cloudsql-login.shop-db
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/acme-staging/instances/shop-db"
+        title: Cloud SQL instance shop-db
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudsql.instanceUser
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners sql:shop-orders-ship-orders->shop-db
+  shop-orders-ship-orders-database-user-shop-db:
+    name: shop-orders-ship-orders.database-user.shop-db
+    type: gcp:sql/user:User
+    properties:
+      deletionPolicy: ABANDON
+      instance: ${shop-db-instance.name}
+      name: shop-orders-ship-orders@acme-staging.iam
+      project: acme-staging
+      type: CLOUD_IAM_SERVICE_ACCOUNT
+    options:
+      dependsOn:
+        - ${shop-db-instance}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase rollout; owners shop-orders-ship-orders
+  shop-orders-ship-orders-job:
+    name: shop-orders-ship-orders.job
+    type: gcp:cloudrunv2/job:Job
+    properties:
+      deletionProtection: false
+      location: us-east1
+      name: shop-orders-ship-orders
+      project: acme-staging
+      template:
+        taskCount: 1
+        template:
+          containers:
+            - envs:
+                - name: FULFILLMENT_REGION
+                  value: us
+                - name: MAX_LINE_ITEMS
+                  value: "50"
+                - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+                  value: //run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api
+                - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+                  value: google-id-token
+                - name: SHOP_API_SERVICE_URL
+                  value: ${shop-api-service.uri}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
+                  value: ${shop-db-database-shop-db.name}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
+                  value: ${shop-db-instance.connectionName}
+                - name: SHOP_DB_DATABASE_CLOUD_SQL_USER
+                  value: shop-orders-ship-orders@acme-staging.iam
+                - name: SHOP_PRICING_SERVICE_CREDENTIAL_AUDIENCE
+                  value: shop-pricing
+                - name: SHOP_PRICING_SERVICE_CREDENTIAL_ISSUER
+                  value: shop-orders-ship-orders
+                - name: SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+                  valueSource:
+                    secretKeyRef:
+                      secret: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
+                      version: ${shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version}
+                - name: SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE
+                  value: signed-token
+                - name: SHOP_PRICING_SERVICE_URL
+                  value: https://shop-pricing.staging.acme.dev
+                - name: STRIPE_KEY
+                  valueSource:
+                    secretKeyRef:
+                      secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+                      version: latest
+              image: us-east1-docker.pkg.dev/acme-staging/mixed-shop/shop-orders-ship-orders
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - mountPath: /cloudsql
+                  name: cloudsql
+          maxRetries: 1
+          serviceAccount: ${shop-orders-ship-orders-account.email}
+          timeout: 300s
+          volumes:
+            - cloudSqlInstance:
+                instances:
+                  - ${shop-db-instance.connectionName}
+              name: cloudsql
+          vpcAccess:
+            egress: ALL_TRAFFIC
+            networkInterfaces:
+              - network: ${network.name}
+                subnetwork: ${network-subnet.name}
+    options:
+      dependsOn:
+        - ${network}
+        - ${network-subnet}
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-api-service}
+        - ${shop-db-database-shop-db}
+        - ${shop-db-instance}
+        - ${shop-orders-ship-orders-account}
+        - ${shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+        - ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY:
+    name: shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+    options:
+      dependsOn:
+        - ${secret-PaymentsSecrets-STRIPE_KEY}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-reads-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: shop-orders-ship-orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secretIamMember:SecretIamMember
+    properties:
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/secretmanager.secretAccessor
+      secretId: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+        - ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+      version: 9.37.1
+  # phase rollout; owners http:shop-orders-ship-orders->shop-api
+  shop-orders-ship-orders-run-invoker-shop-api:
+    name: shop-orders-ship-orders.run-invoker.shop-api
+    type: gcp:cloudrunv2/serviceIamMember:ServiceIamMember
+    properties:
+      location: us-east1
+      member: ${shop-orders-ship-orders-account.member}
+      name: ${shop-api-service.name}
+      project: acme-staging
+      role: roles/run.invoker
+    options:
+      dependsOn:
+        - ${shop-api-service}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase rollout; owners shop-orders-ship-orders
+  shop-orders-ship-orders-schedule:
+    name: shop-orders-ship-orders.schedule
+    type: gcp:cloudscheduler/job:Job
+    properties:
+      description: Runs job shop-orders-ship-orders of MixedShop Staging on its schedule
+      httpTarget:
+        httpMethod: POST
+        oauthToken:
+          serviceAccountEmail: ${shop-orders-ship-orders-account.email}
+        uri: https://run.googleapis.com/v2/projects/acme-staging/locations/us-east1/jobs/${shop-orders-ship-orders-job.name}:run
+      name: shop-orders-ship-orders
+      project: acme-staging
+      region: us-east1
+      schedule: 0 * * * *
+      timeZone: America/New_York
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+        - ${shop-orders-ship-orders-job}
+        - ${shop-orders-ship-orders-schedule-invoker}
+      version: 9.37.1
+  # phase rollout; owners shop-orders-ship-orders
+  shop-orders-ship-orders-schedule-invoker:
+    name: shop-orders-ship-orders.schedule-invoker
+    type: gcp:cloudrunv2/jobIamMember:JobIamMember
+    properties:
+      location: us-east1
+      member: ${shop-orders-ship-orders-account.member}
+      name: ${shop-orders-ship-orders-job.name}
+      project: acme-staging
+      role: roles/run.invoker
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+        - ${shop-orders-ship-orders-job}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secretVersion:SecretVersion
+    properties:
+      secret: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+      secretData: ${shop-orders-ship-orders-calls-shop-pricing-key.privateKeyPemPkcs8}
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-calls-shop-pricing-key}
+        - ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY}
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY:
+    name: shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    type: gcp:secretmanager/secret:Secret
+    properties:
+      project: acme-staging
+      replication:
+        auto: {}
+      secretId: MixedShop-Staging-shop-orders-ship-orders-SHOP_PRICING_SERVICE_CREDENTIAL_KEY
+    options:
+      version: 9.37.1
+  # phase infrastructure; owners shop-orders-ship-orders
+  shop-orders-ship-orders-trace-agent:
+    name: shop-orders-ship-orders.trace-agent
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/cloudtrace.agent
+    options:
+      dependsOn:
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners shop-pricing
+  shop-pricing-account:
+    name: shop-pricing.account
+    type: fake:iam/account:Account
+    properties:
+      name: shop-pricing
+  # phase exposure; owners shop-pricing
+  shop-pricing-route:
+    name: shop-pricing.route
+    type: fake:run/route:Route
+    properties:
+      host: shop-pricing.staging.acme.dev
+      service: ${shop-pricing-service.id}
+    options:
+      dependsOn:
+        - ${shop-pricing-service}
+  # phase rollout; owners shop-pricing
+  shop-pricing-service:
+    name: shop-pricing.service
+    type: fake:run/service:Service
+    properties:
+      account: ${shop-pricing-account.email}
+      env:
+        - name: SHOP_PRICING_CALLERS_ISSUERS
+          value: "2"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_ALGORITHMS
+          value: EdDSA
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_AUDIENCE
+          value: shop-pricing
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS
+          value: "1"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE
+          value: Orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_SERVES
+          value: shop-orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT
+          value: Orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_ISSUER
+          value: Orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_KEYS
+          value: "1"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_KEYS_0_PEM
+          value: ${Orders-calls-shop-pricing-key.publicKeyPem}
+        - name: SHOP_PRICING_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS
+          value: "300"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_ALGORITHMS
+          value: EdDSA
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_AUDIENCE
+          value: shop-pricing
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS
+          value: "1"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE
+          value: shop-orders-ship-orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_SERVES
+          value: shop-orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT
+          value: shop-orders-ship-orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_ISSUER
+          value: shop-orders-ship-orders
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_KEYS
+          value: "1"
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_KEYS_0_PEM
+          value: ${shop-orders-ship-orders-calls-shop-pricing-key.publicKeyPem}
+        - name: SHOP_PRICING_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS
+          value: "300"
+      image: shop-pricing
+      language: typescript
+      name: shop-pricing
+      public: true
+    options:
+      dependsOn:
+        - ${Orders-calls-shop-pricing-key}
+        - ${shop-orders-ship-orders-calls-shop-pricing-key}
+        - ${shop-pricing-account}
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-account:
+    name: shop-storefront.account
+    type: fake:iam/account:Account
+    properties:
+      name: shop-storefront
+  # phase infrastructure; owners http:shop-storefront->shop-api
+  shop-storefront-calls-shop-api-key:
+    name: shop-storefront.calls.shop-api.key
+    type: tls:index/privateKey:PrivateKey
+    properties:
+      algorithm: ED25519
+    options:
+      version: 5.6.2
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-reads-SHOP_API_SERVICE_CREDENTIAL_KEY:
+    name: shop-storefront.reads.SHOP_API_SERVICE_CREDENTIAL_KEY
+    type: fake:iam/grant:Grant
+    properties:
+      member: ${shop-storefront-account.email}
+      resource: ${shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+      role: secret.accessor
+    options:
+      dependsOn:
+        - ${shop-storefront-account}
+        - ${shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY}
+  # phase exposure; owners shop-storefront
+  shop-storefront-route:
+    name: shop-storefront.route
+    type: fake:run/route:Route
+    properties:
+      host: shop-storefront.staging.acme.dev
+      service: ${shop-storefront-service.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-service}
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-secret-version-SHOP_API_SERVICE_CREDENTIAL_KEY:
+    name: shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY
+    type: fake:secrets/version:Version
+    properties:
+      data: ${shop-storefront-calls-shop-api-key.privateKeyPemPkcs8}
+      secret: ${shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-calls-shop-api-key}
+        - ${shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY}
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY:
+    name: shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY
+    type: fake:secrets/secret:Secret
+    properties:
+      name: shop-storefront-SHOP_API_SERVICE_CREDENTIAL_KEY
+  # phase rollout; owners shop-storefront
+  shop-storefront-service:
+    name: shop-storefront.service
+    type: fake:run/service:Service
+    properties:
+      account: ${shop-storefront-account.email}
+      env:
+        - name: SHOP_API_SERVICE_CREDENTIAL_AUDIENCE
+          value: shop-api
+        - name: SHOP_API_SERVICE_CREDENTIAL_ISSUER
+          value: shop-storefront
+        - name: SHOP_API_SERVICE_CREDENTIAL_KEY
+          secret: ${shop-storefront-secret-version-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+        - name: SHOP_API_SERVICE_CREDENTIAL_SOURCE
+          value: signed-token
+        - name: SHOP_API_SERVICE_URL
+          value: https://shop-api.staging.acme.dev
+      image: shop-storefront
+      language: typescript
+      name: shop-storefront
+      public: true
+    options:
+      dependsOn:
+        - ${shop-storefront-account}
+        - ${shop-storefront-secret-version-SHOP_API_SERVICE_CREDENTIAL_KEY}
+outputs:
+  Orders.account.email: ${Orders-account.email}
+  Orders.account.id: ${Orders-account.id}
+  Orders.account.member: ${Orders-account.member}
+  Orders.calls.shop-pricing.key.id: ${Orders-calls-shop-pricing-key.id}
+  Orders.calls.shop-pricing.key.publicKeyPem: ${Orders-calls-shop-pricing-key.publicKeyPem}
+  Orders.cloudsql-client.shop-db.id: ${Orders-cloudsql-client-shop-db.id}
+  Orders.cloudsql-login.shop-db.id: ${Orders-cloudsql-login-shop-db.id}
+  Orders.database-user.shop-db.id: ${Orders-database-user-shop-db.id}
+  Orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${Orders-reads-PaymentsSecrets-STRIPE_KEY.id}
+  Orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${Orders-reads-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  Orders.run-invoker.shop-api.id: ${Orders-run-invoker-shop-api.id}
+  Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${Orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version: ${Orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version}
+  Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
+  Orders.service.id: ${Orders-service.id}
+  Orders.service.uri: ${Orders-service.uri}
+  Orders.trace-agent.id: ${Orders-trace-agent.id}
+  dns.shop-api.a.id: ${dns-shop-api-a.id}
+  dns.shop-api.cname.id: ${dns-shop-api-cname.id}
+  dns.shop-pricing.cname.id: ${dns-shop-pricing-cname.id}
+  dns.shop-storefront.cname.id: ${dns-shop-storefront-cname.id}
+  network.id: ${network.id}
+  network.name: ${network.name}
+  network.nat.id: ${network-nat.id}
+  network.router.id: ${network-router.id}
+  network.router.name: ${network-router.name}
+  network.subnet.id: ${network-subnet.id}
+  network.subnet.name: ${network-subnet.name}
+  secret.PaymentsSecrets.STRIPE_KEY.id: ${secret-PaymentsSecrets-STRIPE_KEY.id}
+  secret.PaymentsSecrets.STRIPE_KEY.secretId: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
+  shop-api.account.email: ${shop-api-account.email}
+  shop-api.account.id: ${shop-api-account.id}
+  shop-api.account.member: ${shop-api-account.member}
+  shop-api.account.name: ${shop-api-account.name}
+  shop-api.address.address: ${shop-api-address.address}
+  shop-api.address.id: ${shop-api-address.id}
+  shop-api.backend.id: ${shop-api-backend.id}
+  shop-api.certificate-map-entry.id: ${shop-api-certificate-map-entry.id}
+  shop-api.certificate-map.id: ${shop-api-certificate-map.id}
+  shop-api.certificate-map.name: ${shop-api-certificate-map.name}
+  shop-api.certificate.id: ${shop-api-certificate.id}
+  shop-api.cloudsql-client.shop-db.id: ${shop-api-cloudsql-client-shop-db.id}
+  shop-api.cloudsql-login.shop-db.id: ${shop-api-cloudsql-login-shop-db.id}
+  shop-api.database-user.shop-db.id: ${shop-api-database-user-shop-db.id}
+  shop-api.dns-authorization.dnsResourceRecords[0].data: ${shop-api-dns-authorization.dnsResourceRecords[0].data}
+  shop-api.dns-authorization.id: ${shop-api-dns-authorization.id}
+  shop-api.endpoint-group.id: ${shop-api-endpoint-group.id}
+  shop-api.forwarding-rule.id: ${shop-api-forwarding-rule.id}
+  shop-api.https-proxy.id: ${shop-api-https-proxy.id}
+  shop-api.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-api-reads-PaymentsSecrets-STRIPE_KEY.id}
+  shop-api.service.id: ${shop-api-service.id}
+  shop-api.service.name: ${shop-api-service.name}
+  shop-api.service.uri: ${shop-api-service.uri}
+  shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
+  shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
+  shop-api.trace-agent.id: ${shop-api-trace-agent.id}
+  shop-api.url-map.id: ${shop-api-url-map.id}
+  shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
+  shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
+  shop-db.instance.connectionName: ${shop-db-instance.connectionName}
+  shop-db.instance.id: ${shop-db-instance.id}
+  shop-db.instance.name: ${shop-db-instance.name}
+  shop-db.migrator.id: ${shop-db-migrator.id}
+  shop-media.bucket.id: ${shop-media-bucket.id}
+  shop-media.bucket.name: ${shop-media-bucket.name}
+  shop-orders-ship-orders.account.email: ${shop-orders-ship-orders-account.email}
+  shop-orders-ship-orders.account.id: ${shop-orders-ship-orders-account.id}
+  shop-orders-ship-orders.account.member: ${shop-orders-ship-orders-account.member}
+  shop-orders-ship-orders.calls.shop-pricing.key.id: ${shop-orders-ship-orders-calls-shop-pricing-key.id}
+  shop-orders-ship-orders.calls.shop-pricing.key.publicKeyPem: ${shop-orders-ship-orders-calls-shop-pricing-key.publicKeyPem}
+  shop-orders-ship-orders.cloudsql-client.shop-db.id: ${shop-orders-ship-orders-cloudsql-client-shop-db.id}
+  shop-orders-ship-orders.cloudsql-login.shop-db.id: ${shop-orders-ship-orders-cloudsql-login-shop-db.id}
+  shop-orders-ship-orders.database-user.shop-db.id: ${shop-orders-ship-orders-database-user-shop-db.id}
+  shop-orders-ship-orders.job.id: ${shop-orders-ship-orders-job.id}
+  shop-orders-ship-orders.job.name: ${shop-orders-ship-orders-job.name}
+  shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
+  shop-orders-ship-orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${shop-orders-ship-orders-reads-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
+  shop-orders-ship-orders.schedule-invoker.id: ${shop-orders-ship-orders-schedule-invoker.id}
+  shop-orders-ship-orders.schedule.id: ${shop-orders-ship-orders-schedule.id}
+  shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version: ${shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version}
+  shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
+  shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
+  shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}
+  shop-pricing.account.email: ${shop-pricing-account.email}
+  shop-pricing.account.id: ${shop-pricing-account.id}
+  shop-pricing.route.id: ${shop-pricing-route.id}
+  shop-pricing.route.target: ${shop-pricing-route.target}
+  shop-pricing.service.id: ${shop-pricing-service.id}
+  shop-pricing.service.url: ${shop-pricing-service.url}
+  shop-storefront.account.email: ${shop-storefront-account.email}
+  shop-storefront.account.id: ${shop-storefront-account.id}
+  shop-storefront.calls.shop-api.key.id: ${shop-storefront-calls-shop-api-key.id}
+  shop-storefront.calls.shop-api.key.publicKeyPem: ${shop-storefront-calls-shop-api-key.publicKeyPem}
+  shop-storefront.reads.SHOP_API_SERVICE_CREDENTIAL_KEY.id: ${shop-storefront-reads-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+  shop-storefront.route.id: ${shop-storefront-route.id}
+  shop-storefront.route.target: ${shop-storefront-route.target}
+  shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY.id: ${shop-storefront-secret-version-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+  shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY.id: ${shop-storefront-secret-SHOP_API_SERVICE_CREDENTIAL_KEY.id}
+  shop-storefront.service.id: ${shop-storefront-service.id}
+  shop-storefront.service.url: ${shop-storefront-service.url}

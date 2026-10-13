@@ -43,7 +43,8 @@ const parentKey = "parent-stack"
 //   - an inherited node is not a resource. The program reads its outputs
 //     from the parent environment's stack through a stack reference;
 //   - the outputs are Exports(env): every node's `id` and every output the
-//     environment references.
+//     environment references, but one a secret member of a binding
+//     references, such as the generic connector's private key (D60).
 //
 // Render reads nothing but env and writes nothing but Pulumi.yaml: the
 // same environment renders the same bytes, and a parameter's value never
@@ -80,7 +81,10 @@ type Export struct {
 // node's properties, a deployable's name, address or public address (D55),
 // a binding's value or a DNS record. An inherited node's outputs are read from the parent
 // environment's stack and exported again, so a member's outputs cover its
-// whole graph.
+// whole graph. An output a secret member of a binding references
+// (ir.DerivedVariable.Secret) is not exported, though a node's property
+// reads it: a secret's version reads the generic connector's private key
+// (D60), which no reader of the outputs needs.
 func Exports(env *ir.ResolvedEnvironment) ([]Export, error) {
 	prog, err := newProgram(env, nil)
 	if err != nil {
@@ -211,6 +215,30 @@ func (p *program) collectExports() error {
 		for _, rec := range p.env.DNS.Records {
 			if err := add("DNS record of "+rec.Deployable, []any{rec.Name, rec.Value}); err != nil {
 				return err
+			}
+		}
+	}
+	// No output a secret member of a binding references is exported, such
+	// as the generic connector's private key (D60): the program hands it
+	// from node to node, the secret's version reads it, and Outputs leaves
+	// a secret output out anyway, so a stack output would only copy it.
+	for _, d := range p.env.Deployables {
+		for _, b := range d.Bindings {
+			if b.Source != ir.BindingDerived {
+				continue
+			}
+			vars, err := ir.DerivedVariables(b.Field, b.Value)
+			if err != nil {
+				return fmt.Errorf("pulumi: binding %s.%s: %w", d.Name, b.Field, err)
+			}
+			for _, v := range vars {
+				if !v.Secret {
+					continue
+				}
+				outputs, _ := ir.ValueRefs(v.Value)
+				for _, out := range outputs {
+					delete(seen, out)
+				}
 			}
 		}
 	}

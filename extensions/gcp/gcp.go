@@ -33,6 +33,12 @@ const (
 	// Target is the target's name.
 	Target = "gcp"
 
+	// Provider is the provider each platform of the target runs on, Google
+	// Cloud. A deployable of another provider reaches a Cloud Run server,
+	// and a Cloud Run server one of another provider, through the core's
+	// generic connector (D60).
+	Provider = "gcp"
+
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
 	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
@@ -204,6 +210,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerBucket,
 		},
 	} {
+		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}

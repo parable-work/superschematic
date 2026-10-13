@@ -28,13 +28,23 @@ const (
 	DNSPlatform = "fake.dns"
 	Provisioner = "fake"
 
+	// Provider is the provider each fake platform runs on. A platform of
+	// another provider reaches a fake server, and a fake deployable a
+	// server of another provider, through the core's generic connector
+	// (D60).
+	Provider = "fake"
+
 	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
 	// Postgres databases.
 	RunPlatform = "fake.run"
 	SQLPlatform = "fake.sql"
 
 	// EdgePlatform runs only TypeScript servers and LitePlatform only
-	// SQLite databases. No connector reaches either.
+	// SQLite databases, as Cloudflare's Workers and D1 do (section 6.8).
+	// No fake connector reaches either; a deployable of another provider
+	// reaches an exposed server on EdgePlatform through the generic
+	// connector, and one on EdgePlatform calls an exposed server of
+	// another provider the same way (D60).
 	EdgePlatform = "fake.edge"
 	LitePlatform = "fake.lite"
 
@@ -93,13 +103,18 @@ const (
 	TypeRoute    = "fake:run/route:Route"
 	TypeSecret   = "fake:secrets/secret:Secret"
 	TypeInstance = "fake:sql/instance:Instance"
-	TypeDatabase = "fake:sql/database:Database"
-	TypeRecord   = "fake:dns/record:Record"
-	TypeJob      = "fake:run/job:Job"
-	TypeSchedule = "fake:scheduler/job:Job"
-	TypeSite     = "fake:storage/site:Site"
-	TypeBucket   = "fake:storage/bucket:Bucket"
-	TypePool     = "fake:run/pool:Pool"
+
+	// TypeSecretVersion is a version of a secret that holds a value the
+	// graph references, such as the private key of a generic connector's
+	// key node (D60).
+	TypeSecretVersion = "fake:secrets/version:Version"
+	TypeDatabase      = "fake:sql/database:Database"
+	TypeRecord        = "fake:dns/record:Record"
+	TypeJob           = "fake:run/job:Job"
+	TypeSchedule      = "fake:scheduler/job:Job"
+	TypeSite          = "fake:storage/site:Site"
+	TypeBucket        = "fake:storage/bucket:Bucket"
+	TypePool          = "fake:run/pool:Pool"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -244,6 +259,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 	} {
+		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
@@ -386,6 +402,9 @@ var resourceTypes = map[string]string{
 	  "additionalProperties": false}`,
 	TypeRoute:  `{"type": "object", "required": ["host", "service"], "properties": {"host": {"type": "string"}, "service": {"type": "string"}}, "additionalProperties": false}`,
 	TypeSecret: `{"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
+	TypeSecretVersion: `{"type": "object", "required": ["secret", "data"],
+	  "properties": {"secret": {"type": "string"}, "data": {"type": "string"}},
+	  "additionalProperties": false}`,
 	TypeInstance: `{"type": "object", "required": ["name", "dialect"],
 	  "properties": {"name": {"type": "string"}, "dialect": {"type": "string"}, "tier": {"type": "string"}, "highAvailability": {"type": "boolean"}},
 	  "additionalProperties": false}`,
@@ -512,7 +531,25 @@ func lowerAccount(ctx registry.PlatformContext) (registry.Lowered, ir.Output, []
 				return registry.Lowered{}, member, nil, fmt.Errorf("binding %s: %w", b.Field, err)
 			}
 			for _, v := range vars {
-				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+				if !v.Secret {
+					env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+					continue
+				}
+				// A secret member, such as the generic connector's
+				// signing key (D60): a secret of the deployable's own
+				// whose version holds the value, which the variable
+				// reads, as a real platform's secret store does.
+				secret, version := d.Name+".secret."+v.Name, d.Name+".secret-version."+v.Name
+				out.Resources = append(out.Resources,
+					&ir.Resource{ID: secret, Type: TypeSecret, Properties: map[string]any{"name": Join(d.ResourceName, "-", v.Name)}, Phase: ir.PhaseInfrastructure},
+					&ir.Resource{ID: version, Type: TypeSecretVersion, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+						"secret": ir.Output{Resource: secret, Name: "id"}, "data": v.Value,
+					}},
+					&ir.Resource{ID: d.Name + ".reads." + v.Name, Type: TypeGrant, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+						"role": "secret.accessor", "member": member, "resource": ir.Output{Resource: secret, Name: "id"},
+					}},
+				)
+				env = append(env, map[string]any{"name": v.Name, "secret": ir.Output{Resource: version, Name: "id"}})
 			}
 			continue
 		case ir.BindingLiteral:

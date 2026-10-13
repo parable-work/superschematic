@@ -39,7 +39,15 @@ var gcpGoldenRoot = filepath.Join("..", "gcp", "testdata", "golden")
 // pinned pulumi-gcp schemas.
 func gcpEnvironment(t *testing.T, name string) *ir.ResolvedEnvironment {
 	t.Helper()
-	data, err := os.ReadFile(stack.EnvironmentPath(gcpGoldenRoot, "Shop", name))
+	return gcpGolden(t, "Shop", name)
+}
+
+// gcpGolden reads extensions/gcp's golden environment of a stack: Shop, or
+// MixedShop, whose fake servers on another provider the generic connector
+// joins to its Cloud Run deployables (D60).
+func gcpGolden(t *testing.T, stackName, name string) *ir.ResolvedEnvironment {
+	t.Helper()
+	data, err := os.ReadFile(stack.EnvironmentPath(gcpGoldenRoot, stackName, name))
 	if err != nil {
 		t.Fatal(err)
 	}

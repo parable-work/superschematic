@@ -125,6 +125,54 @@ func AllowServiceShop() []stack.Service {
 	return services
 }
 
+// EdgeShop returns RequireServiceShop with two TypeScript APIs for a
+// platform of another provider, such as EdgePlatform beside a cloud
+// target's servers (D60): shop-pricing, which prices an order, whose one
+// operation, Quotes.price, only shop-orders may call, and which shop-orders
+// now calls; and shop-storefront, which now calls shop-api for its
+// products. WithEdge deploys them.
+func EdgeShop() []stack.Service {
+	services := RequireServiceShop()
+	for i := range services {
+		switch services[i].Name {
+		case "shop-orders":
+			services[i].Calls = append(services[i].Calls, ShopPricing)
+		case "shop-storefront":
+			services[i].Calls = append(services[i].Calls, ShopAPI)
+		}
+	}
+	return append(services, stack.Service{
+		Name:     "shop-pricing",
+		Kind:     ir.SchemaKindAPI,
+		Language: registry.APILanguageTypeScript,
+		Operations: []stack.Operation{{
+			Name:           "Quotes.price",
+			ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersRequire, From: []string{"shop-orders"}},
+		}},
+	})
+}
+
+// WithEdge returns s deploying EdgeShop's shop-storefront and shop-pricing
+// as well, each exposed and placed on platform in every environment that
+// extends no other, to resolve over EdgeShop's services. A deployable of
+// another provider reaches a server only at its public address, so a
+// server another provider's deployable calls must be exposed: shop-api, as
+// Shop exposes it, and shop-pricing.
+func WithEdge(s *ir.Stack, platform string) *ir.Stack {
+	s.Deploy = append(s.Deploy, ShopStorefront, ShopPricing)
+	s.Expose = append(s.Expose, Of(ShopStorefront), Of(ShopPricing))
+	for _, env := range s.Environments {
+		if env.Extends != "" {
+			continue
+		}
+		env.Settings = append(env.Settings,
+			&ir.DeployableSettings{Of: Of(ShopStorefront), Platform: platform},
+			&ir.DeployableSettings{Of: Of(ShopPricing), Platform: platform},
+		)
+	}
+	return s
+}
+
 // SiteShop returns AcmeShop with the site shop-web (D55), a Site service
 // whose code at web/shop-web calls shop-api from the browser, as
 // examples/acme-shop's does, with the single-page fallback. WithSite
@@ -246,6 +294,10 @@ var (
 	ShopOrders = ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
 	ShopWeb    = ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}
 	ShopMedia  = ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}
+
+	// ShopStorefront and ShopPricing are EdgeShop's TypeScript APIs.
+	ShopStorefront = ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}
+	ShopPricing    = ir.ServiceRef{Name: "shop-pricing", Kind: ir.SchemaKindAPI}
 )
 
 // ShipOrders is shop-orders' job (D52): the warehouse's pick run, which

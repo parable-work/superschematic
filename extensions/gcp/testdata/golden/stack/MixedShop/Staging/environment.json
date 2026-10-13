@@ -1,0 +1,3093 @@
+{
+  "version": 1,
+  "stack": "MixedShop",
+  "environment": "Staging",
+  "target": "gcp",
+  "provisioner": "pulumi",
+  "values": {
+    "project": "acme-staging",
+    "region": "us-east1"
+  },
+  "domain": "staging.acme.dev",
+  "dns": {
+    "platform": "gcp.clouddns",
+    "values": {
+      "zone": "acme-dev"
+    },
+    "records": [
+      {
+        "name": "shop-api.staging.acme.dev",
+        "type": "A",
+        "value": {
+          "$output": {
+            "resource": "shop-api.address",
+            "name": "address"
+          }
+        },
+        "deployable": "shop-api"
+      },
+      {
+        "name": "_acme-challenge.shop-api.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-api.dns-authorization",
+            "name": "dnsResourceRecords[0].data"
+          }
+        },
+        "deployable": "shop-api"
+      },
+      {
+        "name": "shop-pricing.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-pricing.route",
+            "name": "target"
+          }
+        },
+        "deployable": "shop-pricing"
+      },
+      {
+        "name": "shop-storefront.staging.acme.dev",
+        "type": "CNAME",
+        "value": {
+          "$output": {
+            "resource": "shop-storefront.route",
+            "name": "target"
+          }
+        },
+        "deployable": "shop-storefront"
+      }
+    ]
+  },
+  "deployables": [
+    {
+      "name": "Orders",
+      "kind": "server",
+      "declared": true,
+      "platform": "gcp.cloudrun",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        },
+        {
+          "name": "shop-pricing",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "resourceName": "orders",
+      "address": {
+        "$output": {
+          "resource": "Orders.service",
+          "name": "uri"
+        }
+      },
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api",
+              "source": "google-id-token"
+            },
+            "url": {
+              "$output": {
+                "resource": "shop-api.service",
+                "name": "uri"
+              }
+            }
+          },
+          "edge": "http:Orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "orders@acme-staging.iam"
+            }
+          },
+          "edge": "sql:Orders->shop-db"
+        },
+        {
+          "field": "SHOP_PRICING_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-pricing",
+              "issuer": "Orders",
+              "key": {
+                "$output": {
+                  "resource": "Orders.calls.shop-pricing.key",
+                  "name": "privateKeyPemPkcs8"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "https://shop-pricing.staging.acme.dev"
+          },
+          "edge": "http:Orders->shop-pricing"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-api",
+      "kind": "server",
+      "platform": "gcp.cloudrun",
+      "services": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "buckets": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "language": "GO",
+      "exposed": true,
+      "resourceName": "shop-api",
+      "address": {
+        "$output": {
+          "resource": "shop-api.service",
+          "name": "uri"
+        }
+      },
+      "publicAddress": "https://shop-api.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "LOG_LEVEL",
+          "source": "literal",
+          "value": "info",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_CALLERS",
+          "source": "derived",
+          "value": {
+            "issuers": [
+              {
+                "algorithms": [
+                  "RS256"
+                ],
+                "audience": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api",
+                "callers": [
+                  {
+                    "deployable": "Orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "orders@acme-staging.iam.gserviceaccount.com"
+                  },
+                  {
+                    "deployable": "shop-orders-ship-orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com"
+                  }
+                ],
+                "issuer": "https://accounts.google.com",
+                "issuerAliases": [
+                  "accounts.google.com"
+                ],
+                "jwksUrl": "https://www.googleapis.com/oauth2/v3/certs",
+                "subjectClaim": "email"
+              },
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-api",
+                "callers": [
+                  {
+                    "deployable": "shop-storefront",
+                    "serves": [
+                      "shop-storefront"
+                    ],
+                    "subject": "shop-storefront"
+                  }
+                ],
+                "issuer": "shop-storefront",
+                "keys": [
+                  {
+                    "pem": {
+                      "$output": {
+                        "resource": "shop-storefront.calls.shop-api.key",
+                        "name": "publicKeyPem"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              }
+            ]
+          },
+          "callersOf": "shop-api",
+          "edges": [
+            "http:Orders->shop-api",
+            "http:shop-orders-ship-orders->shop-api",
+            "http:shop-storefront->shop-api"
+          ]
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "shop-api@acme-staging.iam"
+            }
+          },
+          "edge": "sql:shop-api->shop-db"
+        },
+        {
+          "field": "SHOP_MEDIA_BUCKET",
+          "source": "derived",
+          "value": {
+            "name": {
+              "$output": {
+                "resource": "shop-media.bucket",
+                "name": "name"
+              }
+            }
+          },
+          "edge": "bucket:shop-api->shop-media"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-db",
+      "kind": "database",
+      "platform": "gcp.cloudsql",
+      "services": [
+        {
+          "name": "shop-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "shop-db",
+      "address": {
+        "$output": {
+          "resource": "shop-db.instance",
+          "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "shop-media",
+      "kind": "bucket",
+      "platform": "gcp.storage",
+      "services": [
+        {
+          "name": "shop-media",
+          "kind": "Bucket"
+        }
+      ],
+      "settings": {
+        "deleteAfterDays": 30
+      },
+      "resourceName": "acme-staging-mixed-shop-shop-media",
+      "address": {
+        "$output": {
+          "resource": "shop-media.bucket",
+          "name": "name"
+        }
+      }
+    },
+    {
+      "name": "shop-orders-ship-orders",
+      "kind": "job",
+      "platform": "gcp.cloudrunjob",
+      "services": [
+        {
+          "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        },
+        {
+          "name": "shop-pricing",
+          "kind": "API"
+        }
+      ],
+      "language": "GO",
+      "job": {
+        "api": "shop-orders",
+        "name": "ShipOrders",
+        "schedule": "0 * * * *",
+        "timeZone": "America/New_York",
+        "timeoutSeconds": 300,
+        "retries": 1
+      },
+      "resourceName": "shop-orders-ship-orders",
+      "bindings": [
+        {
+          "field": "FULFILLMENT_REGION",
+          "source": "literal",
+          "value": "us"
+        },
+        {
+          "field": "MAX_LINE_ITEMS",
+          "source": "literal",
+          "value": "50",
+          "default": true
+        },
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api",
+              "source": "google-id-token"
+            },
+            "url": {
+              "$output": {
+                "resource": "shop-api.service",
+                "name": "uri"
+              }
+            }
+          },
+          "edge": "http:shop-orders-ship-orders->shop-api"
+        },
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "shop-db.database.shop-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "shop-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "shop-orders-ship-orders@acme-staging.iam"
+            }
+          },
+          "edge": "sql:shop-orders-ship-orders->shop-db"
+        },
+        {
+          "field": "SHOP_PRICING_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-pricing",
+              "issuer": "shop-orders-ship-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-pricing.key",
+                  "name": "privateKeyPemPkcs8"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "https://shop-pricing.staging.acme.dev"
+          },
+          "edge": "http:shop-orders-ship-orders->shop-pricing"
+        },
+        {
+          "field": "STRIPE_KEY",
+          "source": "secret",
+          "secret": "PaymentsSecrets.STRIPE_KEY"
+        }
+      ]
+    },
+    {
+      "name": "shop-pricing",
+      "kind": "server",
+      "platform": "fake.edge",
+      "services": [
+        {
+          "name": "shop-pricing",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "exposed": true,
+      "resourceName": "shop-pricing",
+      "address": {
+        "$output": {
+          "resource": "shop-pricing.service",
+          "name": "url"
+        }
+      },
+      "publicAddress": "https://shop-pricing.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "SHOP_PRICING_CALLERS",
+          "source": "derived",
+          "value": {
+            "issuers": [
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-pricing",
+                "callers": [
+                  {
+                    "deployable": "Orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "Orders"
+                  }
+                ],
+                "issuer": "Orders",
+                "keys": [
+                  {
+                    "pem": {
+                      "$output": {
+                        "resource": "Orders.calls.shop-pricing.key",
+                        "name": "publicKeyPem"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              },
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-pricing",
+                "callers": [
+                  {
+                    "deployable": "shop-orders-ship-orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "shop-orders-ship-orders"
+                  }
+                ],
+                "issuer": "shop-orders-ship-orders",
+                "keys": [
+                  {
+                    "pem": {
+                      "$output": {
+                        "resource": "shop-orders-ship-orders.calls.shop-pricing.key",
+                        "name": "publicKeyPem"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              }
+            ]
+          },
+          "callersOf": "shop-pricing",
+          "edges": [
+            "http:Orders->shop-pricing",
+            "http:shop-orders-ship-orders->shop-pricing"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shop-storefront",
+      "kind": "server",
+      "platform": "fake.edge",
+      "services": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "exposed": true,
+      "resourceName": "shop-storefront",
+      "address": {
+        "$output": {
+          "resource": "shop-storefront.service",
+          "name": "url"
+        }
+      },
+      "publicAddress": "https://shop-storefront.staging.acme.dev",
+      "bindings": [
+        {
+          "field": "SHOP_API_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-api",
+              "issuer": "shop-storefront",
+              "key": {
+                "$output": {
+                  "resource": "shop-storefront.calls.shop-api.key",
+                  "name": "privateKeyPemPkcs8"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "https://shop-api.staging.acme.dev"
+          },
+          "edge": "http:shop-storefront->shop-api"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "bucket:shop-api->shop-media",
+      "kind": "bucket",
+      "from": "shop-api",
+      "to": "shop-media",
+      "service": {
+        "name": "shop-media",
+        "kind": "Bucket"
+      },
+      "connector": "gcp.cloudrun-storage",
+      "field": "SHOP_MEDIA_BUCKET"
+    },
+    {
+      "id": "http:Orders->shop-api",
+      "kind": "http",
+      "from": "Orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "gcp.cloudrun-cloudrun",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "http:Orders->shop-pricing",
+      "kind": "http",
+      "from": "Orders",
+      "to": "shop-pricing",
+      "service": {
+        "name": "shop-pricing",
+        "kind": "API"
+      },
+      "connector": "generic.http",
+      "field": "SHOP_PRICING_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-ship-orders->shop-api",
+      "kind": "http",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "gcp.cloudrunjob-cloudrun",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-ship-orders->shop-pricing",
+      "kind": "http",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-pricing",
+      "service": {
+        "name": "shop-pricing",
+        "kind": "API"
+      },
+      "connector": "generic.http",
+      "field": "SHOP_PRICING_SERVICE"
+    },
+    {
+      "id": "http:shop-storefront->shop-api",
+      "kind": "http",
+      "from": "shop-storefront",
+      "to": "shop-api",
+      "service": {
+        "name": "shop-api",
+        "kind": "API"
+      },
+      "connector": "generic.http",
+      "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "sql:Orders->shop-db",
+      "kind": "sql",
+      "from": "Orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrun-cloudsql",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-api->shop-db",
+      "kind": "sql",
+      "from": "shop-api",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrun-cloudsql",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-orders-ship-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrunjob-cloudsql",
+      "field": "SHOP_DB_DATABASE"
+    }
+  ],
+  "secrets": [
+    {
+      "id": "PaymentsSecrets.STRIPE_KEY",
+      "type": "PaymentsSecrets",
+      "field": "STRIPE_KEY",
+      "readers": [
+        "Orders",
+        "shop-api",
+        "shop-orders-ship-orders"
+      ]
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "Orders.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "orders",
+          "displayName": "MixedShop Staging server Orders",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.calls.shop-pricing.key",
+        "type": "tls:index/privateKey:PrivateKey",
+        "properties": {
+          "algorithm": "ED25519"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:Orders->shop-pricing"
+        ]
+      },
+      {
+        "id": "Orders.cloudsql-client.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "Orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:Orders->shop-db"
+        ]
+      },
+      {
+        "id": "Orders.cloudsql-login.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "Orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:Orders->shop-db"
+        ]
+      },
+      {
+        "id": "Orders.database-user.shop-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "orders@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "Orders.account",
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:Orders->shop-db"
+        ]
+      },
+      {
+        "id": "Orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "Orders.account",
+          "secret.PaymentsSecrets.STRIPE_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "Orders.account",
+          "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.run-invoker.shop-api",
+        "type": "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "name": {
+            "$output": {
+              "resource": "shop-api.service",
+              "name": "name"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/run.invoker"
+        },
+        "dependsOn": [
+          "Orders.account",
+          "shop-api.service"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "http:Orders->shop-api"
+        ]
+      },
+      {
+        "id": "Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secretVersion:SecretVersion",
+        "properties": {
+          "secret": {
+            "$output": {
+              "resource": "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          },
+          "secretData": {
+            "$output": {
+              "resource": "Orders.calls.shop-pricing.key",
+              "name": "privateKeyPemPkcs8"
+            }
+          }
+        },
+        "dependsOn": [
+          "Orders.calls.shop-pricing.key",
+          "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secret:Secret",
+        "properties": {
+          "project": "acme-staging",
+          "replication": {
+            "auto": {}
+          },
+          "secretId": "MixedShop-Staging-orders-SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.service",
+        "type": "gcp:cloudrunv2/service:Service",
+        "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/orders"
+          ],
+          "deletionProtection": false,
+          "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+          "invokerIamDisabled": false,
+          "location": "us-east1",
+          "name": "orders",
+          "project": "acme-staging",
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "FULFILLMENT_REGION",
+                    "value": "us"
+                  },
+                  {
+                    "name": "MAX_LINE_ITEMS",
+                    "value": "50"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+                    "value": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+                    "value": "google-id-token"
+                  },
+                  {
+                    "name": "SHOP_API_SERVICE_URL",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-api.service",
+                        "name": "uri"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.database.shop-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "orders@acme-staging.iam"
+                  },
+                  {
+                    "name": "SHOP_PRICING_SERVICE_CREDENTIAL_AUDIENCE",
+                    "value": "shop-pricing"
+                  },
+                  {
+                    "name": "SHOP_PRICING_SERVICE_CREDENTIAL_ISSUER",
+                    "value": "Orders"
+                  },
+                  {
+                    "name": "SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                    "valueSource": {
+                      "secretKeyRef": {
+                        "secret": {
+                          "$output": {
+                            "resource": "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                            "name": "secretId"
+                          }
+                        },
+                        "version": {
+                          "$output": {
+                            "resource": "Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                            "name": "version"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE",
+                    "value": "signed-token"
+                  },
+                  {
+                    "name": "SHOP_PRICING_SERVICE_URL",
+                    "value": "https://shop-pricing.staging.acme.dev"
+                  },
+                  {
+                    "name": "STRIPE_KEY",
+                    "valueSource": {
+                      "secretKeyRef": {
+                        "secret": {
+                          "$output": {
+                            "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+                            "name": "secretId"
+                          }
+                        },
+                        "version": "latest"
+                      }
+                    }
+                  }
+                ],
+                "image": "us-east1-docker.pkg.dev/acme-staging/mixed-shop/orders",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
+                "ports": {
+                  "containerPort": 8080
+                },
+                "resources": {
+                  "cpuIdle": true,
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "startupProbe": {
+                  "failureThreshold": 24,
+                  "httpGet": {
+                    "path": "/readyz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 4
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "Orders.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ],
+            "vpcAccess": {
+              "egress": "ALL_TRAFFIC",
+              "networkInterfaces": [
+                {
+                  "network": {
+                    "$output": {
+                      "resource": "network",
+                      "name": "name"
+                    }
+                  },
+                  "subnetwork": {
+                    "$output": {
+                      "resource": "network.subnet",
+                      "name": "name"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "dependsOn": [
+          "Orders.account",
+          "Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+          "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+          "network",
+          "network.subnet",
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.service",
+          "shop-db.database.shop-db",
+          "shop-db.instance"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "Orders.trace-agent",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudtrace.agent"
+        },
+        "dependsOn": [
+          "Orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders"
+        ]
+      },
+      {
+        "id": "dns.shop-api.a",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "shop-api.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-api.address",
+                "name": "address"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "A"
+        },
+        "dependsOn": [
+          "shop-api.address"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "dns.shop-api.cname",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "_acme-challenge.shop-api.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-api.dns-authorization",
+                "name": "dnsResourceRecords[0].data"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "CNAME"
+        },
+        "dependsOn": [
+          "shop-api.dns-authorization"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "dns.shop-pricing.cname",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "shop-pricing.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-pricing.route",
+                "name": "target"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "CNAME"
+        },
+        "dependsOn": [
+          "shop-pricing.route"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "dns.shop-storefront.cname",
+        "type": "gcp:dns/recordSet:RecordSet",
+        "properties": {
+          "managedZone": "acme-dev",
+          "name": "shop-storefront.staging.acme.dev.",
+          "project": "acme-staging",
+          "rrdatas": [
+            {
+              "$output": {
+                "resource": "shop-storefront.route",
+                "name": "target"
+              }
+            }
+          ],
+          "ttl": 300,
+          "type": "CNAME"
+        },
+        "dependsOn": [
+          "shop-storefront.route"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "dns"
+        ]
+      },
+      {
+        "id": "network",
+        "type": "gcp:compute/network:Network",
+        "properties": {
+          "autoCreateSubnetworks": false,
+          "name": "mixed-shop",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Orders",
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "network.nat",
+        "type": "gcp:compute/routerNat:RouterNat",
+        "properties": {
+          "name": "mixed-shop-egress",
+          "natIpAllocateOption": "AUTO_ONLY",
+          "project": "acme-staging",
+          "region": "us-east1",
+          "router": {
+            "$output": {
+              "resource": "network.router",
+              "name": "name"
+            }
+          },
+          "sourceSubnetworkIpRangesToNat": "ALL_SUBNETWORKS_ALL_IP_RANGES"
+        },
+        "dependsOn": [
+          "network.router"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders",
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "network.router",
+        "type": "gcp:compute/router:Router",
+        "properties": {
+          "name": "mixed-shop-egress",
+          "network": {
+            "$output": {
+              "resource": "network",
+              "name": "id"
+            }
+          },
+          "project": "acme-staging",
+          "region": "us-east1"
+        },
+        "dependsOn": [
+          "network"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders",
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "network.subnet",
+        "type": "gcp:compute/subnetwork:Subnetwork",
+        "properties": {
+          "ipCidrRange": "10.8.0.0/20",
+          "name": "mixed-shop-egress",
+          "network": {
+            "$output": {
+              "resource": "network",
+              "name": "id"
+            }
+          },
+          "privateIpGoogleAccess": true,
+          "project": "acme-staging",
+          "region": "us-east1"
+        },
+        "dependsOn": [
+          "network"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "Orders",
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "secret.PaymentsSecrets.STRIPE_KEY",
+        "type": "gcp:secretmanager/secret:Secret",
+        "properties": {
+          "project": "acme-staging",
+          "replication": {
+            "auto": {}
+          },
+          "secretId": "MixedShop-PaymentsSecrets-STRIPE_KEY"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Orders",
+          "shop-api",
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-api.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-api",
+          "displayName": "MixedShop Staging server shop-api",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.address",
+        "type": "gcp:compute/globalAddress:GlobalAddress",
+        "properties": {
+          "ipVersion": "IPV4",
+          "name": "shop-api-ip",
+          "project": "acme-staging"
+        },
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.backend",
+        "type": "gcp:compute/backendService:BackendService",
+        "properties": {
+          "backends": [
+            {
+              "group": {
+                "$output": {
+                  "resource": "shop-api.endpoint-group",
+                  "name": "id"
+                }
+              }
+            }
+          ],
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "shop-api-backend",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-api.endpoint-group"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.certificate",
+        "type": "gcp:certificatemanager/certificate:Certificate",
+        "properties": {
+          "managed": {
+            "dnsAuthorizations": [
+              {
+                "$output": {
+                  "resource": "shop-api.dns-authorization",
+                  "name": "id"
+                }
+              }
+            ],
+            "domains": [
+              "shop-api.staging.acme.dev"
+            ]
+          },
+          "name": "shop-api-cert",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-api.dns-authorization"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.certificate-map",
+        "type": "gcp:certificatemanager/certificateMap:CertificateMap",
+        "properties": {
+          "name": "shop-api-certs",
+          "project": "acme-staging"
+        },
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.certificate-map-entry",
+        "type": "gcp:certificatemanager/certificateMapEntry:CertificateMapEntry",
+        "properties": {
+          "certificates": [
+            {
+              "$output": {
+                "resource": "shop-api.certificate",
+                "name": "id"
+              }
+            }
+          ],
+          "hostname": "shop-api.staging.acme.dev",
+          "map": {
+            "$output": {
+              "resource": "shop-api.certificate-map",
+              "name": "name"
+            }
+          },
+          "name": "shop-api-certs-host",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-api.certificate",
+          "shop-api.certificate-map"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.cloudsql-client.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-api->shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.cloudsql-login.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-api->shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.database-user.shop-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-api@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-api->shop-db"
+        ]
+      },
+      {
+        "id": "shop-api.dns-authorization",
+        "type": "gcp:certificatemanager/dnsAuthorization:DnsAuthorization",
+        "properties": {
+          "domain": "shop-api.staging.acme.dev",
+          "name": "shop-api-dns-auth",
+          "project": "acme-staging"
+        },
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.endpoint-group",
+        "type": "gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup",
+        "properties": {
+          "cloudRun": {
+            "service": {
+              "$output": {
+                "resource": "shop-api.service",
+                "name": "name"
+              }
+            }
+          },
+          "name": "shop-api-neg",
+          "networkEndpointType": "SERVERLESS",
+          "project": "acme-staging",
+          "region": "us-east1"
+        },
+        "dependsOn": [
+          "shop-api.service"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.forwarding-rule",
+        "type": "gcp:compute/globalForwardingRule:GlobalForwardingRule",
+        "properties": {
+          "ipAddress": {
+            "$output": {
+              "resource": "shop-api.address",
+              "name": "address"
+            }
+          },
+          "ipProtocol": "TCP",
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "shop-api-https",
+          "portRange": "443",
+          "project": "acme-staging",
+          "target": {
+            "$output": {
+              "resource": "shop-api.https-proxy",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-api.address",
+          "shop-api.https-proxy"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.https-proxy",
+        "type": "gcp:compute/targetHttpsProxy:TargetHttpsProxy",
+        "properties": {
+          "certificateMap": {
+            "$concat": [
+              "//certificatemanager.googleapis.com/",
+              {
+                "$output": {
+                  "resource": "shop-api.certificate-map",
+                  "name": "id"
+                }
+              }
+            ]
+          },
+          "name": "shop-api-https",
+          "project": "acme-staging",
+          "urlMap": {
+            "$output": {
+              "resource": "shop-api.url-map",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-api.certificate-map",
+          "shop-api.certificate-map-entry",
+          "shop-api.url-map"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.service",
+        "type": "gcp:cloudrunv2/service:Service",
+        "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+          ],
+          "deletionProtection": false,
+          "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
+          "invokerIamDisabled": true,
+          "location": "us-east1",
+          "name": "shop-api",
+          "project": "acme-staging",
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "LOG_LEVEL",
+                    "value": "info"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS",
+                    "value": "2"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS",
+                    "value": "RS256"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE",
+                    "value": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS",
+                    "value": "2"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE",
+                    "value": "Orders"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES",
+                    "value": "shop-orders"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT",
+                    "value": "orders@acme-staging.iam.gserviceaccount.com"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_DEPLOYABLE",
+                    "value": "shop-orders-ship-orders"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SERVES",
+                    "value": "shop-orders"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_CALLERS_1_SUBJECT",
+                    "value": "shop-orders-ship-orders@acme-staging.iam.gserviceaccount.com"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_ISSUER",
+                    "value": "https://accounts.google.com"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_ISSUER_ALIASES",
+                    "value": "accounts.google.com"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_JWKS_URL",
+                    "value": "https://www.googleapis.com/oauth2/v3/certs"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_0_SUBJECT_CLAIM",
+                    "value": "email"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_ALGORITHMS",
+                    "value": "EdDSA"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_AUDIENCE",
+                    "value": "shop-api"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS",
+                    "value": "1"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE",
+                    "value": "shop-storefront"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SERVES",
+                    "value": "shop-storefront"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT",
+                    "value": "shop-storefront"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_ISSUER",
+                    "value": "shop-storefront"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS",
+                    "value": "1"
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_KEYS_0_PEM",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-storefront.calls.shop-api.key",
+                        "name": "publicKeyPem"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_API_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS",
+                    "value": "300"
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.database.shop-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "shop-api@acme-staging.iam"
+                  },
+                  {
+                    "name": "SHOP_MEDIA_BUCKET_NAME",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-media.bucket",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "STRIPE_KEY",
+                    "valueSource": {
+                      "secretKeyRef": {
+                        "secret": {
+                          "$output": {
+                            "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+                            "name": "secretId"
+                          }
+                        },
+                        "version": "latest"
+                      }
+                    }
+                  }
+                ],
+                "image": "us-east1-docker.pkg.dev/acme-staging/mixed-shop/shop-api",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
+                "ports": {
+                  "containerPort": 8080
+                },
+                "resources": {
+                  "cpuIdle": true,
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "startupProbe": {
+                  "failureThreshold": 24,
+                  "httpGet": {
+                    "path": "/readyz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 4
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "shop-api.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "shop-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.account",
+          "shop-db.database.shop-db",
+          "shop-db.instance",
+          "shop-media.bucket",
+          "shop-storefront.calls.shop-api.key"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.sign-as-self",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/iam.serviceAccountTokenCreator",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
+        "id": "shop-api.storage.shop-media",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "shop-media.bucket",
+              "name": "name"
+            }
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "shop-api.account",
+          "shop-media.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bucket:shop-api->shop-media"
+        ]
+      },
+      {
+        "id": "shop-api.trace-agent",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudtrace.agent"
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-api.url-map",
+        "type": "gcp:compute/uRLMap:URLMap",
+        "properties": {
+          "defaultService": {
+            "$output": {
+              "resource": "shop-api.backend",
+              "name": "id"
+            }
+          },
+          "name": "shop-api-lb",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-api.backend"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-api"
+        ]
+      },
+      {
+        "id": "shop-db.database.shop-db",
+        "type": "gcp:sql/database:Database",
+        "properties": {
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop_db",
+          "project": "acme-staging"
+        },
+        "dependsOn": [
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-db.instance",
+        "type": "gcp:sql/databaseInstance:DatabaseInstance",
+        "properties": {
+          "databaseVersion": "POSTGRES_16",
+          "deletionProtection": false,
+          "name": "shop-db",
+          "project": "acme-staging",
+          "region": "us-east1",
+          "settings": {
+            "availabilityType": "ZONAL",
+            "backupConfiguration": {
+              "enabled": true,
+              "pointInTimeRecoveryEnabled": false
+            },
+            "connectorEnforcement": "REQUIRED",
+            "databaseFlags": [
+              {
+                "name": "cloudsql.iam_authentication",
+                "value": "on"
+              }
+            ],
+            "deletionProtectionEnabled": false,
+            "edition": "ENTERPRISE",
+            "ipConfiguration": {
+              "ipv4Enabled": true
+            },
+            "tier": "db-custom-1-3840"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-db.migrator",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "databaseRoles": [
+            "cloudsqlsuperuser"
+          ],
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "mixed-shop-migrator@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-db"
+        ]
+      },
+      {
+        "id": "shop-media.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": false,
+          "lifecycleRules": [
+            {
+              "action": {
+                "type": "Delete"
+              },
+              "condition": {
+                "age": 30
+              }
+            }
+          ],
+          "location": "US-EAST1",
+          "name": "acme-staging-mixed-shop-shop-media",
+          "project": "acme-staging",
+          "publicAccessPrevention": "enforced",
+          "uniformBucketLevelAccess": true,
+          "versioning": {
+            "enabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-media"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-orders-ship-orders",
+          "displayName": "MixedShop Staging job shop-orders-ship-orders",
+          "project": "acme-staging"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.calls.shop-pricing.key",
+        "type": "tls:index/privateKey:PrivateKey",
+        "properties": {
+          "algorithm": "ED25519"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders-ship-orders->shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.cloudsql-client.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-ship-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.cloudsql-login.shop-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/acme-staging/instances/shop-db\"",
+            "title": "Cloud SQL instance shop-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-ship-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.database-user.shop-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "shop-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "shop-orders-ship-orders@acme-staging.iam",
+          "project": "acme-staging",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "shop-db.instance",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:shop-orders-ship-orders->shop-db"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.job",
+        "type": "gcp:cloudrunv2/job:Job",
+        "properties": {
+          "deletionProtection": false,
+          "location": "us-east1",
+          "name": "shop-orders-ship-orders",
+          "project": "acme-staging",
+          "template": {
+            "taskCount": 1,
+            "template": {
+              "containers": [
+                {
+                  "envs": [
+                    {
+                      "name": "FULFILLMENT_REGION",
+                      "value": "us"
+                    },
+                    {
+                      "name": "MAX_LINE_ITEMS",
+                      "value": "50"
+                    },
+                    {
+                      "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+                      "value": "//run.googleapis.com/projects/acme-staging/locations/us-east1/services/shop-api"
+                    },
+                    {
+                      "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+                      "value": "google-id-token"
+                    },
+                    {
+                      "name": "SHOP_API_SERVICE_URL",
+                      "value": {
+                        "$output": {
+                          "resource": "shop-api.service",
+                          "name": "uri"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
+                      "value": {
+                        "$output": {
+                          "resource": "shop-db.database.shop-db",
+                          "name": "name"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                      "value": {
+                        "$output": {
+                          "resource": "shop-db.instance",
+                          "name": "connectionName"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SHOP_DB_DATABASE_CLOUD_SQL_USER",
+                      "value": "shop-orders-ship-orders@acme-staging.iam"
+                    },
+                    {
+                      "name": "SHOP_PRICING_SERVICE_CREDENTIAL_AUDIENCE",
+                      "value": "shop-pricing"
+                    },
+                    {
+                      "name": "SHOP_PRICING_SERVICE_CREDENTIAL_ISSUER",
+                      "value": "shop-orders-ship-orders"
+                    },
+                    {
+                      "name": "SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                      "valueSource": {
+                        "secretKeyRef": {
+                          "secret": {
+                            "$output": {
+                              "resource": "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                              "name": "secretId"
+                            }
+                          },
+                          "version": {
+                            "$output": {
+                              "resource": "shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+                              "name": "version"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE",
+                      "value": "signed-token"
+                    },
+                    {
+                      "name": "SHOP_PRICING_SERVICE_URL",
+                      "value": "https://shop-pricing.staging.acme.dev"
+                    },
+                    {
+                      "name": "STRIPE_KEY",
+                      "valueSource": {
+                        "secretKeyRef": {
+                          "secret": {
+                            "$output": {
+                              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+                              "name": "secretId"
+                            }
+                          },
+                          "version": "latest"
+                        }
+                      }
+                    }
+                  ],
+                  "image": "us-east1-docker.pkg.dev/acme-staging/mixed-shop/shop-orders-ship-orders",
+                  "resources": {
+                    "limits": {
+                      "cpu": "1",
+                      "memory": "512Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/cloudsql",
+                      "name": "cloudsql"
+                    }
+                  ]
+                }
+              ],
+              "maxRetries": 1,
+              "serviceAccount": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.account",
+                  "name": "email"
+                }
+              },
+              "timeout": "300s",
+              "volumes": [
+                {
+                  "cloudSqlInstance": {
+                    "instances": [
+                      {
+                        "$output": {
+                          "resource": "shop-db.instance",
+                          "name": "connectionName"
+                        }
+                      }
+                    ]
+                  },
+                  "name": "cloudsql"
+                }
+              ],
+              "vpcAccess": {
+                "egress": "ALL_TRAFFIC",
+                "networkInterfaces": [
+                  {
+                    "network": {
+                      "$output": {
+                        "resource": "network",
+                        "name": "name"
+                      }
+                    },
+                    "subnetwork": {
+                      "$output": {
+                        "resource": "network.subnet",
+                        "name": "name"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "dependsOn": [
+          "network",
+          "network.subnet",
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-api.service",
+          "shop-db.database.shop-db",
+          "shop-db.instance",
+          "shop-orders-ship-orders.account",
+          "shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+          "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "secret.PaymentsSecrets.STRIPE_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "secret.PaymentsSecrets.STRIPE_KEY",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/secretmanager.secretAccessor",
+          "secretId": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account",
+          "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.run-invoker.shop-api",
+        "type": "gcp:cloudrunv2/serviceIamMember:ServiceIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "name": {
+            "$output": {
+              "resource": "shop-api.service",
+              "name": "name"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/run.invoker"
+        },
+        "dependsOn": [
+          "shop-api.service",
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "http:shop-orders-ship-orders->shop-api"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.schedule",
+        "type": "gcp:cloudscheduler/job:Job",
+        "properties": {
+          "description": "Runs job shop-orders-ship-orders of MixedShop Staging on its schedule",
+          "httpTarget": {
+            "httpMethod": "POST",
+            "oauthToken": {
+              "serviceAccountEmail": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.account",
+                  "name": "email"
+                }
+              }
+            },
+            "uri": {
+              "$concat": [
+                "https://run.googleapis.com/v2/projects/acme-staging/locations/us-east1/jobs/",
+                {
+                  "$output": {
+                    "resource": "shop-orders-ship-orders.job",
+                    "name": "name"
+                  }
+                },
+                ":run"
+              ]
+            }
+          },
+          "name": "shop-orders-ship-orders",
+          "project": "acme-staging",
+          "region": "us-east1",
+          "schedule": "0 * * * *",
+          "timeZone": "America/New_York"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account",
+          "shop-orders-ship-orders.job",
+          "shop-orders-ship-orders.schedule-invoker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.schedule-invoker",
+        "type": "gcp:cloudrunv2/jobIamMember:JobIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "name": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.job",
+              "name": "name"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/run.invoker"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account",
+          "shop-orders-ship-orders.job"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secretVersion:SecretVersion",
+        "properties": {
+          "secret": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          },
+          "secretData": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.calls.shop-pricing.key",
+              "name": "privateKeyPemPkcs8"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.calls.shop-pricing.key",
+          "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "type": "gcp:secretmanager/secret:Secret",
+        "properties": {
+          "project": "acme-staging",
+          "replication": {
+            "auto": {}
+          },
+          "secretId": "MixedShop-Staging-shop-orders-ship-orders-SHOP_PRICING_SERVICE_CREDENTIAL_KEY"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.trace-agent",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-staging",
+          "role": "roles/cloudtrace.agent"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-pricing.account",
+        "type": "fake:iam/account:Account",
+        "properties": {
+          "name": "shop-pricing"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-pricing.route",
+        "type": "fake:run/route:Route",
+        "properties": {
+          "host": "shop-pricing.staging.acme.dev",
+          "service": {
+            "$output": {
+              "resource": "shop-pricing.service",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-pricing.service"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-pricing.service",
+        "type": "fake:run/service:Service",
+        "properties": {
+          "account": {
+            "$output": {
+              "resource": "shop-pricing.account",
+              "name": "email"
+            }
+          },
+          "env": [
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS",
+              "value": "2"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_ALGORITHMS",
+              "value": "EdDSA"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_AUDIENCE",
+              "value": "shop-pricing"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE",
+              "value": "Orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_SERVES",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT",
+              "value": "Orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_ISSUER",
+              "value": "Orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_KEYS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_KEYS_0_PEM",
+              "value": {
+                "$output": {
+                  "resource": "Orders.calls.shop-pricing.key",
+                  "name": "publicKeyPem"
+                }
+              }
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS",
+              "value": "300"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_ALGORITHMS",
+              "value": "EdDSA"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_AUDIENCE",
+              "value": "shop-pricing"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_SERVES",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_ISSUER",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_KEYS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_KEYS_0_PEM",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-pricing.key",
+                  "name": "publicKeyPem"
+                }
+              }
+            },
+            {
+              "name": "SHOP_PRICING_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS",
+              "value": "300"
+            }
+          ],
+          "image": "shop-pricing",
+          "language": "typescript",
+          "name": "shop-pricing",
+          "public": true
+        },
+        "dependsOn": [
+          "Orders.calls.shop-pricing.key",
+          "shop-orders-ship-orders.calls.shop-pricing.key",
+          "shop-pricing.account"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-storefront.account",
+        "type": "fake:iam/account:Account",
+        "properties": {
+          "name": "shop-storefront"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.calls.shop-api.key",
+        "type": "tls:index/privateKey:PrivateKey",
+        "properties": {
+          "algorithm": "ED25519"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-storefront->shop-api"
+        ]
+      },
+      {
+        "id": "shop-storefront.reads.SHOP_API_SERVICE_CREDENTIAL_KEY",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "shop-storefront.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          },
+          "role": "secret.accessor"
+        },
+        "dependsOn": [
+          "shop-storefront.account",
+          "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.route",
+        "type": "fake:run/route:Route",
+        "properties": {
+          "host": "shop-storefront.staging.acme.dev",
+          "service": {
+            "$output": {
+              "resource": "shop-storefront.service",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.service"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY",
+        "type": "fake:secrets/version:Version",
+        "properties": {
+          "data": {
+            "$output": {
+              "resource": "shop-storefront.calls.shop-api.key",
+              "name": "privateKeyPemPkcs8"
+            }
+          },
+          "secret": {
+            "$output": {
+              "resource": "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.calls.shop-api.key",
+          "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY",
+        "type": "fake:secrets/secret:Secret",
+        "properties": {
+          "name": "shop-storefront-SHOP_API_SERVICE_CREDENTIAL_KEY"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.service",
+        "type": "fake:run/service:Service",
+        "properties": {
+          "account": {
+            "$output": {
+              "resource": "shop-storefront.account",
+              "name": "email"
+            }
+          },
+          "env": [
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-api"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-storefront"
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_KEY",
+              "secret": {
+                "$output": {
+                  "resource": "shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY",
+                  "name": "id"
+                }
+              }
+            },
+            {
+              "name": "SHOP_API_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_API_SERVICE_URL",
+              "value": "https://shop-api.staging.acme.dev"
+            }
+          ],
+          "image": "shop-storefront",
+          "language": "typescript",
+          "name": "shop-storefront",
+          "public": true
+        },
+        "dependsOn": [
+          "shop-storefront.account",
+          "shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "Orders.account",
+        "Orders.calls.shop-pricing.key",
+        "Orders.cloudsql-client.shop-db",
+        "Orders.cloudsql-login.shop-db",
+        "Orders.database-user.shop-db",
+        "Orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "Orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "Orders.trace-agent",
+        "network",
+        "network.nat",
+        "network.router",
+        "network.subnet",
+        "secret.PaymentsSecrets.STRIPE_KEY",
+        "shop-api.account",
+        "shop-api.cloudsql-client.shop-db",
+        "shop-api.cloudsql-login.shop-db",
+        "shop-api.database-user.shop-db",
+        "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-api.sign-as-self",
+        "shop-api.storage.shop-media",
+        "shop-api.trace-agent",
+        "shop-db.database.shop-db",
+        "shop-db.instance",
+        "shop-db.migrator",
+        "shop-media.bucket",
+        "shop-orders-ship-orders.account",
+        "shop-orders-ship-orders.calls.shop-pricing.key",
+        "shop-orders-ship-orders.cloudsql-client.shop-db",
+        "shop-orders-ship-orders.cloudsql-login.shop-db",
+        "shop-orders-ship-orders.database-user.shop-db",
+        "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
+        "shop-orders-ship-orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
+        "shop-orders-ship-orders.trace-agent",
+        "shop-pricing.account",
+        "shop-storefront.account",
+        "shop-storefront.calls.shop-api.key",
+        "shop-storefront.reads.SHOP_API_SERVICE_CREDENTIAL_KEY",
+        "shop-storefront.secret-version.SHOP_API_SERVICE_CREDENTIAL_KEY",
+        "shop-storefront.secret.SHOP_API_SERVICE_CREDENTIAL_KEY"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "shop-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-api",
+        "shop-pricing"
+      ],
+      "resources": [
+        "Orders.run-invoker.shop-api",
+        "shop-api.service",
+        "shop-orders-ship-orders.run-invoker.shop-api",
+        "shop-pricing.service"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "Orders",
+        "shop-orders-ship-orders",
+        "shop-storefront"
+      ],
+      "resources": [
+        "Orders.service",
+        "shop-orders-ship-orders.job",
+        "shop-orders-ship-orders.schedule",
+        "shop-orders-ship-orders.schedule-invoker",
+        "shop-storefront.service"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "shop-db"
+      ]
+    },
+    {
+      "step": "exposure",
+      "resources": [
+        "dns.shop-api.a",
+        "dns.shop-api.cname",
+        "dns.shop-pricing.cname",
+        "dns.shop-storefront.cname",
+        "shop-api.address",
+        "shop-api.backend",
+        "shop-api.certificate",
+        "shop-api.certificate-map",
+        "shop-api.certificate-map-entry",
+        "shop-api.dns-authorization",
+        "shop-api.endpoint-group",
+        "shop-api.forwarding-rule",
+        "shop-api.https-proxy",
+        "shop-api.url-map",
+        "shop-pricing.route",
+        "shop-storefront.route"
+      ]
+    }
+  ]
+}

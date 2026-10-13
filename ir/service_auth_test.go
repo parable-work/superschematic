@@ -1,7 +1,16 @@
 package ir
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -132,6 +141,91 @@ func TestServiceAuthThatBreaksItsContract(t *testing.T) {
 			err := CheckServiceAuth(tc.value)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("CheckServiceAuth = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// publicKeyPEM is the PEM of an Ed25519 public key's SubjectPublicKeyInfo
+// from a seed of one byte repeated, as the tls provider's publicKeyPem
+// writes one.
+func publicKeyPEM(t *testing.T, seed byte) (string, ed25519.PublicKey) {
+	t.Helper()
+	public := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seed}, ed25519.SeedSize)).Public().(ed25519.PublicKey)
+	der, err := x509.MarshalPKIXPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})), public
+}
+
+// TestServiceAuthKeyPEM: a key may be an Ed25519 public key's PEM, a
+// literal or a reference such as the generic connector's key node's
+// publicKeyPem, whose kid is its thumbprint; any other PEM, or a key with
+// both members or neither, is refused (D60).
+func TestServiceAuthKeyPEM(t *testing.T) {
+	text, public := publicKeyPEM(t, 7)
+	got, err := Ed25519PublicKeyOfPEM(text)
+	if err != nil || !bytes.Equal(got, public) {
+		t.Fatalf("Ed25519PublicKeyOfPEM = %x, %v; want %x", got, err, public)
+	}
+	// RFC 8037, appendix A.3.
+	x, _ := base64.RawURLEncoding.DecodeString("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo")
+	if got := Ed25519Thumbprint(x); got != "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k" {
+		t.Errorf("Ed25519Thumbprint = %s", got)
+	}
+
+	withKeys := func(keys ...ServiceAuthKey) *ServiceAuthIssuer {
+		issuer := localIssuer("Orders")
+		issuer.Keys = keys
+		return issuer
+	}
+	reference := Output{Resource: "Orders.calls.shop-edge.key", Name: "publicKeyPem"}
+	for name, issuer := range map[string]*ServiceAuthIssuer{
+		"a literal PEM":   withKeys(ServiceAuthKey{PEM: text}),
+		"a reference":     withKeys(ServiceAuthKey{PEM: reference}),
+		"a PEM and a JWK": withKeys(ServiceAuthKey{PEM: text}, ServiceAuthKey{JWK: `{"kty":"OKP","crv":"Ed25519","kid":"k1","x":"AAAA"}`}),
+	} {
+		if err := CheckServiceAuthIssuer(issuer); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	got2, err := DerivedVariables("SHOP_EDGE_CALLERS", ServiceAuth{Issuers: []*ServiceAuthIssuer{withKeys(ServiceAuthKey{PEM: reference})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(got2, func(v DerivedVariable) bool {
+		return v.Name == "SHOP_EDGE_CALLERS_ISSUERS_0_KEYS_0_PEM" && v.Value == reference && !v.Secret
+	}) {
+		t.Errorf("no public SHOP_EDGE_CALLERS_ISSUERS_0_KEYS_0_PEM in %#v", got2)
+	}
+
+	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p256, err := x509.MarshalPKIXPublicKey(&ecdsaKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := publicKeyPEM(t, 8)
+	for _, tc := range []struct {
+		name string
+		keys []ServiceAuthKey
+		want string
+	}{
+		{"both members", []ServiceAuthKey{{JWK: `{"kty":"OKP","kid":"k","x":"AA"}`, PEM: text}}, "keys[0] sets jwk or pem, not both"},
+		{"neither member", []ServiceAuthKey{{}}, "keys[0] sets jwk or pem"},
+		{"no PEM", []ServiceAuthKey{{PEM: "key"}}, "keys[0].pem is not a PEM block"},
+		{"a private key's PEM", []ServiceAuthKey{{PEM: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1}}))}}, "is a PEM PRIVATE KEY, not a PUBLIC KEY"},
+		{"a P-256 key", []ServiceAuthKey{{PEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: p256}))}}, "is not an Ed25519 public key's SubjectPublicKeyInfo"},
+		{"two blocks", []ServiceAuthKey{{PEM: text + other}}, "holds more than one PEM block"},
+		{"one key twice", []ServiceAuthKey{{PEM: text}, {PEM: text}}, "keys[1].pem repeats the kid " + Ed25519Thumbprint(public)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckServiceAuthIssuer(withKeys(tc.keys...))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CheckServiceAuthIssuer = %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
