@@ -142,18 +142,10 @@ type workflowTransition struct {
 }
 
 // textField reports whether a field holds a single text value: the string
-// primitive, or a scalar whose values are JSON strings. The catalog gives
-// a scalar that holds any JSON value, a JSON object or a JSON array the
-// string primitive too, so its json_schema mapping rules it out.
+// primitive, or a scalar whose values are JSON strings (ir.TextValue, the
+// rule a reference's label and a search argument share).
 func textField(schema *ir.Schema, f *ir.FieldDef) bool {
-	if f.TypeRef.IsArray || f.TypeRef.IsMap {
-		return false
-	}
-	if f.TypeRef.Name == "string" {
-		return true
-	}
-	scalar := schema.Scalars[f.TypeRef.Name]
-	return scalar != nil && scalar.LanguagePrimitive == ir.LanguageString && !scalar.IsAnyJSON() && scalar.StructuredJSONType() == ""
+	return ir.TextValue(schema, f.TypeRef)
 }
 
 // typeLabel writes a field's type as a message names it: Name, Name[] or

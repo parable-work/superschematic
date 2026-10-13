@@ -31,6 +31,8 @@ func TestLoadServiceDataFormatsMatchTSGolden(t *testing.T) {
 		{"fixture-general-yaml", "fixture-general"},
 		{"fixture-db-json", "fixture-db"},
 		{"fixture-db-yaml", "fixture-db"},
+		{"fixture-refs-api-json", "fixture-refs-api"},
+		{"fixture-refs-api-yaml", "fixture-refs-api"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {

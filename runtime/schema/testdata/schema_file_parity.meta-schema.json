@@ -25,7 +25,14 @@
         "name": {
           "type": "string"
         },
+        "references": {
+          "$ref": "#/$defs/ReferenceDef"
+        },
         "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "search": {
           "default": false,
           "type": "boolean"
         },
@@ -2829,6 +2836,9 @@
           "default": "",
           "type": "string"
         },
+        "references": {
+          "$ref": "#/$defs/ReferenceDef"
+        },
         "relation": {
           "$ref": "#/$defs/RelationDef"
         },
@@ -3733,6 +3743,34 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "ReferenceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        },
+        "options": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
       "type": "object"
     },
     "RelationDef": {

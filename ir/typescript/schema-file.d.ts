@@ -42,7 +42,9 @@ export interface ArgumentDef {
   encrypted?: boolean;
   isQuery?: boolean;
   name: string;
+  references?: ReferenceDef;
   required?: boolean;
+  search?: boolean;
   typeRef: TypeRef;
   validateListMax?: number;
   validateListMin?: number;
@@ -198,6 +200,7 @@ export interface FieldDef {
   projectedFunction?: ProjectionFunctionCall;
   public?: boolean;
   purpose?: string;
+  references?: ReferenceDef;
   relation?: RelationDef;
   requireOwnership?: boolean;
   required?: boolean;
@@ -435,6 +438,13 @@ export interface QueueDef {
 export interface RawHeritage {
   extends?: string;
   implements?: string[];
+}
+
+export interface ReferenceDef {
+  label?: string;
+  options?: string;
+  type: string;
+  value?: string;
 }
 
 export interface RelationDef {

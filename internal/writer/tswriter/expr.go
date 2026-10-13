@@ -138,7 +138,7 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 		return "never"
 	}
 
-	expr := e.renderTypeName(fd.TypeRef.Name, owner)
+	expr := e.refersTo(e.renderTypeName(fd.TypeRef.Name, owner), fd.References, owner)
 
 	if fd.Default != nil {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))
@@ -204,7 +204,7 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		e.failf("%s: map-typed arguments have no TypeScript authoring form", owner)
 		return "never"
 	}
-	expr := e.renderTypeName(arg.TypeRef.Name, owner)
+	expr := e.refersTo(e.renderTypeName(arg.TypeRef.Name, owner), arg.References, owner)
 	if arg.Default != nil {
 		fd := &ir.FieldDef{TypeRef: arg.TypeRef, Default: arg.Default}
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))
@@ -218,6 +218,13 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
 	expr += arraySuffix(arg.TypeRef)
+	if arg.Search {
+		// SearchQuery<T> is QueryParam<Nullable<T>> that marks the search.
+		if !arg.IsQuery || arg.Required || arg.Encrypted {
+			e.failf("%s: a search argument that is not an optional query parameter has no TypeScript authoring form", owner)
+		}
+		return fmt.Sprintf("%s<%s>", e.use("SearchQuery"), expr)
+	}
 	if arg.Encrypted {
 		expr = fmt.Sprintf("%s<%s>", e.use("EncryptedField"), expr)
 	}
@@ -228,6 +235,29 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		expr = fmt.Sprintf("%s<%s>", e.use("QueryParam"), expr)
 	}
 	return expr
+}
+
+// refersTo wraps a value's base type in RefersTo<T, Target, C> (D61), with
+// only the config members the reference writes, or returns it as it is.
+// A list refers element by element, so the wrapper sits on the base and
+// the list suffix goes outside it.
+func (e *emitter) refersTo(base string, ref *ir.ReferenceDef, owner string) string {
+	if ref == nil {
+		return base
+	}
+	var config []string
+	for _, member := range []struct{ key, value string }{
+		{"options", ref.Options}, {"value", ref.Value}, {"label", ref.Label},
+	} {
+		if member.value != "" {
+			config = append(config, member.key+": "+quote(member.value))
+		}
+	}
+	target := e.renderTypeName(ref.Type, owner)
+	if len(config) == 0 {
+		return fmt.Sprintf("%s<%s, %s>", e.use("RefersTo"), base, target)
+	}
+	return fmt.Sprintf("%s<%s, %s, { %s }>", e.use("RefersTo"), base, target, strings.Join(config, ", "))
 }
 
 // arraySuffix renders a reference's list depth: "" for T, "[]" for T[] and

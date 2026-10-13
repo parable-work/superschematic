@@ -66,6 +66,14 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 			return
 		}
 		e.emitClass(def)
+	case ir.RoleAPIInput:
+		// The TypeScript reader gives a class whose name ends in Input this
+		// role, and no other.
+		if !strings.HasSuffix(def.Name, "Input") {
+			e.failf("type %s: role APIInput is only expressible in TypeScript on a class whose name ends in Input", def.Name)
+			return
+		}
+		e.emitClass(def)
 	case ir.RoleTrait:
 		e.emitClass(def)
 	case ir.RoleProjection:
@@ -540,6 +548,7 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.TemporalFormat = ""
 	rest.ConflictUnit = ""
 	rest.Relation = nil
+	rest.References = nil
 	rest.HasMany, rest.ManyToMany = false, false
 	if !isZeroField(&rest) {
 		e.failf("%s: carries metadata with no TypeScript authoring form on a data field", owner)

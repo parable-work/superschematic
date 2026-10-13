@@ -428,6 +428,11 @@ type FieldDef struct {
 	// Nil if the field has no relation.
 	Relation *RelationDef `json:"relation,omitempty" yaml:"relation,omitempty"`
 
+	// References is RefersTo (D61): the type whose items the value names,
+	// and the operation that lists them. Nil for every other field. See
+	// [ReferenceDef] and [ResolveReference].
+	References *ReferenceDef `json:"references,omitempty" yaml:"references,omitempty"`
+
 	// HasMany indicates a one-to-many relationship (@hasMany).
 	HasMany bool `json:"hasMany,omitempty" yaml:"hasMany,omitempty"`
 
@@ -694,4 +699,13 @@ type ArgumentDef struct {
 	// any argument. Only an argument of a POST, PUT or PATCH request body
 	// may carry it; a path or query parameter travels outside the envelope.
 	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
+
+	// References is RefersTo (D61), as on a field: the type whose items the
+	// argument's value names. Nil for every other argument.
+	References *ReferenceDef `json:"references,omitempty" yaml:"references,omitempty"`
+
+	// Search is SearchQuery (D62): the argument is its operation's search
+	// text, an optional query parameter whose words each item's searchable
+	// text must contain. An operation has at most one.
+	Search bool `json:"search,omitempty" yaml:"search,omitempty"`
 }

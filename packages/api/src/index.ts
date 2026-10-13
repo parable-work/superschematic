@@ -47,4 +47,4 @@ export type {
   WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";
-export type { EncryptedField, QueryParam } from "./wrappers";
+export type { EncryptedField, QueryParam, RefersTo, RefersToConfig, SearchQuery } from "./wrappers";

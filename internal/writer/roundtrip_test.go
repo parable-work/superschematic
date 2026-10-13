@@ -84,6 +84,12 @@ var corpus = []roundtripFixture{
 	// icons (D48), from TypeScript and from JSON.
 	{name: "fixture-display", dir: tsFixtures + "/fixture-display", native: FormatTS},
 	{name: "fixture-display-json", dir: dataFixtures + "/fixture-display-json", native: FormatJSON},
+	// RefersTo on fields and arguments, with and without its config, in a
+	// list and under Validate and Nullable, and a SearchQuery argument
+	// (D61, D62), from TypeScript, JSON and YAML.
+	{name: "fixture-refs-api", dir: tsFixtures + "/fixture-refs-api", native: FormatTS},
+	{name: "fixture-refs-api-json", dir: dataFixtures + "/fixture-refs-api-json", native: FormatJSON},
+	{name: "fixture-refs-api-yaml", dir: dataFixtures + "/fixture-refs-api-yaml", native: FormatYAML},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},

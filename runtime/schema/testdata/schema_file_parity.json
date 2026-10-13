@@ -160,6 +160,48 @@
       "error": "a non-boolean encrypted argument flag: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/arguments/0/encrypted': got string, want boolean"
     },
     {
+      "name": "references and a search",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"catalog\", \"types\": {\n\t\t\"BasketLine\": {\"name\": \"BasketLine\", \"role\": \"APIInput\", \"fields\": [\n\t\t\t{\"name\": \"itemId\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"required\": true, \"references\": {\"type\": \"ItemView\"}},\n\t\t\t{\"name\": \"skus\", \"typeRef\": {\"name\": \"Identity.Slug\", \"isArray\": true}, \"references\": {\"type\": \"ItemView\", \"options\": \"Catalog.listItems\", \"value\": \"sku\", \"label\": \"name\"}}]}},\n\t\t\"operationSets\": [{\"name\": \"Catalog\", \"operations\": [{\"name\": \"listItems\", \"typeRef\": {\"name\": \"ItemView\", \"isArray\": true}, \"httpMethod\": \"GET\", \"arguments\": [\n\t\t\t{\"name\": \"q\", \"typeRef\": {\"name\": \"String\"}, \"isQuery\": true, \"search\": true},\n\t\t\t{\"name\": \"ids\", \"typeRef\": {\"name\": \"Identity.UUID\", \"isArray\": true}, \"isQuery\": true, \"references\": {\"type\": \"ItemView\", \"value\": \"id\"}, \"search\": false}]}]}]}",
+      "accept": true,
+      "canonical": "{\"kind\":\"API\",\"name\":\"catalog\",\"operationSets\":[{\"name\":\"Catalog\",\"operations\":[{\"arguments\":[{\"isQuery\":true,\"name\":\"q\",\"search\":true,\"typeRef\":{\"name\":\"String\"}},{\"isQuery\":true,\"name\":\"ids\",\"references\":{\"type\":\"ItemView\",\"value\":\"id\"},\"typeRef\":{\"isArray\":true,\"name\":\"Identity.UUID\"}}],\"httpMethod\":\"GET\",\"name\":\"listItems\",\"typeRef\":{\"isArray\":true,\"name\":\"ItemView\"}}]}],\"types\":{\"BasketLine\":{\"fields\":[{\"name\":\"itemId\",\"references\":{\"type\":\"ItemView\"},\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"skus\",\"references\":{\"label\":\"name\",\"options\":\"Catalog.listItems\",\"type\":\"ItemView\",\"value\":\"sku\"},\"typeRef\":{\"isArray\":true,\"name\":\"Identity.Slug\"}}],\"name\":\"BasketLine\",\"role\":\"APIInput\"}}}"
+    },
+    {
+      "name": "a reference with an empty options",
+      "registry": "core",
+      "input": "{\"name\": \"BasketLine\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"itemId\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"references\": {\"type\": \"ItemView\", \"options\": \"\"}}]}",
+      "accept": false,
+      "error": "a reference with an empty options: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/references/options': minLength: got 0, want 1"
+    },
+    {
+      "name": "a reference without its type",
+      "registry": "core",
+      "input": "{\"name\": \"BasketLine\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"itemId\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"references\": {\"options\": \"listItems\"}}]}",
+      "accept": false,
+      "error": "a reference without its type: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/references': missing property 'type'"
+    },
+    {
+      "name": "a reference to an empty type",
+      "registry": "core",
+      "input": "{\"name\": \"BasketLine\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"itemId\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"references\": {\"type\": \"\"}}]}",
+      "accept": false,
+      "error": "a reference to an empty type: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/references/type': minLength: got 0, want 1"
+    },
+    {
+      "name": "an unknown key on a reference",
+      "registry": "core",
+      "input": "{\"name\": \"BasketLine\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"itemId\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"references\": {\"type\": \"ItemView\", \"target\": \"ItemView\"}}]}",
+      "accept": false,
+      "error": "an unknown key on a reference: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/references': additional properties 'target' not allowed"
+    },
+    {
+      "name": "a non-boolean search flag",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"ItemView\", \"isArray\": true}, \"arguments\": [{\"name\": \"q\", \"typeRef\": {\"name\": \"String\"}, \"isQuery\": true, \"search\": \"yes\"}]}]}",
+      "accept": false,
+      "error": "a non-boolean search flag: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/arguments/0/search': got string, want boolean"
+    },
+    {
       "name": "a service clause on a set and an operation",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"StockOps\", \"serviceCallers\": {\"mode\": \"require\", \"from\": [\"orders-api\"]}, \"operations\": [\n\t\t{\"name\": \"release\", \"typeRef\": {\"name\": \"Order\"}, \"auth\": true, \"serviceCallers\": {\"mode\": \"allow\", \"from\": []}}]}",

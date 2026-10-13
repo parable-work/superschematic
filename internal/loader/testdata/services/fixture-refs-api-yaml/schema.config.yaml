@@ -1,0 +1,6 @@
+# The YAML twin of the TypeScript fixture-refs-api (D61, D62): references
+# carry only the members they say, and the search argument is an optional
+# query argument with search set.
+name: fixture-refs-api
+kind: API
+outputs: {}
