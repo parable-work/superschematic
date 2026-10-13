@@ -23,6 +23,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "resourceName": "orders",
       "address": "http://127.0.0.1:20268",
       "bindings": [
@@ -82,6 +83,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "exposed": true,
       "resourceName": "shop-api",
       "address": "http://127.0.0.1:21692",
@@ -139,6 +141,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "worker": {
         "api": "shop-orders",
         "name": "FulfilOrders",
@@ -212,6 +215,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",

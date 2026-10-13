@@ -12,8 +12,8 @@ import (
 // `@worker` of a member API service is a deployable of kind worker, named
 // after its API and its class as a job is (ir.WorkerDeployableName). Its
 // edges, its config and its identity are its API's, as a job's are: the
-// resolver treats a worker as it treats a job wherever a deployable has an
-// image (ir.DeployableKind.HasImage). What is its own is decided here: the
+// resolver treats a worker as it treats a job wherever a deployable runs
+// code (ir.DeployableKind.RunsCode). What is its own is decided here: the
 // queue it claims from, which must be a queue of the database its API
 // connects to, a database the environment runs on Postgres, and how many
 // instances run, each handling how many messages at a time.

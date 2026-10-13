@@ -67,6 +67,12 @@ const (
 	BucketConnector    = "fake.run-storage"
 	JobBucketConnector = "fake.job-storage"
 
+	// BundlePlatform runs TypeScript servers whose artifact is a bundle,
+	// as a Workers platform runs a Worker's files (D64): a script that reads
+	// each file of the bundle from the program's artifacts, with its hash.
+	// No connector reaches it.
+	BundlePlatform = "fake.bundle"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -100,6 +106,7 @@ const (
 	TypeSite     = "fake:storage/site:Site"
 	TypeBucket   = "fake:storage/bucket:Bucket"
 	TypePool     = "fake:run/pool:Pool"
+	TypeScript   = "fake:edge/script:Script"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -118,6 +125,8 @@ type Extension struct {
 	CI          *FakeCI
 	Jobs        *FakeJobs
 	Sites       *FakeSites
+	Bundles     *FakeBundles
+	PreDestroy  *FakePreDestroy
 	Tools       []registry.CLITool
 	NoJobRunner bool
 }
@@ -154,11 +163,19 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Sites == nil {
 		e.Sites = &FakeSites{}
 	}
+	if e.Bundles == nil {
+		e.Bundles = &FakeBundles{}
+	}
+	if e.PreDestroy == nil {
+		e.PreDestroy = &FakePreDestroy{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
 	e.Jobs.log = e.Provisioner
 	e.Sites.log = e.Provisioner
+	e.Bundles.log = e.Provisioner
+	e.PreDestroy.log = e.Provisioner
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
@@ -199,6 +216,18 @@ func (e *Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript),
 		server(EdgePlatform, registry.APILanguageTypeScript),
+		{
+			Name:      BundlePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableServer,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".script", Name: "url"}
+			},
+			Lower: lowerBundle,
+		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
 		{
@@ -305,6 +334,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 		CI:         e.CI,
 		Jobs:       jobs,
 		Sites:      e.Sites,
+		Bundles:    e.Bundles,
+		PreDestroy: e.PreDestroy,
 	})
 }
 
@@ -420,6 +451,17 @@ var resourceTypes = map[string]string{
 	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
 	  },
 	  "additionalProperties": false}`,
+	TypeScript: `{"type": "object", "required": ["name", "account", "mainModule", "modules"],
+	  "properties": {
+	    "name": {"type": "string"}, "account": {"type": "string"}, "mainModule": {"type": "string"},
+	    "modules": {"type": "array", "items": {"type": "object", "required": ["name", "contentFile", "contentSha256"],
+	      "properties": {"name": {"type": "string"}, "contentFile": {"type": "string"}, "contentSha256": {"type": "string"}},
+	      "additionalProperties": false}},
+	    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
+	      "properties": {"name": {"type": "string"}, "value": {}, "secret": {"type": "string"}},
+	      "additionalProperties": false}}
+	  },
+	  "additionalProperties": false}`,
 	TypePool: `{"type": "object", "required": ["name", "image", "account", "language", "instances", "concurrency"],
 	  "properties": {
 	    "name": {"type": "string"}, "image": {"type": "string"}, "account": {"type": "string"},
@@ -482,6 +524,33 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 			Value: ir.Output{Resource: d.Name + ".route", Name: "target"},
 		})
 	}
+	return out, nil
+}
+
+// lowerBundle lowers a server on the bundle platform (D64) to an account
+// and the secrets it reads, as a server's, and a script that runs its
+// bundle: each file BundleFiles names, read from the program's artifacts
+// under the bundle's digest with its SHA-256, which the deploy pins, and
+// the server's environment.
+func lowerBundle(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	var modules []any
+	for _, file := range BundleFiles {
+		modules = append(modules, map[string]any{
+			"name":          file,
+			"contentFile":   ir.BundlePath(d.Name, file),
+			"contentSha256": ir.BundleFileToken(file),
+		})
+	}
+	script := map[string]any{"name": d.ResourceName, "account": member, "mainModule": BundleFiles[0], "modules": modules}
+	if len(env) > 0 {
+		script["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".script", Type: TypeScript, Properties: script})
 	return out, nil
 }
 

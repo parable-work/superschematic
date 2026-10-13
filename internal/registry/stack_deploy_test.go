@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -25,6 +26,10 @@ func (nopState) Build(context.Context, BuildRequest) (string, error) {
 	return "", nil
 }
 func (nopState) RunJob(context.Context, JobRunRequest) error { return nil }
+func (nopState) Publish(context.Context, Run, string, string, string) error {
+	return nil
+}
+func (nopState) PrepareDestroy(context.Context, Run, io.Writer) error { return nil }
 
 // TestRegisterTargetDeploySeams covers the refusals of a deploy seam a
 // target cannot use.
@@ -42,6 +47,10 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 		{"builder without state", TargetSpec{Name: "fake", Provisioner: "fake", Builder: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
 		{"jobs without provisioner", TargetSpec{Name: "fake", State: nopState{}, Jobs: nopState{}}, "has State, Jobs but names no provisioner"},
 		{"jobs without state", TargetSpec{Name: "fake", Provisioner: "fake", Jobs: nopState{}}, "has Bootstrap, Migrations, Builder, CI or Jobs but no State"},
+		{"bundles without provisioner", TargetSpec{Name: "fake", State: nopState{}, Bundles: nopState{}}, "has State, Bundles but names no provisioner"},
+		{"bundles without state", TargetSpec{Name: "fake", Provisioner: "fake", Bundles: nopState{}}, "has Bundles but no State"},
+		{"pre-destroy without provisioner", TargetSpec{Name: "fake", State: nopState{}, PreDestroy: nopState{}}, "has State, PreDestroy but names no provisioner"},
+		{"pre-destroy without state", TargetSpec{Name: "fake", Provisioner: "fake", PreDestroy: nopState{}}, "has PreDestroy but no State"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,7 +60,7 @@ func TestRegisterTargetDeploySeams(t *testing.T) {
 			}
 		})
 	}
-	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}, Builder: nopState{}, Jobs: nopState{}}
+	sound := TargetSpec{Name: "fake", Provisioner: "fake", State: nopState{}, Bootstrap: nopState{}, Migrations: nopState{}, Builder: nopState{}, Jobs: nopState{}, Bundles: nopState{}, PreDestroy: nopState{}}
 	if err := New(naming.Default()).RegisterTarget(sound); err != nil {
 		t.Errorf("a target with every seam: %v", err)
 	}

@@ -46,8 +46,9 @@ type Sources struct {
 	// naming file's [implementation_paths] are relative to (D55).
 	ImplementationRoot string
 
-	// Run runs a site's build, and the frozen install of the workspace
-	// before it; nil runs them with os/exec.
+	// Run runs a site's build and a bundle's (`bun bundle.ts <dir>` in
+	// server/<stack>/<deployable>/ under OutputRoot, D64), and the frozen
+	// install of the workspace before them; nil runs them with os/exec.
 	Run RunCommand
 }
 
@@ -109,7 +110,7 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 	p := &imagePlan{images: map[string]string{}, contexts: map[string]string{}}
 	if prev != nil {
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind.HasImage() {
+			if d := s.env.Deployable(server); d != nil && d.HasImage() {
 				p.images[server] = image
 				if c := prev.Contexts[server]; c != "" {
 					p.contexts[server] = c
@@ -125,7 +126,7 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 		return p, nil
 	}
 	for _, d := range s.env.Deployables {
-		if !d.Kind.HasImage() {
+		if !d.HasImage() {
 			continue
 		}
 		if _, ok := given[d.Name]; ok {
@@ -260,9 +261,13 @@ type BuildResult struct {
 	// unchanged, by site: what `stack deploy --site` takes (D55).
 	Sites map[string]string `json:"sites,omitempty"`
 
+	// Bundles holds the digest of each bundle, built and published or
+	// unchanged, by deployable: what `stack deploy --bundle` takes (D64).
+	Bundles map[string]string `json:"bundles,omitempty"`
+
 	// Built are the deployables built; Unchanged those whose context is
 	// the one their deployed image was built from, or a site whose files
-	// are the ones it serves.
+	// are the ones it serves, or a bundle that is the one it runs.
 	Built     []string `json:"built,omitempty"`
 	Unchanged []string `json:"unchanged,omitempty"`
 }
@@ -272,13 +277,15 @@ type BuildResult struct {
 // changed since the image the manifest records, as a deploy would build
 // it. It writes no manifest, so a deploy takes the images with --image;
 // the target's builder may also find an image it built for the same
-// context without building it again.
+// context without building it again. It builds each site and each bundle
+// too, and has the target keep the files whose digest is new, which a
+// deploy takes with --site and --bundle.
 func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 	s, err := open(o.Options)
 	if err != nil {
 		return nil, err
 	}
-	if s.target.Builder == nil && s.target.Sites == nil {
+	if s.target.Builder == nil && s.target.Sites == nil && s.target.Bundles == nil {
 		return nil, fmt.Errorf("target %s builds no images; give each server's and job's image with --image", s.target.Name)
 	}
 	if s.target.State == nil {
@@ -338,6 +345,30 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 				out.Sites = map[string]string{}
 			}
 			out.Sites[site] = files.Digest
+		}
+	}
+	if err := s.checkBundles(); err != nil {
+		return nil, err
+	}
+	if s.target.Bundles != nil {
+		// A bundle's files are kept under their digest and run nowhere
+		// until a deploy takes the digest with --bundle, or builds the same
+		// files (D64).
+		bundles, err := s.planBundles(ctx, prev, nil, &src, o.Deployables)
+		defer bundles.cleanup()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.publishBundles(ctx, bundles, o.Force); err != nil {
+			return nil, err
+		}
+		out.Built = append(out.Built, bundles.built...)
+		out.Unchanged = append(out.Unchanged, bundles.unchanged...)
+		for name, files := range bundles.files {
+			if out.Bundles == nil {
+				out.Bundles = map[string]string{}
+			}
+			out.Bundles[name] = files.Digest
 		}
 	}
 	slices.Sort(out.Built)

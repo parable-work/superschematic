@@ -193,6 +193,39 @@ type ResolvedSite struct {
 // once (D55).
 const SiteDigestToken = "{site-digest}"
 
+// ArtifactsDir is the directory, under the directory a provisioner renders
+// its program in, where a deploy places the files of each bundle it pins,
+// and of each site whose target fetches them, at
+// `artifacts/<deployable>/<hex digest>/`, after Render and before every
+// Plan, Apply or Destroy (D64). A platform names a file there relative to
+// the program, with BundleDigestToken or SiteDigestToken for the digest.
+const ArtifactsDir = "artifacts"
+
+// BundleDigestToken is what the platform of a deployable whose artifact is
+// a bundle writes, in a string property of one of the deployable's own
+// nodes, where the hex digest of the bundle's files goes: the directory
+// `artifacts/<deployable>/{bundle-digest}/` its files are read from. A
+// deploy pins it as it pins SiteDigestToken, and places the files there
+// (D64).
+const BundleDigestToken = "{bundle-digest}"
+
+// BundleFileTokenPrefix begins a BundleFileToken.
+const BundleFileTokenPrefix = "{bundle-sha256:"
+
+// BundleFileToken returns the token a platform writes where the hex SHA-256
+// of one file of a deployable's bundle goes, `{bundle-sha256:<file>}`, file
+// being the slash-separated path of the file in the bundle (`main.js`): a
+// hash a provider checks the file's content against. A deploy pins it with
+// BundleDigestToken (D64).
+func BundleFileToken(file string) string { return BundleFileTokenPrefix + file + "}" }
+
+// BundlePath returns the path, relative to a provisioner's program, of one
+// file of a deployable's bundle, the digest a BundleDigestToken:
+// `artifacts/<deployable>/{bundle-digest}/<file>` (D64).
+func BundlePath(deployable, file string) string {
+	return ArtifactsDir + "/" + deployable + "/" + BundleDigestToken + "/" + file
+}
+
 // SiteEndpoint is what a site edge's connector derives: the public base
 // URL of an API the site calls, where a browser reaches it. It holds no
 // credential: the browser carries its end user's token (D55).

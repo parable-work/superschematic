@@ -56,10 +56,12 @@ func (k DeployableKind) Valid() bool {
 	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker
 }
 
-// HasImage reports whether a deployable of kind k runs code the stack's
-// build writes an entrypoint for, and so has an image a deploy builds,
-// pins and records: a server, a job (D52) or a worker (D53).
-func (k DeployableKind) HasImage() bool {
+// RunsCode reports whether a deployable of kind k runs code the stack's
+// build writes an entrypoint for, with a config and edges of its APIs: a
+// server, a job (D52) or a worker (D53). Each has an artifact a deploy
+// builds, pins and records, an image unless its platform builds a bundle
+// (ResolvedDeployable.Artifact, D64).
+func (k DeployableKind) RunsCode() bool {
 	return k == DeployableServer || k == DeployableJob || k == DeployableWorker
 }
 
@@ -67,7 +69,7 @@ func (k DeployableKind) HasImage() bool {
 // order's waves, after the servers it calls: a server, a job, or a site,
 // whose files a deploy publishes once the APIs it calls are up (D55).
 func (k DeployableKind) RollsOut() bool {
-	return k.HasImage() || k == DeployableSite
+	return k.RunsCode() || k == DeployableSite
 }
 
 // DeployableKinds returns the deployable kinds, in a fixed order.

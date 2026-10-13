@@ -74,7 +74,7 @@ func (r *resolver) deriveEdges() {
 			r.deriveSiteEdges(d)
 			continue
 		}
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RunsCode() {
 			continue
 		}
 		for _, served := range d.res.Services {
@@ -167,7 +167,7 @@ func (r *resolver) bindConfig() {
 			r.bindSite(d)
 			continue
 		}
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RunsCode() {
 			for _, key := range sortedKeys(d.settings.env) {
 				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which has no config", d.settings.envFrom[key], key, d.res.Kind, name)
 			}

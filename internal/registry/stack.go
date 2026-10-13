@@ -103,6 +103,16 @@ type PlatformSpec struct {
 	// database platform, refused for a server platform.
 	Dialects []string
 
+	// Artifact is what a deploy builds for a server, a job or a worker on
+	// the platform, and resolution records (ir.ResolvedDeployable.Artifact):
+	// ir.ArtifactImage, the default, which the target's Builder builds from
+	// the Dockerfile the stack's build writes; or ir.ArtifactBundle, the
+	// files `bun bundle.ts <dir>` writes in the deployable's package, which
+	// the target's Bundles keeps, and whose digest and files' hashes the
+	// platform writes into its nodes as ir.BundleDigestToken and
+	// ir.BundleFileToken (D64). Refused for any other platform.
+	Artifact ir.Artifact
+
 	// Settings is the JSON Schema of a deployable's settings on this
 	// platform (`minInstances`, `tier`). Nil accepts no settings.
 	Settings json.RawMessage
@@ -290,8 +300,22 @@ type TargetSpec struct {
 	// Sites publishes the files a site's build writes, and its config
 	// for each run, where the site's platform serves them (section 8.10,
 	// D55). Nil publishes none, and a deploy of an environment with a site
-	// on the target is refused.
+	// on the target is refused. One that is also an ArtifactFetcher has the
+	// deploy place each site's files beside the provisioner's program
+	// (ir.ArtifactsDir, D64).
 	Sites SitePublisher
+
+	// Bundles keeps the files of each bundle a deploy builds, for a server,
+	// a job or a worker whose platform's artifact is a bundle, under their
+	// digest (D64). Nil keeps none, and a deploy of an environment with
+	// such a deployable on the target is refused.
+	Bundles BundlePublisher
+
+	// PreDestroy readies a run's resources for the provisioner's Destroy,
+	// which `stack destroy` calls it before: the cloudflare target empties a
+	// member's R2 buckets, which its provider deletes only empty (D64). Nil
+	// readies nothing.
+	PreDestroy DestroyPreparer
 
 	// CI says how a generated CI job signs in to the target's
 	// environments (section 11.3, D47). Nil gives CI no identity, and the
@@ -416,6 +440,15 @@ type StateBackend struct {
 	// SecretsProvider encrypts the secrets in the state: a gcpkms:// key
 	// for the gcp target, passphrase in tests.
 	SecretsProvider string
+
+	// Env holds the environment variables the state store gives a run to
+	// reach the state and decrypt its secrets, keyed by the variable: the
+	// cloudflare target's S3 credentials for its R2 bucket and the
+	// passphrase of its secrets provider (D64). The provisioner hands them
+	// to its tool's process for the run only, after the run's credentials
+	// (ProvisionRequest.Env), and never writes them to its config, its
+	// program, a log or a file. Nil gives none.
+	Env map[string]string
 }
 
 // PlannedChange is one resource a plan would change.
@@ -521,9 +554,10 @@ var serverLanguages = []string{APILanguageGo, APILanguageRust, APILanguageTypeSc
 // RegisterPlatform adds a platform. It refuses a malformed or duplicate
 // name, an unknown kind, a server, job or worker platform without languages or a
 // database platform without dialects (or either with the other's list), an
-// unknown or repeated language or dialect, a settings schema that does not
-// compile, an identity config that is not a server platform's JSON object,
-// and a missing NameOf, AddressOf or Lower.
+// unknown or repeated language or dialect, an unknown artifact or one on a
+// platform that runs no code, a settings schema that does not compile, an
+// identity config that is not a server platform's JSON object, and a
+// missing NameOf, AddressOf or Lower.
 func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if err := r.registrable("platform " + spec.Name); err != nil {
 		return err
@@ -571,6 +605,14 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
+	}
+	if spec.Artifact != "" {
+		if !spec.Kind.RunsCode() {
+			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job or worker platform builds one", spec.Kind, spec.Name)
+		}
+		if !spec.Artifact.Valid() {
+			return fmt.Errorf("registry: platform %q declares artifact %q (want %s or %s)", spec.Name, spec.Artifact, ir.ArtifactImage, ir.ArtifactBundle)
+		}
 	}
 	if spec.IdentityConfig != "" {
 		var object map[string]any
@@ -648,9 +690,9 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 // values schema or resource type schema that does not compile, a resource
 // type another target registered with a different schema, a policy rule
 // without a name or Check, or with a repeated name, and a deploy seam it
-// cannot use: State, Bootstrap, Migrations, Builder, CI, Jobs or Sites
-// without a provisioner, and Bootstrap, Migrations, Builder, CI, Jobs or
-// Sites without State.
+// cannot use: State, Bootstrap, Migrations, Builder, CI, Jobs, Sites,
+// Bundles or PreDestroy without a provisioner, and Bootstrap, Migrations,
+// Builder, CI, Jobs, Sites, Bundles or PreDestroy without State.
 // Finalize checks that the platforms, the DNS platform and the provisioner
 // it names are registered.
 func (r *Registry) RegisterTarget(spec TargetSpec) error {

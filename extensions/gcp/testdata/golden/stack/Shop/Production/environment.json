@@ -78,6 +78,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "settings": {
         "memory": "1Gi"
       },
@@ -163,6 +164,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "exposed": true,
       "settings": {
         "minInstances": 1
@@ -297,6 +299,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "worker": {
         "api": "shop-orders",
         "name": "FulfilOrders",
@@ -382,6 +385,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",

@@ -903,9 +903,15 @@ func (r *resolver) place() {
 	}
 }
 
-// placeServer gives a server, or a job, the language of its APIs, and
-// checks its platform runs it. A job is written in its API's language.
+// placeServer gives a server, or a job, the language of its APIs and its
+// platform's artifact, an image unless the platform builds a bundle (D64),
+// and checks its platform runs the language. A job is written in its API's
+// language.
 func (r *resolver) placeServer(d *deployable) {
+	d.res.Artifact = d.platform.Artifact
+	if d.res.Artifact == "" {
+		d.res.Artifact = ir.ArtifactImage
+	}
 	lang, ok := r.serverLanguage(d.res)
 	if !ok {
 		return
@@ -1042,7 +1048,7 @@ func (r *resolver) resolveCalls() {
 func (r *resolver) resolveBuckets() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RunsCode() {
 			continue
 		}
 		seen := map[string]bool{}

@@ -27,6 +27,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "settings": {
         "port": 8081
       },
@@ -95,6 +96,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "exposed": true,
       "settings": {
         "port": 8080
@@ -176,6 +178,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "worker": {
         "api": "shop-orders",
         "name": "FulfilOrders",
@@ -249,6 +252,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",

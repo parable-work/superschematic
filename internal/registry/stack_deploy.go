@@ -255,8 +255,8 @@ type MigrationPreparer interface {
 type BuildRequest struct {
 	Run Run
 
-	// Deployable is the server or job the image is for (D52): a deployable
-	// whose kind has an image (ir.DeployableKind.HasImage).
+	// Deployable is the server, job or worker the image is for (D52, D53):
+	// a deployable whose artifact is an image (ir.ResolvedDeployable.HasImage).
 	Deployable string
 
 	// Context is the path of the gzipped tarball of the build context.
@@ -285,7 +285,7 @@ func (r BuildRequest) Check() error {
 	}
 	d := r.Run.Environment.Deployable(r.Deployable)
 	switch {
-	case d == nil || !d.Kind.HasImage():
+	case d == nil || !d.HasImage():
 		return fmt.Errorf("build: environment %s has no server or job %q", r.Run.Environment.Environment, r.Deployable)
 	case r.Context == "":
 		return fmt.Errorf("build %s: no context archive", r.Deployable)
@@ -416,6 +416,46 @@ type SitePublisher interface {
 	Publish(ctx context.Context, req SitePublishRequest) error
 }
 
+// BundlePublisher keeps the files of the bundles a deploy builds (D64): the
+// files `bun bundle.ts <dir>` wrote in a server's, a job's or a worker's
+// package, under their digest, where a deploy that did not build them
+// fetches them (ArtifactFetcher). It switches nothing: the deploy pins the
+// digest and each file's hash into the deployable's nodes, places the files
+// beside the provisioner's program (ir.ArtifactsDir), and the provisioner's
+// apply of the nodes uploads them. It keeps the files of every digest it
+// published, so a deploy given an earlier digest rolls the deployable back
+// without a build. A BundlePublisher must also be an ArtifactFetcher for a
+// deploy that builds nothing, a rollback or a plan, to place the files.
+type BundlePublisher interface {
+	// Publish keeps the files of dir, whose names are slash-separated paths
+	// below it, under digest (`sha256:` and the hex SHA-256 of their tar
+	// stream, as a site's files are digested), unless they are there
+	// already.
+	Publish(ctx context.Context, run Run, deployable, dir, digest string) error
+}
+
+// ArtifactFetcher is a BundlePublisher or a SitePublisher that writes back
+// the files it keeps under a digest (D64): into dest, a directory that
+// exists and is empty, each file at its slash-separated path below it. A
+// deploy fetches a bundle it did not build, for a plan in CI or a
+// `--bundle` rollback, and checks the files against the digest before it
+// places them beside the provisioner's program; a SitePublisher that is one
+// has each site's files placed there too, for a provider that uploads them
+// from the program. It returns an error that says so when it keeps no
+// files under digest.
+type ArtifactFetcher interface {
+	Fetch(ctx context.Context, run Run, deployable, digest, dest string) error
+}
+
+// DestroyPreparer readies a run's resources for the provisioner's Destroy,
+// which `stack destroy` calls it before (TargetSpec.PreDestroy): the
+// cloudflare target empties a member's R2 buckets, which its provider
+// deletes only empty (D64). An error stops the destroy before the
+// provisioner runs.
+type DestroyPreparer interface {
+	PrepareDestroy(ctx context.Context, run Run, log io.Writer) error
+}
+
 // Credential is a secret a platform needs to write its resources, such
 // as the API token of the Cloudflare DNS platform (section 6.9): not an
 // application secret a server reads, but one the provisioner hands its
@@ -435,11 +475,12 @@ type Credential struct {
 }
 
 // checkDeploySeams refuses a target that carries a deploy seam it cannot
-// use: State, Bootstrap, Migrations, Builder, CI or Jobs without a
-// provisioner, and Bootstrap, Migrations, Builder, CI or Jobs without
-// State, which a bootstrap creates, a deploy records each migration and
-// each build in, a CI job plans and deploys from, and a job's run on
-// demand reads the image of.
+// use: State, Bootstrap, Migrations, Builder, CI, Jobs, Sites, Bundles or
+// PreDestroy without a provisioner, and Bootstrap, Migrations, Builder, CI,
+// Jobs, Sites, Bundles or PreDestroy without State, which a bootstrap
+// creates, a deploy records each migration and each build in, a CI job
+// plans and deploys from, a job's run on demand reads the image of, and a
+// destroy deletes the manifest of.
 func checkDeploySeams(spec TargetSpec) error {
 	var named []string
 	if spec.State != nil {
@@ -463,6 +504,12 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Sites != nil {
 		named = append(named, "Sites")
 	}
+	if spec.Bundles != nil {
+		named = append(named, "Bundles")
+	}
+	if spec.PreDestroy != nil {
+		named = append(named, "PreDestroy")
+	}
 	if len(named) > 0 && spec.Provisioner == "" {
 		return fmt.Errorf("registry: target %q has %s but names no provisioner to deploy with", spec.Name, strings.Join(named, ", "))
 	}
@@ -471,6 +518,12 @@ func checkDeploySeams(spec TargetSpec) error {
 	}
 	if spec.Sites != nil && spec.State == nil {
 		return fmt.Errorf("registry: target %q has Sites but no State: a deploy records the digest of each site's files in it (D55)", spec.Name)
+	}
+	if spec.Bundles != nil && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Bundles but no State: a deploy records the digest of each bundle's files in it, which a rollback and a plan fetch (D64)", spec.Name)
+	}
+	if spec.PreDestroy != nil && spec.State == nil {
+		return fmt.Errorf("registry: target %q has PreDestroy but no State: only a target that deploys destroys (D64)", spec.Name)
 	}
 	return nil
 }

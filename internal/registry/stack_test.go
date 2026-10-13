@@ -61,6 +61,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"no NameOf", func(s *PlatformSpec) { s.NameOf = nil }, "needs NameOf, AddressOf and Lower"},
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
 		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
+		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image or bundle)`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +84,20 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("database with an artifact", func(t *testing.T) {
+		spec := sqlPlatform("fake.sql")
+		spec.Artifact = ir.ArtifactBundle
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job or worker platform builds one") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("server with a bundle", func(t *testing.T) {
+		spec := runPlatform("fake.run")
+		spec.Artifact = ir.ArtifactBundle
+		if err := New(naming.Default()).RegisterPlatform(spec); err != nil {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
