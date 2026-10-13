@@ -159,21 +159,27 @@ func TestStackInitOverAcmeShop(t *testing.T) {
 	if want := "\nNext:\n  superschematic stack dev ./schemas/services/shop-stack-init --environment Dev\n  superschematic stack bootstrap Staging --stack ./schemas/services/shop-stack-init\n"; !strings.HasSuffix(out, want) {
 		t.Errorf("stack init printed no %q:\n%s", want, out)
 	}
-	stackLine := func(path string) string {
+	// stackDecl is a file's @stack declaration, from `@stack(` to the class
+	// it decorates, its whitespace collapsed, so one a formatter wraps over
+	// several lines compares equal to one on a single line.
+	stackDecl := func(path string) string {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "@stack(") {
-				return line
-			}
+		text := string(data)
+		start := strings.Index(text, "\n@stack(")
+		if start < 0 {
+			t.Fatalf("%s declares no @stack", path)
 		}
-		t.Fatalf("%s declares no @stack", path)
-		return ""
+		end := strings.Index(text[start:], "\nexport ")
+		if end < 0 {
+			t.Fatalf("%s decorates no class with its @stack", path)
+		}
+		return strings.Join(strings.Fields(text[start:start+end]), " ")
 	}
-	written := stackLine(filepath.Join(schemasRoot, "services", "shop-stack-init", "src", "stack.schema.ts"))
-	byHand := stackLine(filepath.Join(acme, "services", "shop-stack", "src", "stack.schema.ts"))
+	written := stackDecl(filepath.Join(schemasRoot, "services", "shop-stack-init", "src", "stack.schema.ts"))
+	byHand := stackDecl(filepath.Join(acme, "services", "shop-stack", "src", "stack.schema.ts"))
 	if written != byHand {
 		t.Errorf("stack init wrote\n  %s\nwhere acme's shop-stack declares\n  %s", written, byHand)
 	}
