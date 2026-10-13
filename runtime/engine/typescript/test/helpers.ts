@@ -62,16 +62,20 @@ export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
  * recording names the test's scenario.
  */
 export function cleanup(context?: TestContextLike): void {
-  endCase(context);
-  for (const item of open.splice(0)) {
-    try {
-      item.close();
-    } catch {
-      // Closed by the test.
+  try {
+    // A recording the recorder refuses fails the test, after the cleanup.
+    endCase(context);
+  } finally {
+    for (const item of open.splice(0)) {
+      try {
+        item.close();
+      } catch {
+        // Closed by the test.
+      }
     }
-  }
-  for (const directory of directories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 }
 
