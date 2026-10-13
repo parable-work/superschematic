@@ -13,11 +13,14 @@
 //! The meta-schema is checked with the jsonschema crate (JSON Schema
 //! 2020-12, formats as annotations), as ajv checks it in the TypeScript
 //! loader, and the issues are written as that loader writes them: ajv's
-//! message for each keyword, an `if` branch's own failure after the errors
+//! message for each keyword, an `if` branch's own failure beside the errors
 //! inside it, an unknown key or a value outside an enum in the loader's
-//! words. Where the two validators visit a schema's keywords in another
-//! order the issues come in another order, and a syntax error's message is
-//! not the JavaScript runtime's; the verdict is the same.
+//! words. They come in a defined order, not the order either validator
+//! visits a schema's keywords in: by JSON pointer, then by the ajv keyword
+//! that failed, then by message, each compared by code point, as the
+//! TypeScript loader sorts them (D58), so both give the same list. A syntax
+//! error's message is not the JavaScript runtime's; the verdict is the
+//! same.
 //!
 //! ```
 //! use superschematic_schema_ir::schemafile::{load_schema_file, SchemaFileLoader};
@@ -573,11 +576,13 @@ fn limit_text(value: &Value) -> String {
 }
 
 /// The issues jsonschema's errors stand for, as ajv lists them: each
-/// error's own, then, after the last error inside an `if`'s `then` (or
-/// `else`) branch, the branch's own failure at the value the `if` read.
+/// error's own, and, for an error inside an `if`'s `then` (or `else`)
+/// branch, the branch's own failure at the value the `if` read; then sorted
+/// by pointer, ajv keyword and message, each by code point (the byte order
+/// of their UTF-8), as the TypeScript loader sorts ajv's errors.
 fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Vec<SchemaFileIssue> {
     let marks: Vec<Vec<BranchMark>> = errors.iter().map(branch_marks).collect();
-    let mut out = Vec::new();
+    let mut out: Vec<KeywordIssue> = Vec::new();
     let mut closed: Option<(String, String)> = None;
     for (i, error) in errors.iter().enumerate() {
         match closed_object(error) {
@@ -590,9 +595,12 @@ fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Ve
                         .and_then(Value::as_object)
                         .map(|members| members.keys().collect())
                         .unwrap_or_default();
-                    out.extend(keys.into_iter().map(|key| SchemaFileIssue {
-                        path: at.0.clone(),
-                        message: format!("unknown key {}", json_string(key)),
+                    out.extend(keys.into_iter().map(|key| KeywordIssue {
+                        keyword: "additionalProperties".to_owned(),
+                        issue: SchemaFileIssue {
+                            path: at.0.clone(),
+                            message: format!("unknown key {}", json_string(key)),
+                        },
                     }));
                     closed = Some(at);
                 }
@@ -607,13 +615,29 @@ fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Ve
             if next.is_some_and(|next| next.contains(mark)) {
                 continue;
             }
-            out.push(SchemaFileIssue {
-                path: mark.instance_path.clone(),
-                message: format!("must match \"{}\" schema", mark.branch),
+            out.push(KeywordIssue {
+                keyword: "if".to_owned(),
+                issue: SchemaFileIssue {
+                    path: mark.instance_path.clone(),
+                    message: format!("must match \"{}\" schema", mark.branch),
+                },
             });
         }
     }
-    out
+    out.sort_by(|a, b| {
+        a.issue
+            .path
+            .cmp(&b.issue.path)
+            .then_with(|| a.keyword.cmp(&b.keyword))
+            .then_with(|| a.issue.message.cmp(&b.issue.message))
+    });
+    out.into_iter().map(|keyed| keyed.issue).collect()
+}
+
+/// An issue and the ajv keyword that failed, which orders it.
+struct KeywordIssue {
+    keyword: String,
+    issue: SchemaFileIssue,
 }
 
 /// The object an `additionalProperties: false` beside no `properties`
@@ -683,45 +707,103 @@ fn branch_marks(error: &jsonschema::ValidationError<'_>) -> Vec<BranchMark> {
 /// The issues one jsonschema error stands for, each with the message ajv
 /// writes for its keyword, and the TypeScript loader's own wording for an
 /// unknown key and a value outside an enum.
-fn issues_of(error: &jsonschema::ValidationError<'_>) -> Vec<SchemaFileIssue> {
+fn issues_of(error: &jsonschema::ValidationError<'_>) -> Vec<KeywordIssue> {
     let path = error.instance_path().to_string();
-    let issue = |message: String| SchemaFileIssue {
-        path: path.clone(),
-        message,
+    let issue = |keyword: &str, message: String| KeywordIssue {
+        keyword: keyword.to_owned(),
+        issue: SchemaFileIssue {
+            path: path.clone(),
+            message,
+        },
     };
     match error.kind() {
         ValidationErrorKind::AdditionalProperties { unexpected } => unexpected
             .iter()
-            .map(|key| issue(format!("unknown key {}", json_string(key))))
+            .map(|key| {
+                issue(
+                    "additionalProperties",
+                    format!("unknown key {}", json_string(key)),
+                )
+            })
             .collect(),
         ValidationErrorKind::Enum { options } => {
             let values: Vec<String> = options
                 .as_array()
                 .map(|values| values.iter().map(Value::to_string).collect())
                 .unwrap_or_default();
-            vec![issue(format!("must be one of {}", values.join(", ")))]
+            vec![issue(
+                "enum",
+                format!("must be one of {}", values.join(", ")),
+            )]
         }
         ValidationErrorKind::AnyOf { context } | ValidationErrorKind::OneOfNotValid { context } => {
-            let mut issues: Vec<SchemaFileIssue> = context
+            let mut issues: Vec<KeywordIssue> = context
                 .iter()
                 .flatten()
                 .flat_map(|error| issues_of(error))
                 .collect();
-            let keyword = if matches!(error.kind(), ValidationErrorKind::AnyOf { .. }) {
-                "must match a schema in anyOf"
+            if matches!(error.kind(), ValidationErrorKind::AnyOf { .. }) {
+                issues.push(issue("anyOf", "must match a schema in anyOf".to_owned()));
             } else {
-                "must match exactly one schema in oneOf"
-            };
-            issues.push(issue(keyword.to_owned()));
+                issues.push(issue(
+                    "oneOf",
+                    "must match exactly one schema in oneOf".to_owned(),
+                ));
+            }
             issues
         }
         ValidationErrorKind::PropertyNames { error: inner } => {
             let mut issues = issues_of(inner);
-            issues.push(issue("property name must be valid".to_owned()));
+            issues.push(issue(
+                "propertyNames",
+                "property name must be valid".to_owned(),
+            ));
             issues
         }
-        kind => vec![issue(ajv_message(kind, error))],
+        kind => vec![issue(&ajv_keyword(kind, error), ajv_message(kind, error))],
     }
+}
+
+/// The keyword ajv names a failure by: the schema keyword, or `false
+/// schema` for a `false` subschema.
+fn ajv_keyword(kind: &ValidationErrorKind, error: &jsonschema::ValidationError<'_>) -> String {
+    match kind {
+        ValidationErrorKind::Type { .. } => "type",
+        ValidationErrorKind::Required { .. } => "required",
+        ValidationErrorKind::Constant { .. } => "const",
+        ValidationErrorKind::Minimum { .. } => "minimum",
+        ValidationErrorKind::Maximum { .. } => "maximum",
+        ValidationErrorKind::ExclusiveMinimum { .. } => "exclusiveMinimum",
+        ValidationErrorKind::ExclusiveMaximum { .. } => "exclusiveMaximum",
+        ValidationErrorKind::MinLength { .. } => "minLength",
+        ValidationErrorKind::MaxLength { .. } => "maxLength",
+        ValidationErrorKind::MinItems { .. } => "minItems",
+        ValidationErrorKind::MaxItems { .. } => "maxItems",
+        ValidationErrorKind::MinProperties { .. } => "minProperties",
+        ValidationErrorKind::MaxProperties { .. } => "maxProperties",
+        ValidationErrorKind::Pattern { .. } => "pattern",
+        ValidationErrorKind::UniqueItems => "uniqueItems",
+        ValidationErrorKind::MultipleOf { .. } => "multipleOf",
+        ValidationErrorKind::Not { .. } => "not",
+        ValidationErrorKind::FalseSchema => "false schema",
+        ValidationErrorKind::Format { .. } => "format",
+        ValidationErrorKind::Contains => "contains",
+        ValidationErrorKind::OneOfMultipleValid { .. } => "oneOf",
+        ValidationErrorKind::UnevaluatedProperties { .. } => "unevaluatedProperties",
+        ValidationErrorKind::UnevaluatedItems { .. } => "unevaluatedItems",
+        ValidationErrorKind::AdditionalItems { .. } => "additionalItems",
+        // Any other keyword ends its schema path.
+        _ => {
+            return error
+                .schema_path()
+                .to_string()
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        }
+    }
+    .to_owned()
 }
 
 /// ajv's message for one keyword's failure.
@@ -890,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn a_branch_failure_follows_the_errors_inside_it() {
+    fn issues_come_sorted_by_pointer_then_keyword_then_message() {
         let loader = SchemaFileLoader::new();
         let error = loader
             .load(
@@ -906,10 +988,44 @@ mod tests {
         assert_eq!(
             issues,
             [
-                ("/behaviors/0/config", "unknown key \"threads\""),
                 ("/behaviors/0", "must match \"then\" schema"),
+                ("/behaviors/0/config", "unknown key \"threads\""),
             ]
         );
+    }
+
+    #[test]
+    fn issues_at_one_pointer_come_by_keyword_before_message() {
+        let loader = SchemaFileLoader::new();
+        let error = loader
+            .load(
+                r#"{"name": "Document", "role": "DBTable", "behaviors": [{"name": "Comments", "config": {"threads": true}}, {"config": {}}], "strictJSON": "yes"}"#,
+                "x",
+            )
+            .unwrap_err();
+        let issues: Vec<(&str, &str)> = error
+            .issues()
+            .iter()
+            .map(|issue| (issue.path.as_str(), issue.message.as_str()))
+            .collect();
+        // By pointer first.
+        assert!(
+            issues.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+            "{issues:#?}"
+        );
+        // At one pointer, an `if` branch's failure (keyword `if`) comes
+        // before a missing property (keyword `required`), though its
+        // message sorts after.
+        let entry: Vec<&str> = issues
+            .iter()
+            .filter(|(path, _)| *path == "/behaviors/1")
+            .map(|(_, message)| *message)
+            .collect();
+        assert_eq!(entry.last(), Some(&"must have required property 'name'"));
+        assert!(entry[..entry.len() - 1]
+            .iter()
+            .all(|message| *message == "must match \"then\" schema"));
+        assert_eq!(issues.last(), Some(&("/strictJSON", "must be boolean")));
     }
 
     #[test]

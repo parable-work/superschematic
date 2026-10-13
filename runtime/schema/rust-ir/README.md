@@ -88,10 +88,12 @@ it, byte for byte; `document` is the same document as a `serde_json`
 value, in the file's member order. `canonical_json` rewrites any JSON text
 in that form. A refused payload is a `SchemaFileError` with the source and
 a JSON pointer per issue, worded as the TypeScript loader words it: ajv's
-message for a keyword, an `if` branch's failure after the errors inside
-it, an unknown key named by itself. The two validators can list the issues
-of one payload in another order, and a syntax error's message is not the
-JavaScript runtime's.
+message for a keyword, an `if` branch's own failure beside the errors
+inside it, an unknown key named by itself. The issues come sorted by
+pointer, then by the ajv keyword that failed, then by message, each
+compared by code point, not in the order either validator finds them, as
+the TypeScript loader sorts them (D58), so the two list one payload's
+issues alike. A syntax error's message is not the JavaScript runtime's.
 
 The default meta-schema is the core registry's, `CORE_META_SCHEMA`
 (`src/schemafile/schema-file.json`, which `internal/tools/schemafiletypes`
