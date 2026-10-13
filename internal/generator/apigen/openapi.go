@@ -326,6 +326,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			parameters = append(parameters, buildQueryParams(endpoint.QueryParams, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)...)
 		}
 
+		// A page's cursor and limit follow the operation's own (D60).
+		if endpoint.Page != nil {
+			parameters = append(parameters, pageOpenAPIParameters(endpoint.Page)...)
+		}
+
 		if len(parameters) > 0 {
 			operation["parameters"] = parameters
 		}
@@ -431,6 +436,10 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			typeToOpenAPISchema(endpoint.OutputType, scalarExamples, scalarDescriptions, scalarMap),
 			endpoint.OutputArrayDepth(),
 		)
+		if endpoint.Page != nil {
+			// The list is the page's items (D60).
+			responseSchema = pageOpenAPISchema(responseSchema)
+		}
 		envelopeSchema := map[string]interface{}{
 			"type":     "object",
 			"required": []string{"data", "meta"},

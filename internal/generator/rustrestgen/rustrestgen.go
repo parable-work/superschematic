@@ -462,6 +462,11 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	if api == nil || len(api.Endpoints) == 0 {
 		return nil, nil
 	}
+	// Until this generator renders @paginated, it refuses a paged operation
+	// rather than answer a list where the other servers answer a page (D60).
+	if err := apigen.RefusePages("the Rust server (rustrestgen)", api); err != nil {
+		return nil, err
+	}
 	b := newBuilder(schema, opts)
 
 	output := &APIOutput{

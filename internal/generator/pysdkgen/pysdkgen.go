@@ -257,6 +257,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
+	// Until this generator renders @paginated, it refuses a paged operation
+	// rather than read a list where the servers answer a page (D60).
+	if err := apigen.RefusePages("the Python SDK (pysdkgen)", apiOutput); err != nil {
+		return nil, err
+	}
 
 	names := apiOutput.Naming.OrDefault()
 	resolvedPackageName := resolvePythonSDKPackageName(packageName, apiOutput.SchemaName, names)

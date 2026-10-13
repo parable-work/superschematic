@@ -199,6 +199,7 @@ func endpointToTool(
 	if endpoint.Docs == nil && endpoint.RequiresAuth {
 		description = fmt.Sprintf("%s (Requires authentication)", description)
 	}
+	description = toolsutil.PagedDescription(description, endpoint.Page)
 
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
@@ -246,6 +247,7 @@ func endpointToTool(
 			return tsutil.ToCamelCase(name)
 		},
 		keys,
+		endpoint.Page,
 	)
 	parametersJSON, _ := json.Marshal(parameters)
 	paramTypes, typeImports := toolParamTSTypes(endpoint, parameters, inputTypeFields, scalars)
@@ -284,7 +286,7 @@ func endpointToTool(
 		Parameters:               parameters,
 		ParamTypes:               paramTypes,
 		TypeImports:              typeImports,
-		Returns:                  toolsutil.BuildReturnSchemaAtDepth(endpoint.OutputType, endpoint.OutputArrayDepth(), scalars),
+		Returns:                  toolsutil.BuildEndpointReturnSchema(endpoint.OutputType, endpoint.OutputArrayDepth(), endpoint.Page, scalars),
 		PathParams:               pathParams,
 		HasInput:                 endpoint.HasInput,
 		InputType:                endpoint.InputType,

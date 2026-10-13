@@ -66,6 +66,7 @@ type EndpointInfo struct {
 	ResourceTSPath string            // resource route path as TypeScript template literal
 	Encrypted      bool              // Whether endpoint payload must be encrypted
 	Filterable     bool              // Whether endpoint accepts bracket-notation filter query params
+	Page           *apigen.PageInfo  // @paginated (D60); nil when the endpoint does not page
 
 	// File upload configuration
 	HasFileUpload    bool              // True if any input field is a file-type scalar
@@ -210,6 +211,11 @@ type SDKOutput struct {
 func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
+	}
+	// Until this generator renders @paginated, it refuses a paged operation
+	// rather than read a list where the servers answer a page (D60).
+	if err := apigen.RefusePages("the TypeScript SDK (sdkgen)", apiOutput); err != nil {
+		return nil, err
 	}
 
 	// The client sends credentials when any operation needs a caller, public
@@ -470,6 +476,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		TSPath:           tsPath,
 		Encrypted:        ep.Encrypted,
 		Filterable:       ep.Filterable,
+		Page:             ep.Page,
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
 		HasOutputParser:  hasOutputParser,

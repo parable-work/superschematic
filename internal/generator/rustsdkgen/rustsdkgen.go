@@ -264,6 +264,11 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
+	// Until this generator renders @paginated, it refuses a paged operation
+	// rather than read a list where the servers answer a page (D60).
+	if err := apigen.RefusePages("the Rust SDK (rustsdkgen)", apiOutput); err != nil {
+		return nil, err
+	}
 
 	names := apiOutput.Naming.OrDefault()
 	if crateName == "" {

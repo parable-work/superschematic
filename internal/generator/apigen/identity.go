@@ -26,6 +26,11 @@ import (
 // OpenAPI document it embeds still describes every route. output itself is
 // unchanged, and an output without such an operation is returned as it is.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
+	// Until the Go server renders @paginated, it refuses a paged operation
+	// rather than answer a list where the other servers answer a page.
+	if err := RefusePages("the Go server (apigen)", output); err != nil {
+		return nil, err
+	}
 	identity := false
 	for _, endpoint := range output.Endpoints {
 		identity = identity || endpoint.IdentityOperation != ""

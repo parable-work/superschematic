@@ -335,6 +335,11 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
+	// Until this generator renders @paginated, it refuses a paged operation
+	// rather than answer a list where the other servers answer a page (D60).
+	if err := apigen.RefusePages("the TypeScript server (tsrestgen)", apiOutput); err != nil {
+		return nil, err
+	}
 
 	b := newBuilder(schema, opts)
 	output := &APIOutput{

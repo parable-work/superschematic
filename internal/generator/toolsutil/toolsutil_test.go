@@ -56,6 +56,7 @@ func TestParametersSchemaPreservesNestedObjectsAndListBounds(t *testing.T) {
 			"Name":   {Type: "string", MinLength: &nameMin, MaxLength: &nameMax},
 		},
 		byName, apigen.DefaultToolKeys(),
+		nil,
 	)
 	name := schema.Properties["name"]
 	if name.MinLength == nil || *name.MinLength != 1 || name.MaxLength == nil || *name.MaxLength != 80 {
@@ -113,6 +114,7 @@ func TestParametersSchemaIncludesRequiredAndArrayQueryArguments(t *testing.T) {
 			return name
 		},
 		apigen.DefaultToolKeys(),
+		nil,
 	)
 	if len(schema.Required) != 1 || schema.Required[0] != "search" {
 		t.Fatalf("required query fields = %#v", schema.Required)
@@ -157,7 +159,7 @@ func TestArbitraryJSONScalarIsAnyJSONValueButNull(t *testing.T) {
 		},
 	}
 	schema := BuildParametersSchema(nil, []ToolQueryArg{{Name: "filter", Type: "Generic.JSON"}}, true, "Input", fields,
-		nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys())
+		nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys(), nil)
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		t.Fatalf("marshal the schema: %v", err)
@@ -202,7 +204,7 @@ func TestToolSchemaCarriesScalarProvenanceAndClosesOnlyStructuralObjects(t *test
 			"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string"},
 			"Generic.JSON":  {CanonicalName: "Generic.JSON", Type: "any"},
 			"string":        {Type: "string"},
-		}, byName, apigen.DefaultToolKeys())
+		}, byName, apigen.DefaultToolKeys(), nil)
 	if schema.AdditionalProperties || len(schema.Vendor) != 0 {
 		t.Fatalf("root is not a closed object without vendor keys: %#v", schema)
 	}
@@ -238,7 +240,7 @@ func TestToolKeysRenameAndAddVendorKeys(t *testing.T) {
 		Scalar:     "x-acme-scalar",
 		Parameters: []apigen.ToolKeyValue{{Key: "x-acme-version", Value: 2}, {Key: "x-acme-owner", Value: "shop"}},
 	}
-	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, keys)
+	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, keys, nil)
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +261,7 @@ func TestToolKeysRenameAndAddVendorKeys(t *testing.T) {
 		t.Fatalf("the core scalar key survived a rename: %s", encoded)
 	}
 
-	unkeyed := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, apigen.ToolKeys{})
+	unkeyed := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, apigen.ToolKeys{}, nil)
 	if encoded, _ := json.Marshal(unkeyed); strings.Contains(string(encoded), `:"Identity.UUID"`) {
 		t.Fatalf("an empty scalar key still wrote the name: %s", encoded)
 	}
@@ -284,6 +286,7 @@ func TestParametersSchemaRendersTypedMapsAsObjects(t *testing.T) {
 			"Identity.Name": {Type: "string", CanonicalName: "Identity.Name"},
 		},
 		byName, apigen.DefaultToolKeys(),
+		nil,
 	)
 
 	panes := schema.Properties["panes"]
@@ -344,7 +347,7 @@ func TestNullableBodyFieldsPreserveContainerAndUnionContracts(t *testing.T) {
 		nil,
 		[]ToolScalarArg{{Name: "reason", Type: "string"}}, false,
 		map[string]apigen.ScalarJSONSchemaInfo{"Identity.UUID": {Type: "string", CanonicalName: "Identity.UUID"}, "Generic.JSON": {Type: "any", CanonicalName: "Generic.JSON"}, "Count": {Type: "integer"}, "string": {Type: "string"}},
-		byName, apigen.DefaultToolKeys())
+		byName, apigen.DefaultToolKeys(), nil)
 	document := make(map[string]any)
 	// The same property rendering every SDK generator uses.
 	for name, property := range schema.Properties {
@@ -401,7 +404,7 @@ func TestValidateReplayContract(t *testing.T) {
 			"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string"},
 			"string":        {Type: "string"},
 			"number":        {Type: "number"},
-		}, byName, apigen.DefaultToolKeys())
+		}, byName, apigen.DefaultToolKeys(), nil)
 
 	for _, test := range []struct {
 		name      string
