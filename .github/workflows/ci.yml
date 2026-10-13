@@ -819,14 +819,41 @@ jobs:
         with:
           workspaces: runtime/engine/rust
 
-      # The same three commands as `make engine-rust`, inline: the Makefile
-      # runs the superscalar and version-graph scripts when it is parsed.
-      - name: fmt / clippy / test
+      - name: Start Postgres
+        # The storage crate's tests run on SQLite, and on this Postgres too
+        # through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each test in a
+        # schema of its own; without the variable they skip the Postgres
+        # pass.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
+      # The same commands as `make engine-rust`, inline: the Makefile runs
+      # the superscalar and version-graph scripts when it is parsed. Clippy
+      # runs on every feature combination (each database alone, both, and
+      # neither), so a build that takes one database still compiles.
+      - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/sqlite -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/postgres -- -D warnings
+
+      - name: test (SQLite and Postgres)
+        working-directory: runtime/engine/rust
+        env:
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: cargo test --workspace --all-features
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
