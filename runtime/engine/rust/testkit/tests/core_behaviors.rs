@@ -4,8 +4,11 @@
 //! their names; the steps document the core binary builds, and the
 //! documents one, with Workflow, Comments and Revisions on one type; the
 //! tasks, projects and numbered invoices documents, whose projects compose
-//! Rollups), on SQLite and, with the variable set, on Postgres. The other
-//! documents compose behaviors of later waves.
+//! Rollups; the project tree document, whose projects Reactions starts,
+//! finishes and fails), on SQLite and, with the variable set, on Postgres.
+//! The notes and recipes documents compose Search and Branches, of later
+//! waves; the expenses, requests and invoices documents run in the
+//! Approvals, Timers and StateRules files.
 
 mod support;
 
@@ -882,6 +885,179 @@ fn it_runs_the_projects_document_beside_the_tasks_one_a_project_rolls_up_its_tas
         assert_eq!(
             finish().expect("done"),
             json!({"from": "active", "to": "done"})
+        );
+    }
+}
+
+/// The project tree document (`fixture-reactions-json`): a project links to
+/// its parent, and Reactions moves the parent as its children start,
+/// finish and fail.
+fn project_tree() -> Value {
+    fixture("fixture-reactions-json", "project.schema.json")
+}
+
+/// The core's behaviors with Rollups and Reactions, in the TypeScript
+/// engine's order.
+fn with_reactions() -> BehaviorSet {
+    use superschematic_engine_behaviors::{
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
+        Rollups, StateRules, Timers, Variants, Workflow,
+    };
+    BehaviorSet::new()
+        .with(Workflow)
+        .with(Comments)
+        .with(Revisions)
+        .with(Dependencies)
+        .with(Links)
+        .with(Rollups)
+        .with(Reactions)
+        .with(Constants)
+        .with(Variants)
+        .with(StateRules)
+        .with(Approvals)
+        .with(Numbering)
+        .with(Timers)
+}
+
+#[test]
+fn it_runs_the_project_tree_document_a_project_starts_finishes_and_fails_its_parent_after_the_commit(
+) {
+    use superschematic_engine::{ReadEvents, RunnerOptions};
+
+    for target in targets("core_project_tree") {
+        let engine = target.open_core_with(|options| {
+            options.behaviors = with_reactions();
+            options.runner = Some(RunnerOptions::new(Principal::new(
+                "runner",
+                Vec::<String>::new(),
+            )));
+        });
+        publish_all(&engine, &[project_tree()]);
+        for id in ["launch", "design", "build"] {
+            create_as(
+                &engine,
+                &writer(),
+                "projects",
+                Some(id),
+                json!({ "title": id }),
+                None,
+            )
+            .expect("create");
+        }
+        let link = |id: &str, parent: &str| {
+            invoke_as(
+                &engine,
+                &writer(),
+                "projects",
+                id,
+                "link",
+                json!({"name": "parent", "id": parent}),
+            )
+            .expect("link");
+        };
+        let move_to = |id: &str, to: &str| {
+            invoke_as(
+                &engine,
+                &writer(),
+                "projects",
+                id,
+                "transition",
+                json!({ "to": to }),
+            )
+            .expect("transition");
+        };
+        let statuses = |ids: &[&str]| -> Vec<Value> {
+            ids.iter()
+                .map(|id| read_as(&engine, "projects", id).behaviors["Workflow"]["status"].clone())
+                .collect()
+        };
+        for id in ["design", "build"] {
+            link(id, "launch");
+        }
+        let tree = ["launch", "design", "build"];
+
+        move_to("design", "doing");
+        assert_eq!(
+            statuses(&tree),
+            [json!("todo"), json!("doing"), json!("todo")]
+        );
+        engine.runner().run_due().expect("run due");
+        assert_eq!(
+            statuses(&tree),
+            [json!("doing"), json!("doing"), json!("todo")]
+        );
+        move_to("design", "done");
+        move_to("build", "doing");
+        move_to("build", "done");
+        engine.runner().run_due().expect("run due");
+        assert_eq!(
+            statuses(&tree),
+            [json!("done"), json!("done"), json!("done")]
+        );
+        let launch = engine
+            .events()
+            .read(
+                &alice(),
+                &ReadEvents {
+                    schema: Some("projects"),
+                    instance_id: Some("launch"),
+                    limit: Some(500),
+                    ..ReadEvents::default()
+                },
+            )
+            .expect("events")
+            .events;
+        let moves: Vec<(String, Value, Option<String>, Option<i64>)> = launch[1..]
+            .iter()
+            .map(|event| {
+                (
+                    event.actor.clone(),
+                    event.change["params"].clone(),
+                    event.cause.as_ref().map(|cause| cause.behavior.clone()),
+                    event.cause.as_ref().map(|cause| cause.depth),
+                )
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            [
+                (
+                    "runner".to_owned(),
+                    json!({"to": "doing"}),
+                    Some("Reactions".to_owned()),
+                    Some(1)
+                ),
+                (
+                    "runner".to_owned(),
+                    json!({"to": "done"}),
+                    Some("Reactions".to_owned()),
+                    Some(1)
+                )
+            ]
+        );
+
+        // A tree with a failed project fails its parent, and is never done.
+        for id in ["release", "docs", "site"] {
+            create_as(
+                &engine,
+                &writer(),
+                "projects",
+                Some(id),
+                json!({ "title": id }),
+                None,
+            )
+            .expect("create");
+        }
+        for id in ["docs", "site"] {
+            link(id, "release");
+            move_to(id, "doing");
+        }
+        move_to("docs", "failed");
+        move_to("site", "done");
+        engine.runner().run_due().expect("run due");
+        assert_eq!(
+            statuses(&["release", "docs", "site"]),
+            [json!("failed"), json!("failed"), json!("done")]
         );
     }
 }

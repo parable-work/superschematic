@@ -40,6 +40,7 @@ pub mod dependencies;
 mod guidance;
 pub mod links;
 pub mod numbering;
+pub mod reactions;
 pub mod revised;
 pub mod revisions;
 pub mod rollups;
@@ -54,6 +55,10 @@ pub use constants::{Constants, ConstantsConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use links::{link_many, link_pin, LinkPin, LinkSpec, Links, LinksConfig};
 pub use numbering::{Numbering, NumberingConfig};
+pub use reactions::{
+    Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRevisedLink,
+    ReactionsRollup, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen,
+};
 pub use revised::{linked_to, moved_on, target_move, TargetMove};
 pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
 pub use rollups::{RollupFunction, RollupSpec, Rollups, RollupsConfig, MAX_ROLLUP_READ};

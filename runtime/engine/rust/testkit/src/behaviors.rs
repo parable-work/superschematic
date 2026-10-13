@@ -18,6 +18,7 @@
 //!   `test/core-dependencies.test.ts` composes [`Reader`] too;
 //! - `test/core-dependencies.test.ts`: [`Finisher`];
 //! - `test/core-numbering.test.ts`: [`Refuser`];
+//! - `test/core-reactions-changes.test.ts`: [`Score`] and [`WorkflowTally`];
 //! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
 //! A test file may define its own behavior under a name another file uses
@@ -26,10 +27,12 @@
 
 mod core_dependencies;
 mod core_numbering;
+mod core_reactions;
 mod core_revisions;
 
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
+pub use core_reactions::{Score, WorkflowTally};
 pub use core_revisions::RevisionHold;
 
 use std::sync::{Arc, Mutex, PoisonError};

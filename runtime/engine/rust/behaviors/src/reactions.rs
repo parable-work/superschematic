@@ -1,10 +1,10 @@
 //! Reactions, the core's rules that move Workflow statuses after a change
-//! commits (D16, amended; D56), the port of `src/behaviors/core/
-//! reactions.ts`. It has no fields, operations or storage: the engine's
-//! runner (`run_due`) hands it each committed event of its schema and of the
-//! schemas its rules name, as the runner's principal, and it changes
-//! statuses only through Workflow's `transition`, whose guards run and whose
-//! events record the cause.
+//! commits (D16, amended; D56), the port of
+//! `src/behaviors/core/reactions.ts`. It has no fields, operations or
+//! storage: the engine's runner (`run_due`) hands it each committed event
+//! of its schema and of the schemas its rules name, as the runner's
+//! principal, and it changes statuses only through Workflow's `transition`,
+//! whose guards run and whose events record the cause.
 //!
 //! A rule is one `when` and one `then`:
 //!
@@ -934,7 +934,8 @@ fn cycle(moves: &[(String, String)]) -> Option<Vec<String>> {
         done: &mut HashSet<&'s str>,
     ) -> Option<Vec<String>> {
         if let Some(at) = path.iter().position(|known| *known == state) {
-            let mut found: Vec<String> = path[at..].iter().map(|state| (*state).to_owned()).collect();
+            let mut found: Vec<String> =
+                path[at..].iter().map(|state| (*state).to_owned()).collect();
             found.push(state.to_owned());
             return Some(found);
         }
@@ -1039,8 +1040,14 @@ fn resolve(
     Vec<(String, ReactionsRevisedLink)>,
 )> {
     let lists = |behavior: &str| target.behaviors().iter().any(|known| known == behavior);
-    let specs = target.configs().get("Rollups").and_then(|config| config.get("rollups"));
-    let links = target.configs().get("Links").and_then(|config| config.get("links"));
+    let specs = target
+        .configs()
+        .get("Rollups")
+        .and_then(|config| config.get("rollups"));
+    let links = target
+        .configs()
+        .get("Links")
+        .and_then(|config| config.get("links"));
     let mut rollups = Vec::new();
     let mut revised = Vec::new();
     for (index, rule) in rules.iter().enumerate() {
@@ -1242,7 +1249,11 @@ fn fields_of(
             let names = names.join(", ");
             return Err(Error::config(format!(
                 "{at} names {name}, but {behavior} declares no field {field} ({})",
-                if names.is_empty() { "none" } else { names.as_str() }
+                if names.is_empty() {
+                    "none"
+                } else {
+                    names.as_str()
+                }
             )));
         };
         if found.volatile {
@@ -1304,7 +1315,8 @@ fn check_rules(rules: &[ReactionsRule], target: &ConfigTarget<'_>, flow: &Value)
                 .unwrap_or(&empty)
         });
     let all = states.join(", ");
-    let not_state = |state: &str| format!("\"{state}\" is not a state of the type's Workflow ({all})");
+    let not_state =
+        |state: &str| format!("\"{state}\" is not a state of the type's Workflow ({all})");
     let mut moves: Vec<(String, String)> = Vec::new();
     for (index, rule) in rules.iter().enumerate() {
         let at = format!("rule {}", index + 1);
@@ -1382,13 +1394,12 @@ fn check_rules(rules: &[ReactionsRule], target: &ConfigTarget<'_>, flow: &Value)
         // while the instance is still in that state.
         let from = match &rule.when {
             ReactionsWhen::Enters(state) => Some(state.as_str()),
-            _ => status.and_then(|status| status.to.as_ref()).and_then(Value::as_str),
+            _ => status
+                .and_then(|status| status.to.as_ref())
+                .and_then(Value::as_str),
         };
         if let Some(from) = from {
-            if !transitions
-                .iter()
-                .any(|edge| *edge == (Some(from), Some(to)))
-            {
+            if !transitions.contains(&(Some(from), Some(to))) {
                 return Err(Error::config(format!(
                     "{at}: no transition of the type's Workflow leads from {from} to {to}, so the rule could never move the instance"
                 )));
@@ -1461,7 +1472,9 @@ impl Behavior for Reactions {
     fn hooks(&self) -> Hooks<Self> {
         Hooks {
             config_change: Some(|_, _, _, _| Ok(None)),
-            guidance: Some(|_, config, target| crate::guidance::reactions::guidance(config, target)),
+            guidance: Some(|_, config, target| {
+                crate::guidance::reactions::guidance(config, target)
+            }),
             reactions: Some(superschematic_engine::behaviors::Reactions {
                 watches: Some(|_, config, _| {
                     let mut schemas: Vec<String> = Vec::new();
@@ -1486,11 +1499,7 @@ impl Behavior for Reactions {
     }
 }
 
-fn react(
-    _: &Reactions,
-    cx: &ReactionCx<'_, ReactionsConfig>,
-    event: &EngineEvent,
-) -> Result<()> {
+fn react(_: &Reactions, cx: &ReactionCx<'_, ReactionsConfig>, event: &EngineEvent) -> Result<()> {
     let config = cx.config();
     let id = instance_id(event);
     // The instance before the event, for the changes rules that need it:
@@ -1570,7 +1579,9 @@ fn react(
                     .as_ref()
                     .and_then(|links| links.get("links"))
                     .and_then(|links| links.get(&terminal.link));
-                if spec.and_then(|spec| spec.get("schema")).and_then(Value::as_str)
+                if spec
+                    .and_then(|spec| spec.get("schema"))
+                    .and_then(Value::as_str)
                     != Some(cx.schema())
                 {
                     return Err(Error::behavior(

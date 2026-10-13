@@ -2354,3 +2354,187 @@ fn rollups_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// The TypeScript guidance for the Reactions configs below
+/// (`reactionsGuidance`), on a Ticket whose operations are the built-in
+/// ones, Workflow's transition, Comments' comment and listComments, and
+/// Timers' snoozeTimer and fireTimer.
+const REACTIONS: &str = r#"{
+  "every": {
+    "summary": "After a change commits, the runner moves statuses by rules, through transition and its guards: when it enters doing, it moves the instance its project points to, to active; when priority changes to \"urgent\", it moves to escalated; when Comments.commentCount changes from 0, it moves to triaged; when Timers.deadlines.nudge.fired changes from false to true, it moves to escalated; when Workflow.status changes, it moves the instance its project points to, to active; when every Task linking here through project is in a terminal state, it moves to done; when every Step linking here through run is in a terminal state with outcome success or neutral, it moves to completed; when a Step linking here through run ends with outcome failure, it moves to failed; when rollup stepsPassed comes to hold, it moves to completed; when the target of spec gains a revision or a release, it moves to review. A move a guard vetoes, or that no transition allows, is left undone.",
+    "operations": {
+      "transition": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "create": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "update": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "comment": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "snoozeTimer": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "fireTimer": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      }
+    }
+  },
+  "plain": {
+    "summary": "After a change commits, the runner moves statuses by rules, through transition and its guards: when it enters paid, it moves to packed. A move a guard vetoes, or that no transition allows, is left undone.",
+    "operations": {
+      "transition": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn reactions_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine::behaviors::{DescribedTypeOperation, OperationScope};
+    use superschematic_engine_behaviors::{
+        Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule,
+        ReactionsTerminal, ReactionsThen, ReactionsWhen,
+    };
+
+    let expected: Value = serde_json::from_str(REACTIONS).expect("the expected guidance");
+    let then = |transition: &str, link: Option<&str>| ReactionsThen {
+        transition: transition.to_owned(),
+        link: link.map(str::to_owned),
+    };
+    let rule = |when: ReactionsWhen, then: ReactionsThen| ReactionsRule { when, then };
+    let changes = |field: &str, from: Option<Value>, to: Option<Value>| {
+        ReactionsWhen::Changes(ReactionsChanges {
+            field: field.to_owned(),
+            to,
+            from,
+        })
+    };
+    let terminal =
+        |schema: &str, link: &str, outcomes: Option<Vec<WorkflowOutcome>>| ReactionsTerminal {
+            schema: schema.to_owned(),
+            link: link.to_owned(),
+            outcomes,
+        };
+    let field = |behavior: Option<&str>, name: &str, members: &[&str]| ReactionsField {
+        behavior: behavior.map(str::to_owned),
+        field: name.to_owned(),
+        members: names(members),
+    };
+    let every = ReactionsConfig {
+        rules: vec![
+            rule(
+                ReactionsWhen::Enters("doing".to_owned()),
+                then("active", Some("project")),
+            ),
+            rule(
+                changes("priority", None, Some(json!("urgent"))),
+                then("escalated", None),
+            ),
+            rule(
+                changes("Comments.commentCount", Some(json!(0)), None),
+                then("triaged", None),
+            ),
+            rule(
+                changes(
+                    "Timers.deadlines.nudge.fired",
+                    Some(json!(false)),
+                    Some(json!(true)),
+                ),
+                then("escalated", None),
+            ),
+            rule(
+                changes("Workflow.status", None, None),
+                then("active", Some("project")),
+            ),
+            rule(
+                ReactionsWhen::AllTerminal(terminal("Task", "project", None)),
+                then("done", None),
+            ),
+            rule(
+                ReactionsWhen::AllTerminal(terminal(
+                    "Step",
+                    "run",
+                    Some(vec![WorkflowOutcome::Success, WorkflowOutcome::Neutral]),
+                )),
+                then("completed", None),
+            ),
+            rule(
+                ReactionsWhen::AnyTerminal(terminal(
+                    "Step",
+                    "run",
+                    Some(vec![WorkflowOutcome::Failure]),
+                )),
+                then("failed", None),
+            ),
+            rule(
+                ReactionsWhen::Holds("stepsPassed".to_owned()),
+                then("completed", None),
+            ),
+            rule(
+                ReactionsWhen::Revised {
+                    link: "spec".to_owned(),
+                },
+                then("review", None),
+            ),
+        ],
+        fields: vec![
+            ("priority".to_owned(), field(None, "priority", &[])),
+            (
+                "Comments.commentCount".to_owned(),
+                field(Some("Comments"), "commentCount", &[]),
+            ),
+            (
+                "Timers.deadlines.nudge.fired".to_owned(),
+                field(Some("Timers"), "deadlines", &["nudge", "fired"]),
+            ),
+            (
+                "Workflow.status".to_owned(),
+                field(Some("Workflow"), "status", &[]),
+            ),
+        ],
+        rollups: Vec::new(),
+        revised: Vec::new(),
+    };
+    let plain = ReactionsConfig {
+        rules: vec![rule(
+            ReactionsWhen::Enters("paid".to_owned()),
+            then("packed", None),
+        )],
+        ..ReactionsConfig::default()
+    };
+    let mut ticket = target();
+    ticket.schema = "Ticket".to_owned();
+    ticket.type_name = "Ticket".to_owned();
+    ticket.operations = [
+        ("create", None, true),
+        ("get", None, false),
+        ("update", None, true),
+        ("delete", None, true),
+        ("transition", Some("Workflow"), true),
+        ("comment", Some("Comments"), true),
+        ("listComments", Some("Comments"), false),
+        ("snoozeTimer", Some("Timers"), true),
+        ("fireTimer", Some("Timers"), true),
+    ]
+    .into_iter()
+    .map(|(name, behavior, writes)| DescribedTypeOperation {
+        name: name.to_owned(),
+        behavior: behavior.map(str::to_owned),
+        writes,
+        scope: OperationScope::Instance,
+    })
+    .collect();
+    let guidance = Reactions.hooks().guidance.expect("guidance");
+    for (name, config) in [("every", every), ("plain", plain)] {
+        assert_eq!(
+            as_json(&guidance(&Reactions, &config, &ticket)),
+            expected[name],
+            "{name}"
+        );
+    }
+}
