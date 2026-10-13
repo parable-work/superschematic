@@ -16,10 +16,15 @@
 //!
 //! ```no_run
 //! use serde_json::json;
-//! use superschematic_engine::{DefineOptions, Engine, EngineOptions, Principal, SchemaTarget};
+//! use superschematic_engine::{DefineOptions, Engine, EngineOptions, Policy, Principal, SchemaTarget};
 //!
-//! let engine = Engine::open(EngineOptions::sqlite("engine.db"))?;
-//! let alice = Principal::new("alice", ["Note"]);
+//! let mut options = EngineOptions::sqlite("engine.db");
+//! options.policy = Some(Policy::from_json(&json!({"rules": [
+//!     {"action": ["define", "publish"], "require": "schemas.{action}"},
+//!     {"require": "{schema}.{action}"}
+//! ]}))?);
+//! let engine = Engine::open(options)?;
+//! let alice = Principal::new("alice", ["schemas", "Note"]);
 //! let document = json!({
 //!     "kind": "General",
 //!     "name": "Note",
@@ -44,7 +49,11 @@ mod principal;
 mod registry;
 mod values;
 
-pub use access::{AccessRequest, NamespaceOperation, SchemaAction};
+pub use access::{
+    covers, has_any_permission, AccessPolicy, AccessRequest, Decision, DottedPermissions,
+    ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate, Policy, PolicyAction,
+    PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction, ServiceMatch,
+};
 pub use engine::{Clock, Engine, EngineClock, EngineOptions, Ids, MetaSchema, Storage};
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,

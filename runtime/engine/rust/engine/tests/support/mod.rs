@@ -15,7 +15,7 @@ use serde_json::{json, Map, Value};
 
 use superschematic_engine::storage::{Db, Dialect};
 use superschematic_engine::{
-    Engine, EngineError, EngineErrorCode, EngineOptions, Error, Principal, Storage,
+    Engine, EngineError, EngineErrorCode, EngineOptions, Error, Policy, Principal, Storage,
 };
 
 /// Names the Postgres the tests run against.
@@ -139,10 +139,12 @@ impl Target {
         }
     }
 
-    /// Options on the target with every default but the ones `configure`
-    /// sets.
+    /// Options on the target with every default and the policy that
+    /// allows everything, as the TypeScript tests' `openTestEngine` has.
     pub fn options(&self) -> EngineOptions {
-        EngineOptions::new(self.storage())
+        let mut options = EngineOptions::new(self.storage());
+        options.policy = Some(Policy::allow_all());
+        options
     }
 
     /// An engine on the target with the default options.

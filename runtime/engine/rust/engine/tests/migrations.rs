@@ -855,10 +855,11 @@ fn reopening_an_engine_keeps_its_schemas_and_events() {
 #[test]
 fn an_engine_opens_on_a_storage_the_host_opened() {
     for target in targets("an_engine_opens_on_a_storage_the_host_opened") {
-        let engine = Engine::open(superschematic_engine::EngineOptions::new(
+        let mut options = superschematic_engine::EngineOptions::new(
             superschematic_engine::Storage::Db(target.db()),
-        ))
-        .unwrap();
+        );
+        options.policy = Some(superschematic_engine::Policy::allow_all());
+        let engine = Engine::open(options).unwrap();
         assert_eq!(engine.dialect(), target.dialect);
         assert_eq!(ledger(engine.db()), (1..=12).collect::<Vec<u32>>());
     }

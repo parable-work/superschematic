@@ -15,6 +15,7 @@
 //! thread that makes it.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -22,7 +23,7 @@ use serde_json::Value;
 use superschematic_engine_storage::{engine_migrations, Db, Dialect, Sql, Tx};
 use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
-use crate::access::{Access, AllowAll};
+use crate::access::{Access, DottedPermissions, PermissionMatcher, Policy};
 use crate::composition::BehaviorRegistry;
 use crate::errors::{Error, Result};
 use crate::indexes::{clash_message, own_indexes, sync_own_indexes};
@@ -86,9 +87,17 @@ pub enum MetaSchema {
 }
 
 /// How an engine opens.
-#[derive(Debug)]
 pub struct EngineOptions {
     pub storage: Storage,
+    /// Who may read, write, define and publish (D58: rules a deployment
+    /// configures, or a Rust policy of its own). There is no default: an
+    /// engine opened without one is refused, as the TypeScript engine
+    /// refuses it; `Policy::allow_all()` is for tests and local use.
+    pub policy: Option<Policy>,
+    /// Decides whether a principal holds a permission a rule requires (and,
+    /// from milestone 5, one a behavior's config names); the HTTP runtime's
+    /// dotted-path `hasAnyPermission` when absent.
+    pub permission_matcher: Option<Arc<dyn PermissionMatcher>>,
     /// The configured namespaces besides `default`, and the shared one. A
     /// create makes more while the engine runs.
     pub namespaces: NamespaceOptions,
@@ -98,12 +107,26 @@ pub struct EngineOptions {
     pub meta_schema: Option<MetaSchema>,
 }
 
+impl std::fmt::Debug for EngineOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineOptions")
+            .field("storage", &self.storage)
+            .field("policy", &self.policy)
+            .field("namespaces", &self.namespaces)
+            .field("ids", &self.ids)
+            .field("clock", &self.clock)
+            .finish_non_exhaustive()
+    }
+}
+
 impl EngineOptions {
-    /// Options with every default: one namespace, random ids, the system
-    /// clock, the core's meta-schema.
+    /// Options with every default: no policy yet, one namespace, random
+    /// ids, the system clock, the core's meta-schema.
     pub fn new(storage: Storage) -> Self {
         EngineOptions {
             storage,
+            policy: None,
+            permission_matcher: None,
             namespaces: NamespaceOptions::default(),
             ids: Ids::default(),
             clock: Clock::default(),
@@ -202,6 +225,8 @@ pub struct Engine {
     pub(crate) db: Db,
     pub(crate) namespaces: NamespaceConfig,
     pub(crate) access: Access,
+    #[allow(dead_code)] // a behavior's can() asks it (milestone 5)
+    pub(crate) matcher: Arc<dyn PermissionMatcher>,
     pub(crate) clock: EngineClock,
     pub(crate) catalog: Catalog,
     ids: IdSource,
@@ -225,6 +250,16 @@ impl Engine {
     }
 
     pub(crate) fn open_with(options: EngineOptions, behaviors: BehaviorRegistry) -> Result<Engine> {
+        let Some(policy) = &options.policy else {
+            return Err(Error::usage(
+                "an engine needs an access policy (policy); pass allowAll for tests and local use",
+            ));
+        };
+        let matcher: Arc<dyn PermissionMatcher> = options
+            .permission_matcher
+            .clone()
+            .unwrap_or_else(|| Arc::new(DottedPermissions));
+        let access = Access::of(policy, &matcher);
         let namespaces = NamespaceConfig::new(&options.namespaces)?;
         let loader = match &options.meta_schema {
             None => SchemaFileLoader::new(),
@@ -239,7 +274,8 @@ impl Engine {
         Ok(Engine {
             db,
             namespaces,
-            access: Access::new(Box::new(AllowAll)),
+            access,
+            matcher,
             clock,
             catalog: Catalog::new(loader, behaviors),
             ids: IdSource {

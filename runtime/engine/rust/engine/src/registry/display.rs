@@ -360,8 +360,9 @@ mod tests {
                 fields: vec![field.into()],
             });
         }
-        let engine =
-            Engine::open_with(EngineOptions::sqlite(dir.join("engine.db")), behaviors).unwrap();
+        let mut options = EngineOptions::sqlite(dir.join("engine.db"));
+        options.policy = Some(crate::Policy::allow_all());
+        let engine = Engine::open_with(options, behaviors).unwrap();
         Open { engine, dir }
     }
 

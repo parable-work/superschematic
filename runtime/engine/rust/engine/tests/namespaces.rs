@@ -4,20 +4,23 @@
 //! engine runs, which an archive freezes; on SQLite and, with the variable
 //! set, on Postgres.
 //!
-//! milestone 4b: what the access policy answers (the TypeScript cases'
-//! `managing` policy: who may create, archive and list, the questions it is
-//! asked, a refused caller learning nothing), and an archived namespace
-//! refusing an instance's create, update, delete, operation and tool while
-//! its instances and events read on. milestone 6: the runner, which runs
-//! nothing in an archived namespace.
+//! What the access policy answers is the TypeScript cases' `managing`
+//! policy: who may create, archive and list, the questions it is asked,
+//! and a refused caller learning nothing. milestone 5: an archived
+//! namespace refusing a behavior's operation, and the tools (milestone 6)
+//! hiding what writes there; milestone 6: the runner, which runs nothing in
+//! an archived namespace.
 
 mod support;
+
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
 use superschematic_engine::{
-    Clock, DefineOptions, Engine, EngineErrorCode, NamespaceConfig, NamespaceOptions,
-    NamespaceOrigin, NamespaceRecord, NamespaceState, Principal, SchemaSummary, SchemaTarget,
+    AccessPolicy, AccessRequest, Clock, DefineOptions, Engine, EngineErrorCode, NamespaceConfig,
+    NamespaceOptions, NamespaceOrigin, NamespaceRecord, NamespaceState, Policy, Principal,
+    SchemaSummary, SchemaTarget,
 };
 use support::{alice, code, order_document, refusal, schema_document, targets, with};
 
@@ -307,6 +310,61 @@ fn ada() -> Principal {
     Principal::new("ada", ["namespaces"])
 }
 
+fn tom() -> Principal {
+    Principal::new("tom", Vec::<String>::new())
+}
+
+/// A manage question as the policy records it: subject, action, namespace
+/// and operation.
+type Question = (String, String, String, String);
+
+/// A policy that lets ada manage namespaces, and everyone do everything
+/// else; it records every manage question as (subject, action, namespace,
+/// operation).
+#[derive(Clone, Default)]
+struct Managing {
+    asked: Arc<Mutex<Vec<Question>>>,
+}
+
+impl Managing {
+    fn asked(&self) -> Vec<Question> {
+        self.asked.lock().unwrap().clone()
+    }
+
+    fn clear(&self) {
+        self.asked.lock().unwrap().clear();
+    }
+}
+
+impl AccessPolicy for Managing {
+    fn allows(&self, request: &AccessRequest<'_>) -> bool {
+        if request.action() != "manage" {
+            return true;
+        }
+        let principal = request.principal();
+        self.asked.lock().unwrap().push((
+            principal.subject.clone(),
+            request.action().to_owned(),
+            request.namespace().to_owned(),
+            request.operation().unwrap_or_default().to_owned(),
+        ));
+        principal
+            .permissions
+            .iter()
+            .any(|held| held == "namespaces")
+            || (request.operation() == Some("list") && request.namespace() == "tom")
+    }
+}
+
+fn question(subject: &str, namespace: &str, operation: &str) -> Question {
+    (
+        subject.to_owned(),
+        "manage".to_owned(),
+        namespace.to_owned(),
+        operation.to_owned(),
+    )
+}
+
 fn created(name: &str, at: i64, by: &str) -> NamespaceRecord {
     NamespaceRecord {
         name: name.into(),
@@ -323,15 +381,18 @@ fn created(name: &str, at: i64, by: &str) -> NamespaceRecord {
 #[test]
 fn create_list_and_get_and_the_next_engine_on_the_storage_has_them() {
     for target in targets("create_list_and_get_and_the_next_engine_on_the_storage_has_them") {
-        let configure = |engine: &mut superschematic_engine::EngineOptions| {
+        let managing = Managing::default();
+        let policy = managing.clone();
+        let engine = target.open_with(|engine| {
             engine.namespaces = options(&["common"], Some("common"));
             engine.clock = Clock::Manual(5_000);
-        };
-        let engine = target.open_with(configure);
+            engine.policy = Some(Policy::custom(policy));
+        });
         assert_eq!(
             engine.namespaces().create(&ada(), "acme").unwrap(),
             created("acme", 5_000, "ada")
         );
+        assert_eq!(managing.asked(), [question("ada", "acme", "create")]);
         engine.namespaces().create(&ada(), "tom").unwrap();
         assert_eq!(
             engine.namespaces().names().unwrap(),
@@ -373,7 +434,22 @@ fn create_list_and_get_and_the_next_engine_on_the_storage_has_them() {
                 ),
             ]
         );
-        assert_eq!(engine.namespaces().get(&ada(), "tom").unwrap().name, "tom");
+        // The list holds what the policy lets the caller list.
+        assert_eq!(
+            engine
+                .namespaces()
+                .list(&tom())
+                .unwrap()
+                .into_iter()
+                .map(|record| record.name)
+                .collect::<Vec<_>>(),
+            ["tom"]
+        );
+        assert_eq!(engine.namespaces().get(&tom(), "tom").unwrap().name, "tom");
+        assert_eq!(
+            code(engine.namespaces().get(&tom(), "acme")),
+            EngineErrorCode::Forbidden
+        );
         assert_eq!(
             code(engine.namespaces().get(&ada(), "nowhere")),
             EngineErrorCode::UnknownNamespace
@@ -438,7 +514,10 @@ fn a_create_is_refused_for_a_name_that_is_not_one_and_a_name_that_is_a_namespace
     for target in
         targets("a_create_is_refused_for_a_name_that_is_not_one_and_a_name_that_is_a_namespace")
     {
-        let engine = target.open_with(|engine| engine.namespaces = options(&["east"], None));
+        let engine = target.open_with(|engine| {
+            engine.namespaces = options(&["east"], None);
+            engine.policy = Some(Policy::custom(Managing::default()));
+        });
         for name in ["East", "1east", "east_side", "", &"e".repeat(64)] {
             let refused = refusal(engine.namespaces().create(&ada(), name));
             assert_eq!(refused.code(), EngineErrorCode::InvalidArgument, "{name}");
@@ -450,6 +529,14 @@ fn a_create_is_refused_for_a_name_that_is_not_one_and_a_name_that_is_a_namespace
                 )
             );
         }
+        let refused = refusal(engine.namespaces().create(&tom(), "west"));
+        assert_eq!(
+            (refused.code(), refused.message()),
+            (
+                EngineErrorCode::Forbidden,
+                "tom may not create namespace west"
+            )
+        );
         engine.namespaces().create(&ada(), "west").unwrap();
         for name in ["default", "east", "west"] {
             let refused = refusal(engine.namespaces().create(&ada(), name));
@@ -461,6 +548,12 @@ fn a_create_is_refused_for_a_name_that_is_not_one_and_a_name_that_is_a_namespace
                 )
             );
         }
+        // The policy is asked before the name is looked up, so a caller it
+        // refuses learns nothing of what exists.
+        assert_eq!(
+            code(engine.namespaces().create(&tom(), "east")),
+            EngineErrorCode::Forbidden
+        );
     }
 }
 
@@ -469,11 +562,19 @@ fn archive_and_unarchive_only_a_created_namespace_and_again_changes_nothing() {
     for target in
         targets("archive_and_unarchive_only_a_created_namespace_and_again_changes_nothing")
     {
+        let managing = Managing::default();
+        let policy = managing.clone();
         let engine = target.open_with(|engine| {
             engine.namespaces = options(&["east"], None);
             engine.clock = Clock::Manual(7_000);
+            engine.policy = Some(Policy::custom(policy));
         });
         engine.namespaces().create(&ada(), "acme").unwrap();
+        managing.clear();
+        assert_eq!(
+            code(engine.namespaces().archive(&tom(), "acme")),
+            EngineErrorCode::Forbidden
+        );
         engine.clock().set(8_000).unwrap();
         let archived = engine.namespaces().archive(&ada(), "acme").unwrap();
         assert_eq!(
@@ -494,6 +595,14 @@ fn archive_and_unarchive_only_a_created_namespace_and_again_changes_nothing() {
                 .archived_at,
             Some(8_000),
             "archiving an archived namespace changes nothing"
+        );
+        assert_eq!(
+            managing.asked(),
+            [
+                question("tom", "acme", "archive"),
+                question("ada", "acme", "archive"),
+                question("ada", "acme", "archive"),
+            ]
         );
         for name in ["default", "east"] {
             let refused = refusal(engine.namespaces().archive(&ada(), name));
