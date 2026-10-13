@@ -890,9 +890,10 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
 	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
 	// A preflight to shop-orders from the site is answered; one from
-	// another origin is not, nor one to shop-reviews, which no site calls.
+	// another origin is not, but goes on to shop-orders' router, which
+	// allows no OPTIONS, nor one to shop-reviews, which no site calls.
 	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
-	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusMethodNotAllowed, "")
 	checkCORS(t, storefront.base, http.MethodOptions, "/api/products/p-1/reviews", siteOrigin, http.MethodGet, 0, "")
 	checkCORS(t, storefront.base, http.MethodGet, "/api/orders/o-1", siteOrigin, "", http.StatusNotImplemented, siteOrigin)
 	storefront.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)

@@ -555,7 +555,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	const siteOrigin = "https://ts-web.acme.dev"
 	shop := bunServer(t, bun, shopDir, append([]string{"TS_DB_DATABASE_URL=" + unreachable, "TS_SHOP_CORS_ORIGINS=" + siteOrigin}, edge...)...)
 	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
-	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	// Another origin's preflight goes on to the app, which has no route for
+	// it.
+	checkCORS(t, shop.base, http.MethodOptions, "/api/carts/tea", "https://evil.example", http.MethodGet, http.StatusNotFound, "")
 	checkCORS(t, shop.base, http.MethodGet, "/api/carts/tea", siteOrigin, "", http.StatusOK, siteOrigin)
 	shop.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
 	shop.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["ts-db"]`)

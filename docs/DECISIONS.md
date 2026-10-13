@@ -5919,3 +5919,30 @@ copies in acme's `testdata/generated/` are unchanged: the core binary
 never reads the table.
 
 The rule is reversible until the first release.
+
+### D55, amended: a site's CORS answers the preflights of the origins its field lists, and hands any other on to the API, whose identity runtime answers its trusted origins
+
+D55 had each API a site calls answer CORS for the origins its CORS field
+lists, in a handler around the whole server, and D50 had an identity
+API's router answer CORS for the trusted origins of its identity config.
+The site's handler answered every preflight to such an API's routes
+itself, 204 with `Vary` alone for an origin it did not list, so no
+preflight reached the identity runtime: an origin the identity config
+trusts that is not a site had its preflights refused on every API a site
+calls. Its ordinary requests were answered, since each layer sets the
+headers of the origins it allows. The acme shop's Dev identity config
+trusts no origin, so nothing showed it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site's CORS answers a preflight itself only from an origin its field lists. A request from any other origin, a preflight included, reaches the API with `Vary` alone, as an ordinary request already did, and the API answers it as it would with no site: an identity API's CORS answers its config's trusted origins with the method and headers they ask for. The parity vectors carry the decision as `answer`, beside `preflight`. | servergen merging the identity config's trusted origins into the API's CORS policy, which would answer a trusted origin with the site's methods and headers rather than those it asks for, so one origin would get a different answer on an API a site calls, and would tie the site's handler to the identity config. The identity runtime's CORS outside the site's, which on a server of several APIs would have to match each request to its API as the site's handler does. |
+| An origin that is both a site and trusted gets the site's answer to a preflight, the outer one: the methods of the API's operations, and `Accept`, `Authorization` and `Content-Type`. | |
+| A preflight from an origin neither lists gets the API's own answer, 405 from a Go router and 404 from a TypeScript app, with no `Access-Control-Allow-Origin`, which the browser refuses as it refused the 204. | The 204 with `Vary` alone, which is what kept the identity runtime from answering. |
+
+Status: built in both runtimes' `cors` (`Decision.Answer`,
+`CorsDecision.answer`) and the vectors. The identity fixture's sites
+`users-web` and `users-ts-web` call an identity API on a Go and a
+TypeScript server, whose tests send preflights from the site, a trusted
+origin and another.
+
+The rule is reversible until the first release.

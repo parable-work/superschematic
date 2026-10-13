@@ -12,9 +12,10 @@ rendered on a server is a TypeScript or Rust server instead.
 A site is a service of the core kind `Site`. Its config names the APIs its
 browser code calls and how it builds; its code is a package of your own.
 In a stack, a site is always exposed, each API it calls must be exposed
-too, and each of those APIs answers CORS for the site's origin and no
-other. One build of the site serves every environment: the site reads
-each API's address from a config the environment serves beside its files.
+too, and each of those APIs answers CORS for the site's origin, beside
+the origins its identity config trusts. One build of the site serves
+every environment: the site reads each API's address from a config the
+environment serves beside its files.
 
 The design is section 8.10 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -123,8 +124,15 @@ TypeScript alike:
   the methods of the API's operations and a max age of ten minutes;
 - any other request from a listed origin carries the origin and
   credentials;
-- any other origin gets `Vary: Origin` alone, so the browser refuses the
-  answer.
+- any other origin gets `Vary: Origin` alone, and its preflight goes on to
+  the API, which answers it as it would with no site.
+
+So an API over the core user model still answers the origins its identity
+config trusts, `trustedOrigins`, with the method and headers their
+preflights ask for ([users and sessions](/superschematic/guides/users-and-sessions/)),
+and an origin that is both a site and trusted gets the site's answer. An
+origin neither lists gets no `Access-Control-Allow-Origin` from either,
+so the browser refuses the answer.
 
 On a server that serves several APIs, a request is the API's whose routes
 take it, so each API answers only the sites that call it.

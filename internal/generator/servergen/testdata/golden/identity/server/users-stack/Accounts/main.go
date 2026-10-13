@@ -35,6 +35,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/parable-work/superschematic/runtime/http/go/cors"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
@@ -177,6 +178,10 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of users-api: %w", err)
 	}
+	usersApiCORS, err := corsPolicy("users-api")
+	if err != nil {
+		return fmt.Errorf("CORS of users-api: %w", err)
+	}
 
 	var draining atomic.Bool
 	handler := newHandler(logger, &draining, []served{
@@ -184,6 +189,13 @@ func run(logger *zap.Logger) error {
 		{"users-api", usersApiRouter},
 	}, []dependency{
 		{"users-db", usersDb.Ping},
+	})
+	// A site's browser calls an API here from the site's origin: each API a
+	// site calls answers CORS for the origins its CORS field lists, and
+	// hands a preflight from another origin on to the API's router, so an
+	// identity API's CORS still answers its trusted origins (section 8.10).
+	handler = cors.Handler(handler, []cors.API{
+		{Policy: usersApiCORS, Match: corsRoutes(usersApiRouter)},
 	})
 	return serve(ctx, stop, logger, &draining, handler)
 }

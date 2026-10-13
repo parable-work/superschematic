@@ -2,8 +2,10 @@
 // makes to the APIs it calls (D55; docs/stack-model.md, section 8.10).
 // Each API a site calls has a CORS field in a stack, the origins of the
 // sites that call it, which stackconfig.LoadCORS reads; its server answers
-// CORS for those origins and no other, with credentials, the Authorization
-// header and the methods the API's operations use.
+// CORS for those origins, with credentials, the Authorization header and
+// the methods the API's operations use. It answers no other origin itself:
+// a preflight from one reaches the API's router, whose identity runtime
+// answers its config's trusted origins (D55, amended).
 //
 // The TypeScript HTTP runtime's cors module decides the same way. The
 // vectors in runtime/http/testdata/cors_parity.json, which this package's
@@ -46,12 +48,20 @@ type Policy struct {
 }
 
 // Decision is what a request's CORS check decides: whether it is a
-// preflight, which the server answers itself with 204 and the headers
-// alone, and the headers the answer carries.
+// preflight, whether the server answers it itself, and the headers the
+// answer carries.
 type Decision struct {
 	// Preflight is true for an OPTIONS request with an Origin and an
 	// Access-Control-Request-Method.
 	Preflight bool
+
+	// Answer is true for a preflight from an origin the policy lists,
+	// which the server answers itself with 204 and the headers alone. Any
+	// other request reaches the API with the headers, a preflight from an
+	// origin the policy does not list included, so a CORS check of the
+	// API's own, the identity runtime's for its trusted origins, answers
+	// it.
+	Answer bool
 
 	// Headers are the headers to set on the answer, by canonical name.
 	// Empty for a request with no Origin.
@@ -66,9 +76,12 @@ func IsPreflight(method string, header http.Header) bool {
 
 // Decide decides a request's CORS under p. A request with no Origin gets
 // no header. One with an Origin p lists gets Access-Control-Allow-Origin
-// with that origin and Access-Control-Allow-Credentials; its preflight
-// gets the methods, the headers and the max age too. One with an Origin p
-// does not list gets Vary alone, so the browser refuses its answer.
+// with that origin and Access-Control-Allow-Credentials; its preflight is
+// the server's to answer, and gets the methods, the headers and the max
+// age too. One with an Origin p does not list gets Vary alone and is not
+// the server's to answer, a preflight included: the API answers it, and
+// unless a CORS check of its own allows the origin, the browser refuses
+// the answer.
 func (p Policy) Decide(method string, header http.Header) Decision {
 	origin := header.Get("Origin")
 	d := Decision{Preflight: IsPreflight(method, header), Headers: map[string]string{}}
@@ -85,6 +98,7 @@ func (p Policy) Decide(method string, header http.Header) Decision {
 	d.Headers["Access-Control-Allow-Origin"] = origin
 	d.Headers["Access-Control-Allow-Credentials"] = "true"
 	if d.Preflight {
+		d.Answer = true
 		d.Headers["Access-Control-Allow-Methods"] = strings.Join(p.Methods, ", ")
 		d.Headers["Access-Control-Allow-Headers"] = strings.Join(AllowedHeaders, ", ")
 		d.Headers["Access-Control-Max-Age"] = strconv.Itoa(MaxAge)
@@ -101,9 +115,12 @@ type API struct {
 
 // Handler answers CORS for the APIs a server serves around next. A request
 // with an Origin is the first API's whose Match takes it, by the method a
-// preflight asks for in place of OPTIONS: a preflight that one takes is
-// answered 204 with its policy's headers, and any other request it takes
-// reaches next with them. A request no API takes reaches next as it is.
+// preflight asks for in place of OPTIONS: a preflight from an origin its
+// policy lists is answered 204 with the policy's headers, and any other
+// request it takes reaches next with them, a preflight from an origin the
+// policy does not list included, which the API's router answers, through
+// the identity runtime's CORS for a trusted origin. A request no API takes
+// reaches next as it is.
 func Handler(next http.Handler, apis []API) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") == "" {
@@ -126,7 +143,7 @@ func Handler(next http.Handler, apis []API) http.Handler {
 			for name, value := range d.Headers {
 				w.Header().Set(name, value)
 			}
-			if d.Preflight {
+			if d.Answer {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
