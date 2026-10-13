@@ -24,12 +24,15 @@
 # Usage:
 #   scripts/superscalar-dep.sh            # checkout + build, print CGO_LDFLAGS
 #   scripts/superscalar-dep.sh --archive  # checkout + the Go archive alone
+#   scripts/superscalar-dep.sh --checkout # checkout alone
 #   scripts/superscalar-dep.sh --print    # print CGO_LDFLAGS only
 #   eval "$(scripts/superscalar-dep.sh --export)"   # export CGO_LDFLAGS
 #
 # --archive skips the TypeScript binding, for the release's static archives
 # (scripts/release-archives.sh), and leaves the stamp below as it was, so a
-# later full run still builds the binding.
+# later full run still builds the binding. --checkout builds nothing and
+# needs no Go: a Rust crate that depends on superscalar's core by path (the
+# engine's schema reader, runtime/schema/rust-ir) needs only the sources.
 #
 # When superscalar publishes a release, replace step 2 with that
 # repository's fetch_release_archive.sh and drop the Rust requirement.
@@ -53,6 +56,22 @@ commit="$(grep -E '^commit=' "$PIN" | cut -d= -f2)"
 if [ -z "$commit" ]; then
   echo "superscalar.pin has no commit= line" >&2
   exit 1
+fi
+
+checkout() {
+  if [ ! -d "$DEP/.git" ]; then
+    git clone --quiet --no-checkout "$REPO_URL" "$DEP"
+  fi
+  if ! git -C "$DEP" cat-file -e "$commit^{commit}" 2>/dev/null; then
+    git -C "$DEP" fetch --quiet origin "$commit"
+  fi
+  git -C "$DEP" checkout --quiet --detach "$commit"
+}
+
+if [ "${1:-}" = "--checkout" ]; then
+  checkout
+  echo "superscalar $commit checked out under $DEP" >&2
+  exit 0
 fi
 
 goos="$(go env GOOS)"
@@ -80,13 +99,7 @@ case "${1:-}" in
     ;;
 esac
 
-if [ ! -d "$DEP/.git" ]; then
-  git clone --quiet --no-checkout "$REPO_URL" "$DEP"
-fi
-if ! git -C "$DEP" cat-file -e "$commit^{commit}" 2>/dev/null; then
-  git -C "$DEP" fetch --quiet origin "$commit"
-fi
-git -C "$DEP" checkout --quiet --detach "$commit"
+checkout
 
 # The archive and the TS dist are build products of one specific commit and
 # toolchain. A pin bump over an existing checkout must rebuild them even

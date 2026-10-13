@@ -53,7 +53,8 @@ export interface BehaviorDocument {
   preconditionSchema?: JSONSchema;
   requires: string[];
   conflicts: string[];
-  fields: Array<{ name: string; description?: string }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
+  fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: BehaviorOperationDocument[];
   /** The codes its vetoes carry. */
   vetoes: Array<{ code: string; description?: string }>;
@@ -96,7 +97,11 @@ export function behaviorDocument(declaration: BehaviorDeclaration, policy: Invoc
     ...(declaration.preconditionSchema !== undefined ? { preconditionSchema: copy(declaration.preconditionSchema) } : {}),
     requires: [...(declaration.requires ?? [])],
     conflicts: [...(declaration.conflicts ?? [])],
-    fields: (declaration.fields ?? []).map((field) => ({ name: field.name, ...(field.description ? { description: field.description } : {}) })),
+    fields: (declaration.fields ?? []).map((field) => ({
+      name: field.name,
+      ...(field.description ? { description: field.description } : {}),
+      ...(field.volatile === true ? { volatile: true as const } : {}),
+    })),
     operations: (declaration.operations ?? []).map((operation) => ({
       name: operation.name,
       ...(operation.description ? { description: operation.description } : {}),

@@ -697,7 +697,9 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `behaviors["acme.Rating"].ratingCount`, apart from the type's own
   fields and every other behavior's, so none collides, and a filter or a
   display names one by its qualified name, `acme.Rating.ratingCount`.
-  A config never renames a field.
+  A config never renames a field. A field the engine computes at a read
+  from other instances, the clock or the config says `"volatile": true`,
+  since no event of its instance records its moves.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an
@@ -880,7 +882,7 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants`, `Variants` and `Branches`, when it opens; `behaviors` adds yours beside them, as it adds
+`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and `Approvals`, when it opens; `behaviors` adds yours beside them, as it adds
 the core's [work-queue behaviors](/superschematic/guides/work-queues/)
 from `@superschematic/engine-workqueue`. No core operation names an
 invocation policy, so their tools take the default of the policy you

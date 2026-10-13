@@ -1,20 +1,25 @@
 // Command schemafiletypes writes the schema-file data form into the
-// @superschematic/schema-ir package:
+// @superschematic/schema-ir package, and the core JSON Schema into the
+// engine's Rust schema reader:
 //
 //	ir/typescript/schema-file.json  the JSON Schema `superschematic json-schema`
 //	                                prints with the core registry and the
 //	                                default naming
 //	ir/typescript/schema-file.d.ts  TypeScript types for the same documents,
 //	                                with the parts a registry closes left open
+//	runtime/schema/rust-ir/src/schemafile/schema-file.json
+//	                                the same JSON Schema, the Rust strict
+//	                                loader's default meta-schema, inside its
+//	                                crate (superschematic-schema-ir)
 //
-// Both come from the reflection of the IR structs the JSON and YAML readers
-// validate against (internal/loader/schemafile). schema-file.json is the
-// one committed copy of the core JSON Schema: TestDefinitionGolden compares
-// against it.
+// They come from the reflection of the IR structs the JSON and YAML readers
+// validate against (internal/loader/schemafile). ir/typescript's
+// schema-file.json is the copy TestDefinitionGolden compares against; the
+// Rust crate's is byte for byte the same.
 //
 // Run from the repository root: go run ./internal/tools/schemafiletypes
 // With -check the command exits 1 when a committed file differs from what it
-// would write, which is how CI keeps both in step with the IR.
+// would write, which is how CI keeps them in step with the IR.
 package main
 
 import (
@@ -29,8 +34,9 @@ import (
 )
 
 const (
-	schemaPath = "ir/typescript/schema-file.json"
-	typesPath  = "ir/typescript/schema-file.d.ts"
+	schemaPath     = "ir/typescript/schema-file.json"
+	typesPath      = "ir/typescript/schema-file.d.ts"
+	rustSchemaPath = "runtime/schema/rust-ir/src/schemafile/schema-file.json"
 )
 
 func main() {
@@ -82,7 +88,7 @@ func render() (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("schema-file TypeScript types: %w", err)
 	}
-	return map[string][]byte{schemaPath: definition, typesPath: types}, nil
+	return map[string][]byte{schemaPath: definition, typesPath: types, rustSchemaPath: definition}, nil
 }
 
 func fail(err error) {

@@ -1,6 +1,8 @@
 // Shared test setup: every test opens real SQLite files under a fresh
 // temporary directory (not :memory:, so write-ahead logging behaves as it
-// does in a deployment), and cleanup closes and removes them.
+// does in a deployment), and cleanup closes and removes them. With
+// ENGINE_RECORD set, the engines they open record the test's calls
+// (recorder.ts).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +11,7 @@ import { join } from 'node:path';
 import {
   allowAll,
   isBun,
-  openEngine,
+  openEngine as openDistEngine,
   type DriverName,
   type Engine,
   type EngineOptions,
@@ -17,6 +19,7 @@ import {
   type InstanceRecord,
   type Principal,
 } from '../dist/index.js';
+import { endCase, recordOpen, registerDirectory, type TestContextLike } from './recorder.ts';
 
 /** The principal most tests act as; openTestEngine allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
@@ -31,6 +34,7 @@ const open: Array<{ close(): void }> = [];
 export function freshPath(): string {
   const directory = mkdtempSync(join(tmpdir(), 'superschematic-engine-'));
   directories.push(directory);
+  registerDirectory(directory);
   return join(directory, 'engine.db');
 }
 
@@ -40,21 +44,38 @@ export function track<T extends { close(): void }>(item: T): T {
   return item;
 }
 
+/**
+ * openEngine is the engine's openEngine, recording the engine's calls when
+ * ENGINE_RECORD is set; tests open engines through it or openTestEngine.
+ */
+export function openEngine(options: EngineOptions): Engine {
+  return recordOpen(options, openDistEngine);
+}
+
 export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
   return track(openEngine({ path: freshPath(), policy: allowAll, ...options }));
 }
 
-/** cleanup closes what the test opened and removes its files; register it with afterEach. */
-export function cleanup(): void {
-  for (const item of open.splice(0)) {
-    try {
-      item.close();
-    } catch {
-      // Closed by the test.
+/**
+ * cleanup closes what the test opened and removes its files; register it
+ * with afterEach, which passes the test's context, under which a
+ * recording names the test's scenario.
+ */
+export function cleanup(context?: TestContextLike): void {
+  try {
+    // A recording the recorder refuses fails the test, after the cleanup.
+    endCase(context);
+  } finally {
+    for (const item of open.splice(0)) {
+      try {
+        item.close();
+      } catch {
+        // Closed by the test.
+      }
     }
-  }
-  for (const directory of directories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -230,6 +251,20 @@ export function stepsDocument(): Record<string, unknown> {
 }
 
 /**
+ * numberedInvoicesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-numbering-json): its Invoice type composes Links, with the
+ * project every create gives, and Numbering, which numbers each invoice
+ * at its create, INV-2026-0001 on, in its project's count, starting
+ * again each UTC year.
+ */
+export function numberedInvoicesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-numbering-json/src/invoice.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
  * recipesDocument is the General schema-file document the core binary
  * loads with no extension linked beside the others (make cli-smoke,
  * fixture-branches-json), a schema named Recipe like its instance type,
@@ -240,5 +275,51 @@ export function stepsDocument(): Record<string, unknown> {
 export function recipesDocument(): Record<string, unknown> {
   return JSON.parse(
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-branches-json/src/recipe.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
+ * invoicesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-staterules-json): its Invoice type composes Workflow, from
+ * draft to sent, then paid or void, and StateRules, under which sent
+ * requires a customer, an amount and the lines and freezes them, and
+ * paid and void freeze every field, but for a caller with
+ * invoices.amend.
+ */
+export function invoicesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-staterules-json/src/invoice.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
+ * expensesDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-approvals-json), a schema named expenses: its Expense type
+ * composes Workflow, from draft to submitted, approved and paid, or
+ * rejected, and Approvals, whose approved state waits for two sign-offs by
+ * principals with expenses.approve, never the claimant's, and whose paid
+ * state, from approved, for one with expenses.pay.
+ */
+export function expensesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-approvals-json/src/expense.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
+ * requestsDocument is the General schema-file document the core binary
+ * loads with no extension linked beside the others (make cli-smoke,
+ * fixture-timers-json), a schema named requests: its Request type composes
+ * Workflow, from open to waiting, escalated or resolved, and Timers, whose
+ * respond escalates a request open four hours, whose lapse resolves one
+ * waiting a week, each cancelled when the request leaves that state, and
+ * whose remind fires a day before visitAt, with requests.timers to reset
+ * or snooze one.
+ */
+export function requestsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-timers-json/src/request.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }

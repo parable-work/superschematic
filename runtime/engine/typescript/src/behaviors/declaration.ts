@@ -68,6 +68,12 @@ export interface BehaviorVetoDeclaration {
 export interface BehaviorFieldDeclaration {
   readonly name: string;
   readonly description?: string;
+  /**
+   * True for a field that can move without an event of its own instance:
+   * computed at a read from other instances, the clock or the config. No
+   * event records such a move, so Reactions' changes refuses one (D56).
+   */
+  readonly volatile?: boolean;
 }
 
 export interface BehaviorOperationDeclaration {
@@ -126,7 +132,7 @@ const DECLARATION_KEYS = new Set([
   'preconditionSchema',
   'vetoes',
 ]);
-const FIELD_KEYS = new Set(['name', 'description']);
+const FIELD_KEYS = new Set(['name', 'description', 'volatile']);
 const VETO_KEYS = new Set(['code', 'description']);
 const OPERATION_KEYS = new Set(['name', 'description', 'paramsSchema', 'resultSchema', 'writes', 'scope', 'invocationPolicy']);
 
@@ -250,6 +256,9 @@ function checkFields(fields: unknown, problems: string[]): void {
     }
     unknownKeys(field, FIELD_KEYS, at, problems);
     optionalString(field.description, `${at}.description`, problems);
+    if (field.volatile !== undefined && typeof field.volatile !== 'boolean') {
+      problems.push(`${at}.volatile is a boolean`);
+    }
     if (typeof field.name !== 'string' || !FIELD_NAME.test(field.name)) {
       problems.push(`${at}.name ${JSON.stringify(field.name)} is not an identifier`);
       return;

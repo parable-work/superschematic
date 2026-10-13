@@ -1,0 +1,82 @@
+{
+  "name": "Numbering",
+  "description": "A number a person reads on each instance, set in its create's transaction from a count per namespace and schema: the format prints it, INV-{yyyy}-{seq:4} as INV-2026-0042. The count may run per target of a required, single-valued link and start again each UTC year, so a label is unique within its scope. A refused create takes no number; a delete leaves a gap. Nothing changes a number once set, and a list finds an instance by its label or its number. An instance made before its schema composed Numbering is numbered by assignNumber.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "format": {
+        "description": "How a number prints: text with {seq}, or {seq:N} zero-padded to N digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the instance was created in, as often as wanted. No other {...} is allowed.",
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "reset": {
+        "description": "yearly starts the count again at 1 each UTC year, the year the instance was created in; the format must then print the year, {yyyy} or {yy}.",
+        "enum": [
+          "yearly"
+        ]
+      },
+      "scope": {
+        "additionalProperties": false,
+        "description": "Counts per target of a link of the type's Links config, which is required and holds one target: each target's instances are numbered 1, 2, 3, ... of their own.",
+        "properties": {
+          "link": {
+            "description": "The link's name in the type's Links config.",
+            "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "format"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "seq",
+      "description": "The instance's number in its count, from 1; absent until it is numbered."
+    },
+    {
+      "name": "label",
+      "description": "The number as the format prints it, unique within its scope; absent until it is numbered."
+    }
+  ],
+  "operations": [
+    {
+      "name": "assignNumber",
+      "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The instance's number.",
+        "properties": {
+          "label": {
+            "description": "The number as the format prints it.",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its number in its count.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq",
+          "label"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

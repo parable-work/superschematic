@@ -734,6 +734,36 @@ for (const driver of drivers) {
       assert.deepEqual(seen, ['without schemas'], 'running a published version reads no other schema');
     });
 
+    test("parseConfig gets every behavior's declared fields, each saying whether it is volatile", () => {
+      let fields: unknown;
+      const looker = defineBehavior({
+        declaration: { name: 'test.Looker' },
+        parseConfig(_config, target) {
+          fields = target.behaviorFields;
+          return {};
+        },
+      });
+      const engine = open({ behaviors: [...testBehaviors, ...reachBehaviors, looker] });
+      engine.schemas.define(
+        alice,
+        document('Other', [
+          { name: 'test.Counter', config: { start: 0 } },
+          { name: 'Workflow', config: { states: ['open'], transitions: [] } },
+          { name: 'Dependencies' },
+          { name: 'test.Looker' },
+        ])
+      );
+      assert.deepEqual(fields, {
+        'test.Counter': [{ name: 'count', volatile: false }],
+        Workflow: [
+          { name: 'status', volatile: false },
+          { name: 'enteredAt', volatile: false },
+        ],
+        Dependencies: [{ name: 'blocked', volatile: true }],
+        'test.Looker': [],
+      });
+    });
+
     test("parseConfig gets the config of every behavior the type lists, as the schema holds it", () => {
       const engine = open({ behaviors: [...testBehaviors, ...reachBehaviors, needsLimit] });
       publish(engine, 'Item', [{ name: 'test.Counter', config: { start: 0, limit: 3 } }, { name: 'test.NeedsLimit' }]);

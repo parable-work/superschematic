@@ -26,9 +26,9 @@ import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from 
 /** What the test behaviors saw, in order. */
 const seen: Array<Record<string, unknown>> = [];
 
-afterEach(() => {
+afterEach((t) => {
   seen.length = 0;
-  cleanup();
+  cleanup(t);
 });
 
 interface ShapeConfig {

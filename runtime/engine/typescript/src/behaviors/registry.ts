@@ -158,9 +158,18 @@ export class BehaviorRegistry {
     return prefix;
   }
 
-  /** issues returns the ajv errors of the last validation as issues at JSON pointers. */
+  /**
+   * issues returns the ajv errors of the last validation as issues at JSON
+   * pointers, in a defined order rather than ajv's, which follows its
+   * compiled code: by instance path, then by keyword, then by message, each
+   * compared by Unicode code point, so another implementation can give the
+   * same list. The messages are ajv's.
+   */
   static issues(errors: ErrorObject[] | null | undefined): SchemaIssue[] {
-    return (errors ?? []).map((error) => ({ path: error.instancePath, message: describe(error) }));
+    return (errors ?? [])
+      .map((error) => ({ path: error.instancePath, keyword: error.keyword, message: describe(error) }))
+      .sort((a, b) => compareCodePoints(a.path, b.path) || compareCodePoints(a.keyword, b.keyword) || compareCodePoints(a.message, b.message))
+      .map(({ path, message }) => ({ path, message }));
   }
 
   private compile(implementation: AnyBehaviorImplementation): RegisteredBehavior {
@@ -498,6 +507,20 @@ function checkIndexes(at: string, declared: unknown, columns: readonly string[],
       problems.push(`${index} lists a column twice`);
     }
   }
+}
+
+// compareCodePoints orders two strings by Unicode code point, as their
+// UTF-8 bytes order, not by UTF-16 code unit as `<` does.
+function compareCodePoints(a: string, b: string): number {
+  const left = [...a];
+  const right = [...b];
+  for (let index = 0; index < left.length && index < right.length; index += 1) {
+    const difference = (left[index].codePointAt(0) as number) - (right[index].codePointAt(0) as number);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.length - right.length;
 }
 
 function describe(error: ErrorObject): string {

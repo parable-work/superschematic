@@ -5204,3 +5204,235 @@ cancel's 409 as the form's message, and a signed-out post of 4,000 or
 50,000 lines rendered with 51.
 
 The rule is reversible until the first release.
+
+## D56. Business records get deadlines, state rules, numbers and sign-offs, and a link may hold many targets
+
+The behaviors D16 ships came from claimable work: leases, queues,
+budgets, retries. A store, a salon, a help desk or an invoice needs
+other things of the instances it keeps: a deadline that moves an item
+on when nobody does, fields a state requires or freezes, a number a
+person reads out, and a sign-off by more than one person. This entry
+adds four core behaviors to `@superschematic/engine`, `Timers`,
+`StateRules`, `Numbering` and `Approvals`, and amends three, `Workflow`,
+`Reactions` and `Links`, for what they need. Holds, stock, calendars and
+payments come later and build on it.
+
+Three rules hold throughout. A duration or a time is an integer of
+milliseconds, as every config before has it (`ttlMs`, `sweepMs`):
+`Temporal.Duration` is written `1h30m`, and the engine has no parser for
+it. A change a read shows goes through an operation with its event; a
+sweep invokes an operation and writes nothing a read shows itself (D16).
+An operation name is flat across behaviors, a route, an MCP tool and the
+policy's `operation`, so each new one says what it acts on
+(`fireTimer`, `signOff`).
+
+### Workflow's `enteredAt`, the `volatile` flag and Reactions' `changes`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Workflow` gains the field `enteredAt`, when the status last changed, in epoch milliseconds: its create and each `transition` set it beside `status`. An instance that predates it has none until its next transition, since a behavior's migration and `afterConfigChange` reach only its own storage. | A reader that falls back to the instance's `createdAt`, one query more on every read, and wrong for an instance that moved before; an event read back from the log, which retention prunes |
+| A declaration's field may say `"volatile": true`: it can move without an event of its own instance, computed at read from other instances, the clock or the config. `Rollups.values`, `Dependencies.blocked`, `Lease.active`, `Links.targets` (whose `latest` and `stale` read the target) and `Budget.meters` (a daily meter starts again at read) are. The describe document carries the flag. | Marking nothing, under which a rule on a field can wait forever for an event that never records it; a flag per member of a field, for one field so far |
+| `ConfigTarget` gains `behaviorFields`, each behavior on the type with its declared fields and whether each is volatile. `behaviors` stays the list of names `parseConfig`s already read. | Turning `behaviors` into records, which breaks every `parseConfig` that calls `includes` on it, an extension's among them |
+| `Reactions` takes `{ when: { changes: { field, to?, from? } } }`. `field` is an own field (no dot) or a behavior's by qualified name, a member path after it allowed (`Timers.deadlines.sla.fired`), the behavior found by the longest of the type's behavior names that prefixes it. It fires on a create, an update or an operation event of its schema that moves the value: to `to` when given, from `from` when given; a create moves a field from absent; a delete fires nothing. An unknown field, a volatile one and `Workflow.enteredAt`, which every move of the status moves, are refused at define, and so is a `to` or `from` of `Workflow.status` that is not a state of the type's Workflow. | A signal each behavior declares and Reactions subscribes to, a second vocabulary beside the fields every reader already has; triggers per behavior added to Reactions one by one, as `enters` was |
+| A rule reads the move from the event: an operation's patch and an update's `behaviors` part are diffs, so a field the patch leaves out has not moved. It folds the instance before the event only for `from`, an object value, or an own field of an update, whose `data` is the caller's patch rather than a diff, once per event. A value the event keeps in the value store is compared once loaded. As with `enters`, a rule on the instance itself acts only while the field still holds `to`. A `changes` on `Workflow.status` joins the cycle check `enters` has: with `to` it moves on from that state, without it from each state a transition to its own state leaves. | Folding the instance for every rule on every event, which grows with each instance's history; comparing a value-store ref with a value |
+
+### Many-valued links
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A link may say `many: true` with a `max` from 1 to 100: it holds a list of targets, a ticket's reviewers or a stylist's services. `required` then means at least one. `targets.<name>` is a list for it, in the order the targets were linked, and the object it was for every other link. | A separate behavior for lists of links, which repeats pins, references and `listLinked`; no bound, under which every write reads every target twice for its event |
+| `link` adds a target to a many-valued link, or pins again one it holds, which keeps its place, and `unlink({ name, id })` removes one; a new target past `max` is `too_many`, a target it does not hold `not_linked`, the last of a required link `required_link`. Its create parameter is a list of at most `max` targets, at least one for a required link, each target once, a list that breaks one of these refused as an invalid argument before anything is stored. On a link that holds one target, `unlink`'s `id`, when given, must be the one it holds. A deleted target leaves the lists that hold it, and the delete is refused only when it would empty a required one. | `addLink` and `removeLink` beside `link`, two operations more on every type with Links, for what `link` and `unlink` already name |
+| The table is rebuilt once, keyed by the target as well as the name, its rows and their order kept. While a schema has instances, a link's `many` does not change and its `max` does not fall. | A second table for many-valued links, two layouts for one behavior |
+| What reads one target refuses a many-valued link, at define and again at run time, since another schema's Links config changes after: Reactions' `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`, Blueprint's `parentLink`, `from.link` and `copyLinks`, Budget's `scope`, Queue's `excludeStale` and Numbering's `scope`. `listLinked`, Rollups, Reactions' `revised` and Lease's `directOn` work over a list, `directOn` keyed by the target too. | Reading the first target, which picks one by an order nobody chose |
+
+### Timers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Timers` keeps named deadlines: `{ deadlines: { <name>: { start, afterMs?, then?, until? } }, sweepMs?, permission? }`. A deadline starts at the create (`{ create: true }`), each time the status enters a state (`{ enters }`), or at an own `date-time` field (`{ field }`), `afterMs` after it, before it with a negative `afterMs` for a field alone. When it comes due it fires; `then: { transition, from? }` moves the status, from the state the deadline starts in alone unless `from` says otherwise (the `enters` state, or the Workflow's initial state for a create), so an item resolved in time is never moved; a field start is in no state of its own and names `from`. `until` cancels a pending deadline once a change leaves the status out of the state it starts in (`{ leaves }`, which a field start cannot name) or in one of the states given (`{ enters }`). | ISO 8601 or Go durations, a parser in the engine for one config; a cron expression, which is a recurrence, a behavior of its own; `from` any state by default, under which a deadline moves an item already resolved |
+| A deadline arms when the fact it starts from changes, the `enteredAt` or the field's value, which `afterChange` reads from the instance as it is, never from which operation ran: a Lease expiry and a Reactions move change the status too. A later write that leaves the fact alone keeps a snooze or a reset, and a status that left and came back within one call is caught by its `enteredAt`. A field cleared cancels its deadline, and one moved arms it again. | Computing every deadline again at every write, which undoes a snooze; reading `change.operation === 'transition'`, which misses every other way the status moves |
+| `Timers.deadlines` gives each armed deadline's `dueAt`, `fired`, `firedAt` and the `outcome` of its move. Nothing in it follows the clock, so it is not volatile, and a rule hears `Timers.deadlines.<name>.fired` turn true; a reader works out what is overdue from `dueAt`. | An `overdue` member, which moves with the clock and no event |
+| The runner's `fire` schedule pages through due deadlines per namespace and schema, in order of due time and keyset by deadline, at most 1000 a run, and invokes `fireTimer` on each, passing over one a veto refuses, a Lease's guard say; any other failure, a policy that refuses the runner write, fails the run, which `runner.status()` shows. `fireTimer` fires one deadline that is due and has not fired, and changes nothing otherwise, so the sweep and a caller cannot fire one twice. It marks the deadline fired whatever its move meets, a veto or a missing permission, and records which in `outcome`, so one stuck instance never holds the sweep back. `resetTimer` and `snoozeTimer({ deadline, dueAt })` need the config's `permission`, which nobody holds when the config names none; a snoozed deadline that fired fires again at its new time. A deadline whose `until` holds when it comes due, as after a version that added the `until`, is cancelled instead of fired. | A permission only the runner holds, which no context can tell; a veto of a fire that is not due, which races the sweep; retrying a move a guard refused, which fires the same deadline forever |
+| A new version may change any deadline, and `Timers` joins and leaves a schema with instances, leaving with every row it kept. A changed `afterMs` moves due times from each deadline's start, which its row keeps, but a snoozed one's; a removed deadline's rows go, and so do those of a deadline whose `start` changes, which arms again at each instance's next write; a new `field` deadline arms every instance at publish, and a new `create` or `enters` one at each instance's next write. On a type with `Lease`, `"Timers.fireTimer"` belongs in its `exempt`, or the holder's lease refuses it. | Arming `enters` deadlines at publish, which needs Workflow's columns no other behavior reads in bulk |
+
+### StateRules
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `StateRules` says, per state of the type's `Workflow`, the own fields an instance must hold to enter it (`required`) and the ones that cannot change while it is in it (`frozen`, a list or `"all"`). A field is held when it is neither absent nor null. `permission` lets a caller change a frozen field. | Rules in `Workflow`'s own config, which every type that only moves a status would carry; conditions in an expression language, which this entry does not add |
+| A transition into a state missing a required field is vetoed (`missing_fields`), and a create into an initial state that requires one is refused as an invalid instance. An update, or an operation's `update()`, that changes a frozen field or clears a required one while the instance is in the state is vetoed (`frozen_fields`, `required_fields`, the second asked first, since no permission lifts it), a behavior's write included: a frozen result stays as it is. | Checking the state in `validate`, which sees the fields and not the status |
+| Any change of the rules is allowed: an instance that predates a requirement keeps working until it would lose a field the rule requires or enter the state. Flagged: Revisions' `propose` checks a patch without guards, so a proposal that changes a frozen field is refused at `approve`. | Refusing a stricter rule while the schema has instances, which keeps a business from ever tightening its own process |
+
+### Numbering
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Numbering` gives each instance a number a person reads, from `format`, a template of `{seq}` or `{seq:N}` (zero-padded to N digits, 1 to 10) exactly once and `{yyyy}` or `{yy}`, no other brace allowed: `INV-{yyyy}-{seq:4}` is `INV-2026-0042`. The count runs per namespace and schema, per target of a required single-valued link with `scope: { link }`, and starts again each UTC year with `reset: "yearly"`, which needs the year in the format, so a label is unique within its scope. | Any string template, under which two scopes print the same label; the year at the time of numbering, which puts a backfilled instance in the wrong year |
+| The number is set in the create's transaction, from its own table of counts, so a refused create takes none and leaves no gap; a delete leaves one. `Numbering.seq` and `Numbering.label` are filters, so `where: { "Numbering.label": "INV-2026-0042" }` finds the instance, and nothing changes a number once set. | An own field the behavior writes, which a create's event would not carry; a lookup operation beside the list's filter |
+| An instance made before the schema composed Numbering has no number until `assignNumber()`, which numbers it with an event and changes nothing on one numbered already; a deployment backfills in creation order. While the schema has instances, the format, the scope and the reset stay, and Numbering stays: added again, it would start counting again. With none, any of them may change, and the counts start again at 1. | Numbering every instance at publish, with no event for any of them; keeping the counts across a change made with no instance, which carries a count into a format that may print what it counted already |
+
+### Approvals
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Approvals` gates states of the type's `Workflow` on sign-offs: `{ gates: { <state>: { count, permission, from?, excludeCreator? } }, resetOnChange? }`. A transition into a gated state, from a state its `from` allows, waits for `count` distinct principals holding `permission` to sign off (`approvals_missing`). The creator cannot sign unless `excludeCreator` is false. | `Revisions`' review, one permission and one approval per proposed patch, which approves a change rather than a move; counting any principal, which lets one approver sign twice under two names only the policy knows apart |
+| `signOff({ state, note? })`, `withdrawSignOff({ state })` and the read-only `listSignOffs`, named apart from `Revisions`' `approve` and `reject`. A sign-off is refused while the instance is in the gated state (`in_state`), since entering it consumed the gate's. `Approvals.gates` lists each gate's current sign-offs, by subject; the count a gate needs stays in the config, since a publish that changes it writes no event. | `approve` and `reject`, which a type composing `Revisions` already has |
+| A change of the own fields, an update or an operation's `update()`, consumes the sign-offs of every gate unless `resetOnChange` is false, so what was signed is what moves. Entering a gated state consumes its sign-offs too: a return to it signs again. Both read the instance as it is, whichever operation ran. Consumed sign-offs stay in the behavior's table for `listSignOffs`. On a type with `Lease`, `signOff` and `withdrawSignOff` belong in its `exempt`. | Sign-offs that outlive a change of what was signed; resetting only on a transition, which a Timers or a Lease move would skip |
+| A new version may add, change and remove gates: a removed gate's sign-offs are consumed, and a gate's new count or permission applies to the sign-offs already given. `Approvals` joins a schema that has instances, which start with none, and does not leave one, whose sign-offs would stay behind with nothing to delete them. A withdrawal deletes its sign-off, which the operation's event records. | Refusing a higher count while the schema has instances, which keeps a business from tightening its own process; keeping a withdrawn sign-off beside the consumed ones, a third kind of row for `listSignOffs` to tell apart |
+
+Status: built. `@superschematic/engine` registers `Timers`, `StateRules`,
+`Numbering` and `Approvals` when it opens, beside the core's other
+behaviors, and the core declares them, twenty-two behaviors in all;
+`Workflow` gives `enteredAt`, `Reactions` takes `changes`, a link may be
+many-valued, and five declared fields are volatile. Each has a suite in
+`runtime/engine/typescript/test` (`core-timers`, `core-staterules`,
+`core-numbering`, `core-approvals`, `core-reactions-changes`,
+`core-links-many`), run on both SQLite drivers, and the work-queue
+package's tests compose them with `Lease`. `make cli-smoke` loads a
+fixture of each new behavior in both forms; the engine runs them in
+`core-behaviors.test.ts`; `superschematic engine-client` types their
+fields. The names and rules are reversible until the first release.
+
+## D58. The engine is one Rust library every server links, over Postgres in a stack and SQLite in one process, and it serves its own routes
+
+D16 built the engine as the TypeScript package `@superschematic/engine`:
+one SQLite file, one process writing it, behavior code synchronous inside
+the write transaction. A generated server refuses a type that composes a
+behavior, so behaviors reach only a deployment written by hand in
+TypeScript, as `examples/engine-notes` and `examples/engine-jobs` are. A
+stack's servers are Go, TypeScript and Rust (D51, D57); Cloud Run runs
+each as many instances, and their data is in Postgres. This entry puts
+the engine in every one of them, as one implementation, so a type's
+behaviors do the same thing whichever language serves it: the engine
+becomes a Rust library each server links through a binding.
+
+It departs from D19 for the engine. The version graph's core is pure, so
+each language keeps an engine of its own around it, over its own driver.
+The behavior engine's logic is the SQL its behaviors run; split by
+language, it would be three implementations of every behavior, which is
+what D17 turned down for the merge rules.
+
+The engine:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine is the Cargo workspace `runtime/engine/rust`: `superschematic-engine` (the engine, the behavior API and its transport-neutral HTTP layer), `superschematic-engine-storage` (both databases), `superschematic-engine-behaviors` (the core's behaviors), a test kit, and a crate per binding. The work-queue behaviors are `superschematic-engine-workqueue` in `runtime/engine-workqueue/rust`, on the engine's public API alone, as the TypeScript package is. Every crate builds with the toolchain `tools.env` pins. | An engine in Go, which a TypeScript server would reach through a subprocess or wasm; keeping the TypeScript engine and adding a Go and a Rust one held equal by vectors, three implementations of every behavior |
+| The engine is synchronous. A call runs on one thread; behavior hooks run inside its transaction and call back into the engine, each nested call in a savepoint, sixteen deep at most, as D16 has them. It reaches Postgres through the `postgres` crate, the synchronous client over the tokio-postgres the version graph's Rust engine uses, and SQLite through rusqlite and the SQLite it bundles. A binding gives its host an asynchronous call by running the synchronous one off the host's event loop. | Asynchronous hooks, which make every behavior's code a future that holds the transaction across awaits; an engine that owns a scheduler of its own inside every server |
+| A behavior is a Rust type that implements the engine's `Behavior` trait: its declaration, the JSON file D16 copies into the crate; a config typed in Rust, parsed from the declared JSON; and its hooks, each optional, since an absent hook means something of its own, as in TypeScript. An extension's behavior is a crate implementing the same trait. A project's engine is a value its build assembles from the core's behaviors, the work queue's and its extensions', not a registry the linker collects. A project that uses an extension's behavior builds its engine from a crate the compiler writes; one that uses the core's alone takes the release's build. | WebAssembly plugins, one engine for every project but a plugin interface, a runtime and slower hooks; behaviors in the host's language called back across the binding, which a server in another language cannot run; registration the linker collects, which a static archive's link can drop |
+
+Storage:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine keeps its data in Postgres or SQLite. In a stack it uses the database of the DB service its types belong to, its tables in a Postgres schema of their own (`engine` unless configured). SQLite is a file one process writes: a test, a local run, a Topcoat app (D44). | SQLite alone, which two instances of a server cannot share; Postgres alone, which takes the engine out of a Topcoat app and puts a database server under every test |
+| Behaviors keep writing SQL text with `?` placeholders, which the engine numbers for Postgres. A statement the two databases word differently is written once for each, as JSON access and a parameter whose type Postgres cannot infer need, a few dozen of some 165. A behavior declares its tables as specs the engine writes for each database, `STRICT` and SQLite's types or Postgres's, and keeps `up()` for the rest. Full-text search is the engine's own: FTS5 on SQLite, a `tsvector` with a GIN index on Postgres. Search ranks differently on each, and its documentation says so. | A dialect layer every statement passes through, which D16 turned down; a query builder, which rewrites every statement and has neither JSON nor full-text search |
+| Postgres keeps D16's one writer per namespace. A write transaction runs at READ COMMITTED and takes an advisory lock on its namespace and a shared one on the catalog; a define, a publish, a change of namespaces and a migration take the catalog's alone; a lock that waits past the busy timeout is the engine's refusal `busy` (503, and the call may be tried again) on both databases, as SQLite's `SQLITE_BUSY` is, a code the TypeScript engine lacked: it let `SQLITE_BUSY` through as an internal error. Migrations at start hold a lock of the session, so instances that start together migrate once. | SERIALIZABLE with retries, which runs a behavior's code twice; a row lock per instance, which every behavior that reads another instance would have to take |
+| Postgres aborts a transaction at any error, so a statement whose error the engine handles runs in a savepoint, a behavior handles one through `try_run`, and a unique conflict is `ON CONFLICT DO NOTHING` and a count. `unchanged()` reads a count of the rows the call wrote, which never goes down, as SQLite's `total_changes()` never does. An instance's data stays JSON text in both, its keys and numbers as written, and a Postgres filter casts the member it reads. | Catching errors as SQLite allows, which leaves a Postgres transaction refusing every later statement |
+| On Postgres a commit notifies (`pg_notify`) and each process listens, so an event stream, `watch` and the runner wake on every instance; a cache holds only what never changes; the runner runs while its process holds a lock of the session. The engine keeps its migration ledger, and a file the TypeScript engine wrote opens and migrates. | A notifier inside the process, which one process writing the file allowed |
+
+Schemas, messages and access:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine reads schema-file documents and validates instances against their IR in Rust. The schema runtime's Rust crate gains an IR reader and validator and the strict schema-file loader, held to Go's and TypeScript's by `runtime/schema/testdata/validation_parity.json` and `schema_file_parity.json`. JSON Schema, for configs and operations' parameters and results, is the `jsonschema` crate, its messages written as ajv writes them and in one defined order, since clients and agents read them. Numbers are written as JavaScript writes them. | Validators generated per schema, which a schema defined while the engine runs has none of; new wording, which every client that matches a message would see change |
+| Access is a policy the engine reads as data: ordered rules, the first that matches deciding (a question no rule matches is refused), each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold (`hasAnyPermission`, `{schema}`, `{action}`, `{namespace}` and `{operation}` standing for the question's) or allowing or refusing outright; `allowAll` and `permission`, today's `permissionPolicy`, are shorthands. A deployment that needs more compiles a Rust policy into its engine. What D16's deployment passed as functions, the ids, the clock, the value store's driver and the permission matcher, is config. A `system` principal, which no request can be, publishes when a server starts. | A policy function the host supplies and the engine asks on every call, which a Go or Rust host would answer through a callback across the binding |
+
+What it serves, and the bindings:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine serves its own routes. A request goes in, with its method, prefix, path, query, headers, body and the caller the host authenticated, and a response comes out, its body bytes or a stream. Routing, decoding, ETags and preconditions, the success envelope and RFC 9457 problems (D15), the service-caller rule (D37), the event stream's frames and the MCP endpoint's JSON-RPC are the engine's. Authentication (D50, D37), request ids, body and rate limits, timeouts and CORS stay with the host's HTTP runtime, which mounts the engine at a prefix. MCP is the stateless streamable transport, so instances share nothing for it. | Routes in each runtime held equal by vectors, as D50's identity routes are: twenty-six routes, an event stream and MCP in three languages |
+| Go reaches the engine through a C ABI over a static archive, in the module `runtime/engine/go`, as the version graph's Go binding does (D17, D47 amended): JSON in and out, output the engine allocates and frees, a panic caught at every export and returned as an `internal` error, and an engine that panicked inside a transaction refusing every later call, so its server's readiness fails. The release's archives gain the engine's. The version graph's C functions go behind a feature the engine leaves off, so a binary that links both archives defines each symbol once. | One archive carrying superscalar's, the version graph's and the engine's C functions, which superscalar's Go binding, linking its own archive by name, cannot use |
+| TypeScript reaches it through a Node-API addon, which Bun loads as it loads superscalar's. `@superschematic/engine` keeps its API: `openEngine` returns the synchronous `Engine` it returns today, over SQLite, and `openEngineAsync` the same methods returning promises, for a server on Postgres. `engineApp` and `engineMcp` become Hono adapters over the engine's routes. `@superschematic/engine/client` stays TypeScript. | The version graph's wasm build, which opens no socket and no file; an asynchronous API everywhere, which rewrites every test and local use for a server's sake |
+| A Rust server links the crate, mounts the engine's axum router at a prefix and calls the engine through `spawn_blocking`. | |
+
+Servers:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type in a DB schema that composes a behavior is an engine type: its instances are the engine's, in that DB service's database, and `sql`, `orm` and D27's migrations leave it and the engine's schema out. A behavior on an API's own type stays refused. The types generators write a behavior's fields under its name (D16, amended), so each generator that meets an engine type renders behaviors. A new generator writes each engine database's document: its namespace, the meta-schema, the D11 tool options, the behaviors and their crates, and a schema-file document per engine type. | A service kind of its own for engine types, a fourth kind for what a DB service already is |
+| A server whose API's database holds engine types opens the engine on it, reaching Cloud SQL through the socket Cloud Run mounts, with an IAM token, as D57 does. It migrates and publishes the document before it reports ready, under a lock, and does nothing when the live versions match. It mounts the engine at the database's `engine.mount` (`/engine/<db>` unless set), behind its API's identity and service callers. On gcp the engine's runner is a worker pool of its own, one instance of the server's image, since Cloud Run gives a request-serving instance CPU only while it serves (D53); on `local` the server runs it. | A runner in every server instance, idle between requests; publishing from CI, which a server that migrates its database at start does not need |
+
+Proving it:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Before the TypeScript engine goes, its behavior is recorded as data: scenarios of calls and their results, with fixed ids and a fixed clock, in `runtime/engine/testdata/scenarios`; its HTTP, event-stream and MCP exchanges; and SQLite files at each migration version. The Rust engine, each binding and each server runtime replay them, on SQLite and on Postgres. The engine's TypeScript suite runs against the addon, a list of the files not yet passing shrinking to none; a test that defines a behavior in TypeScript runs it through a bridge built into the test addon alone. One script drives a Go, a TypeScript and a Rust server, and their transcripts must match. | The TypeScript suite alone, which the Go and Rust bindings cannot run |
+
+This entry amends D16: the engine is the Rust library, not the
+TypeScript package; its storage is Postgres or SQLite; the access policy
+is data; an extension that declares a behavior ships it as a Rust crate;
+and generators render behaviors on DB types. It amends D19 for the
+engine alone; D32 for Branches, which runs the version graph's Rust
+engine over the behavior's transaction in place of the TypeScript
+`SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
+the engine mounts in.
+
+Status: not built. `runtime/engine/rust` holds the workspace;
+`superschematic-engine-storage`: both databases' transactions, savepoints
+and writer locks, the write counter, the migration ledger with the
+engine's migrations for each, a behavior's storage and SQL checker, and
+the commit notifier; in `superschematic-engine`, opening an engine on its
+storage and migrating it, the namespaces, the schema registry with its
+validator over `superschematic-schema-ir`, the compatibility rule and the
+display and index checks, the access policy read as rules (or a Rust
+policy compiled in) with the `system` principal always allowed, the
+instances with their filters, unique indexes and lookups, the event log
+with its reads and its watch on the notifier, the value store with its
+configured driver, the engine's refusals with their codes, the calls by
+name with JSON arguments that the bindings will make, the principal, and
+JSON written and hashed as JavaScript writes it; the behavior API
+(milestone 5): a behavior is a Rust type with its declaration, a typed
+config and optional hooks, registered when the engine opens or later,
+composed and checked at define and publish, its storage migrated and its
+afterConfigChange run in the publish's transaction, and run with every
+call on its instances (initialize with create parameters, guards with
+veto codes and preconditions, validate, operations and schema-level
+operations through invoke, operate and invokeSchema, update and
+unchanged, the fields it adds, afterChange, reads, invokes and creates of
+other instances, references with their guards and hooks, and the relation
+over its columns), a panic in a hook a BehaviorError, and the paging of
+a behavior's list operations; the runner (milestone 6), which runs
+reactions after the commit and schedules every everyMs, driven by its
+host (`run_due`, `next_wake`) or by a thread of its own that waits on the
+notifier, and on Postgres only in the process that holds its session
+advisory lock, another taking over when it stops, with retention pruning
+the event log; the describe and tools documents, the behavior catalog
+and a tool run by its MCP handle, under the invocation policy and vendor
+keys the engine's options give; the HTTP API as one request and one
+response any host mounts (`engine::api`): the 26 routes and the MCP
+endpoint, their parameters, media types, ETags and preconditions,
+envelope and problems, `Location` under the prefix, 401 with no caller
+and the D37 stand-in, the event stream's every byte, which the host
+pulls a frame at a time, and MCP's stateless JSON-RPC on the 2025
+revisions and 2026-07-28, the host keeping authentication, request ids,
+body and rate limits, timeouts and CORS; the calls by name for all of
+it, an event stream held by an id; and a Postgres connect bounded by its
+connect timeout end to end; `superschematic-engine-behaviors`, the
+core's behaviors, each over the copy of its declaration that `make
+behaviors` writes into the crate and CI checks, which a host passes in
+its options (`core()`) since the engine cannot depend on them: wave 1
+(milestone 8) has ported Workflow (with D56's enteredAt), Comments,
+Constants and Variants, and wave 2 (milestone 9) Revisions,
+Dependencies, Links (with D56's many-valued links, and what a move of a
+link's target moves on, which Reactions and Lease hear), and D56's
+Numbering, StateRules, Approvals and Timers, whose deadlines the runner
+fires, with their guidance, migrations on both databases, configs,
+guards, fields, operations, schedules and veto codes; and
+`superschematic-engine-testkit`, which ports the TypeScript tests'
+behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
+retention's and the tools', and those of the ported behaviors'
+`test/core-*.test.ts` against the engine, and replays the scenario and
+HTTP corpora, those behaviors' files included, giving their recorded
+answers on SQLite and Postgres for every case whose behaviors it has,
+an event cursor on Postgres held to the recorded order rather than its
+number (a write a rollback undid leaves a gap in a Postgres identity
+column), but for a step it lists with what explains it (a change the
+recording does not see). CI tests the
+workspace on both databases. The Node-API addon is milestone 7, the
+other core behaviors (Rollups, Search and Reactions, then Branches)
+milestones 10 and 11, and the work queue's milestone 12. Until the Rust
+engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
+
+The rule is reversible until the first release.

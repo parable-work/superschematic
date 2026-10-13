@@ -50,7 +50,7 @@
   },
   "requires": ["Workflow"],
   "fields": [
-    { "name": "blocked", "description": "Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts." }
+    { "name": "blocked", "description": "Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.", "volatile": true }
   ],
   "operations": [
     {

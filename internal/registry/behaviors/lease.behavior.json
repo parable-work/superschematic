@@ -127,7 +127,7 @@
     { "name": "acquiredAt", "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free." },
     { "name": "renewedAt", "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free." },
     { "name": "expiresAt", "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free." },
-    { "name": "active", "description": "Whether a lease is held and has not expired." },
+    { "name": "active", "description": "Whether a lease is held and has not expired.", "volatile": true },
     { "name": "expiries", "description": "How many leases have expired or been abandoned since the last resetExpiries." },
     { "name": "ended", "description": "How and when the last lease ended (reason and at); absent while one is held." }
   ],

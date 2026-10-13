@@ -1,0 +1,19 @@
+# The engine in Rust (D58): one workspace and one lock file, every crate built
+# with the toolchain tools.env pins, since the archives a Go binary links must
+# come from one Rust release. Nothing consumes these crates from a registry.
+
+[workspace]
+resolver = "2"
+members = ["behaviors", "engine", "storage", "testkit"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.99.0"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+publish = false
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

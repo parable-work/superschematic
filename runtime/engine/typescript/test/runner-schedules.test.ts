@@ -20,9 +20,9 @@ import {
   testClock,
 } from './runner-fixtures.ts';
 
-afterEach(() => {
+afterEach((t) => {
   resetProbe();
-  cleanup();
+  cleanup(t);
 });
 
 function schedules(engine: Engine): Record<string, Omit<ScheduleStatus, 'behavior' | 'schedule' | 'namespace' | 'schema'>> {

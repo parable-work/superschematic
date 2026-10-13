@@ -1,9 +1,10 @@
 // Lease's directOn: when the target of a link moves on, a new revision of
 // Revisions or a release of Branches, the runner sends the holder of each
 // instance linked to it the config's directive through Lease's direct, as
-// its principal, once per lease and move (direct's dedupeKey). An
-// instance with no lease hears nothing, now or when it is next taken; a
-// pinned link tells only the instances the target moved past. Without
+// its principal, once per lease and move of a target (direct's
+// dedupeKey). An instance with no lease hears nothing, now or when it is
+// next taken; a pinned link tells only the instances the target moved
+// past; a many-valued link hears each of its targets. Without
 // directOn Lease's reactions are off, and they start at the publish that
 // turns them on. Real SQLite, a real engine and its runner.
 import assert from 'node:assert/strict';
@@ -125,7 +126,7 @@ for (const driver of drivers) {
             id: 1,
             name: 'rebase',
             data: { why: 'the plan moved', revised: { link: 'plan', schema: 'Plan', id: 'p1', revision: 2 } },
-            dedupeKey: 'revised plan 2',
+            dedupeKey: 'revised plan p1 2',
             createdBy: 'runner',
           },
         ]
@@ -135,7 +136,7 @@ for (const driver of drivers) {
       const direct = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.find((event) => (event.change as { operation?: string }).operation === 'direct');
       assert.deepEqual([direct?.actor, direct?.cause], ['runner', { behavior: 'Lease', event: revised?.cursor, depth: 1 }]);
       // The dedupe key is direct's: sent again under the lease, it stands.
-      assert.deepEqual(engine.instances.invoke(runner, 'Job', 'j1', 'direct', { name: 'rebase', dedupeKey: 'revised plan 2' }), { id: 1, created: false });
+      assert.deepEqual(engine.instances.invoke(runner, 'Job', 'j1', 'direct', { name: 'rebase', dedupeKey: 'revised plan p1 2' }), { id: 1, created: false });
       // j2 had no lease: nothing was sent, and nothing waits for its next holder.
       const { token } = engine.instances.invoke(wren, 'Job', 'j2', 'acquire', {}) as { token: number };
       assert.deepEqual(directives(engine, wren, 'j2', token), []);
@@ -152,7 +153,7 @@ for (const driver of drivers) {
       // Before the runner hears it, j3 is pinned to revision 2.
       engine.instances.invoke(otto, 'Job', 'j3', 'link', { name: 'plan', id: 'p1' }, fenced(tokens.j3));
       engine.runner.runDue();
-      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['revised plan 2']);
+      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['revised plan p1 2']);
       assert.deepEqual(directives(engine, otto, 'j3', tokens.j3), []);
       engine.instances.update(alice, 'Plan', 'p2', { title: 'notes, revised' });
       engine.runner.runDue();
@@ -183,7 +184,7 @@ for (const driver of drivers) {
       engine.runner.runDue();
       assert.deepEqual(
         directives(engine, wren, 'j1', tokens.j1).map((directive) => [directive.name, directive.data, directive.dedupeKey]),
-        [['reload', { revised: { link: 'recipe', schema: 'Recipe', id: 'soup', release: 1, commit: merged } }, 'released recipe 1']]
+        [['reload', { revised: { link: 'recipe', schema: 'Recipe', id: 'soup', release: 1, commit: merged } }, 'released recipe soup 1']]
       );
     });
 
@@ -204,8 +205,32 @@ for (const driver of drivers) {
       // Before the runner hears it, j3 is pinned to release 2.
       engine.instances.invoke(otto, 'Job', 'j3', 'link', { name: 'recipe', id: 'soup' }, fenced(tokens.j3));
       engine.runner.runDue();
-      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['released recipe 2']);
+      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['released recipe soup 2']);
       assert.deepEqual(directives(engine, otto, 'j3', tokens.j3), []);
+    });
+
+    test('a many-valued link tells the holder of each job that holds a target the target moved past, once per target and move', () => {
+      const { engine, tokens } = world(
+        { directPermission: 'jobs.direct', directOn: [{ revised: { link: 'plans' }, name: 'replan' }] },
+        {},
+        { plans: { schema: 'Plan', many: true, max: 3, pinned: true } }
+      );
+      engine.instances.create(alice, 'Plan', { title: 'p3' }, { id: 'p3' });
+      engine.instances.invoke(wren, 'Job', 'j1', 'link', { name: 'plans', id: 'p2' }, fenced(tokens.j1));
+      engine.instances.invoke(wren, 'Job', 'j1', 'link', { name: 'plans', id: 'p3' }, fenced(tokens.j1));
+      engine.instances.invoke(otto, 'Job', 'j3', 'link', { name: 'plans', id: 'p3' }, fenced(tokens.j3));
+      engine.instances.update(alice, 'Plan', 'p2', { title: 'notes, revised' });
+      engine.instances.update(alice, 'Plan', 'p3', { title: 'p3, revised' });
+      engine.runner.runDue();
+      // Both of j1's targets moved to revision 2: a directive for each.
+      assert.deepEqual(
+        directives(engine, wren, 'j1', tokens.j1).map((directive) => [directive.data?.revised, directive.dedupeKey]),
+        [
+          [{ link: 'plans', schema: 'Plan', id: 'p2', revision: 2 }, 'revised plans p2 2'],
+          [{ link: 'plans', schema: 'Plan', id: 'p3', revision: 2 }, 'revised plans p3 2'],
+        ]
+      );
+      assert.deepEqual(directives(engine, otto, 'j3', tokens.j3).map((directive) => directive.dedupeKey), ['revised plans p3 2']);
     });
 
     test('without directOn the reactions are off; a version that adds it hears only what comes after its publish', () => {
@@ -219,7 +244,7 @@ for (const driver of drivers) {
       assert.deepEqual(directives(engine, wren, 'j1', tokens.j1), []);
       engine.instances.update(alice, 'Plan', 'p1', { title: 'v3' });
       engine.runner.runDue();
-      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['revised plan 3']);
+      assert.deepEqual(directives(engine, wren, 'j1', tokens.j1).map((directive) => directive.dedupeKey), ['revised plan p1 3']);
     });
 
     test("a runner whose principal lacks the permission fails the subscription, forbidden, where an operator sees it", () => {

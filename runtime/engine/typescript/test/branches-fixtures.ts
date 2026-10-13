@@ -5,7 +5,6 @@
 import {
   allowAll,
   openDriver,
-  openEngine,
   type DriverName,
   type Engine,
   type EngineOptions,
@@ -13,7 +12,7 @@ import {
   type Row,
   type SqlValue,
 } from '../dist/index.js';
-import { alice, clone, freshPath, schemaDocument, track } from './helpers.ts';
+import { alice, clone, freshPath, openEngine, schemaDocument, track } from './helpers.ts';
 
 /** The Branches config of the Recipe document. */
 export const recipeConfig = {
