@@ -24,15 +24,15 @@
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-api",
-      "address": "http://127.0.0.1:20638",
-      "publicAddress": "http://127.0.0.1:20638",
+      "address": "http://127.0.0.1:20839",
+      "publicAddress": "http://127.0.0.1:20839",
       "bindings": [
         {
           "field": "SHOP_API_CORS",
           "source": "derived",
           "value": {
             "origins": [
-              "http://127.0.0.1:20852"
+              "http://127.0.0.1:21053"
             ]
           },
           "corsOf": "shop-api",
@@ -51,7 +51,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-api->shop-db"
         },
@@ -59,7 +59,7 @@
           "field": "SHOP_MEDIA_BUCKET",
           "source": "derived",
           "value": {
-            "endpoint": "http://127.0.0.1:23473",
+            "endpoint": "http://127.0.0.1:23674",
             "name": "shop-media"
           },
           "edge": "bucket:shop-api->shop-media"
@@ -78,7 +78,7 @@
       ],
       "dialect": "postgres",
       "resourceName": "shop-db",
-      "address": "127.0.0.1:30473"
+      "address": "127.0.0.1:30674"
     },
     {
       "name": "shop-media",
@@ -91,7 +91,7 @@
         }
       ],
       "resourceName": "shop-media",
-      "address": "http://127.0.0.1:23473"
+      "address": "http://127.0.0.1:23674"
     },
     {
       "name": "shop-orders",
@@ -103,17 +103,23 @@
           "kind": "API"
         }
       ],
+      "calls": [
+        {
+          "name": "shop-stock",
+          "kind": "API"
+        }
+      ],
       "language": "GO",
       "exposed": true,
       "resourceName": "shop-orders",
-      "address": "http://127.0.0.1:22735",
-      "publicAddress": "http://127.0.0.1:22735",
+      "address": "http://127.0.0.1:20168",
+      "publicAddress": "http://127.0.0.1:20168",
       "bindings": [
         {
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders->shop-db"
         },
@@ -123,6 +129,25 @@
           "value": "{\"cookie\":{\"secure\":false}}",
           "default": true,
           "identityOf": "shop-orders"
+        },
+        {
+          "field": "SHOP_STOCK_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-stock",
+              "issuer": "shop-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:22565"
+          },
+          "edge": "http:shop-orders->shop-stock"
         }
       ]
     },
@@ -133,6 +158,12 @@
       "services": [
         {
           "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-stock",
           "kind": "API"
         }
       ],
@@ -152,9 +183,28 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders-fulfil-orders->shop-db"
+        },
+        {
+          "field": "SHOP_STOCK_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-stock",
+              "issuer": "shop-orders-fulfil-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders-fulfil-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:22565"
+          },
+          "edge": "http:shop-orders-fulfil-orders->shop-stock"
         }
       ]
     },
@@ -165,6 +215,12 @@
       "services": [
         {
           "name": "shop-orders",
+          "kind": "API"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-stock",
           "kind": "API"
         }
       ],
@@ -183,9 +239,156 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders-ship-orders->shop-db"
+        },
+        {
+          "field": "SHOP_STOCK_SERVICE",
+          "source": "derived",
+          "value": {
+            "credential": {
+              "audience": "shop-stock",
+              "issuer": "shop-orders-ship-orders",
+              "key": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              },
+              "source": "signed-token"
+            },
+            "url": "http://127.0.0.1:22565"
+          },
+          "edge": "http:shop-orders-ship-orders->shop-stock"
+        }
+      ]
+    },
+    {
+      "name": "shop-stock",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "shop-stock",
+          "kind": "API"
+        }
+      ],
+      "language": "RUST",
+      "exposed": true,
+      "resourceName": "shop-stock",
+      "address": "http://127.0.0.1:22565",
+      "publicAddress": "http://127.0.0.1:22565",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-stock->shop-db"
+        },
+        {
+          "field": "SHOP_STOCK_CALLERS",
+          "source": "derived",
+          "value": {
+            "issuers": [
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-stock",
+                "callers": [
+                  {
+                    "deployable": "shop-orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "shop-orders"
+                  }
+                ],
+                "issuer": "shop-orders",
+                "keys": [
+                  {
+                    "jwk": {
+                      "$output": {
+                        "resource": "shop-orders.calls.shop-stock.key",
+                        "name": "publicJwk"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              },
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-stock",
+                "callers": [
+                  {
+                    "deployable": "shop-orders-fulfil-orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "shop-orders-fulfil-orders"
+                  }
+                ],
+                "issuer": "shop-orders-fulfil-orders",
+                "keys": [
+                  {
+                    "jwk": {
+                      "$output": {
+                        "resource": "shop-orders-fulfil-orders.calls.shop-stock.key",
+                        "name": "publicJwk"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              },
+              {
+                "algorithms": [
+                  "EdDSA"
+                ],
+                "audience": "shop-stock",
+                "callers": [
+                  {
+                    "deployable": "shop-orders-ship-orders",
+                    "serves": [
+                      "shop-orders"
+                    ],
+                    "subject": "shop-orders-ship-orders"
+                  }
+                ],
+                "issuer": "shop-orders-ship-orders",
+                "keys": [
+                  {
+                    "jwk": {
+                      "$output": {
+                        "resource": "shop-orders-ship-orders.calls.shop-stock.key",
+                        "name": "publicJwk"
+                      }
+                    }
+                  }
+                ],
+                "maxLifetimeSeconds": 300
+              }
+            ]
+          },
+          "callersOf": "shop-stock",
+          "edges": [
+            "http:shop-orders->shop-stock",
+            "http:shop-orders-fulfil-orders->shop-stock",
+            "http:shop-orders-ship-orders->shop-stock"
+          ]
+        },
+        {
+          "field": "SHOP_STOCK_IDENTITY",
+          "source": "literal",
+          "value": "{\"cookie\":{\"secure\":false}}",
+          "default": true,
+          "identityOf": "shop-stock"
         }
       ]
     },
@@ -202,8 +405,8 @@
       "language": "TYPESCRIPT",
       "exposed": true,
       "resourceName": "shop-storefront",
-      "address": "http://127.0.0.1:20634",
-      "publicAddress": "http://127.0.0.1:20634"
+      "address": "http://127.0.0.1:20835",
+      "publicAddress": "http://127.0.0.1:20835"
     },
     {
       "name": "shop-web",
@@ -229,14 +432,14 @@
       },
       "exposed": true,
       "resourceName": "shop-web",
-      "address": "http://127.0.0.1:20852",
-      "publicAddress": "http://127.0.0.1:20852",
+      "address": "http://127.0.0.1:21053",
+      "publicAddress": "http://127.0.0.1:21053",
       "bindings": [
         {
           "field": "shop-api",
           "source": "derived",
           "value": {
-            "url": "http://127.0.0.1:20638"
+            "url": "http://127.0.0.1:20839"
           },
           "edge": "site:shop-web->shop-api"
         }
@@ -255,6 +458,42 @@
       },
       "connector": "local.process-gcs",
       "field": "SHOP_MEDIA_BUCKET"
+    },
+    {
+      "id": "http:shop-orders->shop-stock",
+      "kind": "http",
+      "from": "shop-orders",
+      "to": "shop-stock",
+      "service": {
+        "name": "shop-stock",
+        "kind": "API"
+      },
+      "connector": "local.process-process",
+      "field": "SHOP_STOCK_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-fulfil-orders->shop-stock",
+      "kind": "http",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-stock",
+      "service": {
+        "name": "shop-stock",
+        "kind": "API"
+      },
+      "connector": "local.worker-process",
+      "field": "SHOP_STOCK_SERVICE"
+    },
+    {
+      "id": "http:shop-orders-ship-orders->shop-stock",
+      "kind": "http",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-stock",
+      "service": {
+        "name": "shop-stock",
+        "kind": "API"
+      },
+      "connector": "local.job-process",
+      "field": "SHOP_STOCK_SERVICE"
     },
     {
       "id": "site:shop-web->shop-api",
@@ -315,6 +554,18 @@
       },
       "connector": "local.job-postgres",
       "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-stock->shop-db",
+      "kind": "sql",
+      "from": "shop-stock",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
     }
   ],
   "resources": {
@@ -331,16 +582,16 @@
           ],
           "image": "postgres:16-alpine",
           "labels": {
-            "superschematic.checkout": "841686",
+            "superschematic.checkout": "5dbd8f",
             "superschematic.environment": "Dev",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-dev-841686-postgres",
+          "name": "superschematic-shop-stack-dev-5dbd8f-postgres",
           "ports": [
             {
               "containerPort": 5432,
               "host": "127.0.0.1",
-              "hostPort": 30473
+              "hostPort": 30674
             }
           ],
           "readiness": {
@@ -368,7 +619,7 @@
           "env": [
             {
               "name": "SHOP_API_CORS_ORIGINS",
-              "value": "http://127.0.0.1:20852"
+              "value": "http://127.0.0.1:21053"
             },
             {
               "name": "SHOP_API_IDENTITY",
@@ -376,11 +627,11 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-              "value": "http://127.0.0.1:23473"
+              "value": "http://127.0.0.1:23674"
             },
             {
               "name": "SHOP_MEDIA_BUCKET_NAME",
@@ -390,7 +641,7 @@
           "language": "go",
           "module": "server/shop-stack/shop-api",
           "name": "shop-api",
-          "port": 20638,
+          "port": 20839,
           "readiness": "/readyz"
         },
         "phase": "rollout",
@@ -410,7 +661,7 @@
           },
           "name": "shop_db",
           "service": "shop-db",
-          "url": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+          "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
         },
         "dependsOn": [
           "postgres.container"
@@ -430,7 +681,7 @@
               "name": "name"
             }
           },
-          "endpoint": "http://127.0.0.1:23473",
+          "endpoint": "http://127.0.0.1:23674",
           "name": "shop-media",
           "service": "shop-media"
         },
@@ -443,13 +694,51 @@
         ]
       },
       {
+        "id": "shop-orders-fulfil-orders.calls.shop-stock.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-stock",
+          "caller": "shop-orders-fulfil-orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders-fulfil-orders->shop-stock"
+        ]
+      },
+      {
         "id": "shop-orders-fulfil-orders.process",
         "type": "local:process/process:Process",
         "properties": {
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-orders-fulfil-orders"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-fulfil-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_URL",
+              "value": "http://127.0.0.1:22565"
             },
             {
               "name": "WORKER_CONCURRENCY",
@@ -462,9 +751,25 @@
           "name": "shop-orders-fulfil-orders",
           "readiness": "started"
         },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.calls.shop-stock.key"
+        ],
         "phase": "rollout",
         "owners": [
           "shop-orders-fulfil-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.calls.shop-stock.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-stock",
+          "caller": "shop-orders-ship-orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders-ship-orders->shop-stock"
         ]
       },
       {
@@ -475,7 +780,32 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_URL",
+              "value": "http://127.0.0.1:22565"
             }
           ],
           "job": "ShipOrders",
@@ -487,9 +817,25 @@
           "timeZone": "UTC",
           "timeoutSeconds": 300
         },
+        "dependsOn": [
+          "shop-orders-ship-orders.calls.shop-stock.key"
+        ],
         "phase": "rollout",
         "owners": [
           "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders.calls.shop-stock.key",
+        "type": "local:serviceauth/keyPair:KeyPair",
+        "properties": {
+          "algorithm": "Ed25519",
+          "callee": "shop-stock",
+          "caller": "shop-orders"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "http:shop-orders->shop-stock"
         ]
       },
       {
@@ -499,22 +845,219 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:30473/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_ORDERS_IDENTITY",
               "value": "{\"cookie\":{\"secure\":false}}"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_ISSUER",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_KEY",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders.calls.shop-stock.key",
+                  "name": "privateJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_CREDENTIAL_SOURCE",
+              "value": "signed-token"
+            },
+            {
+              "name": "SHOP_STOCK_SERVICE_URL",
+              "value": "http://127.0.0.1:22565"
             }
           ],
           "language": "go",
           "module": "server/shop-stack/shop-orders",
           "name": "shop-orders",
-          "port": 22735,
+          "port": 20168,
           "readiness": "/readyz"
         },
+        "dependsOn": [
+          "shop-orders.calls.shop-stock.key"
+        ],
         "phase": "rollout",
         "owners": [
           "shop-orders"
+        ]
+      },
+      {
+        "id": "shop-stock.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS",
+              "value": "3"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_ALGORITHMS",
+              "value": "EdDSA"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_CALLERS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_CALLERS_0_SERVES",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_ISSUER",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_KEYS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_KEYS_0_JWK",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders.calls.shop-stock.key",
+                  "name": "publicJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS",
+              "value": "300"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_ALGORITHMS",
+              "value": "EdDSA"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_CALLERS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_CALLERS_0_DEPLOYABLE",
+              "value": "shop-orders-fulfil-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_CALLERS_0_SERVES",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_CALLERS_0_SUBJECT",
+              "value": "shop-orders-fulfil-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_ISSUER",
+              "value": "shop-orders-fulfil-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_KEYS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_KEYS_0_JWK",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-fulfil-orders.calls.shop-stock.key",
+                  "name": "publicJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS",
+              "value": "300"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_ALGORITHMS",
+              "value": "EdDSA"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_AUDIENCE",
+              "value": "shop-stock"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_CALLERS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_CALLERS_0_DEPLOYABLE",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_CALLERS_0_SERVES",
+              "value": "shop-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_CALLERS_0_SUBJECT",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_ISSUER",
+              "value": "shop-orders-ship-orders"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_KEYS",
+              "value": "1"
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_KEYS_0_JWK",
+              "value": {
+                "$output": {
+                  "resource": "shop-orders-ship-orders.calls.shop-stock.key",
+                  "name": "publicJwk"
+                }
+              }
+            },
+            {
+              "name": "SHOP_STOCK_CALLERS_ISSUERS_2_MAX_LIFETIME_SECONDS",
+              "value": "300"
+            },
+            {
+              "name": "SHOP_STOCK_IDENTITY",
+              "value": "{\"cookie\":{\"secure\":false}}"
+            }
+          ],
+          "language": "rust",
+          "module": "server/shop-stack/shop-stock",
+          "name": "shop-stock",
+          "port": 22565,
+          "readiness": "/readyz"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.calls.shop-stock.key",
+          "shop-orders-ship-orders.calls.shop-stock.key",
+          "shop-orders.calls.shop-stock.key"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-stock"
         ]
       },
       {
@@ -524,7 +1067,7 @@
           "language": "typescript",
           "module": "server/shop-stack/shop-storefront",
           "name": "shop-storefront",
-          "port": 20634,
+          "port": 20835,
           "readiness": "/readyz"
         },
         "phase": "rollout",
@@ -540,7 +1083,7 @@
           "config": {
             "apis": {
               "shop-api": {
-                "url": "http://127.0.0.1:20638"
+                "url": "http://127.0.0.1:20839"
               }
             }
           },
@@ -548,7 +1091,7 @@
           "fallback": "index.html",
           "name": "shop-web",
           "output": "dist",
-          "port": 20852
+          "port": 21053
         },
         "phase": "rollout",
         "owners": [
@@ -571,22 +1114,22 @@
             "-filesystem-root",
             "/storage",
             "-public-host",
-            "127.0.0.1:23473",
+            "127.0.0.1:23674",
             "-external-url",
-            "http://127.0.0.1:23473"
+            "http://127.0.0.1:23674"
           ],
           "image": "fsouza/fake-gcs-server:1.56.1",
           "labels": {
-            "superschematic.checkout": "841686",
+            "superschematic.checkout": "5dbd8f",
             "superschematic.environment": "Dev",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-dev-841686-storage",
+          "name": "superschematic-shop-stack-dev-5dbd8f-storage",
           "ports": [
             {
               "containerPort": 4443,
               "host": "127.0.0.1",
-              "hostPort": 23473
+              "hostPort": 23674
             }
           ],
           "readiness": {
@@ -607,6 +1150,9 @@
         "postgres.container",
         "shop-db.database.shop-db",
         "shop-media.bucket",
+        "shop-orders-fulfil-orders.calls.shop-stock.key",
+        "shop-orders-ship-orders.calls.shop-stock.key",
+        "shop-orders.calls.shop-stock.key",
         "storage.container"
       ]
     },
@@ -622,16 +1168,12 @@
       "wave": 1,
       "deployables": [
         "shop-api",
-        "shop-orders",
-        "shop-orders-fulfil-orders",
-        "shop-orders-ship-orders",
+        "shop-stock",
         "shop-storefront"
       ],
       "resources": [
         "shop-api.process",
-        "shop-orders-fulfil-orders.process",
-        "shop-orders-ship-orders.job",
-        "shop-orders.process",
+        "shop-stock.process",
         "shop-storefront.process"
       ]
     },
@@ -639,9 +1181,15 @@
       "step": "rollout",
       "wave": 2,
       "deployables": [
+        "shop-orders",
+        "shop-orders-fulfil-orders",
+        "shop-orders-ship-orders",
         "shop-web"
       ],
       "resources": [
+        "shop-orders-fulfil-orders.process",
+        "shop-orders-ship-orders.job",
+        "shop-orders.process",
         "shop-web.site"
       ]
     },
