@@ -5381,13 +5381,25 @@ instances with their filters, unique indexes and lookups, the event log
 with its reads and its watch on the notifier, the value store with its
 configured driver, the engine's refusals with their codes, the calls by
 name with JSON arguments that the bindings will make, the principal, and
-JSON written and hashed as JavaScript writes it; and
-`superschematic-engine-testkit`, which replays the scenario corpus and
-gives its recorded answers on SQLite and Postgres for every scenario that
-needs no behavior. CI tests the workspace on both databases. No behavior
-is registered yet (milestone 5), and the runner, retention, the tools and
-the routes are milestone 6's. Until the Rust engine passes the TypeScript
-suite, `@superschematic/engine` is the TypeScript implementation and
-nothing uses the workspace.
+JSON written and hashed as JavaScript writes it; the behavior API
+(milestone 5): a behavior is a Rust type with its declaration, a typed
+config and optional hooks, registered when the engine opens or later,
+composed and checked at define and publish, its storage migrated and its
+afterConfigChange run in the publish's transaction, and run with every
+call on its instances (initialize with create parameters, guards with
+veto codes and preconditions, validate, operations and schema-level
+operations through invoke, operate and invokeSchema, update and
+unchanged, the fields it adds, afterChange, reads, invokes and creates of
+other instances, references with their guards and hooks, and the relation
+over its columns), a panic in a hook a BehaviorError; and
+`superschematic-engine-testkit`, which ports the TypeScript tests'
+behaviors, runs the cases of `test/behavior-*.test.ts` against the API,
+and replays the scenario corpus, giving its recorded answers on SQLite
+and Postgres for every scenario whose behaviors it has. CI tests the
+workspace on both databases. The core's behaviors are milestones 8 to 12,
+and the runner (which runs reactions and schedules), retention, the tools
+and the routes are milestone 6's. Until the Rust engine passes the
+TypeScript suite, `@superschematic/engine` is the TypeScript
+implementation and nothing uses the workspace.
 
 The rule is reversible until the first release.

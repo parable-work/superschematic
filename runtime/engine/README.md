@@ -23,9 +23,22 @@ event log, read by namespace and watched through the notifier, the value
 store over `engine_payloads` or a driver the deployment compiles in, the
 refusals with this package's codes (and `busy`, a lock held past the busy
 timeout), the calls by name with JSON arguments the bindings will make,
-and JSON written and hashed as JavaScript writes it, with no behavior
-yet; and `superschematic-engine-testkit` (`rust/testkit`), which replays
-the scenario corpus (`testdata/scenarios`) on both databases.
+JSON written and hashed as JavaScript writes it, and the behavior API: a
+behavior is a Rust type with its declaration, a typed config and optional
+hooks (`Behavior`, `Hooks`), registered when the engine opens or later,
+composed and checked at define and publish with its storage and
+afterConfigChange in the publish's transaction, and run with every call
+on its instances (initialize and create parameters, guards with veto
+codes and preconditions, validate, operations and schema-level operations
+through `invoke`, `operate` and `invoke_schema`, update and unchanged, the
+fields it adds, afterChange, reads, invokes and creates of other
+instances, references with their guards and hooks, and the read-only
+relation over its own columns), with the runner, the describe and tools
+documents and the core's behaviors still to come; and
+`superschematic-engine-testkit` (`rust/testkit`), which ports this
+package's test behaviors, runs the cases of `test/behavior-*.test.ts`
+against the behavior API, and replays the scenario corpus
+(`testdata/scenarios`), all on both databases.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
