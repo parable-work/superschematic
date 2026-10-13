@@ -4,12 +4,13 @@
 //! and their staleness, the delete of a target, refused for a required
 //! link and cleared for an optional one as the caller, the schema-level
 //! listLinked, reads as the caller, and its config rules), on SQLite and,
-//! with the variable set, on Postgres. The cases that pin a release need
-//! Branches, which a later wave ports; a release pin's checks that need no
-//! Branches run here. The describe document is milestone 6's; the guidance
-//! and create parameters are held to the TypeScript text in the behaviors
+//! with the variable set, on Postgres. Links pinned to a release of a
+//! target whose schema composes Branches run here as those pinned to a
+//! revision do. The describe document is milestone 6's; the guidance and
+//! create parameters are held to the TypeScript text in the behaviors
 //! crate's tests. What a move of a link's target moves on (`revised`, which
-//! Reactions and Lease hear) runs through a test behavior of this file.
+//! Reactions and Lease hear), a revision or a release, runs through a test
+//! behavior of this file.
 
 mod support;
 
@@ -22,7 +23,7 @@ use superschematic_engine::{
     Principal, ReadEvents, Result, SchemaTarget, WriteOptions,
 };
 use superschematic_engine_behaviors::{
-    link_pin, moved_on, target_move, Comments, Links, Revisions, TargetMove, Workflow,
+    link_pin, moved_on, target_move, Branches, Comments, Links, Revisions, TargetMove, Workflow,
 };
 use support::{
     alice, issue, issues_of, refusal, schema_document, targets, veto, RecordingPolicy, Target,
@@ -1108,6 +1109,344 @@ fn what_a_link_pins_may_change_and_a_row_pinned_to_the_other_kind_records_no_pin
             .issues()
             .iter()
             .any(|issue| issue.path == "/types/Task/behaviors/0/config/links/spec/pinned"));
+    }
+}
+
+// A Recipe composes Branches, with a step kind; a Cook's recipe link pins
+// its release.
+fn recipe_schema() -> Value {
+    let mut document = schema_document(
+        "Recipe",
+        json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
+        json!({"types": {"Step": {"name": "Step", "role": "EmbeddedStruct", "fields": [
+            {"name": "instruction", "typeRef": {"name": "string"}, "required": true},
+            {"name": "position", "typeRef": {"name": "Int"}, "required": true}
+        ]}}}),
+    );
+    document["types"]["Recipe"]["behaviors"] = json!([{"name": "Branches", "config": {"kinds": {"step": {"type": "Step", "order": "position"}}}}]);
+    document
+}
+
+fn cooks(links: Value) -> Value {
+    schema(
+        "Cook",
+        json!([{"name": "Links", "config": {"links": links}}]),
+    )
+}
+
+fn pinned_cooks() -> Value {
+    cooks(json!({"recipe": {"schema": "Recipe", "pinned": "release"}}))
+}
+
+// kitchen opens an engine with Branches beside Links, and the meta-schema
+// that lets a test behavior through, publishes Recipe and `cook`, the Cook
+// schema, and creates soup, c1 and c2.
+fn kitchen(target: &Target, more: BehaviorSet, cook: Value) -> Engine {
+    let engine = target.open_with(behaviors().with(Branches).extend(more), |_| {});
+    publish(&engine, &recipe_schema());
+    publish(&engine, &cook);
+    create(&engine, &alice(), "Recipe", Some("soup"), None).expect("soup");
+    for id in ["c1", "c2"] {
+        create(&engine, &alice(), "Cook", Some(id), None).expect("cook");
+    }
+    engine
+}
+
+// release writes a step on a draft of soup's primary line, merges it in
+// tagged and releases the merge, at the release field's version; it
+// returns the commit released.
+fn release(engine: &Engine) -> Value {
+    let soup = |operation: &str, params: Value| {
+        invoke(engine, &alice(), "Recipe", "soup", operation, params)
+            .unwrap_or_else(|error| panic!("{operation}: {error}"))
+    };
+    let main = soup("refs", json!({}))["items"][0].clone();
+    let n = soup("releases", json!({}))["items"]
+        .as_array()
+        .map_or(0, Vec::len)
+        + 1;
+    let draft = soup(
+        "branch",
+        json!({"fromRef": main["id"], "name": format!("change{n}")}),
+    );
+    let saved = soup(
+        "save",
+        json!({"ref": draft["id"], "version": draft["version"], "edits": {"step": {"upsert": [{"instruction": format!("Step {n}"), "position": n}]}}}),
+    );
+    let committed = soup(
+        "commit",
+        json!({"ref": saved["ref"]["id"], "version": saved["ref"]["version"]}),
+    );
+    let merged = soup(
+        "merge",
+        json!({"source": committed["ref"]["id"], "target": main["id"], "targetVersion": main["version"], "tag": true}),
+    );
+    let released = get(engine, "Recipe", "soup")
+        .expect("soup")
+        .behavior_field("Branches", "release")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    soup(
+        "releaseCommit",
+        json!({"commit": merged["commit"]["id"], "version": released}),
+    );
+    merged["commit"].clone()
+}
+
+fn cook(engine: &Engine, id: &str, params: Value) -> Result<Value> {
+    invoke(engine, &alice(), "Cook", id, "link", params)
+}
+
+fn recipe_of(engine: &Engine, id: &str) -> Value {
+    get(engine, "Cook", id)
+        .expect("the cook")
+        .behavior_field("Links", "targets")
+        .map_or(Value::Null, |targets| targets["recipe"].clone())
+}
+
+#[test]
+fn a_link_pinned_to_a_release_records_the_targets_release_and_is_stale_once_it_is_released_again() {
+    for target in targets("links_release") {
+        let engine = kitchen(&target, BehaviorSet::new(), pinned_cooks());
+        let (behavior, action, reason, code, _) =
+            veto(cook(&engine, "c1", json!({"name": "recipe", "id": "soup"})));
+        assert_eq!(
+            json!([behavior, action, reason, code]),
+            json!([
+                "Links",
+                "link",
+                "Recipe soup has no release to pin yet",
+                "no_release"
+            ])
+        );
+        release(&engine);
+        assert_eq!(
+            get(&engine, "Recipe", "soup")
+                .expect("soup")
+                .behavior_field("Branches", "release"),
+            Some(&json!(1))
+        );
+        assert_eq!(
+            cook(&engine, "c1", json!({"name": "recipe", "id": "soup"})).expect("link"),
+            json!({"name": "recipe", "schema": "Recipe", "id": "soup", "release": 1})
+        );
+        assert_eq!(
+            recipe_of(&engine, "c1"),
+            json!({"schema": "Recipe", "id": "soup", "release": 1, "latest": 1, "stale": false})
+        );
+        release(&engine);
+        assert_eq!(
+            recipe_of(&engine, "c1"),
+            json!({"schema": "Recipe", "id": "soup", "release": 1, "latest": 2, "stale": true})
+        );
+        assert_eq!(
+            get(&engine, "Cook", "c1").expect("c1").seq,
+            2,
+            "read when read: no event on the cook"
+        );
+        assert_eq!(
+            cook(
+                &engine,
+                "c2",
+                json!({"name": "recipe", "id": "soup", "release": 1})
+            )
+            .expect("link"),
+            json!({"name": "recipe", "schema": "Recipe", "id": "soup", "release": 1})
+        );
+        cook(&engine, "c1", json!({"name": "recipe", "id": "soup"})).expect("link");
+        assert_eq!(
+            recipe_of(&engine, "c1"),
+            json!({"schema": "Recipe", "id": "soup", "release": 2, "latest": 2, "stale": false})
+        );
+        assert_eq!(
+            issues_of(&refusal(cook(
+                &engine,
+                "c1",
+                json!({"name": "recipe", "id": "soup", "release": 3})
+            ))),
+            [issue("/release", "Recipe soup has releases 1 to 2, not 3")]
+        );
+        assert_eq!(
+            issues_of(&refusal(cook(
+                &engine,
+                "c1",
+                json!({"name": "recipe", "id": "soup", "revision": 1})
+            ))),
+            [issue(
+                "/revision",
+                "link recipe is pinned to a release, so it records no revision"
+            )]
+        );
+        // listLinked gives each pin and the latest, and with stale only the
+        // ones the target has been released past.
+        assert_eq!(
+            listed(&engine, "Cook", json!({"name": "recipe", "id": "soup"})).expect("listLinked"),
+            json!({"items": [
+                {"id": "c1", "release": 2, "latest": 2, "stale": false},
+                {"id": "c2", "release": 1, "latest": 2, "stale": true}
+            ], "next": null})
+        );
+        assert_eq!(
+            listed(
+                &engine,
+                "Cook",
+                json!({"name": "recipe", "id": "soup", "stale": true})
+            )
+            .expect("listLinked"),
+            json!({"items": [{"id": "c2", "release": 1, "latest": 2, "stale": true}], "next": null})
+        );
+        // unlink returns the pin.
+        assert_eq!(
+            invoke(
+                &engine,
+                &alice(),
+                "Cook",
+                "c2",
+                "unlink",
+                json!({"name": "recipe"})
+            )
+            .expect("unlink"),
+            json!({"name": "recipe", "schema": "Recipe", "id": "soup", "release": 1})
+        );
+    }
+}
+
+#[test]
+fn a_release_pin_needs_a_target_schema_that_composes_branches_and_a_create_gives_it_as_id_and_release(
+) {
+    for target in targets("links_release_create") {
+        let engine = kitchen(&target, BehaviorSet::new(), pinned_cooks());
+        publish(&engine, &schema("Note", json!([])));
+        publish(
+            &engine,
+            &cooks(json!({
+                "recipe": {"schema": "Recipe", "pinned": "release"},
+                "note": {"schema": "Note", "pinned": "release"}
+            })),
+        );
+        create(&engine, &alice(), "Note", Some("n1"), None).expect("n1");
+        assert_eq!(
+            issues_of(&refusal(cook(
+                &engine,
+                "c1",
+                json!({"name": "note", "id": "n1"})
+            ))),
+            [issue(
+                "/name",
+                "link note is pinned to a release, but Note does not compose Branches"
+            )]
+        );
+        let (_, action, _, code, details) = veto(create(
+            &engine,
+            &alice(),
+            "Cook",
+            None,
+            Some(json!({"Links": {"recipe": "soup"}})),
+        ));
+        assert_eq!(
+            json!([action, code, details]),
+            json!(["create", "no_release", {"path": "/behaviors/Links/recipe"}])
+        );
+        release(&engine);
+        release(&engine);
+        let created = create(
+            &engine,
+            &alice(),
+            "Cook",
+            Some("c3"),
+            Some(json!({"Links": {"recipe": {"id": "soup", "release": 1}}})),
+        )
+        .expect("c3");
+        assert_eq!(
+            created.behavior_field("Links", "targets"),
+            Some(
+                &json!({"recipe": {"schema": "Recipe", "id": "soup", "release": 1, "latest": 2, "stale": true}})
+            )
+        );
+        let refused = refusal(create(
+            &engine,
+            &alice(),
+            "Cook",
+            None,
+            Some(json!({"Links": {"recipe": {"id": "soup", "release": 3}}})),
+        ));
+        assert_eq!(
+            issues_of(&refused),
+            [issue(
+                "/behaviors/Links/recipe/release",
+                "Recipe soup has releases 1 to 2, not 3"
+            )]
+        );
+    }
+}
+
+#[test]
+fn a_release_of_the_target_moves_on_the_instances_pinned_to_an_earlier_one_and_its_other_operations_move_none(
+) {
+    for target in targets("links_release_moved") {
+        let engine = kitchen(
+            &target,
+            BehaviorSet::new().with(Mover),
+            schema(
+                "Cook",
+                json!([
+                    {"name": "Links", "config": {"links": {"recipe": {"schema": "Recipe", "pinned": "release"}, "about": {"schema": "Recipe"}}}},
+                    {"name": "test.Mover"}
+                ]),
+            ),
+        );
+        let first = release(&engine);
+        for id in ["c1", "c2"] {
+            cook(&engine, id, json!({"name": "recipe", "id": "soup"})).expect("link");
+            cook(&engine, id, json!({"name": "about", "id": "soup"})).expect("link");
+        }
+        let second = release(&engine);
+        // c2 pins the new release since; c1 still pins the first.
+        cook(&engine, "c2", json!({"name": "recipe", "id": "soup"})).expect("link");
+        let soup_events = events(&engine, "Recipe", "soup");
+        let ask = |name: &str, event: &EngineEvent| {
+            engine
+                .instances()
+                .invoke_schema(
+                    &alice(),
+                    "Cook",
+                    "moved",
+                    &json!({"link": name, "event": serde_json::to_value(event).expect("JSON")}),
+                    Default::default(),
+                )
+                .expect("moved")
+        };
+        let released = soup_events.last().expect("the release");
+        assert_eq!(released.change["operation"], "releaseCommit");
+        // A link that pins releases moves on the instances the target has
+        // been released past; one that pins nothing, every one linked to it.
+        assert_eq!(
+            ask("recipe", released),
+            json!({"move": {"release": 2, "commit": second["id"]}, "instances": ["c1"]})
+        );
+        assert_eq!(
+            ask("about", released),
+            json!({"move": {"release": 2, "commit": second["id"]}, "instances": ["c1", "c2"]})
+        );
+        // The first release moved on nothing pinned before it.
+        let first_release = soup_events
+            .iter()
+            .find(|event| {
+                event.change["operation"] == "releaseCommit"
+                    && event.change["params"]["commit"] == first["id"]
+            })
+            .expect("the first release");
+        assert_eq!(
+            ask("recipe", first_release)["move"],
+            json!({"release": 1, "commit": first["id"]})
+        );
+        // Branches' other operations are no move.
+        for event in &soup_events {
+            let operation = event.change["operation"].as_str().unwrap_or_default();
+            if operation != "releaseCommit" {
+                assert_eq!(ask("recipe", event), Value::Null, "{operation}");
+            }
+        }
     }
 }
 
