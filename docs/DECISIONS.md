@@ -6164,3 +6164,67 @@ OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
 picker that searches a reference's options (D61).
 
 The rule is reversible until the first release.
+
+### D44, amended: a list's filter updates it in place through a shard, and the pages keep their routes' controls
+
+A review of the generated pages found five gaps, beside a feature they
+lacked: a list's filter loaded the whole page again for each change,
+where Topcoat's runtime can render part of a page again. A list at
+`C/new` beside C's new page, or a collection named `edit` or `delete`
+under an item with an edit or a delete page, registered a page twice,
+which Topcoat's router refuses with a panic as the app builds. Choices
+were one set for every resource. The nav asked every top-level guard on
+each render, each guard asked the `PageAuthenticator` again, and the
+index asked them all once more. The pages skipped their routes'
+`@rateLimit`, `@bodyLimit` and `@timeout`, so acme's console was an
+unlimited twin of `placeOrder`, as its procedure was before the
+procedures amendment. And a collection whose type declares no `@display`
+named its items by a singular English rules guessed from its path,
+`shelves` a Shelve, while `orders/archived` took its type's `plural`,
+Orders, the title of `orders` too.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `outputs.topcoat.pages.live`, or `pages_live = true` beside `pages_prefix` in `[extension.topcoat]`, off by default, renders each list with a filter through a `#[shard]` at `<prefix>/_live/<resource>`, a path the build does not change. The shard holds the list's heading, its filter and its table, and a signal holds the filter's query, the page's at first. When the app loads Topcoat's runtime, the form's submit stops the browser's own, writes the form's query, as the browser would send it, to a hidden input whose input event sets the signal, and puts the query in the address bar; the runtime renders the shard again with it. Without the runtime the form is the GET form it was and the shard renders inline. A list without a filter has nothing to update and stays a component. | Live lists by default, whose endpoints an app without the runtime could not use; a signal per control, which each kind of control would bind its own way; setting the signal from the script itself (`cx.hydrate`), which the runtime does not document; re-rendering the page through a `link`, which the runtime offers for an anchor, not a form |
+| A shard's request meets no page's guard or layout, so the shard reads the query as the page reads its own, through the list's argument form, and calls the list through `operations`: the caller admitted and the filter checked as the route does, a refusal its route's status (401, 403, 404, 422) and the pages' refusal, as the page answers it. A nested list's shard takes its parent's id as an argument, which its call checks as the page's checks the route's, and ignores the query's hidden path value. The runtime applies only a 200, so a refused re-render leaves the table as it was, and a reload shows the refusal. | A guard of the shard's own, beside the call's; answering a refusal 200 so the runtime applies it, which would give the shard another status than its page |
+| An action's form keeps its POST-redirect-GET: the item's page does not refresh in place. | Posting it through a shard, which would run the operation inside a render; through a procedure, which would need the form's fields as a record the browser builds |
+| Collections are checked in key order, so a collection's pages come before those of one that extends its path or lies under its items. A collection one of whose routes another's page already serves has no pages: each of its operations is left out with the reason in the build log ("its collection, projects/new, has no pages, since the list of projects/new would be served at GET projects/new, the new page of projects"), and it leaves the trail unless a collection under it has pages. | Renaming its pages, which would put the console's paths out of step with the API's; leaving out the console's own new, edit or delete page, which its links and its trail name |
+| `Settings::choices_for(resource, choices)` scopes choices to one resource's pages: its list, its item's page, its new, edit and delete pages, and its section on its parent's page. The resource is named by its path below the prefix, its parameters as its pages name them, as `pages::RESOURCES` lists it; a name none has panics, as a typo would. On its pages a resource's choice for a field wins over the app's for that field, and its other fields keep the app's (`Choices::and`). | Choices per page, which the generated pages could not take; naming a resource by its Rust identifier or by the API's path, whose parameters operations name differently at one place |
+| A request asks the `PageAuthenticator` for its caller once: the crate's `admit` reads it through `#[memoize]`, so each guard is a permission check of that caller. The nav's list of what the caller may list is kept for the request too, which the index shares. | Memoizing each guard, which `#[memoize]` cannot key by an `OperationInfo`; a value the layout puts in the request's context, which Topcoat renders in no order beside its page |
+| A page's request meets the traffic controls of the operation it is for, in the route's order, through `PageControls`, one layer at the prefix that `<service>(...)` adds, which finds the page by its method and the path its route is registered at: a post its operation's; a GET page that shows an operation's result its operation's, a list's page the list's, an item's page and its edit and delete pages, which show the item, the detail's; a live list's shard its list's. The new page and the index call no operation and meet none, and a GET page carries no body for a body limit to refuse. Each operation's limiter for the pages, at its route's rate and keyed by Topcoat's `client_ip`, is shared by every page and shard that calls the operation; the route and the procedure keep theirs, as replicas would. The body is read up to its limit before the page decodes its form, and the timeout covers the render. A refusal is the route's 429 with `Retry-After`, 413 or 504, and the pages' refusal section, its heading and the route's message, without the layout, since the page did not run. A page meets its own operation's controls only, not those of the sections it shows. | A layer per page, which Topcoat matches by prefix, so a list's would cover its items' pages; the controls in the in-process call, which would spend an operation's budget on the app's own pages; limits on posts alone, which would leave a list's page an unlimited read of its route; the layout around a refusal, which only a page renders |
+| No label guesses a singular. An item is named by its type's `@display` noun, else by its type's name in words, as a table names an untitled row (`Shelf`, `OrderView` an Order view); a collection by its type's `plural`, else by its path's last word as given (Shelves); one whose path extends a sibling's, `orders/archived` beside `orders`, by its own words after the sibling's (Archived), never by its type's `plural`; an item of a collection without pages, which has no type, by its id alone in the trail. A route's parameter keeps its name (`shelve_id`), an identifier, not a label. | The plural with "item" ("Shelves item"), which reads as neither; a dictionary of English plurals; renaming the parameters, which an app's `href!` names |
+
+Status: built. `fixture-pages-api` gains a filter of a project's tasks
+by `done`, shelves whose type declares no `@display`, archived projects
+at `projects/archived` that only an auditor lists, and lists at
+`projects/new`, `projects/{id}/edit` and `projects/{id}/delete`, and its
+golden and cargo test have the lists live. `TestPagesServeATopcoatApp`
+drives it through `Router::handle`: a list renders its filter, as a GET
+form, between the shard's markers; the shard's own request renders the
+filtered list without the layout, and renders it again under the shard's
+identity from the signal the submit set; a filter the rules refuse is
+422; a query's id and unknown names are ignored; a caller the list
+refuses gets the route's 401, with the sign-in link, or 403, and no row;
+the tasks' shard reads its project from its argument and not from the
+query, and one that is no project's id is 404. A counting authenticator
+is asked once for the index, a list, an item's page, an edit page and a
+nested list. Choices scoped to the projects and to a project's tasks win
+on their pages, the app's hold on a label's tasks, and `choices_for` of
+no resource panics. Shelves are titled Shelves and a shelf Shelf, the
+archived projects Archived beside Projects, and the app builds with the
+colliding lists left out. `TestPagesThatWouldMeetAreLeftOut` reads their
+reasons in the build log, `TestLiveListsAreOptIn` the crate without and
+with live lists and through the table, and `TestTheOperationsDescribeResources`
+a list at `things/new` and one at `things/{id}/delete`.
+`fixture-controls-api` gains the orders' list, two a minute and
+filtered by a status, an order, and its hold, two a minute, a megabyte
+and a second; `TestPagesKeepTheirRoutesControls` turns its pages on, live:
+the list's third page in a minute is the route's 429 with `Retry-After`,
+its shard shares the budget both ways, an order's page is not limited,
+and the hold's third post is 429, a body past the megabyte, sent or
+declared, 413, and a slow hold 504, each as the pages' refusal. acme's
+console's new-order and cancel posts carry `placeOrder`'s and
+`cancelOrder`'s controls, its products' trail names a product by its id,
+and its lists are not live, since the app loads no runtime.
+
+The rule is reversible until the first release.

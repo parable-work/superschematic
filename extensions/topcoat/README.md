@@ -34,7 +34,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   id by the name the app's choices give it
   ([Display components](#display-components)).
 - when asked, serves a page per resource the operations describe, under a
-  prefix, with a layout, a nav and an index ([Pages](#pages)).
+  prefix, with a layout, a nav and an index, each page under its
+  operation's route controls, and, for an app that loads Topcoat's
+  runtime, lists whose filter updates them in place ([Pages](#pages)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -83,7 +85,9 @@ leave out their module;
 `records: false` leaves out the records, and with them the procedures and
 the views, which are built on records. Pages are off by default:
 `pages: { enabled: true, prefix: "/console" }` turns them on, and they
-need the records, the forms and the views ([Pages](#pages)).
+need the records, the forms and the views ([Pages](#pages)); `live: true`
+beside them renders each list with a filter through a shard ([Live
+lists](#live-lists)).
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -119,6 +123,10 @@ service it does not name has none:
 services = ["shop-orders", "shop-catalog"]
 pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/catalog" }
 ```
+
+`pages_live = true` beside `pages_prefix` makes the lists of the pages it
+turns on live, as `pages.live` would ([Live lists](#live-lists)); without
+a `pages_prefix` the table refuses it.
 
 An app that links two crates registers each one's pages, layout and
 index at its prefix, so the table refuses one path for several services,
@@ -583,7 +591,9 @@ such procedure:
 A control a procedure could not apply as its route does would leave the
 procedure out, with the reason, rather than be skipped; all three apply.
 An in-process call from the app's own page applies none of them: the
-page is a route of the app, and its controls are the app's to set.
+page is a route of the app, and its controls are the app's to set. The
+[generated pages](#route-controls-of-the-pages) apply them to their own
+requests.
 
 ## Display components
 
@@ -715,19 +725,34 @@ change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action's
 form posts from the item's page in one click and a delete asks first.
 
 A resource is named by its type's `@display` (`noun`, `plural`,
-`createLabel`, `titleField`), else by its path's last word: `projects`
-is Projects, an item a Project, the new page "New project". A list's rows
-link to their items' pages when the list returns the detail's type and
-the detail's path parameter names one of its fields (`{id}` and `id`).
+`createLabel`, `titleField`) where it declares them. Else the collection
+is titled by its path's last word as the path gives it, `shelves` is
+Shelves, and an item by its type's name in words, `Shelf` is a Shelf,
+`OrderView` an Order view, as a table names an untitled row: no label
+guesses a singular from a plural, which English rules get wrong (shelves
+is no shelve). The new page is then "New shelf". A collection whose path
+extends another's, `documents/drafts` beside `documents`, is titled by its
+own words after the other's, Drafts, never by its type's `plural`. A
+collection without pages of its own, only a step to one under its items,
+names an item in the trail by its id alone. A list's rows link to their
+items' pages when the list returns the detail's type and the detail's
+path parameter names one of its fields (`{id}` and `id`).
+
+A collection whose pages would be served at another's has none, and the
+build log says why: a list at `projects/new`, beside the projects' new
+page, or a collection named `edit` or `delete` under an item that has an
+edit or a delete page, `projects/{id}/edit`. Topcoat's router refuses a
+page registered twice, so the console's own pages keep their paths:
+`no page for project.listNewProjects: its collection, projects/new, has no
+pages, since the list of projects/new would be served at GET projects/new,
+the new page of projects`.
 
 ### What each page does
 
 Every page calls its operation through `operations`, so the route's
-rules hold, and takes its input through the [forms](#forms). The route's
-traffic controls are not among those rules: an in-process call applies
-no `@rateLimit`, `@bodyLimit` or `@timeout` ([route
-controls](#route-controls)), so the pages are limited only as the app
-limits its own routes.
+rules hold, and takes its input through the [forms](#forms). Its request
+meets the route's traffic controls too ([Route controls of the
+pages](#route-controls-of-the-pages)).
 
 - **A list** checks the guard, renders the filter form (a GET, read from
   the query), and the result as `<type>_table` with each row linked, and a
@@ -768,7 +793,11 @@ another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
 pages' collection, current in the nav and the trail, never an item named
 `archived`; under an item, a collection is read before the item's
 actions. The item's detail, which the
-item's page calls too, is called once per request (`#[memoize]`). The
+item's page calls too, is called once per request (`#[memoize]`), and so
+is the nav's list of what the caller may list, which the index shares. A
+request asks the `PageAuthenticator` for its caller once
+(`#[memoize]`), however many guards its page, its layout and its forms'
+calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
 
@@ -793,13 +822,126 @@ page for an action; without it a 401 has no link), and the
 [choices](#choices-the-app-supplies) every form and display component of
 the pages takes, by each field's path: `lines.productId` makes each
 line's product a select on the new-order page and its name in an order's
-lines. They are one set for every resource, so a path names its field in
-each form and component that holds one; choices per resource or per page
-are open. The page functions and their path parameters are public, so an
-app's own page can link to one with
+lines. `choices` are the app's for every resource, so a path names its
+field in each form and component that holds one. `choices_for` scopes
+choices to one resource's pages, its list, its item's page, its new, edit
+and delete pages and its section on its parent's page, named by its path
+below the prefix as `pages::RESOURCES` lists it, its parameters as its
+pages name them. A resource's choice for a field wins over the app's for
+that field on its pages, whose other fields keep the app's; a name no
+resource has panics, as a typo would:
+
+```rust
+let settings = pages::Settings::new()
+    .choices(Choices::new().with("ownerId", members))
+    .choices_for("projects/{project_id}/tasks", Choices::new().with("ownerId", assignees));
+```
+
+The page functions and their path parameters are public, so an app's own
+page can link to one with
 `href!(pages::projects_item_page, pages::ProjectId(id))`.
 
 An app that mounts two services' pages gives each a prefix of its own,
 as the [table](#the-config) requires: each crate registers its index and
 its layout at its prefix, and Topcoat's router refuses a page registered
 twice.
+
+### Route controls of the pages
+
+A page's request meets the `@rateLimit`, `@bodyLimit` and `@timeout` of
+the operation it is for, in the route's order, as the route's request
+does, so the console is no unlimited twin of a route
+([D44](../../docs/DECISIONS.md)). `<service>(...)` adds one layer at the
+prefix, `PageControls`, which finds the page by its method and the path
+it is registered at:
+
+- a post meets the controls of the operation it submits: the new page's
+  create, the edit page's update, the delete page's delete, an action's
+  operation;
+- a GET page meets those of the operation it shows: a list its list's,
+  an item's page, its edit page and its delete page the detail's. The
+  new page and the index call no operation, and meet none. A GET page
+  carries no body for a body limit to refuse;
+- a [live list](#live-lists)'s shard meets its list's.
+
+The rate limit is the operation's own limiter for the pages, at its
+route's rate, which every page and shard that calls the operation shares,
+and counts each client by its IP address as Topcoat reads it
+(`client_ip`), as a procedure's does; the JSON API's route and the
+procedure keep theirs, as replicas would. The body is read up to its
+limit before the page decodes its form, and the timeout covers the
+page's render, its call included. A refusal is the route's status, 429
+with `Retry-After`, 413 or 504, and the pages' refusal section, its
+heading and the route's message, which no layout frames, since the page
+did not run:
+
+```html
+<section class="ss-refusal" data-status="429"><h1>Too many requests</h1><p>Too Many Requests</p></section>
+```
+
+A page meets the controls of its own operation only: the sections an
+item's page shows, and the item a refused delete renders again, are calls
+of a page already admitted. An in-process call from the app's own page
+applies none of them, as before.
+
+### Live lists
+
+`pages: { enabled: true, live: true }` renders each list with a filter
+through a Topcoat shard, `<prefix>/_live/<resource>`, `/console/_live/orders`,
+a path that does not change with the build. Without Topcoat's runtime in
+the browser the page is as it was: the filter is a GET form, and its
+submit loads the page for the query. An app that loads the runtime gets
+the filter's results in place: the form's submit handler stops the
+browser's own, writes the form's query, as the browser would have sent
+it, to a hidden input whose input event sets the shard's signal, puts the
+query in the address bar, so a reload or a link keeps the filter, and the
+runtime renders the shard again with it, the heading, the filter with its
+errors and the table.
+
+The shard reads the query as the page reads its own, through the list's
+argument form, and calls the list through `operations`: a shard's
+request meets no page's guard or layout, so the call admits the caller
+and checks the filter as the route does, and answers a refusal with the
+route's status (401, 403, 404, 422), as the page does. A nested list's
+shard takes its parent's id as an argument, as the page takes it from
+its route, and its query's hidden path value is ignored, as the page's
+is. Topcoat's runtime applies only a 200: a refused re-render leaves the
+table as it was, and the browser's console names the failed request,
+while the page itself, reloaded, shows the refusal. The form's controls
+carry the rules a browser checks before the submit runs.
+
+A list without a filter has nothing to update, and stays a component. An
+action's form, a post that changes the item, keeps its POST-redirect-GET
+without a reload of its own: a shard renders and a form posts, so posting
+through one would run the operation inside a render, and through a
+procedure would need the form's fields as a record the browser builds.
+
+An app loads the runtime once, for all its pages. The console's layout
+renders no `<html>`, so the app's own root layout gives the document its
+head and the runtime's script, around the console's layout, and the
+router serves the asset bundle (`topcoat asset bundle` builds it beside
+the binary) and the runtime's layer:
+
+```rust
+#[layout("/")]
+async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <!DOCTYPE html>
+        <html>
+            <head>topcoat::runtime::script()</head>
+            <body>(slot)</body>
+        </html>
+    })
+}
+
+Router::builder()
+    .discover()
+    .app_context(settings)
+    .shop_orders(implementations, page_authenticator)
+    .assets(AssetBundle::load()?)
+    .runtime()
+    .build()
+```
+
+An app that does not load it leaves `live` off, so it registers no shard
+it cannot use.

@@ -68,7 +68,21 @@ impl Choices {
             .iter()
             .find(|choice| choice.value == value)
             .map(|choice| choice.label.as_str())
+    }{{- if .Pages }}
+
+    /// These choices, then `other`'s, which win where both name a field:
+    /// the app's choices with one resource's own (`pages::Settings`).
+    #[must_use]
+    pub fn and(mut self, other: &Choices) -> Self {
+        let fields = Arc::make_mut(&mut self.fields);
+        for (name, options) in other.fields.iter() {
+            if let Some(field) = name.strip_prefix(other.at.as_str()) {
+                fields.push((format!("{}{field}", self.at), options.clone()));
+            }
+        }
+        self
     }
+{{- end }}
 
     /// The choices of the object or the rows at `field`, by their own
     /// fields' names: `productId` under `lines` is `lines.productId`.

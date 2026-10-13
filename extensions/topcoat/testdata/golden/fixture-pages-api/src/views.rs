@@ -20,7 +20,7 @@
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
 
 use crate::choices::Choices;
-use crate::records::{CommentRecord, DocumentInputRecord, DocumentRecord, MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, TaskInputRecord, TaskRecord, ViewerRecord};
+use crate::records::{CommentRecord, DocumentInputRecord, DocumentRecord, MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, ShelfRecord, TaskInputRecord, TaskRecord, ViewerRecord};
 use topcoat::view::{View, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -970,6 +970,71 @@ pub async fn project_patch_table(
                                 None => "",
                             }
                         </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `ShelfRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn shelf_detail(record: ShelfRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="Shelf" role="group">
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="label">
+                    <dt>"Label"</dt>
+                    <dd>(text_of(&choices, "label", &record.label))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `ShelfRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn shelf_table(
+    rows: Vec<ShelfRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Shelf">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="label">"Label"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Shelf");
+                    <tr>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="label">(text_of(&choices, "label", &row.label))</td>
                     </tr>
                 }
             </tbody>

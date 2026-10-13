@@ -455,6 +455,18 @@ fn boolean(value: Option<&str>) -> Read {
     Ok(Some(Value::from(value.is_some())))
 }
 
+/// A boolean from a select of `true` and `false`: a filter's, whose blank
+/// option sends nothing, so a filter can leave it out, and a path
+/// argument's.
+fn yes_no(value: Option<&str>) -> Read {
+    match value {
+        None => Ok(None),
+        Some("true") => Ok(Some(Value::Bool(true))),
+        Some("false") => Ok(Some(Value::Bool(false))),
+        Some(_) => Err("must be true or false"),
+    }
+}
+
 /// A number, refused when it is not one.
 fn number(value: Option<&str>) -> Read {
     match value.map(|text| text.trim().parse::<f64>()) {
@@ -2800,6 +2812,138 @@ pub async fn task_add_task_args_fields(
                 None => <input id="task-add-task-title" name="title" type="text" required=(true) minlength="1" maxlength="120" value=(form.input.title.clone()) aria-invalid=(errors.invalid("title"))>,
             }
             for message in errors.of("title") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
+/// The arguments of task.listTasks, each as the browser sends it. A filter,
+/// sent by GET and read from the query.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TaskListTasksArgsForm {
+    pub project_id: Option<String>,
+    pub done: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl TaskListTasksArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "get";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(project_id: impl ToString) -> Self {
+        Self {
+            project_id: Some(project_id.to_string()),
+            done: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<TaskListTasksArgsForm>` decodes a query this
+    /// way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            project_id: posted.get("projectId").first(),
+            done: posted.get("done").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The filter the current request's query holds, so a page's form shows
+    /// the filters in effect: what `Form<TaskListTasksArgsForm>` reads on GET.
+    pub fn from_query(cx: &Cx) -> topcoat::Result<Self> {
+        let query = uri(cx).query().unwrap_or_default();
+        Ok(Form::<Self>::from_bytes(query.as_bytes())?.0)
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::TaskListTasksArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_project_id = single(&mut errors, "projectId", text(self.project_id.as_deref()));
+        let arg_done = single(&mut errors, "done", yes_no(self.done.as_deref()));
+        let Some(arg_project_id) = arg_project_id else {
+            return Err(errors);
+        };
+        let Some(arg_done) = arg_done else {
+            return Err(errors);
+        };
+        let args = crate::api::TaskListTasksArgs {
+            project_id: arg_project_id,
+            done: arg_done,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::task_list_tasks`). A refusal is the status a page answers
+    /// with and the errors it renders the form again with: 422 and `parse`'s
+    /// errors, or the route's status (401, 403, 404, 409, ...) and the
+    /// operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::Task>, Refusal> {
+        let args = self.parse()?;
+        operations::task_list_tasks(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "done" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskListTasksArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `TaskListTasksArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn task_list_tasks_args_fields(
+    #[default] form: TaskListTasksArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(TaskListTasksArgsForm::shows);
+    let _ = choices;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="projectId" value=(form.project_id.clone())>
+        <div class="field">
+            <label for="task-list-tasks-done">"Done"</label>
+            <select id="task-list-tasks-done" name="done" aria-invalid=(errors.invalid("done"))>
+                <option value="" selected=(form.done.is_none())>""</option>
+                <option value="true" selected=(form.done.as_deref() == Some("true"))>"Yes"</option>
+                <option value="false" selected=(form.done.as_deref() == Some("false"))>"No"</option>
+            </select>
+            for message in errors.of("done") {
                 <p class="field-error">(message)</p>
             }
         </div>

@@ -14,6 +14,16 @@
 # which a PUT and a DELETE of their whole collection would change and a
 # DELETE of its cover would remove, none of which has a page. Reading a
 # document needs documents.read and changing one documents.write.
+#
+# Paths whose pages would meet, which the build leaves out: the projects
+# started this week at projects/new, beside the projects' new page, and a
+# project's edits and deletions at projects/{id}/edit and
+# projects/{id}/delete, beside a project's edit and delete pages. The
+# archived projects at projects/archived, beside a project at
+# projects/{id}, are titled by their own path, not by Project's plural, and
+# only an auditor lists them. Shelves, whose type has no @display, are
+# titled by their path and their items by their type's name, never by a
+# singular guessed from shelves.
 name: fixture-pages-api
 kind: API
 scalars:
@@ -222,6 +232,17 @@ types:
       - name: text
         typeRef: { name: string }
         required: true
+  # A shelf, whose type declares no @display.
+  Shelf:
+    name: Shelf
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: label
+        typeRef: { name: string }
+        required: true
   Member:
     name: Member
     role: APIView
@@ -262,6 +283,46 @@ operationSets:
         permissions: [projects.read]
         arguments:
           - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+      # The projects started this week, at a path the projects' new page
+      # takes, so it has no page.
+      - name: listNewProjects
+        typeRef: { name: Project, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: projects/new
+        permissions: [projects.read]
+      # The archived projects, a collection whose path extends the
+      # projects', which only an auditor lists.
+      - name: listArchivedProjects
+        typeRef: { name: Project, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: projects/archived
+        permissions: [projects.audit]
+      # A project's edits, at the path of its edit page, so they have no
+      # page.
+      - name: listProjectEdits
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "projects/{projectId}/edit"
+        permissions: [projects.read]
+        arguments:
+          - name: projectId
+            typeRef: { name: Identity.UUID }
+            required: true
+      # A project's deletions, at the path of its delete page, so they have
+      # no page.
+      - name: listProjectDeletions
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "projects/{projectId}/delete"
+        permissions: [projects.read]
+        arguments:
+          - name: projectId
             typeRef: { name: Identity.UUID }
             required: true
   - name: ProjectMutations
@@ -322,7 +383,8 @@ operationSets:
             validateMaxLength: 200
   - name: TaskQueries
     operations:
-      # A project's tasks.
+      # A project's tasks, the done ones or the open ones when the query
+      # says.
       - name: listTasks
         typeRef: { name: Task, isArray: true }
         required: true
@@ -333,6 +395,9 @@ operationSets:
           - name: projectId
             typeRef: { name: Identity.UUID }
             required: true
+          - name: done
+            typeRef: { name: boolean }
+            isQuery: true
       # One task of a project.
       - name: getTask
         typeRef: { name: Task }
@@ -475,6 +540,26 @@ operationSets:
         httpMethod: DELETE
         restPath: "documents/{id}/cover"
         permissions: [documents.write]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: ShelfQueries
+    operations:
+      # Every shelf.
+      - name: listShelves
+        typeRef: { name: Shelf, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: shelves
+        permissions: [shelves.read]
+      # One shelf.
+      - name: getShelf
+        typeRef: { name: Shelf }
+        required: true
+        httpMethod: GET
+        restPath: "shelves/{id}"
+        permissions: [shelves.read]
         arguments:
           - name: id
             typeRef: { name: string }

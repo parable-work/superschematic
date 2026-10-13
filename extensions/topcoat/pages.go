@@ -9,10 +9,13 @@ import (
 )
 
 // PagesConfig is outputs.topcoat.pages: whether the crate has a page per
-// resource its operations describe, and the path they are served under.
+// resource its operations describe, the path they are served under, and
+// whether a list's filter updates its table in place, through a shard, for
+// an app that loads Topcoat's runtime (Live).
 type PagesConfig struct {
 	Enabled bool   `json:"enabled"`
 	Prefix  string `json:"prefix,omitempty"`
+	Live    bool   `json:"live,omitempty"`
 }
 
 // DefaultPagesPrefix is where the pages are served when the config names
@@ -68,8 +71,47 @@ type pagesModel struct {
 	Tree string
 	// LeftOut are the operations without a page, and why.
 	LeftOut []leftOut
-	uses    map[string]bool
-	imports map[string]map[string]bool
+	// Controls are the route controls of each operation a page is for
+	// whose route has one, and Controlled each such page's method, path
+	// and its operation's place in Controls.
+	Controls   []routeControls
+	Controlled []controlledPage
+	uses       map[string]bool
+	imports    map[string]map[string]bool
+}
+
+// controlledPage is a page whose request meets its operation's route
+// controls: its method, its path as it is registered, and the place of
+// the operation's controls in pagesModel.Controls.
+type controlledPage struct {
+	Method string
+	Path   string
+	At     int
+}
+
+// Live reports whether a list updates in place through a shard.
+func (m *pagesModel) Live() bool {
+	for _, r := range m.Resources {
+		if r.Live {
+			return true
+		}
+	}
+	return false
+}
+
+// ControlsUse reports whether a page's operation's route has the control
+// ("rate_limit", "body_limit" or "timeout"), so pages.rs declares what
+// applies it.
+func (m *pagesModel) ControlsUse(control string) bool {
+	for _, c := range m.Controls {
+		switch {
+		case control == "rate_limit" && c.RateLimit > 0,
+			control == "body_limit" && c.BodyLimit > 0,
+			control == "timeout" && c.Timeout > 0:
+			return true
+		}
+	}
+	return false
 }
 
 // Uses reports whether pages.rs needs a helper (or an import) named item.
@@ -105,9 +147,21 @@ type routeParam struct {
 type pageResource struct {
 	node  *resourceNode
 	Ident string // projects_tasks
+	// Name is the resource's path below the prefix, by which the app's
+	// Settings scope choices to its pages: projects/{project_id}/tasks.
+	Name string
 	// Path is the list's route, ItemPath an item's.
 	Path     string
 	ItemPath string
+	// Live reports whether the list renders through a shard at LivePath,
+	// which its filter renders again in place when the app loads
+	// Topcoat's runtime.
+	Live     bool
+	LivePath string
+	// LiveSubmit is the script the filter's submit runs: it sends the
+	// form's query to the shard, through the hidden input whose input
+	// event sets the shard's signal, and puts it in the address bar.
+	LiveSubmit string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -302,7 +356,7 @@ type prefill struct {
 // pagesOf builds the pages of the resources the operations of inProcess
 // describe, under cfg's prefix, from the crate's records, views and forms.
 // It logs each operation left out, and is nil when no resource has a page.
-func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, logf func(format string, args ...any)) (*pagesModel, error) {
+func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
 	forms := pageForms{args: map[string]*argForm{}, inputs: map[string]*form{}}
 	for i := range c.ArgForms {
 		forms.args[c.ArgForms[i].ArgsName] = &c.ArgForms[i]
@@ -330,7 +384,20 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		params:   map[string]bool{},
 		idents:   map[string]bool{},
 		prefills: map[string]*prefill{},
+		live:     live,
+		routes:   map[string]bool{},
+		logf:     logf,
 	}
+	var taken func(nodes []*resourceNode)
+	taken = func(nodes []*resourceNode) {
+		for _, node := range nodes {
+			for _, r := range node.routes() {
+				b.routes[r.route] = true
+			}
+			taken(node.children)
+		}
+	}
+	taken(roots)
 	for _, rec := range c.Records {
 		b.records[rec.TypeName] = rec
 	}
@@ -360,8 +427,57 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		m.Prefills = append(m.Prefills, b.prefills[name])
 	}
 	m.Tree = b.tree(roots, 0)
+	b.controls()
 	b.finish()
 	return m, nil
+}
+
+// controls records, for each page that calls an operation whose route has
+// a traffic control, the page's method and path and the operation's
+// controls: a list's page, and its shard, the list's; an item's page, and
+// the edit and delete pages, which show the item, the detail's; a post the
+// operation it submits. The new page and the index call no operation.
+func (b *pageBuilder) controls() {
+	m := b.m
+	at := map[string]int{}
+	add := func(method, path string, o *pageOp) {
+		if o == nil {
+			return
+		}
+		controls := controlsOf(o.c.d.endpoint)
+		if !controls.HasControls() {
+			return
+		}
+		i, ok := at[o.Snake]
+		if !ok {
+			i = len(m.Controls)
+			at[o.Snake] = i
+			m.Controls = append(m.Controls, controls)
+		}
+		m.Controlled = append(m.Controlled, controlledPage{Method: method, Path: path, At: i})
+	}
+	for _, r := range m.Resources {
+		add("GET", r.Path, r.List)
+		if r.Live {
+			add("POST", r.LivePath, r.List)
+		}
+		add("GET", r.ItemPath, r.Detail)
+		add("POST", r.Path+"/new", r.Create)
+		if r.Update != nil {
+			add("GET", r.ItemPath+"/edit", r.Detail)
+			add("POST", r.ItemPath+"/edit", r.Update)
+		}
+		if r.Delete != nil {
+			add("GET", r.ItemPath+"/delete", r.Detail)
+			add("POST", r.ItemPath+"/delete", r.Delete)
+		}
+		for _, o := range r.Actions {
+			add("POST", r.ItemPath+"/"+o.Verb, o)
+		}
+	}
+	if len(m.Controlled) > 0 {
+		m.use("controls")
+	}
 }
 
 // pageBuilder builds each resource's pages.
@@ -374,6 +490,12 @@ type pageBuilder struct {
 	params   map[string]bool
 	idents   map[string]bool
 	prefills map[string]*prefill
+	// live reports whether a list with a filter renders through a shard;
+	// routes are the routes the pages serve, "GET projects/{}", which a
+	// shard's path must not be.
+	live   bool
+	routes map[string]bool
+	logf   func(format string, args ...any)
 }
 
 // resource adds the pages of node, then of the collections under its
@@ -405,6 +527,7 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 		r = &pageResource{
 			node:       node,
 			Ident:      ident,
+			Name:       strings.TrimPrefix(path, b.m.Prefix+"/"),
 			Path:       path,
 			ItemPath:   path + "/{" + node.param + "}",
 			ColParams:  colParams,
@@ -426,6 +549,7 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 		if err := b.fill(r); err != nil {
 			return err
 		}
+		b.liveList(r)
 		// A route holds the collection's parameters, and an item's page,
 		// which only a detail gives, its own.
 		for _, param := range r.ColParams {
@@ -447,6 +571,50 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 	return nil
 }
 
+// stepTitle is a collection's title from its path: the words after the
+// collection whose path it extends (`Drafts` for `documents/drafts`), else
+// its last word, as the path gives them.
+func stepTitle(node *resourceNode) string {
+	if len(node.extends) > 0 {
+		return humanize(strings.Join(node.words[len(node.extends):], " "))
+	}
+	return humanize(node.words[len(node.words)-1])
+}
+
+// liveSegment is the segment under the prefix of the shards' paths:
+// <prefix>/_live/<resource>.
+const liveSegment = "_live"
+
+// liveList makes a list with a filter render through a shard, when the
+// pages' lists are live: the shard's path, under the prefix, is its own,
+// unless a page serves it, which leaves the list as it is, with the reason
+// in the build log.
+func (b *pageBuilder) liveList(r *pageResource) {
+	if !b.live || r.List == nil || r.List.ArgForm == nil {
+		return
+	}
+	route := "POST " + liveSegment + "/" + r.Ident
+	if b.routes[route] {
+		b.logf("  - topcoat: %s's list is not live: its shard's path, %s/%s/%s, is a page's\n", r.node.key, b.m.Prefix, liveSegment, r.Ident)
+		return
+	}
+	b.routes[route] = true
+	r.Live, r.LivePath = true, b.m.Prefix+"/"+liveSegment+"/"+r.Ident
+	r.LiveSubmit = liveSubmit(r.Ident)
+}
+
+// liveSubmit is the script a live list's filter runs on submit, after
+// Topcoat's handler stops the browser's own: the form's query, as the
+// browser would send it, written to the form's hidden input, whose input
+// event sets the shard's signal, which renders the list again, and put in
+// the address bar, so a reload or a link keeps the filter.
+func liveSubmit(ident string) string {
+	return `(() => { const form = document.querySelector('form[data-ss-live="` + ident + `"]'); ` +
+		`const query = new URLSearchParams(new FormData(form)).toString(); ` +
+		`history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); ` +
+		`const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()`
+}
+
 // collectionWords are the words of each collection on the path to node.
 func collectionWords(node *resourceNode) []string {
 	var words []string
@@ -466,8 +634,17 @@ func (b *pageBuilder) fill(r *pageResource) error {
 	if node.list != nil {
 		rowType = node.list.d.op.TypeRef.Name
 	}
-	last := node.words[len(node.words)-1]
-	r.Plural, r.Noun = humanize(last), humanize(singular(last))
+	// An item is named by its type's @display noun, else by the type's
+	// name in words, as a display component names an untitled row; the
+	// collection by the type's plural, else by its path's last word as
+	// the path gives it. Neither guesses a word's singular, which English
+	// rules get wrong (shelves is no shelve). A collection whose path
+	// extends another's is titled by its own words.
+	typeName := itemType
+	if typeName == "" {
+		typeName = rowType
+	}
+	r.Plural, r.Noun = stepTitle(node), humanize(typeName)
 	createLabel := ""
 	for _, name := range []string{rowType, itemType} {
 		if name == "" {
@@ -477,7 +654,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if display.Noun != "" {
 			r.Noun = display.Noun
 		}
-		if display.Plural != "" {
+		if display.Plural != "" && len(node.extends) == 0 {
 			r.Plural = display.Plural
 		}
 		if display.CreateLabel != "" {
@@ -855,7 +1032,9 @@ func (b *pageBuilder) tree(nodes []*resourceNode, level int) string {
 		for i, word := range node.words {
 			words[i] = rustString(word)
 		}
-		plural, noun := humanize(node.words[len(node.words)-1]), humanize(singular(node.words[len(node.words)-1]))
+		// A collection without pages names an item by its id alone: it has
+		// no type to name it by.
+		plural, noun := stepTitle(node), ""
 		list, detail, edit, del := false, false, false, false
 		create := "None"
 		var actions []string

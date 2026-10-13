@@ -448,6 +448,44 @@ impl From<types::ProjectPatch> for ProjectPatchRecord {
     }
 }
 
+/// The record of `types::Shelf`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShelfRecord {
+    pub id: String,
+    pub label: String,
+}
+
+impl ShelfRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            label: wire::string(&json["label"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        json.insert("label".to_owned(), wire::put_string(&self.label));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Shelf> for ShelfRecord {
+    fn from(value: &types::Shelf) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Shelf> for ShelfRecord {
+    fn from(value: types::Shelf) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::Task`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

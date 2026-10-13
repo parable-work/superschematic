@@ -574,11 +574,11 @@ type crateOptions struct {
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
-// alike: rustOutputs, with the pages on for fixture-pages-api, the one
-// fixture whose crate has them.
+// alike: rustOutputs, with the pages on, their lists live, for
+// fixture-pages-api, the one fixture whose crate has them.
 func outputsOf(service string) map[string]any {
 	if service == pagesService {
-		return pagesOutputs()
+		return livePagesOutputs()
 	}
 	return rustOutputs()
 }
@@ -2020,8 +2020,8 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
     ApiError, Authenticator, Principal, RequestContext, ServiceAuthenticator, ServiceCaller,
 };
 use schemas_fixture_controls_api_topcoat::api::{
-    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderImplementation, StockImplementation,
-    StockReleaseReservationArgs, WebhookVerifier,
+    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
 };
 use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
@@ -2089,6 +2089,15 @@ impl StockImplementation for Shop {
 
 #[async_trait]
 impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
+        Ok(vec![types::OrderView { id: "1".to_string() }])
+    }
+    async fn get_order(&self, _ctx: RequestContext, args: OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: args.id })
+    }
+    async fn hold_order(&self, _ctx: RequestContext, args: OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: args.id })
+    }
     async fn place_order(&self, _ctx: RequestContext) -> Result<types::OrderView, ApiError> {
         if self.slow {
             tokio::time::sleep(Duration::from_secs(5)).await;

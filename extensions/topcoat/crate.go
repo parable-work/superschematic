@@ -245,7 +245,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 	}
 	if cfg.WritesPages() {
 		title := humanize(strings.ReplaceAll(service, "-", " "))
-		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, c.Logf); err != nil {
+		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -378,6 +378,31 @@ func (c *crate) ControlledProcedures() []procedure {
 		}
 	}
 	return out
+}
+
+// ControlledPages reports whether a page calls an operation whose route
+// has a traffic control, so `<service>(...)` adds the pages' layer that
+// applies it.
+func (c *crate) ControlledPages() bool { return c.Pages != nil && len(c.Pages.Controlled) > 0 }
+
+// SetupLayers is the expression `<service>(...)` returns its router
+// through, `router` wrapped in each module's call that adds its route
+// controls' layers; empty when no procedure or page has any.
+func (c *crate) SetupLayers() string {
+	expr := ""
+	wrap := func(call string) {
+		if expr == "" {
+			expr = "router"
+		}
+		expr = call + "(" + expr + ")"
+	}
+	if len(c.ControlledProcedures()) > 0 {
+		wrap("procedures::route_controls")
+	}
+	if c.ControlledPages() {
+		wrap("pages::route_controls")
+	}
+	return expr
 }
 
 // ControlsUse reports whether a procedure's route has the control
