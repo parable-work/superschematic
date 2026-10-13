@@ -8,10 +8,12 @@ require (
 	example.com/acme/orm/shop-db v0.0.0-00010101000000-000000000000
 	example.com/acme/sdk/go/shop-api v0.0.0-00010101000000-000000000000
 	example.com/acme/sdk/go/shop-orders v0.0.0-00010101000000-000000000000
+	example.com/acme/sdk/go/shop-stock v0.0.0-00010101000000-000000000000
 	example.com/acme/types/go/shop-api v0.0.0
 	example.com/acme/types/go/shop-common v0.0.0-00010101000000-000000000000
 	example.com/acme/types/go/shop-db v0.0.0
 	example.com/acme/types/go/shop-orders v0.0.0
+	example.com/acme/types/go/shop-stock v0.0.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superscalar/go v1.0.0
@@ -59,10 +61,12 @@ replace (
 	example.com/acme/orm/shop-db => ../schemas/dist/orm/shop-db
 	example.com/acme/sdk/go/shop-api => ../schemas/dist/sdk/go/shop-api
 	example.com/acme/sdk/go/shop-orders => ../schemas/dist/sdk/go/shop-orders
+	example.com/acme/sdk/go/shop-stock => ../schemas/dist/sdk/go/shop-stock
 	example.com/acme/types/go/shop-api => ../schemas/dist/types/go/shop-api
 	example.com/acme/types/go/shop-common => ../schemas/dist/types/go/shop-common
 	example.com/acme/types/go/shop-db => ../schemas/dist/types/go/shop-db
 	example.com/acme/types/go/shop-orders => ../schemas/dist/types/go/shop-orders
+	example.com/acme/types/go/shop-stock => ../schemas/dist/types/go/shop-stock
 	github.com/parable-work/superscalar/go => ../../../third_party/superscalar/go
 	github.com/parable-work/superschematic/ir => ../../../ir
 	github.com/parable-work/superschematic/runtime/http/go => ../../../runtime/http/go

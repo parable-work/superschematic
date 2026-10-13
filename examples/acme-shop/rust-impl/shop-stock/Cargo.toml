@@ -1,0 +1,24 @@
+# The implementation of the shop-stock API (D57).
+#
+# superschematic wrote this crate once, as a scaffold, because it was
+# missing, and never writes it again: it is the shop's, and so is its
+# name. shop-stack's server entrypoint for shop-stock depends on it by path
+# and calls its `create`.
+[package]
+name = "acme-shop-stock-implementation"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+# The generated API crate, and the HTTP runtime it is built on, whose
+# postgres feature is the pool Deps holds and the tokio-postgres it
+# re-exports; and tracing, which logs inside the API's span.
+[dependencies]
+async-trait = "0.1.89"
+acme-shop-stock-api = { path = "../../schemas/dist/api/shop-stock" }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["postgres"] }
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

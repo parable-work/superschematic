@@ -2222,13 +2222,21 @@ its jobs and workers stay Go's.
   --release --locked` into the program directory's Cargo target
   directory and runs its binary (section 8.3). Its build of the stack has
   brought the lockfile up to date first, so a manifest the engineer
-  changes reaches the lockfile through `stack dev`.
+  changes reaches the lockfile through `stack dev`. The implementation's
+  `Cargo.toml` names the API crate by its path under the output root the
+  scaffold was written for, so the server builds in that output root
+  alone: with `--out` elsewhere, cargo finds two crates of the API's name
+  and refuses the workspace.
 - **CI.** The generated `check` sets up the Rust release before the build,
   refuses a lockfile git does not track or the build changed, and runs
   `cargo check --locked` in each Rust server's crate (section 11.3).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
 another, and signs an end user in with the identity runtime.
+acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
+over `shop-db` whose reservations admit only `shop-orders`' Go server,
+which reserves an order's stock through `shop-stock`'s Go SDK with its
+edge's credential and the shopper it forwards.
 
 Not built: Rust jobs and workers, buckets from a Rust server, and
 OpenTelemetry export (D57).

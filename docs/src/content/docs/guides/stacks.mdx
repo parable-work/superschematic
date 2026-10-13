@@ -672,14 +672,18 @@ malformed declarations and names nothing registers.
 ## The acme shop's stack
 
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
-`shop-api` and `shop-orders`, each on a default Go server, and
-`shop-storefront`, on a default TypeScript server, and exposes all three;
-`shop-db`, the `authDb` of both Go APIs, joins as their database,
-`shop-media`, the bucket `shop-api` lists, as a bucket, `shop-orders`'
-worker `FulfilOrders` as a worker, which handles `shop-db`'s queue
+`shop-api` and `shop-orders`, each on a default Go server, `shop-stock`,
+on a default Rust server, and `shop-storefront`, on a default TypeScript
+server, and exposes all four; `shop-db`, the `authDb` of `shop-api`,
+`shop-orders` and `shop-stock`, joins as their database, `shop-media`,
+the bucket `shop-api` lists, as a bucket, `shop-orders`' worker
+`FulfilOrders` as a worker, which handles `shop-db`'s queue
 `OrderPlaced`, its job `ShipOrders` as a job, and `shop-web`, a static
-site whose browser code calls `shop-api`, as a site. Its one environment,
-`Dev`, is on the core's `local` target, and runs the job every minute:
+site whose browser code calls `shop-api`, as a site. `shop-orders` calls
+`shop-stock`, whose reservations admit only `shop-orders`' server
+([Service callers](#service-callers)), so its edge carries a service
+credential. Its one environment, `Dev`, is on the core's `local` target,
+and runs the job every minute:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -689,7 +693,12 @@ default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` the Go
 entrypoints call, building each API's identity service over `shop-db`,
 whose `User` table has the user model's trait, and
 `typescript/shop-storefront`, whose `create(deps)` and `authenticate(deps)`
-the TypeScript one calls.
+the TypeScript one calls. `shop-stock`'s is at `rust-impl/shop-stock`, the
+`rust` template the example's naming file sets, `rust-impl/{service}`,
+since its `rust/` is a client crate: the Rust entrypoint calls its
+`create(deps)` and builds the identity service over `shop-db` and the
+service authenticator over its callers field
+([Rust servers](#rust-servers)).
 [Serve and call it from Go](/superschematic/first-project/go-api/) walks
 `shop-api`'s, and
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
@@ -697,18 +706,29 @@ the storefront's.
 
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
-`shop-media`, both Go servers on their generated entrypoints, the
-storefront's on Bun, the worker as a process, the job on its schedule,
-and the site, built once and served with its config.
+`shop-media`, both Go servers on their generated entrypoints, `shop-stock`'s
+on its generated crate, which cargo builds, the storefront's on Bun, the
+worker as a process, the job on its schedule, and the site, built once
+and served with its config.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
-running, calls each Go server through its SDK, uploads a product's image
-to `shop-media` through the URL `shop-api` signs, reads a cart from the
-storefront, sees the worker fulfil the order it placed, reads the site and
-its config, checks that `shop-api` answers CORS for the site's origin and
-no other, and sees the job ship the order, once with `stack run` and once
-on the schedule. The worker's code is `NewWorkers` in
-`go/shop-orders/workers.go`, and the job's `NewJobs` in
-`go/shop-orders/jobs.go`:
+running, calls each Go and Rust server through its Go SDK, uploads a
+product's image to `shop-media` through the URL `shop-api` signs, sets the
+product's stock on `shop-stock` as staff, reads a cart from the
+storefront, places an order, which reserves its stock on `shop-stock`,
+sees an order beyond the stock refused and a reservation with the
+shopper's session alone refused 401, sees the worker fulfil the order it
+placed, reads the site and its config, checks that `shop-api` answers
+CORS for the site's origin and no other, and sees the job ship the order,
+once with `stack run` and once on the schedule. `PlaceOrder` reserves the
+stock through the client of `shop-stock` its `Deps` holds, which sends
+`shop-orders`' credential and forwards the shopper of the request its
+context belongs to, and refuses the order with `shop-stock`'s reason when
+the warehouse cannot fill it:
+
+<Snippet file="go/shop-orders/orders.go" symbol="Orders.reserve" />
+
+The worker's code is `NewWorkers` in `go/shop-orders/workers.go`, and the
+job's `NewJobs` in `go/shop-orders/jobs.go`:
 
 <Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
 
@@ -847,10 +867,11 @@ and path.
 
 A server whose database some environment of the stack places on Cloud
 SQL links the Cloud SQL Go connector and logs in with IAM database
-authentication; every other server links no Google module. One limit
-applies today: a server whose API has a `@requireService` or
-`@allowService` clause refuses to start, since no connector derives the
-callee's service-auth field yet.
+authentication; every other server links no Google module. A server
+whose API has a `@requireService` or `@allowService` clause verifies each
+calling server's credential against the API's callers field,
+`<API>_CALLERS`, which the connector of each http edge to it derives
+([Service callers](#service-callers)).
 
 A TypeScript server's package, beside the Go servers' modules, holds a
 `main.ts` that does the same on [Bun](https://bun.sh): it loads each API's
@@ -919,7 +940,22 @@ schemas/dist/*
 
 The build says in one line when git ignores the lockfile, when cargo is
 not on `PATH`, and when cargo cannot resolve the workspace, as in a build
-of the stack before its services are built. The Dockerfile builds the
+of the stack before its services are built. The implementation's
+`Cargo.toml` names the API crate by its path under the output root the
+scaffold was written for, so the server builds in that output root alone:
+in another, as `stack dev --out` elsewhere would write it, cargo finds two
+crates of the API's name and refuses the workspace.
+
+`examples/acme-shop`'s `shop-stock` is a Rust server. Its implementation,
+`rust-impl/shop-stock`, reads and writes `shop-db`'s `stock_level` table
+with tokio-postgres, which the HTTP runtime re-exports, over the pool its
+`Deps` holds, since no ORM is generated for Rust. A reservation takes
+every line off the shelf in one transaction, or none:
+
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="/// Takes each line's units off the shelf" to="        Ok(levels)" />
+
+The example commits `schemas/dist/Cargo.lock`, and its check fails when a
+build changes it. The Dockerfile builds the
 crate with `cargo build --release --locked` on the Rust release
 `tools.env` pins, from the repository root, which holds the checkouts the
 naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust` and
@@ -1331,6 +1367,16 @@ must reach at least one operation that admits that server, or resolution
 fails with `unreachable-edge`. A handle in `from` that names a service the
 stack does not deploy is not an error, since one API is written once and
 deployed in many stacks.
+
+The connector of each http edge to an API with a service clause derives
+the issuer its caller's credential comes from, and the build merges them
+into the API's callers field, `<API>_CALLERS`, which its server's
+authenticator verifies each credential against. On `local`, the calling
+server signs a short-lived token with an Ed25519 key pair `stack dev`
+makes for the edge, and the callee's field holds its public key. In the
+acme shop, `shop-orders`' server, its worker and its job each have an
+edge to `shop-stock`, since each holds a client of it in its `Deps`, so
+`SHOP_STOCK_CALLERS` lists all three, each serving `shop-orders`.
 
 ## Write your own target
 
