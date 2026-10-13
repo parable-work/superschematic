@@ -5397,12 +5397,14 @@ core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
 its options (`core()`) since the engine cannot depend on them: wave 1
 (milestone 8) has ported Workflow (with D56's enteredAt), Comments,
-Constants and Variants, with their guidance, migrations on both
-databases, configs, guards, fields, operations and veto codes; and
-`superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts` and of the four
+Constants and Variants, and wave 2 (milestone 9) D56's StateRules,
+Approvals and Timers, whose fire schedule the tests run through a test
+entry point until the runner does, with their guidance, migrations on
+both databases, configs, guards, fields, operations, schedules and veto
+codes; and `superschematic-engine-testkit`, which ports the TypeScript tests'
+behaviors, runs the cases of `test/behavior-*.test.ts` and of the ported
 behaviors' `test/core-*.test.ts` against the API, and replays the
-scenario corpus, the four behaviors' files included, giving its recorded
+scenario corpus, those behaviors' files included, giving its recorded
 answers on SQLite and Postgres for every scenario whose behaviors it has.
 CI tests the workspace on both databases. The other core behaviors are
 milestones 9 to 11 and the work queue's milestone 12, and the runner

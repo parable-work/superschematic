@@ -10,7 +10,8 @@
 //! - `test/unique.test.ts`: [`Slugger`];
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
 //!   what a test puts in its [`Probe`];
-//! - `test/core-workflow.test.ts`: [`Dispatch`].
+//! - `test/core-workflow.test.ts`: [`Dispatch`];
+//! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
@@ -1046,13 +1047,18 @@ impl Behavior for Dispatch {
 /// an open that names one: the engine refuses it, as the TypeScript engine
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
-    use superschematic_engine_behaviors::{Comments, Constants, Variants, Workflow};
+    use superschematic_engine_behaviors::{
+        Approvals, Comments, Constants, StateRules, Timers, Variants, Workflow,
+    };
     let set = BehaviorSet::new();
     Some(match name {
         "Workflow" => set.with(Workflow),
         "Comments" => set.with(Comments),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
+        "StateRules" => set.with(StateRules),
+        "Approvals" => set.with(Approvals),
+        "Timers" => set.with(Timers),
         _ => return None,
     })
 }
@@ -1064,6 +1070,9 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
     let set = BehaviorSet::new();
     Some(match (file, name) {
         ("core-workflow", "test.Dispatch") => set.with(Dispatch),
+        ("core-staterules", "test.Recorder") => set.with(crate::core_fixtures::Recorder),
+        ("core-timers", "test.Bounce") => set.with(crate::core_fixtures::Bounce),
+        ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),

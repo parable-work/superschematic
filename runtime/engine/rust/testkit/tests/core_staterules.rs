@@ -34,7 +34,7 @@ fn amender() -> Principal {
 
 /// The core's behaviors, as the TypeScript engine registers them.
 fn core() -> BehaviorSet {
-    superschematic_engine_behaviors::core().with(superschematic_engine_behaviors::StateRules)
+    superschematic_engine_behaviors::core()
 }
 
 fn open(target: &Target) -> Engine {

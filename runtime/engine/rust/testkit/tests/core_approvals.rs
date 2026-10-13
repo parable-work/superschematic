@@ -48,7 +48,7 @@ fn wes() -> Principal {
 
 /// The core's behaviors, as the TypeScript engine registers them.
 fn core() -> BehaviorSet {
-    superschematic_engine_behaviors::core().with(superschematic_engine_behaviors::Approvals)
+    superschematic_engine_behaviors::core()
 }
 
 // A Doc moves from draft to review, then to approved or straight to

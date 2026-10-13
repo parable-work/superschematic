@@ -51,8 +51,6 @@ fn lead() -> Principal {
 /// The core's behaviors, as the TypeScript engine registers them.
 fn core() -> BehaviorSet {
     superschematic_engine_behaviors::core()
-        .with(superschematic_engine_behaviors::StateRules)
-        .with(superschematic_engine_behaviors::Timers)
 }
 
 // A ticket is open, waits on its customer, is escalated, resolved, or
