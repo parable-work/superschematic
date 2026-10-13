@@ -1,18 +1,22 @@
-// Command scalarcatalog writes the scalar catalogs the TypeScript and Python
-// schema runtimes ship, from the superscalar Go package this repository
-// links. The Go runtime reads scalars.ScalarMetadataByCanonical directly;
-// the other two runtimes cannot import Go, so the same rows are written out
-// once here and committed:
+// Command scalarcatalog writes the scalar catalogs the TypeScript and
+// Python schema runtimes and the engine's Rust schema reader ship, from the
+// superscalar Go package this repository links. The Go runtime reads
+// scalars.ScalarMetadataByCanonical directly; the others cannot import Go,
+// so the same rows are written out once here and committed:
 //
 //	runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts
 //	runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py
+//	runtime/schema/rust-ir/src/builtin_scalars.json
 //
-// The TypeScript catalog also gives each builtin scalar its value class
-// (D19, D32): the class the graph descriptor gives a single field of the
-// scalar, computed by graphdesc.ScalarClass over the scalar as the loader
-// hydrates it from the core catalog, so the engine classifies a field
-// with the compiler's rule. The Python catalog holds no scalar rows, only
-// the parse, normalize and validate functions, and gains nothing.
+// The TypeScript and Rust catalogs also give each builtin scalar its value
+// class (D19, D32): the class the graph descriptor gives a single field of
+// the scalar, computed by graphdesc.ScalarClass over the scalar as the
+// loader hydrates it from the core catalog, so the engine classifies a
+// field with the compiler's rule. The Rust catalog is JSON holding the
+// TypeScript catalog's rows, which the Rust IR reader
+// (superschematic-schema-ir) reads as it reads a scalar of an IR document. The Python catalog holds no scalar
+// rows, only the parse, normalize and validate functions, and gains
+// nothing.
 //
 // Run from the repository root: go run ./internal/tools/scalarcatalog
 // With -check the command exits 1 when a committed file differs from what it
@@ -39,8 +43,9 @@ import (
 )
 
 const (
-	tsPath = "runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts"
-	pyPath = "runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py"
+	tsPath   = "runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts"
+	pyPath   = "runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py"
+	rustPath = "runtime/schema/rust-ir/src/builtin_scalars.json"
 )
 
 // entry is the runtime ScalarDef shape (ir/typescript/index.d.ts ScalarDef).
@@ -90,8 +95,9 @@ func main() {
 	}
 
 	outputs := map[string][]byte{
-		tsPath: renderTS(names, classes),
-		pyPath: renderPython(names),
+		tsPath:   renderTS(names, classes),
+		pyPath:   renderPython(names),
+		rustPath: renderRust(names, classes),
 	}
 	failed := false
 	for rel, want := range outputs {
@@ -148,44 +154,7 @@ func renderTS(names []string, classes map[string]string) []byte {
 	b.WriteString("import type { ScalarDef } from './validation/types';\n\n")
 	b.WriteString("export const BUILTIN_SCALARS: Record<string, ScalarDef> = {\n")
 	for i, name := range names {
-		meta := scalars.ScalarMetadataByCanonical[name]
-		row := entry{
-			Name:               strings.ReplaceAll(name, ".", "_"),
-			Description:        meta.Description,
-			Primitive:          meta.Primitive,
-			MinLength:          meta.MinLength,
-			MaxLength:          meta.MaxLength,
-			Pattern:            meta.Pattern,
-			Format:             meta.Format,
-			ReservedWords:      []string{},
-			CaseInsensitive:    meta.CaseInsensitive,
-			Minimum:            meta.Minimum,
-			Maximum:            meta.Maximum,
-			HasCustomNormalize: meta.HasCustomNormalize,
-			HasCustomValidate:  meta.HasCustomValidate,
-			HasCustomParse:     meta.HasCustomParse,
-			TypeMappings:       map[string]string{},
-		}
-		if len(meta.ReservedWords) > 0 {
-			row.ReservedWords = append(row.ReservedWords, meta.ReservedWords...)
-		}
-		row.ReservedWordsCaseInsensitive = meta.ReservedWordsCaseInsensitive
-		row.ReservedWordsMatchPartial = meta.ReservedWordsMatchPartial
-		if len(meta.Examples) > 0 {
-			row.Example = meta.Examples[0]
-		}
-		if meta.Symbol != "" {
-			row.TypeMappings["go"] = meta.Symbol
-		}
-		if isObjectPrimitive(meta.Primitive) && meta.GoType != "" {
-			row.TypeMappings["typescript"] = meta.GoType
-		}
-		if meta.SQLType != "" {
-			row.TypeMappings["sql"] = meta.SQLType
-		}
-		if meta.JSONSchemaType != "" {
-			row.TypeMappings["json_schema"] = meta.JSONSchemaType
-		}
+		row := rowOf(name)
 		encoded, err := json.MarshalIndent(row, "  ", "  ")
 		if err != nil {
 			panic(err)
@@ -218,6 +187,80 @@ func renderTS(names []string, classes map[string]string) []byte {
 	}
 	b.WriteString("};\n")
 	return b.Bytes()
+}
+
+// rowOf is the catalog row of the named scalar, in the runtime ScalarDef
+// shape, keyed by its legacy underscore name.
+func rowOf(name string) entry {
+	meta := scalars.ScalarMetadataByCanonical[name]
+	row := entry{
+		Name:               strings.ReplaceAll(name, ".", "_"),
+		Description:        meta.Description,
+		Primitive:          meta.Primitive,
+		MinLength:          meta.MinLength,
+		MaxLength:          meta.MaxLength,
+		Pattern:            meta.Pattern,
+		Format:             meta.Format,
+		ReservedWords:      []string{},
+		CaseInsensitive:    meta.CaseInsensitive,
+		Minimum:            meta.Minimum,
+		Maximum:            meta.Maximum,
+		HasCustomNormalize: meta.HasCustomNormalize,
+		HasCustomValidate:  meta.HasCustomValidate,
+		HasCustomParse:     meta.HasCustomParse,
+		TypeMappings:       map[string]string{},
+	}
+	if len(meta.ReservedWords) > 0 {
+		row.ReservedWords = append(row.ReservedWords, meta.ReservedWords...)
+	}
+	row.ReservedWordsCaseInsensitive = meta.ReservedWordsCaseInsensitive
+	row.ReservedWordsMatchPartial = meta.ReservedWordsMatchPartial
+	if len(meta.Examples) > 0 {
+		row.Example = meta.Examples[0]
+	}
+	if meta.Symbol != "" {
+		row.TypeMappings["go"] = meta.Symbol
+	}
+	if isObjectPrimitive(meta.Primitive) && meta.GoType != "" {
+		row.TypeMappings["typescript"] = meta.GoType
+	}
+	if meta.SQLType != "" {
+		row.TypeMappings["sql"] = meta.SQLType
+	}
+	if meta.JSONSchemaType != "" {
+		row.TypeMappings["json_schema"] = meta.JSONSchemaType
+	}
+	return row
+}
+
+// rustCatalog is the Rust IR reader's catalog file: the TypeScript
+// catalog's rows and value classes, keyed as there.
+type rustCatalog struct {
+	Comment      string            `json:"comment"`
+	Scalars      map[string]entry  `json:"scalars"`
+	ValueClasses map[string]string `json:"valueClasses"`
+}
+
+// renderRust writes the Rust IR reader's catalog as JSON, which it reads
+// row by row as it reads an IR document's scalars.
+func renderRust(names []string, classes map[string]string) []byte {
+	catalog := rustCatalog{
+		Comment:      "@generated by go run ./internal/tools/scalarcatalog from the superscalar Go package this repository pins (superscalar.pin); do not edit",
+		Scalars:      make(map[string]entry, len(names)),
+		ValueClasses: make(map[string]string, len(classes)),
+	}
+	for _, name := range names {
+		row := rowOf(name)
+		catalog.Scalars[row.Name] = row
+		if class, ok := classes[name]; ok {
+			catalog.ValueClasses[row.Name] = class
+		}
+	}
+	encoded, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	return append(encoded, '\n')
 }
 
 // isObjectPrimitive reads a row's primitive as the loader does
