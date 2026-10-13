@@ -7,6 +7,7 @@
 
 pub(crate) mod comments;
 pub(crate) mod constants;
+pub(crate) mod variants;
 pub(crate) mod workflow;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};

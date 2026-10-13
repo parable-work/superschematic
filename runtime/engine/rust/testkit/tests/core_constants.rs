@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 
 use superschematic_engine::{
     Behavior, ConfigTarget, CreateOptions, DefineOptions, Engine, EngineError, EngineErrorKind,
-    Hooks, Principal, Result, SchemaTarget, WriteOptions,
+    Hooks, Principal, Result, SchemaTarget, ValidateOptions, WriteOptions,
 };
-use support::{alice, issue, issues_of, refusal, schema_document, targets};
+use support::{alice, issue, issues_of, refusal, repository, schema_document, targets};
 
 fn renamer() -> Principal {
     Principal::new("rita", ["steps.rename"])
@@ -442,5 +442,51 @@ fn its_fields_are_the_types_own_and_a_new_version_may_change_add_or_remove_it() 
                 .version,
             Some(5)
         );
+    }
+}
+
+/// The steps document the core binary loads with no extension linked
+/// (`fixture-variants-json`), as the TypeScript tests' `stepsDocument()`
+/// reads it.
+fn steps_document() -> Value {
+    let path = repository()
+        .join("internal/loader/testdata/services/fixture-variants-json/src/step.schema.json");
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("the steps document"))
+        .expect("JSON")
+}
+
+#[test]
+fn the_document_the_core_binary_builds_keeps_a_steps_kind() {
+    for target in targets("constants_steps") {
+        let engine = target.open_core();
+        publish(&engine, &steps_document());
+        create(
+            &engine,
+            "Step",
+            json!({"title": "Check", "kind": "verify"}),
+            "s1",
+        );
+        let error = refusal(engine.instances().update(
+            &alice(),
+            "Step",
+            "s1",
+            &json!({"kind": "note"}),
+            WriteOptions::default(),
+        ));
+        assert_eq!(
+            issues(&error)
+                .into_iter()
+                .map(|(path, rule, _)| (path, rule))
+                .collect::<Vec<_>>(),
+            [constant("kind")]
+        );
+        let composed: Vec<String> = engine
+            .schemas()
+            .behaviors(&alice(), "Step", ValidateOptions::default())
+            .expect("behaviors")
+            .into_iter()
+            .map(|behavior| behavior.name)
+            .collect();
+        assert_eq!(composed, ["Constants", "Variants"]);
     }
 }
