@@ -106,8 +106,9 @@ go-goldens: schema-file-types
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
-# The schema-file JSON Schema and TypeScript types in ir/typescript are
-# written from the IR structs. CI fails when a committed file differs.
+# The schema-file JSON Schema and TypeScript types in ir/typescript, and the
+# engine's Rust schema reader's copy of the JSON Schema, are written from
+# the IR structs. CI fails when a committed file differs.
 schema-file-types:
 	go run ./internal/tools/schemafiletypes
 

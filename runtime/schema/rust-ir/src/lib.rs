@@ -3,10 +3,11 @@
 //! from the TypeScript runtime (`@superschematic/schema-runtime`'s `ir/`,
 //! `validation/` and `parse/`) so a schema defined while a program runs is
 //! checked as the TypeScript runtime checks it, with the same paths, codes
-//! and messages. Every scalar's own checks are superscalar's core's (D3),
-//! which this crate links by path, so it is not published; the helpers it
-//! shares with the generated Rust validators come from
-//! `superschematic-schema-runtime`.
+//! and messages, and, behind the `schemafile` feature, the strict
+//! schema-file loader, the `schemafile` module. Every scalar's own checks
+//! are superscalar's core's (D3), which this crate links by path, so it is
+//! not published; the helpers it shares with the generated Rust validators
+//! come from `superschematic-schema-runtime`.
 //!
 //! ```
 //! use serde_json::json;
@@ -32,6 +33,8 @@ mod parse;
 mod reader;
 mod scalars;
 mod schema;
+#[cfg(feature = "schemafile")]
+pub mod schemafile;
 mod validate;
 
 use serde_json::Value;
