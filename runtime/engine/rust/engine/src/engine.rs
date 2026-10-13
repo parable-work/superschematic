@@ -1,6 +1,7 @@
 //! Opening an engine, the part of `src/engine.ts` built so far (D16, D58):
 //! its storage, brought up to the engine's migrations, the namespaces the
-//! deployment configures, the access policy, and the ids and the clock.
+//! deployment configures, the access policy, the meta-schema schema
+//! documents load against, and the ids and the clock.
 //!
 //! What the TypeScript engine took as functions is configuration here
 //! (D58), so a Go or Rust host passes the same options as data: the ids are
@@ -16,13 +17,18 @@
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde_json::Value;
+
 use superschematic_engine_storage::{engine_migrations, Db, Dialect, Sql, Tx};
+use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
 use crate::access::{Access, AllowAll};
+use crate::composition::BehaviorRegistry;
 use crate::errors::{Error, Result};
 use crate::indexes::{clash_message, own_indexes, sync_own_indexes};
 use crate::namespaces::{NamespaceConfig, NamespaceOptions, Namespaces};
 use crate::registry::document::model_of;
+use crate::registry::{Catalog, Schemas};
 
 /// Where the engine keeps its data.
 #[derive(Debug)]
@@ -71,6 +77,14 @@ pub enum Clock {
     Manual(i64),
 }
 
+/// The meta-schema schema documents load against: the `superschematic
+/// json-schema` output of the deployment's binary, parsed or as JSON text.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetaSchema {
+    Document(Value),
+    Text(String),
+}
+
 /// How an engine opens.
 #[derive(Debug)]
 pub struct EngineOptions {
@@ -80,17 +94,20 @@ pub struct EngineOptions {
     pub namespaces: NamespaceOptions,
     pub ids: Ids,
     pub clock: Clock,
+    /// The core registry's meta-schema when absent.
+    pub meta_schema: Option<MetaSchema>,
 }
 
 impl EngineOptions {
     /// Options with every default: one namespace, random ids, the system
-    /// clock.
+    /// clock, the core's meta-schema.
     pub fn new(storage: Storage) -> Self {
         EngineOptions {
             storage,
             namespaces: NamespaceOptions::default(),
             ids: Ids::default(),
             clock: Clock::default(),
+            meta_schema: None,
         }
     }
 
@@ -178,7 +195,7 @@ struct IdSource {
     next: AtomicU64,
 }
 
-/// The engine: its storage, namespaces and access policy. More
+/// The engine: its storage, namespaces, access policy and schemas. More
 /// of the TypeScript engine (instances, events, values, behaviors, the
 /// runner and the routes) arrives with the milestones after 4a (D58).
 pub struct Engine {
@@ -186,6 +203,7 @@ pub struct Engine {
     pub(crate) namespaces: NamespaceConfig,
     pub(crate) access: Access,
     pub(crate) clock: EngineClock,
+    pub(crate) catalog: Catalog,
     ids: IdSource,
 }
 
@@ -203,7 +221,18 @@ impl Engine {
     /// engine's migrations. A bad option is refused before the storage
     /// opens.
     pub fn open(options: EngineOptions) -> Result<Engine> {
+        Self::open_with(options, BehaviorRegistry::default())
+    }
+
+    pub(crate) fn open_with(options: EngineOptions, behaviors: BehaviorRegistry) -> Result<Engine> {
         let namespaces = NamespaceConfig::new(&options.namespaces)?;
+        let loader = match &options.meta_schema {
+            None => SchemaFileLoader::new(),
+            Some(MetaSchema::Document(document)) => SchemaFileLoader::with_meta_schema(document)
+                .map_err(|error| Error::usage(error.to_string()))?,
+            Some(MetaSchema::Text(text)) => SchemaFileLoader::with_meta_schema_text(text)
+                .map_err(|error| Error::usage(error.to_string()))?,
+        };
         let clock = EngineClock::new(options.clock);
         let db = open_storage(options.storage)?;
         db.migrate(&engine_migrations(unique_indexes), clock.now())?;
@@ -212,11 +241,17 @@ impl Engine {
             namespaces,
             access: Access::new(Box::new(AllowAll)),
             clock,
+            catalog: Catalog::new(loader, behaviors),
             ids: IdSource {
                 ids: options.ids,
                 next: AtomicU64::new(0),
             },
         })
+    }
+
+    /// The schema registry.
+    pub fn schemas(&self) -> Schemas<'_> {
+        Schemas { engine: self }
     }
 
     /// The namespaces: resolved by every call, and created, archived and
