@@ -168,6 +168,79 @@ same.
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`.
 
+### In the generated types
+
+The `types` output types what a read returns under `behaviors`. For each
+type that composes behaviors, each language's types write
+`<Type>Behaviors` beside the type itself, which stays the own fields, the
+read's `data`. It has a member per behavior that declares a field, under
+the behavior's name, holding those fields as the type's config narrows
+them, as [`engine-client`](/superschematic/reference/cli/#engine-client---out-filets-schema-file)
+types them: Workflow's status is one of the type's states, Links' targets
+holds each link of the config with its target's schema, Timers' deadlines
+each deadline of the config. A field a read can leave out is optional.
+For the `Task` above, in TypeScript (`types/behaviors.ts`):
+
+```ts
+/** A state of a Task's Workflow. */
+export type TaskState = 'todo' | 'doing' | 'done' | 'dropped';
+
+export interface TaskBehaviors {
+  readonly Workflow: {
+    readonly status: TaskState;
+    readonly enteredAt?: number;
+  };
+  readonly Dependencies: {
+    readonly blocked: boolean;
+  };
+  readonly Links: {
+    readonly targets: {
+      parent?: { id: string; schema: 'tasks' };
+      project: { id: string; schema: 'projects' };
+      spec?: {
+        id: string;
+        latest?: number;
+        revision?: number;
+        schema: 'documents';
+        stale?: boolean;
+      };
+    };
+  };
+}
+```
+
+and in Go (`behaviors.go`), where each object a field holds is a struct
+named by its path:
+
+```go
+type TaskBehaviors struct {
+	Workflow     TaskWorkflow     `json:"Workflow"`
+	Dependencies TaskDependencies `json:"Dependencies"`
+	Links        TaskLinks        `json:"Links"`
+}
+
+type TaskWorkflow struct {
+	Status    TaskState `json:"status"`
+	EnteredAt *int64    `json:"enteredAt,omitempty"`
+}
+```
+
+Rust's `src/behaviors.rs` writes the same structs with serde, and
+Python's `behaviors.py` Pydantic models, with `from_json` and
+`to_json_dict` on `<Type>Behaviors`. Where a language's names cannot hold
+a behavior's name or a config's key, the member takes it in PascalCase,
+each run of letters and digits capitalized and the runs joined
+(`acme.Rating` is `AcmeRating`, a state `in-progress` is `InProgress`),
+snake_case for a Rust or Python field (`acme_rating`), and the JSON keeps
+the exact name. A behavior with no narrowing, an extension's, types its
+fields as any JSON, and so do Go, Rust and Python for a value that is one
+of several types, such as a rollup's (`{ "over": true }` past its limit).
+
+Only the `types` generator renders behaviors so far: the other generators
+of a build refuse a type that composes one, so a build that runs them
+fails, naming the first
+([`build`](/superschematic/reference/cli/#build-service-dir)).
+
 ## Display
 
 A UI, or an agent, that renders a schema's instances reads how to show

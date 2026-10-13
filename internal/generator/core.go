@@ -64,6 +64,11 @@ func RegisterCore(reg *registry.Registry) error {
 		{
 			Name:      typesGenerator,
 			OutputKey: "types",
+			// Each language's types write <T>Behaviors for a type that
+			// composes behaviors: each behavior's fields as a read
+			// returns them, narrowed by the type's config (D58). The
+			// own-field type stays the instance's data.
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledTypeLanguages() {

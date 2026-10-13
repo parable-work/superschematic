@@ -52,7 +52,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 	assert.Empty(t, behaviors[1].Config)
 
 	_, err = runCommandWith(t, acme, "build", service, "--out", t.TempDir())
-	require.ErrorContains(t, err, "generator: types does not render behaviors yet: type Item composes behavior acme.Stock")
+	require.ErrorContains(t, err, "generator: envConfig does not render behaviors yet: type Item composes behavior acme.Stock")
 
 	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
 	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`)
@@ -271,7 +271,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	_, err := runCommandWith(t, nil, "build", filepath.Join(tsreaderTestdata, "broken-behavior-config"), "--emit-ir", "--out", t.TempDir())
 	require.ErrorContains(t, err, "type Memo: behavior Workflow config: ")
 	_, err = runCommandWith(t, nil, "build", filepath.Join(loaderTestdata, "fixture-behaviors-json"), "--out", t.TempDir())
-	require.ErrorContains(t, err, "generator: types does not render behaviors yet: type Document composes behavior Workflow")
+	require.ErrorContains(t, err, "generator: envConfig does not render behaviors yet: type Document composes behavior Workflow")
 
 	schemaOut, err := runCommandWith(t, nil, "json-schema")
 	require.NoError(t, err)

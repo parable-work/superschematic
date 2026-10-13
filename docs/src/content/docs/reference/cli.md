@@ -58,10 +58,17 @@ message naming the import, in every build command:
 `schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
 
 A type that composes a behavior (`behaviors` in the data forms) loads,
-and `--emit-ir` prints it, but no generator of a build renders behaviors:
-the build fails and names the first generator that would run, the type and
-the behavior. An engine runs such a schema; `engine-client` (below) types
-the engine's client for it.
+and `--emit-ir` prints it. The `types` generator renders it: each
+language's types write `<Type>Behaviors`, the type's behaviors' fields as
+a read returns them, narrowed by the type's config
+([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
+No other generator of a build renders behaviors yet, so the build fails
+and names the first such generator that would run (`sql` for a DB schema,
+`envConfig` for a General one, `api` for an API one), the type and the
+behavior:
+`generator: envConfig does not render behaviors yet: type Document composes behavior Workflow`.
+An engine runs such a schema; `engine-client` (below) types the engine's
+client for it.
 
 A generated package that imports a package the build does not generate
 fails the build:

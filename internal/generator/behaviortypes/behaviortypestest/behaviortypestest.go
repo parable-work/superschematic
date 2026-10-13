@@ -21,10 +21,10 @@ import (
 // Service is the name the tests generate the fixture's packages under.
 const Service = "fixture-behavior-types"
 
-// rating is acme.Rating's declaration, as
+// Rating is acme.Rating's declaration, as
 // examples/acme-schematic/ext/rating.behavior.json declares it, less its
-// operations.
-const rating = `{
+// operations: an extension named acme registers it.
+const Rating = `{
   "name": "acme.Rating",
   "description": "Shoppers rate a catalog item from one star to the configured maximum.",
   "configSchema": {
@@ -46,7 +46,7 @@ const rating = `{
 func Registry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := registry.New(naming.Default())
-	if err := reg.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: json.RawMessage(rating)}); err != nil {
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: json.RawMessage(Rating)}); err != nil {
 		t.Fatal(err)
 	}
 	return reg

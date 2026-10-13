@@ -938,14 +938,35 @@ the first enabled generator without `GeneratorSpec.RendersBehaviors` fails
 the run with `generator: <name> does not render behaviors yet: type <T>
 composes behavior <B>`. The check covers core and extension generators
 alike; document generators, which render their documents, are not asked.
-No core generator sets the flag. `build --emit-ir`, `format` and
-`json-schema` run no generator and accept the schema. The one generator
-that renders behaviors is a command of its own, not in a pipeline:
-`engine-client` types the engine's client for engine schemas (D49). It
-narrows the core's behaviors by their configs; an extension's behavior
-it types by its declaration, its operations' parameters and results,
-create parameters, precondition and veto codes as declared and its
-fields as any JSON.
+`build --emit-ir`, `format` and `json-schema` run no generator and accept
+the schema.
+
+Of the core's pipeline generators, `types` sets the flag (D58). For each
+type that composes behaviors, each language's types write `<T>Behaviors`:
+what a read returns under `behaviors`, one member per behavior that
+declares a field, holding those fields (Go's `behaviors.go`, TypeScript's
+`types/behaviors.ts`, Rust's `src/behaviors.rs`, Python's
+`behaviors.py`). The own-field type `<T>` is unchanged: it is the
+instance's `data`. Every other core generator still refuses, so a DB
+schema's build fails naming `sql`, a General one's `envConfig` and an
+API one's `api`, until each renders behaviors too.
+
+`types` shares its narrowings with the other generator that renders
+behaviors, a command of its own and not in a pipeline: `engine-client`
+types the engine's client for engine schemas (D49).
+`internal/generator/behaviortypes` narrows the core's behaviors by their
+configs, a Workflow's states, a Links config's names, a Timers config's
+deadlines, for both. An extension's behavior has no narrowing:
+`engine-client` types its operations' parameters and results, create
+parameters, precondition and veto codes as declared, and both type its
+fields as any JSON, since a declaration names a field without a schema.
+A behavior's member keeps its exact name in the JSON; where a language's
+names cannot hold it, the member takes the behavior's name in PascalCase,
+each run of letters and digits capitalized and the runs joined
+(`acme.Rating` is `AcmeRating`, `acme_rating` in Rust and Python), and a
+Go tag, a serde rename or a Pydantic alias carries the exact name. A
+config's key that names a member, a deadline's or a gate's, follows the
+same rule.
 
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`

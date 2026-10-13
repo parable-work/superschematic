@@ -762,9 +762,13 @@ so the service lists the file in its `tsconfig.json` `include`, as acme's
 
 The loader checks each entry against its declaration and names the type
 and the behavior when it fails; `json-schema` limits the names to the
-registered behaviors and holds each config to its schema. No generator
-renders behaviors yet, so `build` refuses such a schema and names the
-generator; `build --emit-ir`, `format` and `json-schema` accept it. A
+registered behaviors and holds each config to its schema. The core's
+`types` generator renders behaviors: its `<Type>Behaviors` holds your
+behavior's fields under its exact name, typed as any JSON, since a
+declaration names a field without a schema, and in Go, Rust and Python
+under the name in PascalCase (`acme.Rating` is `AcmeRating`). Every other
+core generator refuses such a schema yet, so `build` fails and names the
+first of them; `build --emit-ir`, `format` and `json-schema` accept it. A
 generator whose output covers what behaviors add sets
 `GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` and
 `shop-ratings-ts` services (`ext/testdata/services`) compose

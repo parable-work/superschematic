@@ -23,9 +23,9 @@ const (
 )
 
 // TestRatingBehavior: acme declares acme.Rating with no core edit, a
-// General schema composes it and the IR carries it; the generators refuse
-// the schema until they render behaviors; the core registry does not know
-// the behavior.
+// General schema composes it and the IR carries it; envConfig, which
+// unlike the types generator does not render behaviors, refuses the
+// schema; the core registry does not know the behavior.
 func TestRatingBehavior(t *testing.T) {
 	reg, names := assemble(t)
 	rating, ok := reg.Behavior(ext.RatingBehavior)
@@ -55,8 +55,8 @@ func TestRatingBehavior(t *testing.T) {
 	}
 
 	if _, err := registry.Generate(schema, cfg, registry.Options{OutputRoot: t.TempDir(), ServicePath: shopRatings, Naming: names, Registry: reg}); err == nil ||
-		!strings.Contains(err.Error(), "types does not render behaviors yet: type Product composes behavior acme.Rating") {
-		t.Fatalf("Generate: err = %v, want the types generator's refusal", err)
+		!strings.Contains(err.Error(), "envConfig does not render behaviors yet: type Product composes behavior acme.Rating") {
+		t.Fatalf("Generate: err = %v, want the envConfig generator's refusal", err)
 	}
 
 	// A config the declaration rejects fails the load, naming the type and

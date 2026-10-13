@@ -21,10 +21,11 @@
 // package writes. A behavior without a narrowing there, an extension's, is
 // typed by its declaration.
 //
-// Unlike every other generator, this one renders behaviors: it is a
-// command of its own (`superschematic engine-client`), not a step of a
-// kind's pipeline, so the pipeline's refusal of a type that composes a
-// behavior (D16) holds for every other generator.
+// It is a command of its own (`superschematic engine-client`), not a step
+// of a kind's pipeline. Of the pipeline's generators, only types renders
+// behaviors, their fields as <T>Behaviors in each language (D58), with the
+// same narrowings; the pipeline refuses a type that composes a behavior
+// (D16) for every other.
 package engineclientgen
 
 import (

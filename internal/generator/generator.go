@@ -217,7 +217,8 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 // schema composes a behavior and an enabled generator does not render
 // behaviors (GeneratorSpec.RendersBehaviors): that generator would write
 // the type without the fields and operations its behaviors add. The error
-// names the generator, the type and the behavior. build --emit-ir, format
+// names the first such generator, the type and the behavior; types, which
+// renders behaviors' fields (D58), is never it. build --emit-ir, format
 // and json-schema run no generator and accept the schema (D16).
 func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
 	typeName, behavior, found := schema.FindBehavior()

@@ -88,9 +88,9 @@
 #      config acme's authoring package types; json-schema limits behavior
 #      names to the core's and it, and format converts the file to YAML and
 #      to TypeScript;
-#      build refuses the service, naming the types generator, which does
-#      not render behaviors; the core-only binary refuses the behavior by
-#      name;
+#      build refuses the service, naming the envConfig generator, which
+#      does not render behaviors (types does, D58); the core-only binary
+#      refuses the behavior by name;
 #  19. shop-db's Planogram version graph, declared with the core's
 #      @versionGraph, @graphMember and @conflictUnit and no core edit,
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
@@ -456,7 +456,7 @@ go_module_compiles "$DIST/orm/shop-db"
 
 echo "==> behaviors: acme.Rating on a data-form General schema"
 # shop-ratings sits outside the schemas root: build-all would refuse it,
-# since no generator renders behaviors yet.
+# since only the types generator renders behaviors yet.
 RATINGS="$EXAMPLE_DIR/ext/testdata/services/shop-ratings"
 "$OUT/acme-schematic" build "$RATINGS" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ir.json" >/dev/null
@@ -472,7 +472,7 @@ if "$OUT/acme-schematic" build "$RATINGS" --out "$OUT/ratings-dist" >"$OUT/ratin
   echo "ERROR: build generated a type whose behavior no generator renders" >&2
   exit 1
 fi
-grep -q 'generator: types does not render behaviors yet: type Product composes behavior acme.Rating' "$OUT/ratings-build.log"
+grep -q 'generator: envConfig does not render behaviors yet: type Product composes behavior acme.Rating' "$OUT/ratings-build.log"
 if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml" --out "$OUT/core-ratings-dist" >"$OUT/core-ratings.log" 2>&1; then
   echo "ERROR: the core-only binary accepted acme.Rating" >&2
   exit 1

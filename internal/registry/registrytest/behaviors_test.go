@@ -33,8 +33,9 @@ const wantItemBehaviors = `"behaviors": [
 
 // The fixture extension's behaviors reach the IR from both data forms, byte
 // for byte the same though the YAML twin writes acme.Stock's config keys in
-// another order; the generators refuse the schema, naming themselves; a
-// registry without the extension refuses the behaviors by name.
+// another order; the first generator that does not render behaviors
+// refuses the schema, naming itself (types renders them, D58); a registry
+// without the extension refuses the behaviors by name.
 func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	reg := acmeRegistry(t)
 	jsonSchema, cfg, err := loader.LoadServiceWithConfig("testdata/stock-json", loader.WithRegistry(reg))
@@ -66,7 +67,7 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	}
 
 	_, err = generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: t.TempDir(), ServicePath: "testdata/stock-json", Registry: reg})
-	if want := "generator: types does not render behaviors yet: type Item composes behavior acme.Stock"; err == nil || err.Error() != want {
+	if want := "generator: envConfig does not render behaviors yet: type Item composes behavior acme.Stock"; err == nil || err.Error() != want {
 		t.Fatalf("generator.Run: err = %v, want %q", err, want)
 	}
 

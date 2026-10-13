@@ -3,9 +3,13 @@ package generator
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -85,5 +89,96 @@ func TestRunRefusesBehaviorsAGeneratorDoesNotRender(t *testing.T) {
 		if ran[0] != "shelfList" {
 			t.Fatalf("%+v: ran = %v", ext, ran)
 		}
+	}
+}
+
+// acmeLedger is the extension the behavior types fixture assumes: it
+// declares acme.Rating, and a kind whose pipeline is the types generator
+// alone, which renders behaviors, so a schema whose types compose them
+// builds.
+type acmeLedger struct{}
+
+func (acmeLedger) Name() string { return "acme" }
+
+func (acmeLedger) Register(r *registry.Registry) error {
+	return errors.Join(
+		r.RegisterKind(registry.KindSpec{Name: "Ledger", Extension: "acme", StructRole: ir.RoleEmbeddedStruct, Pipeline: []string{typesGenerator}}),
+		r.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: json.RawMessage(behaviortypestest.Rating)}),
+	)
+}
+
+// The types generator renders behaviors (D58): a pipeline of it alone
+// builds a schema whose types compose them, and each language writes its
+// <T>Behaviors beside the own-field types, the extension's behavior
+// under its exact name.
+func TestTypesGeneratorRendersBehaviors(t *testing.T) {
+	reg := extensionRegistry(t, acmeLedger{})
+	schema := behaviortypestest.Schema(t, reg)
+	schema.Kind = ir.SchemaKind("Ledger")
+	enabled := map[string]any{"enabled": true}
+	cfg := &schemaconfig.SchemaConfig{Name: "tracker", Kind: schema.Kind, Outputs: map[string]any{
+		"types": map[string]any{LangGo: enabled, LangTypeScript: enabled, LangRust: enabled, LangPython: enabled},
+	}}
+	root := t.TempDir()
+	if _, err := Run(schema, cfg, Options{OutputRoot: root, Registry: reg}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	python, err := filepath.Glob(filepath.Join(TypesDir(root, LangPython, "tracker"), "*", "behaviors.py"))
+	if err != nil || len(python) != 1 {
+		t.Fatalf("behaviors.py: %v, %v", python, err)
+	}
+	for _, tc := range []struct {
+		path  string
+		wants []string
+	}{
+		{filepath.Join(TypesDir(root, LangGo, "tracker"), "behaviors.go"), []string{"type TicketBehaviors struct {", "AcmeRating TicketAcmeRating `json:\"acme.Rating\"`", "TicketStateInProgress TicketState = \"in-progress\""}},
+		{filepath.Join(TypesDir(root, LangTypeScript, "tracker"), "types", "behaviors.ts"), []string{"export interface TicketBehaviors {", "readonly 'acme.Rating': {", "export type TicketState = 'open' | 'in-progress' | 'done' | 'dropped';"}},
+		{filepath.Join(TypesDir(root, LangRust, "tracker"), "src", "behaviors.rs"), []string{"pub struct TicketBehaviors {", "#[serde(rename = \"acme.Rating\")]\n    pub acme_rating: TicketAcmeRating,"}},
+		{python[0], []string{"class TicketBehaviors(BaseModel):", "acme_rating: TicketAcmeRating = Field(..., alias=\"acme.Rating\""}},
+	} {
+		data, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("%s lacks %q", tc.path, want)
+			}
+		}
+	}
+	// The own-field type is the instance's data as before.
+	types, err := os.ReadFile(filepath.Join(TypesDir(root, LangGo, "tracker"), "types.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(types), "type Ticket struct {") || strings.Contains(string(types), "Behaviors") {
+		t.Errorf("types.go's Ticket is not the own fields alone:\n%s", types)
+	}
+}
+
+// Every core generator but types still refuses a type that composes a
+// behavior, and the refusal names the first that would run: sql in a DB
+// pipeline, envConfig in a General one, api in an API one.
+func TestCoreGeneratorsButTypesRefuseBehaviors(t *testing.T) {
+	enabled := map[string]any{"enabled": true}
+	goTypes := map[string]any{LangGo: enabled}
+	for _, tc := range []struct {
+		kind    ir.SchemaKind
+		outputs map[string]any
+		want    string
+	}{
+		{ir.SchemaKindDB, map[string]any{"types": goTypes}, "sql"},
+		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, "envConfig"},
+		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled}, "api"},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			schema := ir.NewSchema("items", tc.kind)
+			schema.Types["Item"] = &ir.TypeDef{Name: "Item", Role: ir.RoleEmbeddedStruct, Behaviors: []ir.BehaviorRef{{Name: "Comments"}}}
+			cfg := &schemaconfig.SchemaConfig{Name: "items", Kind: tc.kind, Outputs: tc.outputs}
+			_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default())})
+			if want := "generator: " + tc.want + " does not render behaviors yet: type Item composes behavior Comments"; err == nil || err.Error() != want {
+				t.Fatalf("Run: err = %v, want %q", err, want)
+			}
+		})
 	}
 }
