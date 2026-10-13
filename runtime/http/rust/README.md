@@ -20,6 +20,14 @@ This crate provides:
 - `ParamSpec`: how the generated router decodes one path, query or body
   argument, as the TypeScript runtime's `params.ts` does, refusing a value
   with a 400 whose `details` name it
+- `page`: the page of a `@paginated` operation (D60). `PageSpec::query`
+  reads `cursor` and `limit` from the query with a parameter's 400s,
+  `PageSpec::request` and `PageSpec::check` hold a request an in-process
+  caller built to the route's spec, `Cursor::encode` and `Cursor::decode`
+  write and read a position as the unpadded base64url of its JSON, and
+  `Page::from_rows` keeps `limit` of the `limit + 1` rows an
+  implementation read and sets `next`. `tests/page_parity.rs` runs
+  `runtime/http/testdata/page_parity.json`
 - `input`, `required_input` and `input_refusal`: an operation's input
   parsed by its type's generated `parse_<type>`, with undeclared keys
   refused and field errors in the problem's `errors`; `body_fields` and

@@ -158,6 +158,34 @@ func LoggedError(w http.ResponseWriter, r *http.Request, status int, message str
 	writeProblemJSON(w, d, status)
 }
 
+// LoggedErrorWithDetails is LoggedError with a structured `details`
+// member: it logs the refusal (Warn for 4xx, Error for 5xx) and writes the
+// problem with the request's id. A refused page request (paging.Read) is
+// one.
+func LoggedErrorWithDetails(w http.ResponseWriter, r *http.Request, status int, message string, errorCode string, details any) {
+	logger := requestctx.LoggerFromContext(r.Context())
+	fields := []zap.Field{zap.Int("status", status), zap.String("error", message)}
+	if errorCode != "" {
+		fields = append(fields, zap.String("error_code", errorCode))
+	}
+	if status >= 500 {
+		logger.Error("http error response", fields...)
+	} else {
+		logger.Warn("http error response", fields...)
+	}
+	writeProblemJSON(w, detailedProblemDetail{
+		problemDetail: problemDetail{
+			Type:      "about:blank",
+			Title:     http.StatusText(status),
+			Status:    status,
+			Detail:    message,
+			Code:      errorCode,
+			RequestID: chimiddleware.GetReqID(r.Context()),
+		},
+		Details: details,
+	}, status)
+}
+
 // ValidationErrors sends an RFC 9457 Problem Details validation error
 // response: 400, titled as its status, with the field errors in errors and
 // ValidationCode unless errorCode names another code.
