@@ -6,6 +6,7 @@
 //! text is plain ASCII and depends only on the config and the type.
 
 pub(crate) mod comments;
+pub(crate) mod constants;
 pub(crate) mod workflow;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};

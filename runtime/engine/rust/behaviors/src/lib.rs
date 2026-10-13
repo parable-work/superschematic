@@ -26,13 +26,16 @@
 //! ```
 //!
 //! The behaviors are ported in waves (milestones 8 to 11); [`NAMES`] lists
-//! the ones [`core`] registers so far: [`Workflow`] and [`Comments`].
+//! the ones [`core`] registers so far: [`Workflow`], [`Comments`] and
+//! [`Constants`].
 
 pub mod comments;
+pub mod constants;
 mod guidance;
 pub mod workflow;
 
 pub use comments::{CommentRecord, Comments};
+pub use constants::{Constants, ConstantsConfig};
 pub use workflow::{
     is_terminal_state, state_outcome, Workflow, WorkflowConfig, WorkflowOutcome, WorkflowTransition,
 };
@@ -41,11 +44,14 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 2] = ["Workflow", "Comments"];
+pub const NAMES: [&str; 3] = ["Workflow", "Comments", "Constants"];
 
 /// The core's behaviors this crate has ported, in the order the TypeScript
 /// engine registers them: what a host passes as `EngineOptions::behaviors`,
 /// extended with its own.
 pub fn core() -> BehaviorSet {
-    BehaviorSet::new().with(Workflow).with(Comments)
+    BehaviorSet::new()
+        .with(Workflow)
+        .with(Comments)
+        .with(Constants)
 }
