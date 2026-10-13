@@ -125,6 +125,29 @@ impl Target {
     pub fn open_fixtures(&self) -> Engine {
         self.open(fixtures())
     }
+
+    /// Options as `openTestEngine` opens an engine for the core behaviors'
+    /// tests: the core's meta-schema, every write allowed, and the core's
+    /// behaviors ported so far, as the TypeScript engine registers its own.
+    pub fn core_options(&self) -> EngineOptions {
+        let mut options = EngineOptions::new(self.storage());
+        options.policy = Some(Policy::allow_all());
+        options.behaviors = superschematic_engine_behaviors::core();
+        options
+    }
+
+    /// An engine with the core's behaviors, its options changed by
+    /// `configure`.
+    pub fn open_core_with(&self, configure: impl FnOnce(&mut EngineOptions)) -> Engine {
+        let mut options = self.core_options();
+        configure(&mut options);
+        Engine::open(options).expect("open the engine")
+    }
+
+    /// An engine with the core's behaviors.
+    pub fn open_core(&self) -> Engine {
+        self.open_core_with(|_| {})
+    }
 }
 
 impl Drop for Target {

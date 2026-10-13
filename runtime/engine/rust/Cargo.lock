@@ -1397,6 +1397,7 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "superschematic-engine",
+ "superschematic-engine-behaviors",
 ]
 
 [[package]]

@@ -9,7 +9,8 @@
 //! - `test/normalize.test.ts`: [`Mailer`];
 //! - `test/unique.test.ts`: [`Slugger`];
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
-//!   what a test puts in its [`Probe`].
+//!   what a test puts in its [`Probe`];
+//! - `test/core-workflow.test.ts`: [`Dispatch`].
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
@@ -990,12 +991,64 @@ impl Behavior for Ledger {
     }
 }
 
+/// test.Dispatch (`test/core-workflow.test.ts`): moves an order through
+/// Workflow's operation, as a caller would, and tries to write the status
+/// itself, which the engine refuses: Workflow's column is not its storage.
+pub struct Dispatch;
+
+static DISPATCH_DECLARATION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    json!({
+        "name": "test.Dispatch",
+        "operations": [
+            {
+                "name": "dispatch",
+                "paramsSchema": {"type": "object", "additionalProperties": false, "required": ["to"], "properties": {"to": {"type": "string"}}},
+                "resultSchema": true,
+                "writes": true
+            },
+            {"name": "forceStatus", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true}
+        ]
+    })
+    .to_string()
+});
+
+impl Behavior for Dispatch {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        &DISPATCH_DECLARATION
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            operations: vec![
+                ("dispatch", |_, cx, params| {
+                    cx.call("Workflow", "transition", &json!({ "to": params.get("to") }))
+                }),
+                ("forceStatus", |_, cx, _| {
+                    let changes = cx.sql().run(
+                        "UPDATE engine_instances SET bhv_workflow__status = 'shipped' WHERE id = ?",
+                        &[SqlValue::from(cx.id())],
+                    )?;
+                    Ok(Value::from(changes.changes))
+                }),
+            ],
+            ..Hooks::default()
+        }
+    }
+}
+
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
 /// fixtures'. `None` for one the test kit has not ported.
 pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
     let set = BehaviorSet::new();
     Some(match (file, name) {
+        ("core-workflow", "test.Dispatch") => set.with(Dispatch),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),
