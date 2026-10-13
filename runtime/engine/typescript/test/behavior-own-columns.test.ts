@@ -12,7 +12,6 @@ import {
   RELATION_COLUMNS,
   allowAll,
   defineBehavior,
-  openEngine,
   type AccessPolicy,
   type AccessRequest,
   type BehaviorMigration,
@@ -23,7 +22,7 @@ import {
   type SqlValue,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, freshPath, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 

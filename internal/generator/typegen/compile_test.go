@@ -1,14 +1,17 @@
 package typegen
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/identitydesc/identitytest"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -42,16 +45,21 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		t.Fatalf("load fixture-user-model-db: %v", err)
 	}
 
+	behaviorsSchema, behaviorsRegistry := loadFixture(t, behaviortypestest.Service)
+
 	cases := []struct {
-		name   string
-		schema *ir.Schema
-		deps   map[string]*ir.Schema
+		name     string
+		schema   *ir.Schema
+		deps     map[string]*ir.Schema
+		registry *registry.Registry
 	}{
 		{name: "fixture-db", schema: dbSchema},
 		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
 		// A User table adds identity.go, which declares IdentityDescriptor.
 		{name: identitytest.Service, schema: identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})},
 		{name: "fixture-user-model-db", schema: userModelSchema},
+		// behaviors.go: each behavior's fields (D58).
+		{name: behaviortypestest.Service, schema: behaviorsSchema, registry: behaviorsRegistry},
 	}
 
 	for _, tc := range cases {
@@ -65,6 +73,7 @@ func TestGeneratedModulesCompile(t *testing.T) {
 			ModulePath:        "example.com/schemas/types/go/" + tc.name,
 			Dependencies:      tc.deps,
 			DependencyModules: depModules,
+			Registry:          tc.registry,
 			Clock:             fixedClock,
 		})
 		if err != nil {
@@ -95,4 +104,62 @@ func TestGeneratedModulesCompile(t *testing.T) {
 			t.Errorf("generated module %s does not compile: %v\n%s", tc.name, err, out)
 		}
 	}
+
+	// TicketBehaviors decodes a read's behaviors and writes them back
+	// unchanged, each behavior under its exact name.
+	outDir := filepath.Join(typesGoDir, behaviortypestest.Service)
+	if err := os.WriteFile(filepath.Join(outDir, "behaviors_test.go"), []byte(goBehaviorsRoundTrip), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	test := exec.Command("go", "test", "./...")
+	test.Dir = outDir
+	if out, err := test.CombinedOutput(); err != nil {
+		t.Errorf("TicketBehaviors does not round-trip a read: %v\n%s", err, out)
+	}
 }
+
+// goBehaviorsRoundTrip is a test of the generated module: TicketBehaviors
+// holds behaviortypestest.TicketBehaviors, typed, and writes it back.
+var goBehaviorsRoundTrip = `package types
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+const read = ` + "`" + behaviortypestest.TicketBehaviors + "`" + `
+
+func TestTicketBehaviorsRoundTrip(t *testing.T) {
+	var b TicketBehaviors
+	if err := json.Unmarshal([]byte(read), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Workflow.Status != TicketStateInProgress || b.Comments.CommentCount != 2 || *b.Revisions.Revision != 3 {
+		t.Fatalf("decoded %+v", b)
+	}
+	if b.Links.Targets.Project.Id != "launch" || len(b.Links.Targets.Reviewers) != 2 || !*b.Links.Targets.Spec.Stale {
+		t.Fatalf("decoded links %+v", b.Links)
+	}
+	if b.Timers.Deadlines.Close != nil || *b.Timers.Deadlines.Respond.Outcome != "moved" {
+		t.Fatalf("decoded timers %+v", b.Timers)
+	}
+	if string(b.AcmeRating.RatingCount) != "4" || b.Approvals.Gates.Done.SignedBy[0] != "ana" {
+		t.Fatalf("decoded %+v", b)
+	}
+	encoded, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got any
+	if err := json.Unmarshal([]byte(read), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("wrote %s", encoded)
+	}
+}
+`

@@ -280,8 +280,13 @@ type APIOutput struct {
 	// permission.
 	PermissionCatalogJSON string
 	// HasEnvConfig is true when the build writes src/config.rs, the env
-	// loader of the service's @envVars type; lib.rs then declares it.
+	// loader of the service's @envVars type and, for a crate with Deps,
+	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
+	// Deps is what src/deps.rs's Deps holds beside the config and the span
+	// (D57), which the dispatch layer sets (SetDeps). Nil writes no
+	// src/deps.rs, and the crate is the one it was before.
+	Deps *DepsInfo
 	// TypesCrateIdent is TypesCrate as a Rust path segment; lib.rs
 	// re-exports the crate as `types`.
 	TypesCrateIdent string
@@ -670,16 +675,24 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
 	}
 
-	// The user model's wiring (D50); a crate written before with it keeps
-	// no stale module.
-	identityPath := filepath.Join(outputDir, "src", "identity.rs")
-	if output.Identity != nil {
-		files = append(files, struct {
-			templateName string
-			outputName   string
-		}{templateName: "identity.tmpl", outputName: filepath.Join("src", "identity.rs")})
-	} else if err := os.Remove(identityPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove %s: %w", identityPath, err)
+	// The user model's wiring (D50) and the implementation's Deps (D57); a
+	// crate written before with either keeps no stale module.
+	for _, module := range []struct {
+		template, file string
+		written        bool
+	}{
+		{"identity.tmpl", "identity.rs", output.Identity != nil},
+		{"deps.tmpl", "deps.rs", output.Deps != nil},
+	} {
+		path := filepath.Join("src", module.file)
+		if module.written {
+			files = append(files, struct {
+				templateName string
+				outputName   string
+			}{templateName: module.template, outputName: path})
+		} else if err := os.Remove(filepath.Join(outputDir, path)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
 	}
 
 	for _, file := range files {
@@ -801,10 +814,11 @@ func generateFile(templateName, outputPath string, data any) error {
 
 func templateFuncs() template.FuncMap {
 	return rustapigen.TemplateFuncs(template.FuncMap{
-		"isGetMethod": func(m string) bool { return strings.EqualFold(m, "get") },
-		"join":        strings.Join,
-		"toUpper":     strings.ToUpper,
-		"rustString":  rustString,
+		"isGetMethod":    func(m string) bool { return strings.EqualFold(m, "get") },
+		"join":           strings.Join,
+		"toUpper":        strings.ToUpper,
+		"rustString":     rustString,
+		"tracingVersion": func() string { return TracingVersion },
 	})
 }
 

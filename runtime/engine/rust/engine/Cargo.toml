@@ -1,0 +1,39 @@
+[package]
+name = "superschematic-engine"
+description = "The engine: schemas as data, their instances and events, and the behaviors composed on their types (D16, D58)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Both databases by default, as the storage has them: the bindings every
+# server links open SQLite in one process and Postgres in a stack. A build
+# that needs one turns the default off and names it.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine-storage/sqlite"]
+postgres = ["superschematic-engine-storage/postgres"]
+
+[dependencies]
+# JavaScript's Number::toString, which JSON.stringify writes a number with:
+# what a client of the TypeScript engine reads, and what every hash covers.
+ryu-js = "1.0.3"
+serde = { version = "1.0.228", features = ["derive"] }
+# Both features pinned on (D58): a number keeps its text until the engine
+# writes it as JavaScript does, and an object keeps its members' order.
+# superscalar's core turns them on in any build that links it anyway.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# A schema's hash, an index's name and a value's hash (RFC 8785).
+sha2 = "0.10.9"
+# The schema reader: the IR reader and validation over superscalar's core,
+# and the strict schema-file loader (its schemafile feature). Not published,
+# so a path dependency (D58).
+superschematic-schema-ir = { path = "../../../schema/rust-ir", features = ["schemafile"] }
+superschematic-engine-storage = { path = "../storage", default-features = false }
+# Random version 4 ids, as the TypeScript engine's randomUUID makes them.
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[lints]
+workspace = true

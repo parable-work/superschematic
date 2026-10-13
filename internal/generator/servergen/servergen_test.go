@@ -890,9 +890,10 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
 	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
 	// A preflight to shop-orders from the site is answered; one from
-	// another origin is not, nor one to shop-reviews, which no site calls.
+	// another origin is not, but goes on to shop-orders' router, which
+	// allows no OPTIONS, nor one to shop-reviews, which no site calls.
 	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
-	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusNoContent, "")
+	checkCORS(t, storefront.base, http.MethodOptions, "/api/orders/o-1", "https://evil.example", http.MethodGet, http.StatusMethodNotAllowed, "")
 	checkCORS(t, storefront.base, http.MethodOptions, "/api/products/p-1/reviews", siteOrigin, http.MethodGet, 0, "")
 	checkCORS(t, storefront.base, http.MethodGet, "/api/orders/o-1", siteOrigin, "", http.StatusNotImplemented, siteOrigin)
 	storefront.expect(t, http.MethodGet, "/healthz", http.StatusOK, `"ok"`)
@@ -964,7 +965,7 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	workerBinary := filepath.Join(t.TempDir(), fulfilOrders)
 	goCommand(t, workerDir, "build", "-o", workerBinary, ".")
 	cmd = exec.Command(workerBinary)
-	cmd.Env = append(os.Environ(), append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "WORKER_CONCURRENCY=3"}, edgeVariables(t, "SHOP_API_SERVICE")...)...)
+	cmd.Env = append(os.Environ(), append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "WORKER_CONCURRENCY=3"}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
 	workerOutput := &syncBuffer{}
 	cmd.Stdout, cmd.Stderr = workerOutput, workerOutput
 	if err := cmd.Start(); err != nil {
@@ -1522,9 +1523,15 @@ func firstLine(s string) string {
 // docker stop.
 func expectServes(t *testing.T, image string) {
 	t.Helper()
-	container := docker(t, "run", "-d", "-p", "127.0.0.1::8080",
+	run := []string{"run", "-d", "-p", "127.0.0.1::8080",
 		"-e", "SHOP_DB_DATABASE_URL=postgres://shop@127.0.0.1:9/shop_db?connect_timeout=1",
-		"-e", "SHOP_API_SERVICE_URL=http://127.0.0.1:9", image)
+		"-e", "SHOP_API_SERVICE_URL=http://127.0.0.1:9"}
+	// Storefront's APIs list shop-media too, which opening reaches nothing
+	// of (D54).
+	for _, v := range bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9") {
+		run = append(run, "-e", v)
+	}
+	container := docker(t, append(run, image)...)
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
 	address := docker(t, "port", container, "8080/tcp")
 	if i := strings.LastIndex(address, "\n"); i >= 0 {

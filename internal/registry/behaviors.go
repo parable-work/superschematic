@@ -79,15 +79,20 @@ type BehaviorVeto struct {
 	Description string `json:"description,omitempty"`
 }
 
-// BehaviorField is a field a behavior adds to a type. It carries a name and
-// a description only: a field's type can depend on the behavior's config.
-// An instance keeps a behavior's fields under the behavior's name, apart
-// from the type's own and every other behavior's, so a field collides with
-// nothing (D16, amended: a behavior's fields sit under its name); a string
-// names one by BehaviorFieldPath.
+// BehaviorField is a field a behavior adds to a type. It carries a name, a
+// description and whether it is volatile, no type: a field's type can
+// depend on the behavior's config. An instance keeps a behavior's fields
+// under the behavior's name, apart from the type's own and every other
+// behavior's, so a field collides with nothing (D16, amended: a behavior's
+// fields sit under its name); a string names one by BehaviorFieldPath.
 type BehaviorField struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Volatile is true for a field that can move without an event of its
+	// own instance: computed when the instance is read, from other
+	// instances, the clock or the config. No event records such a move, so
+	// a rule that hears a field's changes refuses one (D56).
+	Volatile bool `json:"volatile,omitempty"`
 }
 
 // BehaviorFieldPath is a behavior field's qualified name: the behavior's

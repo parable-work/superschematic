@@ -1,0 +1,41 @@
+-- Generated PostgreSQL DDL for schema: fixture-engine-db
+-- This file is auto-generated. Do not edit manually.
+
+-- Enable required PostgreSQL extensions
+-- Note: pgcrypto is only needed for PostgreSQL < 13 (for gen_random_uuid)
+-- PostgreSQL 13+ has gen_random_uuid() built-in
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+
+
+-- Create tables (without foreign key constraints)
+
+CREATE TABLE agent (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "name" VARCHAR(80) NOT NULL,
+  manager_id UUID
+);
+
+COMMENT ON TABLE agent IS 'A support agent: a table, with its manager a relation to another agent.';
+
+CREATE TABLE customer (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "name" VARCHAR(80) NOT NULL,
+  email CITEXT NOT NULL,
+  tier TEXT NOT NULL,
+  billing_address TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  UNIQUE (email)
+);
+
+COMMENT ON TABLE customer IS 'A customer: a table.';
+
+-- Add foreign key constraints
+
+ALTER TABLE agent
+  ADD CONSTRAINT fk_agent_manager_id
+  FOREIGN KEY (manager_id)
+  REFERENCES agent(id)
+  ON DELETE CASCADE;
+
+-- Create indexes

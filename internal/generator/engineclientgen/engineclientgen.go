@@ -14,25 +14,28 @@
 // A behavior's config narrows what its declaration says: Workflow's states,
 // Links' names, Dependencies' blocker schemas, Variants' types. The engine
 // narrows the create parameters in TypeScript (createParamsSchema(config));
-// this package narrows them again in Go for the core's behaviors, and the
-// engine's test suite holds the two to each other through
-// runtime/engine/testdata/client_codegen_parity.json. A behavior without a
-// narrowing here, an extension's, is typed by its declaration.
+// internal/generator/behaviortypes narrows them again in Go for the core's
+// behaviors, for this package and every other generator that renders
+// behaviors, and the engine's test suite holds the two to each other
+// through runtime/engine/testdata/client_codegen_parity.json, which this
+// package writes. A behavior without a narrowing there, an extension's, is
+// typed by its declaration.
 //
-// Unlike every other generator, this one renders behaviors: it is a
-// command of its own (`superschematic engine-client`), not a step of a
-// kind's pipeline, so the pipeline's refusal of a type that composes a
-// behavior (D16) holds for every other generator.
+// It is a command of its own (`superschematic engine-client`), not a step
+// of a kind's pipeline. Of the pipeline's generators, only types renders
+// behaviors, their fields as <T>Behaviors in each language (D58), with the
+// same narrowings; the pipeline refuses a type that composes a behavior
+// (D16) for every other.
 package engineclientgen
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -72,16 +75,9 @@ type schemaModel struct {
 	// client names the wrapper: NotesClient, and notesClient its factory.
 	client string
 	// behaviors are the type's behaviors in list order.
-	behaviors []behaviorModel
+	behaviors []behaviortypes.Behavior
 	// variants is the instance type's Variants config, when it composes it.
-	variants *variantsConfig
-}
-
-// behaviorModel is one behavior a type composes: its declaration and what
-// its config narrows.
-type behaviorModel struct {
-	declaration registry.Behavior
-	narrowed    narrowing
+	variants *behaviortypes.Variants
 }
 
 // buildModels checks each schema as the engine would take it and builds
@@ -126,7 +122,7 @@ func buildModel(schema *ir.Schema, reg *registry.Registry) (*schemaModel, error)
 	instance := instanceTypeOf(schema)
 	if instance == nil {
 		return nil, fmt.Errorf("engine-client: schema %s has no instance type: declare a type named %s or exactly one type (found: %s)",
-			schema.Name, schema.Name, strings.Join(sortedKeys(schema.Types), ", "))
+			schema.Name, schema.Name, strings.Join(behaviortypes.SortedKeys(schema.Types), ", "))
 	}
 	if err := checkFields(schema, instance); err != nil {
 		return nil, err
@@ -138,7 +134,7 @@ func buildModel(schema *ir.Schema, reg *registry.Registry) (*schemaModel, error)
 		base:     instance.Name,
 		client:   codegen.ToPascalCase(schema.Name) + "Client",
 	}
-	target := narrowTarget{schema: schema.Name, base: model.base, document: schema, instance: instance}
+	target := behaviortypes.Target{Schema: schema.Name, Base: model.base, Document: schema, Instance: instance}
 	for _, ref := range instance.Behaviors {
 		declaration, ok := reg.Behavior(ref.Name)
 		if !ok {
@@ -147,14 +143,14 @@ func buildModel(schema *ir.Schema, reg *registry.Registry) (*schemaModel, error)
 		if err := declaration.ValidateConfig(ref.Config); err != nil {
 			return nil, fmt.Errorf("engine-client: type %s of schema %s: %w", instance.Name, schema.Name, err)
 		}
-		narrowed, err := narrow(declaration, ref.Config, target)
+		narrowed, err := behaviortypes.Narrow(declaration, ref.Config, target)
 		if err != nil {
 			return nil, fmt.Errorf("engine-client: type %s of schema %s: behavior %s: %w", instance.Name, schema.Name, ref.Name, err)
 		}
-		if narrowed.variants != nil {
-			model.variants = narrowed.variants
+		if narrowed.Variants != nil {
+			model.variants = narrowed.Variants
 		}
-		model.behaviors = append(model.behaviors, behaviorModel{declaration: declaration, narrowed: narrowed})
+		model.behaviors = append(model.behaviors, behaviortypes.Behavior{Declaration: declaration, Narrowed: narrowed})
 	}
 	return model, nil
 }
@@ -225,44 +221,4 @@ func reachableTypes(schema *ir.Schema, root string) []string {
 		}
 	}
 	return seen
-}
-
-// jsonKey is the key a field's value has in an instance.
-func jsonKey(field *ir.FieldDef) string {
-	if field.JSONTag != "" {
-		return field.JSONTag
-	}
-	return field.Name
-}
-
-// ownField finds an own field of a type by its JSON key.
-func ownField(td *ir.TypeDef, key string) *ir.FieldDef {
-	for _, field := range td.Fields {
-		if field != nil && jsonKey(field) == key {
-			return field
-		}
-	}
-	return nil
-}
-
-// decodeSchema decodes a declaration's JSON Schema into a tree the
-// narrowings copy and change.
-func decodeSchema(raw json.RawMessage) (any, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

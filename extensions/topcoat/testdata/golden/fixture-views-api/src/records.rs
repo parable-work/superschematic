@@ -176,6 +176,7 @@ pub struct OrderViewRecord {
     pub status: String,
     pub placed_at: String,
     pub deliver_by: Option<String>,
+    pub collect_at: Option<String>,
     pub note: Option<String>,
     pub gift: bool,
     pub ship_to: AddressRecord,
@@ -195,6 +196,7 @@ impl OrderViewRecord {
             status: wire::string(&json["status"]),
             placed_at: wire::string(&json["placedAt"]),
             deliver_by: wire::optional(&json["deliverBy"], wire::string),
+            collect_at: wire::optional(&json["collectAt"], wire::string),
             note: wire::optional(&json["note"], wire::string),
             gift: wire::boolean(&json["gift"]),
             ship_to: AddressRecord::from_wire(&json["shipTo"]),
@@ -215,6 +217,9 @@ impl OrderViewRecord {
         json.insert("placedAt".to_owned(), wire::put_string(&self.placed_at));
         if let Some(value) = &self.deliver_by {
             json.insert("deliverBy".to_owned(), wire::put_string(value));
+        }
+        if let Some(value) = &self.collect_at {
+            json.insert("collectAt".to_owned(), wire::put_string(value));
         }
         if let Some(value) = &self.note {
             json.insert("note".to_owned(), wire::put_string(value));

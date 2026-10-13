@@ -21,6 +21,11 @@ func customTemplateFuncs() template.FuncMap {
 		"rustStrings":     rustStrings,
 		"fieldNames":      fieldNames,
 		"fieldData":       fieldData,
+
+		"rustBehaviorVariant": rustBehaviorVariant,
+		"rustBehaviorAttr":    rustBehaviorAttr,
+		"rustBehaviorField":   rustBehaviorField,
+		"rustBehaviorType":    rustBehaviorType,
 	}
 }
 

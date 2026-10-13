@@ -29,6 +29,8 @@ export type NoteBehaviors = {
   readonly Workflow: {
     /** The state the instance is in. */
     readonly status: NoteState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
   };
   readonly Comments: {
     /** How many comments the instance has. */

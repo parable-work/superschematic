@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
+	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 	publicregistry "github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
@@ -161,6 +162,51 @@ func TestUnresolvedStackFailsTheBuild(t *testing.T) {
 	}
 	if _, err := os.Stat(stackgen.OutDir(out, "shop-stack")); !os.IsNotExist(err) {
 		t.Errorf("a failed build wrote %s", stackgen.OutDir(out, "shop-stack"))
+	}
+}
+
+// TestResolveInTheBuildsCheckout: a build resolves a local environment in
+// the checkout of its schemas root, links resolved, so the containers
+// environment.json names are the ones stack dev runs however the build
+// reached the checkout; a build that names no schemas root resolves it for
+// no checkout (D30, amended).
+func TestResolveInTheBuildsCheckout(t *testing.T) {
+	reg := assemble(t)
+	st := stacktest.Shop()
+	orders := ir.DeployableRef{Deployable: "Orders"}
+	st.Environments = []*ir.Environment{{
+		Name:     "Dev",
+		Target:   local.Target,
+		Settings: []*ir.DeployableSettings{{Of: orders, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}}},
+	}}
+	real := filepath.Join(t.TempDir(), "schemas")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "schemas")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := func(schemasRoot string) any {
+		t.Helper()
+		envs, err := stackgen.Resolve(registry.GenerateContext{Registry: reg, Options: registry.Options{SchemasRoot: schemasRoot}}, st, stacktest.AcmeShop())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return envs[0].Resources.Resource(local.PostgresContainer).Properties["name"]
+	}
+	want := local.ContainerName("shop-stack", "Dev", local.Checkout(canonical, "shop-stack", "Dev"))
+	for _, root := range []string{real, link} {
+		if got := container(root); got != want {
+			t.Errorf("built in %s, Dev's Postgres container is %v, want %s", root, got, want)
+		}
+	}
+	if got, want := container(""), local.ContainerName("shop-stack", "Dev", ""); got != want {
+		t.Errorf("built in no checkout, Dev's Postgres container is %v, want %s", got, want)
 	}
 }
 

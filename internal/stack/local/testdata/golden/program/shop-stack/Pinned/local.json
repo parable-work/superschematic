@@ -5,7 +5,7 @@
   "containers": [
     {
       "id": "postgres.container",
-      "name": "superschematic-shop-stack-pinned-postgres",
+      "name": "superschematic-shop-stack-pinned-963e50-postgres",
       "image": "postgres:17-alpine",
       "host": "127.0.0.1",
       "hostPort": 55432,
@@ -17,6 +17,7 @@
         }
       ],
       "labels": {
+        "superschematic.checkout": "963e50",
         "superschematic.environment": "Pinned",
         "superschematic.stack": "shop-stack"
       },
@@ -35,10 +36,10 @@
     },
     {
       "id": "storage.container",
-      "name": "superschematic-shop-stack-pinned-storage",
+      "name": "superschematic-shop-stack-pinned-963e50-storage",
       "image": "fsouza/fake-gcs-server:1.56.1",
       "host": "127.0.0.1",
-      "hostPort": 25414,
+      "hostPort": 23222,
       "containerPort": 4443,
       "args": [
         "-scheme",
@@ -52,11 +53,12 @@
         "-filesystem-root",
         "/storage",
         "-public-host",
-        "127.0.0.1:25414",
+        "127.0.0.1:23222",
         "-external-url",
-        "http://127.0.0.1:25414"
+        "http://127.0.0.1:23222"
       ],
       "labels": {
+        "superschematic.checkout": "963e50",
         "superschematic.environment": "Pinned",
         "superschematic.stack": "shop-stack"
       },
@@ -80,7 +82,7 @@
       "name": "shop-media",
       "service": "shop-media",
       "container": "storage.container",
-      "endpoint": "http://127.0.0.1:25414"
+      "endpoint": "http://127.0.0.1:23222"
     }
   ],
   "keyPairs": [
@@ -133,7 +135,7 @@
         },
         {
           "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-          "value": "http://127.0.0.1:25414"
+          "value": "http://127.0.0.1:23222"
         },
         {
           "name": "SHOP_MEDIA_BUCKET_NAME",
@@ -265,6 +267,7 @@
       "deployable": "shop-orders-ship-orders",
       "name": "shop-orders-ship-orders",
       "wave": 2,
+      "language": "go",
       "module": "server/shop-stack/shop-orders-ship-orders",
       "binary": "bin/shop-orders-ship-orders",
       "api": "shop-orders",

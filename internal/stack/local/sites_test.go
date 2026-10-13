@@ -33,7 +33,7 @@ func TestSiteGolden(t *testing.T) {
 func TestSiteWiring(t *testing.T) {
 	reg := assemble(t)
 	dev := resolve(t, reg, stacktest.WithSite(shop()), stacktest.SiteShop(), "Dev")
-	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev"}
+	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev", SchemasRoot: checkoutRoot}
 	site, api := dev.Deployable("shop-web"), dev.Deployable("shop-api")
 	origin := local.ServerURL(local.ServerPort(env, *site))
 	if site.PublicAddress != origin || !site.Exposed {
@@ -78,7 +78,9 @@ func mustJSON(t *testing.T, v any) []byte {
 
 // TestSiteHandler serves a site's build: each file, the directory's
 // index.html, the config uncached, the fallback for a path that names no
-// file, and nothing above the root.
+// file, and nothing above the root. A file whose name holds a hex content
+// hash is cached a year, and every other file, the fallback too, is
+// revalidated (D55, amended).
 func TestSiteHandler(t *testing.T) {
 	root := t.TempDir()
 	write := func(name, content string) {
@@ -92,6 +94,8 @@ func TestSiteHandler(t *testing.T) {
 	}
 	write("index.html", "<main>shop</main>")
 	write("app-1234.js", "console.log(1)")
+	write("assets/app.3f9a2c1d.js", "console.log(2)")
+	write("shell.3f9a2c1d.js", "console.log(3)")
 	write("docs/index.html", "<main>docs</main>")
 	if err := os.WriteFile(filepath.Join(filepath.Dir(root), "secret.txt"), []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
@@ -104,7 +108,9 @@ func TestSiteHandler(t *testing.T) {
 		body, cache        string
 	}{
 		{"the index", "GET", "/", "", 200, "<main>shop</main>", "no-cache"},
-		{"a script", "GET", "/app-1234.js", "", 200, "console.log(1)", ""},
+		{"a script", "GET", "/app-1234.js", "", 200, "console.log(1)", "no-cache"},
+		{"a content-hashed script", "GET", "/assets/app.3f9a2c1d.js", "", 200, "console.log(2)", "public, max-age=31536000, immutable"},
+		{"a content-hashed fallback", "GET", "/products/42", "shell.3f9a2c1d.js", 200, "console.log(3)", "no-cache"},
 		{"a directory's index", "GET", "/docs/", "", 200, "<main>docs</main>", "no-cache"},
 		{"the config", "GET", ir.SiteConfigPath, "", 200, string(config), "no-store"},
 		{"a route of the application", "GET", "/products/42", "index.html", 200, "<main>shop</main>", "no-cache"},

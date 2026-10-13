@@ -137,9 +137,23 @@ type FakeMigrations struct {
 	// Fail holds the error to return for a phase on a database, keyed
 	// `<phase> <database>` (`contract shop-db`).
 	Fail map[string]error
+
+	// Prepared names each run a deploy readied the runner for before its
+	// first step, and PrepareFail is the error to return when it does.
+	Prepared    []string
+	PrepareFail error
 }
 
-var _ registry.MigrationRunner = (*FakeMigrations)(nil)
+var (
+	_ registry.MigrationRunner   = (*FakeMigrations)(nil)
+	_ registry.MigrationPreparer = (*FakeMigrations)(nil)
+)
+
+// PrepareMigrations records the run, and returns PrepareFail.
+func (m *FakeMigrations) PrepareMigrations(_ context.Context, run registry.Run, _ io.Writer) error {
+	m.Prepared = append(m.Prepared, run.Name())
+	return m.PrepareFail
+}
 
 // Migrate records the phase and the plans' services, and the servers of
 // a plan with no steps in the phase.

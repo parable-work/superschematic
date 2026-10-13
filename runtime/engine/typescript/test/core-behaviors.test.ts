@@ -7,8 +7,13 @@
 // fixture-search-json, whose notes are searched,
 // fixture-reactions-json, whose projects start, finish and fail their
 // parent, fixture-variants-json, whose steps keep their kind and hold
-// a result of the kind's shape, and fixture-branches-json, whose recipes
-// are version graphs.
+// a result of the kind's shape, fixture-branches-json, whose recipes
+// are version graphs, and fixture-staterules-json, whose invoices need
+// and keep fields by their status, and fixture-approvals-json, whose expense claims
+// wait for sign-offs, fixture-numbering-json, whose invoices are
+// numbered per project and per year, and fixture-timers-json, whose
+// support requests are escalated or resolved when nobody moves them in
+// time.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -19,11 +24,15 @@ import {
   cleanup,
   documentsDocument,
   drivers,
+  expensesDocument,
+  invoicesDocument,
   notesDocument,
+  numberedInvoicesDocument,
   openTestEngine,
   projectTreeDocument,
   projectsDocument,
   recipesDocument,
+  requestsDocument,
   stepsDocument,
   tasksDocument,
 } from './helpers.ts';
@@ -40,13 +49,17 @@ const notes = notesDocument();
 const writer: Principal = { subject: 'wes', permissions: [] };
 const reviewer: Principal = { subject: 'rae', permissions: ['documents.review'] };
 const publisher: Principal = { subject: 'pat', permissions: ['documents'] };
+const amender: Principal = { subject: 'amos', permissions: ['invoices.amend'] };
 
 for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
-      assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
+      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow']);
+      assert.deepEqual(
+        engine.behaviors.declaration('Workflow')?.fields?.map((field) => field.name),
+        ['status', 'enteredAt']
+      );
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
       assert.throws(() => openTestEngine({ driver, behaviors: [impostor] }), /already registered/);
@@ -75,7 +88,11 @@ for (const driver of drivers) {
 
       const created = engine.instances.create(writer, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
       assert.deepEqual(created.data, { title: 'Launch plan' });
-      assert.deepEqual(created.behaviors, { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } });
+      assert.deepEqual(created.behaviors, {
+        Workflow: { status: 'draft', enteredAt: created.createdAt },
+        Comments: { commentCount: 0 },
+        Revisions: { revision: 1, pendingProposals: 0 },
+      });
 
       engine.instances.invoke(writer, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'review' });
@@ -87,25 +104,33 @@ for (const driver of drivers) {
       engine.instances.invoke(publisher, 'documents', 'doc-1', 'transition', { to: 'published' });
 
       const read = engine.instances.get(alice, 'documents', 'doc-1');
+      const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.' });
-      assert.deepEqual(read?.behaviors, { Workflow: { status: 'published' }, Comments: { commentCount: 2 }, Revisions: { revision: 2, pendingProposals: 0 } });
+      // The status was last entered by the last transition, the seventh event.
+      assert.deepEqual(read?.behaviors, {
+        Workflow: { status: 'published', enteredAt: events[6].at },
+        Comments: { commentCount: 2 },
+        Revisions: { revision: 2, pendingProposals: 0 },
+      });
       assert.equal(read?.seq, 7);
 
-      const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(
         events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { patch: unknown }).patch : event.change]),
         [
           [
             'create',
             'wes',
-            { data: { title: 'Launch plan' }, behaviors: { Workflow: { status: 'draft' }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } } },
+            {
+              data: { title: 'Launch plan' },
+              behaviors: { Workflow: { status: 'draft', enteredAt: events[0].at }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } },
+            },
           ],
           ['operation', 'wes', { behaviors: { Comments: { commentCount: 1 } } }],
-          ['operation', 'wes', { behaviors: { Workflow: { status: 'review' } } }],
+          ['operation', 'wes', { behaviors: { Workflow: { status: 'review', enteredAt: events[2].at } } }],
           ['operation', 'wes', { behaviors: { Revisions: { pendingProposals: 1 } } }],
           ['operation', 'rae', { data: { body: 'The plan, in full.' }, behaviors: { Revisions: { revision: 2, pendingProposals: 0 } } }],
           ['operation', 'rae', { behaviors: { Comments: { commentCount: 2 } } }],
-          ['operation', 'pat', { behaviors: { Workflow: { status: 'published' } } }],
+          ['operation', 'pat', { behaviors: { Workflow: { status: 'published', enteredAt: events[6].at } } }],
         ]
       );
       // The log replays, a merge patch at a time, to the instance a read returns.
@@ -143,7 +168,11 @@ for (const driver of drivers) {
       engine.instances.update(writer, 'documents', 'doc-1', { summary: 'Withdrawn.' });
       const retracted = engine.instances.get(alice, 'documents', 'doc-1');
       assert.deepEqual(retracted?.data, { title: 'Launch plan', body: 'The plan, in full.', summary: 'Withdrawn.' });
-      assert.deepEqual(retracted?.behaviors, { Workflow: { status: 'retracted' }, Comments: { commentCount: 2 }, Revisions: { revision: 3, pendingProposals: 0 } });
+      assert.deepEqual(retracted?.behaviors, {
+        Workflow: { status: 'retracted', enteredAt: engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events[7].at },
+        Comments: { commentCount: 2 },
+        Revisions: { revision: 3, pendingProposals: 0 },
+      });
     });
 
     test('it runs the notes document: its title and body are searched, the title weighing more, and its embedder pulls their text', () => {
@@ -190,7 +219,11 @@ for (const driver of drivers) {
       const created = engine.instances.create(writer, 'tasks', { title: 'Build' }, { id: 'build', behaviors: project });
       assert.deepEqual([created.data, created.behaviors], [
         { title: 'Build' },
-        { Workflow: { status: 'todo' }, Dependencies: { blocked: false }, Links: { targets: { project: { schema: 'projects', id: 'launch' } } } },
+        {
+          Workflow: { status: 'todo', enteredAt: created.createdAt },
+          Dependencies: { blocked: false },
+          Links: { targets: { project: { schema: 'projects', id: 'launch' } } },
+        },
       ]);
 
       // build waits on plan and on the design, implements the design at its
@@ -200,8 +233,9 @@ for (const driver of drivers) {
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'spec', id: 'doc-1' });
       engine.instances.invoke(writer, 'tasks', 'build', 'link', { name: 'parent', id: 'plan' });
       engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'doing' });
-      assert.deepEqual(engine.instances.get(alice, 'tasks', 'build')?.behaviors, {
-        Workflow: { status: 'doing' },
+      const doing = engine.instances.get(alice, 'tasks', 'build');
+      assert.deepEqual(doing?.behaviors, {
+        Workflow: { status: 'doing', enteredAt: doing?.updatedAt },
         Dependencies: { blocked: true },
         Links: {
           targets: {
@@ -237,6 +271,7 @@ for (const driver of drivers) {
         next: null,
       });
       assert.deepEqual(engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'done' }), { from: 'doing', to: 'done' });
+      const enteredDone = engine.instances.get(alice, 'tasks', 'build')?.updatedAt;
 
       // launch is the tasks' required project, so it stays; the design can
       // go, which removes build's edge to it and clears its spec link.
@@ -255,7 +290,7 @@ for (const driver of drivers) {
       assert.deepEqual([done?.data, done?.behaviors], [
         { title: 'Build' },
         {
-          Workflow: { status: 'done' },
+          Workflow: { status: 'done', enteredAt: enteredDone },
           Dependencies: { blocked: false },
           Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
         },
@@ -275,7 +310,7 @@ for (const driver of drivers) {
       const created = engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
       assert.deepEqual([created.data, created.behaviors], [
         { title: 'Launch' },
-        { Workflow: { status: 'active' }, Rollups: { values: { tasks: 0, tasksByStatus: {}, tasksFinished: true } } },
+        { Workflow: { status: 'active', enteredAt: created.createdAt }, Rollups: { values: { tasks: 0, tasksByStatus: {}, tasksFinished: true } } },
       ]);
       for (const id of ['plan', 'build']) {
         engine.instances.create(writer, 'tasks', { title: id }, { id, behaviors: { Links: { project: 'launch' } } });
@@ -361,6 +396,91 @@ for (const driver of drivers) {
       });
     });
 
+    test("it runs the expenses document: a claim waits for two approvers' sign-offs, never its claimant's, then one to pay it, and a change of it signs again", () => {
+      const claimant: Principal = { subject: 'cleo', permissions: ['expenses.approve'] };
+      const approvers: Principal[] = [
+        { subject: 'ann', permissions: ['expenses.approve'] },
+        { subject: 'bob', permissions: ['expenses.approve'] },
+      ];
+      const payer: Principal = { subject: 'pia', permissions: ['expenses.pay'] };
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, expensesDocument());
+      engine.schemas.publish(alice, 'expenses');
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'expenses').map(({ name }) => name),
+        ['Workflow', 'Approvals']
+      );
+      const created = engine.instances.create(claimant, 'expenses', { title: 'Train to the offsite', amount: 120 }, { id: 'trip' });
+      assert.deepEqual(created.behaviors, { Workflow: { status: 'draft', enteredAt: created.createdAt }, Approvals: { gates: {} } });
+      const invoke = (who: Principal, operation: string, params: Record<string, unknown> = {}) => engine.instances.invoke(who, 'expenses', 'trip', operation, params);
+      invoke(claimant, 'transition', { to: 'submitted' });
+      assert.equal(thrown(() => invoke(claimant, 'signOff', { state: 'approved' })).code, 'vetoed');
+      for (const approver of approvers) {
+        invoke(approver, 'signOff', { state: 'approved' });
+      }
+      // The claim changes: the sign-offs it had no longer count.
+      engine.instances.update(claimant, 'expenses', 'trip', { amount: 140 });
+      assert.deepEqual(engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals, { gates: {} });
+      assert.equal(thrown(() => invoke(claimant, 'transition', { to: 'approved' })).code, 'vetoed');
+      for (const approver of approvers) {
+        invoke(approver, 'signOff', { state: 'approved' });
+      }
+      assert.deepEqual(invoke(claimant, 'transition', { to: 'approved' }), { from: 'submitted', to: 'approved' });
+      assert.equal(thrown(() => invoke(claimant, 'transition', { to: 'paid' })).code, 'vetoed');
+      invoke(payer, 'signOff', { state: 'paid' });
+      invoke(claimant, 'transition', { to: 'paid' });
+      const read = engine.instances.get(alice, 'expenses', 'trip');
+      assert.deepEqual(read?.behaviors.Workflow.status, 'paid');
+      assert.deepEqual(read?.behaviors.Approvals, { gates: {} });
+      const listed = engine.instances.invoke(alice, 'expenses', 'trip', 'listSignOffs') as { items: Array<{ subject: string; consumedAt?: number }> };
+      assert.deepEqual(
+        listed.items.map(({ subject, consumedAt }) => [subject, consumedAt !== undefined]),
+        [
+          ['ann', true],
+          ['bob', true],
+          ['ann', true],
+          ['bob', true],
+          ['pia', true],
+        ]
+      );
+    });
+
+    test('it runs the requests document: a request open four hours is escalated on the runner, one that left open in time is not, and a visit is reminded a day before', () => {
+      const runner: Principal = { subject: 'runner', permissions: [] };
+      const lead: Principal = { subject: 'lee', permissions: ['requests.timers'] };
+      let now = Date.UTC(2026, 9, 9, 9);
+      const engine = openTestEngine({ driver, clock: () => now, runner: { principal: runner } });
+      engine.schemas.define(alice, requestsDocument());
+      engine.schemas.publish(alice, 'requests');
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'requests').map(({ name }) => name),
+        ['Workflow', 'Timers']
+      );
+      engine.runner.runDue();
+      const start = now;
+      const visitAt = new Date(start + 3 * 86_400_000).toISOString();
+      const created = engine.instances.create(writer, 'requests', { title: 'Printer jams', visitAt }, { id: 'jam' });
+      assert.deepEqual(created.behaviors.Timers, {
+        deadlines: { remind: { dueAt: start + 2 * 86_400_000, fired: false }, respond: { dueAt: start + 4 * 3_600_000, fired: false } },
+      });
+      engine.instances.create(writer, 'requests', { title: 'Toner' }, { id: 'toner' });
+      engine.instances.invoke(writer, 'requests', 'toner', 'transition', { to: 'waiting' });
+      // The waiting request's lapse is snoozed a day, by a lead.
+      engine.instances.invoke(lead, 'requests', 'toner', 'snoozeTimer', { deadline: 'lapse', dueAt: start + 8 * 86_400_000 });
+      now = start + 5 * 3_600_000;
+      engine.runner.runDue();
+      const read = (id: string) => engine.instances.get(alice, 'requests', id);
+      const deadlines = (id: string) => read(id)?.behaviors.Timers.deadlines as Record<string, { fired: boolean }>;
+      assert.deepEqual([read('jam')?.behaviors.Workflow.status, read('toner')?.behaviors.Workflow.status], ['escalated', 'waiting']);
+      assert.deepEqual(deadlines('jam').respond, { dueAt: start + 4 * 3_600_000, fired: true, firedAt: now, outcome: 'moved' });
+      now = start + 2 * 86_400_000;
+      engine.runner.runDue();
+      assert.equal(deadlines('jam').remind.fired, true);
+      // The customer answers: leaving waiting cancels lapse.
+      engine.instances.invoke(writer, 'requests', 'toner', 'transition', { to: 'open' });
+      assert.deepEqual(Object.keys(deadlines('toner')), ['respond']);
+    });
+
     test('it runs the recipes document: a recipe is a graph root whose drafts merge into its primary line, and a tagged commit is released', () => {
       const engine = openTestEngine({ driver, runner: { principal: { subject: 'runner', permissions: [] } } });
       engine.schemas.define(alice, recipesDocument());
@@ -397,6 +517,54 @@ for (const driver of drivers) {
         engine.runner.status().schedules.filter((schedule) => schedule.behavior === 'Branches').map(({ state, everyMs }) => [state, everyMs]),
         [['active', 3600000]]
       );
+    });
+
+    test("it runs the invoices document: a sent invoice needs a customer, an amount and its lines, which then stay, and a paid one keeps every field", () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, invoicesDocument());
+      engine.schemas.publish(alice, 'invoices');
+      engine.instances.create(writer, 'invoices', { title: 'March', customer: 'Acme' }, { id: 'march' });
+      const missing = thrown(() => engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'sent' }));
+      assert.deepEqual([missing.code, missing.message], [
+        'vetoed',
+        'behavior StateRules vetoes transition of invoices march: invoices march cannot move to sent without amount and lines, which sent requires',
+      ]);
+      engine.instances.update(writer, 'invoices', 'march', { amount: 1200, lines: ['Consulting'] });
+      engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'sent' });
+      assert.match(thrown(() => engine.instances.update(writer, 'invoices', 'march', { amount: 1300 })).message, /which freezes amount/);
+      assert.equal(engine.instances.update(amender, 'invoices', 'march', { amount: 1300 }).data.amount, 1300);
+      engine.instances.invoke(writer, 'invoices', 'march', 'transition', { to: 'paid' });
+      assert.match(thrown(() => engine.instances.update(writer, 'invoices', 'march', { notes: 'Thanks' })).message, /is paid, which freezes notes/);
+      const read = engine.instances.get(alice, 'invoices', 'march');
+      assert.deepEqual([read?.data, read?.behaviors.Workflow?.status, read?.seq], [{ title: 'March', customer: 'Acme', amount: 1300, lines: ['Consulting'] }, 'paid', 5]);
+    });
+
+    test("it runs the invoices document beside the projects one: an invoice is numbered at its create in its project's count, which starts again each year", () => {
+      let now = Date.UTC(2026, 11, 31);
+      const engine = openTestEngine({ driver, clock: () => now });
+      for (const document of [documents, tasks, projects, numberedInvoicesDocument()]) {
+        engine.schemas.define(alice, document);
+        engine.schemas.publish(alice, document.name as string);
+      }
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'invoices').map(({ name }) => name),
+        ['Links', 'Numbering']
+      );
+      for (const id of ['launch', 'site']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      const bill = (id: string, project: string) =>
+        engine.instances.create(writer, 'invoices', { title: id, amount: 100 }, { id, behaviors: { Links: { project } } }).behaviors.Numbering;
+      assert.deepEqual(bill('a', 'launch'), { seq: 1, label: 'INV-2026-0001' });
+      assert.deepEqual(bill('b', 'launch'), { seq: 2, label: 'INV-2026-0002' });
+      assert.deepEqual(bill('c', 'site'), { seq: 1, label: 'INV-2026-0001' });
+      now = Date.UTC(2027, 0, 1);
+      assert.deepEqual(bill('d', 'launch'), { seq: 1, label: 'INV-2027-0001' });
+      const found = engine.instances.list(alice, 'invoices', { where: { 'Numbering.label': 'INV-2026-0001' } }).items;
+      assert.deepEqual(found.map((item) => [item.id, item.behaviors.Links.targets]), [
+        ['a', { project: { schema: 'projects', id: 'launch' } }],
+        ['c', { project: { schema: 'projects', id: 'site' } }],
+      ]);
     });
   });
 }

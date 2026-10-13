@@ -1,5 +1,8 @@
 name: ts-shop
 kind: API
+imports:
+  - package: "@schemas/ts-db"
+    types: [CartAbandoned]
 types:
   ShopConfig:
     name: ShopConfig
@@ -41,3 +44,18 @@ operationSets:
         httpMethod: GET
         restPath: me/cart
         auth: true
+# A job is a deployable of its own, with ts-shop's Deps: its database, its
+# client of ts-pricing and its bucket (D52). Its schedule's */15 stays in
+# the generated JSDoc.
+jobs:
+  - name: SweepCarts
+    schedule: "*/15 * * * *"
+    timeout: 2m
+# A worker is a deployable of its own too, with the same Deps: it claims the
+# messages of ts-db's queue CartAbandoned, two at a time, and gives its
+# running handlers two seconds when it stops (D53).
+workers:
+  - name: RemindShoppers
+    queue: CartAbandoned
+    concurrency: 2
+    grace: 2s

@@ -42,8 +42,8 @@ const (
 	// Run jobs with a scheduler for its schedule (D52).
 	JobPlatform = "fake.job"
 
-	// WorkerPlatform runs Go workers, as gcp runs a worker on a Cloud Run
-	// worker pool (D53).
+	// WorkerPlatform runs Go and TypeScript workers, as gcp runs a worker
+	// on a Cloud Run worker pool (D53).
 	WorkerPlatform = "fake.worker"
 
 	SQLConnector  = "fake.run-sql"
@@ -237,7 +237,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      WorkerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableWorker,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(workerSettings),
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },

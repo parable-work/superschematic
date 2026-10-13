@@ -137,7 +137,11 @@ for (const driver of drivers) {
             'create',
             {
               data: { step: 'build', title: 'Build it', topic: 'public' },
-              behaviors: { Workflow: { status: 'todo' }, Dependencies: { blocked: true }, Links: { targets: { run: { schema: 'Run', id: 'r1' } } } },
+              behaviors: {
+                Workflow: { status: 'todo', enteredAt: events[0].at },
+                Dependencies: { blocked: true },
+                Links: { targets: { run: { schema: 'Run', id: 'r1' } } },
+              },
             },
           ],
         ]
@@ -234,6 +238,8 @@ for (const driver of drivers) {
       assert.match(refusal(engine, inline), /schema Step has no link run \(its links: owner\)/);
       publish(engine, documentOf('Step', stepFields, stepBehaviors({ owner: { schema: 'Run' }, run: { schema: 'Other' } })));
       assert.match(refusal(engine, inline), /schema Step's link run points at Other, not Run/);
+      publish(engine, documentOf('Step', stepFields, stepBehaviors({ run: { schema: 'Run', many: true, max: 2 } })));
+      assert.match(refusal(engine, inline), /schema Step's link run holds a list of targets, and a child links to its one parent through it/);
       publish(engine, documentOf('Step', stepFields, [{ name: 'Workflow', config: stepFlow }]));
       assert.match(refusal(engine, inline), /schema Step does not compose Links/);
 
@@ -519,6 +525,20 @@ for (const driver of drivers) {
       assert.match(refusal({ ...fromConfig, copyLinks: ['run'] }), /copyLinks names run, the link each child points at its parent through/);
       assert.match(refusal({ ...fromConfig, copyLinks: ['owner'] }), /copyLinks: the type's Links has no link owner/);
       assert.match(refusal({ ...fromConfig, copyLinks: ['area'] }, { plan: { schema: 'Plan', pinned: true }, area: { schema: 'Plan' } }), /copyLinks: schema Step's link area points at Area, and this type's at Plan/);
+      // Each link it reads holds one target.
+      assert.match(
+        refusal(fromConfig, { plan: { schema: 'Plan', pinned: true, many: true, max: 2 }, area: { schema: 'Area' } }),
+        /from: link plan holds a list of targets, and the steps are read from one/
+      );
+      assert.match(
+        refusal(fromConfig, { plan: { schema: 'Plan', pinned: true }, area: { schema: 'Area', many: true, max: 2 } }),
+        /copyLinks: link area holds a list of targets, and a stamp copies one/
+      );
+      publish(
+        engine,
+        documentOf('Step', stepFields, stepBehaviors({ run: { schema: 'Run', required: true }, plan: { schema: 'Plan', pinned: true }, area: { schema: 'Area', many: true, max: 2 } }))
+      );
+      assert.match(refusal(fromConfig), /copyLinks: schema Step's link area holds a list of targets, and a stamp copies one/);
     });
   });
 

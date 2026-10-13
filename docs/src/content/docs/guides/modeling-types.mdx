@@ -288,7 +288,11 @@ adds a field per derived value, and `LoadEnvConfig()`, which reads both and
 reports every problem at once. The generated `Deps`, which your
 implementation's `New(deps Deps)` takes, holds it as `Config`, beside the
 ORM of the API's database, a client of each API it calls and a logger. The
-TypeScript and Rust loaders do not read derived fields yet.
+TypeScript API package's `loadEnvConfig()` and the Rust API crate's
+`config::load_env_config()` read the derived fields too, into the
+`EnvConfig` their `Deps` holds
+([TypeScript](/superschematic/install/typescript/),
+[Rust](/superschematic/install/rust/#the-implementation-crate)).
 
 ## Secrets
 

@@ -131,6 +131,39 @@ pub async fn call_account_sign_up(cx: &Cx, args: AccountSignUpArgsRecord) -> Res
     Ok(AccountViewRecord::from_wire(&json))
 }
 
+/// The arguments of account.draftNote, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountDraftNoteArgsRecord {
+    pub input: Option<NoteInputRecord>,
+    pub id: String,
+}
+
+impl AccountDraftNoteArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::AccountDraftNoteArgs, ProblemRecord> {
+        Ok(crate::api::AccountDraftNoteArgs {
+            input: decode("input", self.input.as_ref().map_or(Value::Null, NoteInputRecord::to_wire))?,
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// account.draftNote, called from the browser.
+#[procedure("/_superschematic/fixture-forms-api/account/draft-note")]
+pub async fn account_draft_note(cx: &Cx, args: AccountDraftNoteArgsRecord) -> topcoat::Result<Result<AccountViewRecord, ProblemRecord>> {
+    Ok(call_account_draft_note(cx, args).await)
+}
+
+/// The body of the account_draft_note procedure.
+pub async fn call_account_draft_note(cx: &Cx, args: AccountDraftNoteArgsRecord) -> Result<AccountViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::account_draft_note(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(AccountViewRecord::from_wire(&json))
+}
+
 /// The arguments of account.rotateKey, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -193,4 +226,35 @@ pub async fn call_account_annotate(cx: &Cx, args: AccountAnnotateArgsRecord) -> 
     let value = operations::account_annotate(cx, args).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(AccountViewRecord::from_wire(&json))
+}
+
+/// The arguments of booking.book, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookingBookArgsRecord {
+    pub input: BookingInputRecord,
+}
+
+impl BookingBookArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::BookingBookArgs, ProblemRecord> {
+        Ok(crate::api::BookingBookArgs {
+            input: decode("input", BookingInputRecord::to_wire(&self.input))?,
+        })
+    }
+}
+
+/// booking.book, called from the browser.
+#[procedure("/_superschematic/fixture-forms-api/booking/book")]
+pub async fn booking_book(cx: &Cx, args: BookingBookArgsRecord) -> topcoat::Result<Result<BookingViewRecord, ProblemRecord>> {
+    Ok(call_booking_book(cx, args).await)
+}
+
+/// The body of the booking_book procedure.
+pub async fn call_booking_book(cx: &Cx, args: BookingBookArgsRecord) -> Result<BookingViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::booking_book(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(BookingViewRecord::from_wire(&json))
 }

@@ -41,11 +41,87 @@ This crate provides:
 - Service credential sources for a calling service, each a `TokenSource`:
   `GoogleIdTokenSource` (Cloud Run), `TokenFileSource` (a Kubernetes
   projected token) and `SignedKeySource` (an edge's Ed25519 key)
+- What a server in a stack reads, opens and logs through, below
 
 Signatures are checked with `ring`. The optional `http-client` feature adds
 `HttpFetcher` (reqwest, native-tls), the default JWKS fetcher of
 `JwtServiceAuthenticator` and HTTP client of `GoogleIdTokenSource`. Without
 it, a service passes its own `KeyFetcher` or `HttpGetter`.
+
+## Running in a stack (D57)
+
+A generated Rust server in a stack reads its configuration from the
+environment, opens its databases, calls other APIs with a service
+credential and logs JSON lines, through these pieces, the twins of the Go
+and TypeScript runtimes' (D51):
+
+- `stackconfig`, with no feature: the readers of the fields an API's edges
+  derive (section 3.4 of `docs/stack-model.md`), each from one variable per
+  member, `<field>_<MEMBER>`. `load_database` reads `<field>_URL`, or
+  `<field>_CLOUD_SQL_INSTANCE`, `_DATABASE` and `_USER`, as a `Database`
+  (`Url` or `CloudSql`); `load_service` the callee's `<field>_URL` and its
+  `<field>_CREDENTIAL_*`, as a `Service`; `load_bucket` `<field>_NAME` and
+  `<field>_ENDPOINT`; `load_callers` the indexed `<field>_ISSUERS_*`, as the
+  `ServiceAuthConfig` `JwtServiceAuthenticator` takes; and `load_cors`
+  `<field>_ORIGINS`. Each refuses what Go's refuses, with its messages, all
+  of a field's in one `StackConfigError`, and has a `_from` twin over a map.
+  `runtime/http/testdata/stackconfig_parity.json` holds the three runtimes
+  to one encoding; `tests/stackconfig_parity.rs` runs every vector. An
+  API's identity config, `<API>_IDENTITY`, is the JSON `identity::Config`
+  reads.
+- Credential sources: `stackconfig::credential_source` turns a `Service`'s
+  credential into the `TokenSource` it names: `GoogleIdTokenSource` for
+  `google-id-token` (with the `http-client` feature), `TokenFileSource`
+  for `token-file`, and `SignedKeySource` for `signed-token`, signing as
+  the issuer for the audience. A generated SDK's `ServiceTokenSource` is
+  the same type, so its `ServiceCredential` is
+  `{ token: credential_source(c)?, headers: c.header_names() }`.
+- `cors`, with no feature: a site's CORS (D55), the twin of Go's
+  `cors.Handler` and TypeScript's `corsHandler`. `cors::Api::new(&cors,
+  operations::ALL)` is an API's policy, its `<API>_CORS` origins and the
+  methods of its operations (`cors::methods`), and the requests its
+  operations' routes take (`cors::match_operations`, a `{param}` taking one
+  segment). `SiteCorsLayer::new(apis)`, around the server's router, finds
+  the API a request with an `Origin` is, a preflight by the method it asks
+  for: a preflight from an origin the policy lists is answered 204 with
+  `Access-Control-Allow-Origin`, `-Credentials`, `-Methods`, `-Headers`
+  (`Accept, Authorization, Content-Type`) and `-Max-Age: 600`, and any
+  other request reaches the router, whose answer gets the policy's headers
+  where it set none (`Allow-Origin` and `Allow-Credentials` for a listed
+  origin, `Vary` always). A preflight from an origin the site's policy does
+  not list reaches the router too, so `identity::CorsLayer` on the API's
+  router answers the origins its identity config trusts (D55, amended).
+  `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`
+  holds the three runtimes to; `tests/cors_parity.rs` runs every vector.
+- The `postgres` feature's `postgres` module: `connect(&Database)` opens a
+  `deadpool-postgres` pool, which connects when first used, and
+  `ping(&Pool)` is the `SELECT 1` a server's `/readyz` makes. A URL
+  connects as it says, its `sslmode` read as libpq reads it: `disable` is
+  no TLS, `prefer` encrypts when the server offers TLS and `require`
+  always, neither verifying the certificate, and `verify-ca` and
+  `verify-full` verify it against the system's roots. A
+  Cloud SQL instance connects over the Unix socket Cloud Run mounts,
+  `/cloudsql/<connection name>`, without TLS, as its IAM database user,
+  with an OAuth access token from the metadata server
+  (`GCE_METADATA_HOST` honoured) as the password, fetched for each new
+  connection. The module re-exports `deadpool_postgres` and
+  `tokio_postgres`. With `identity-postgres` too, `identity::PostgresPool`
+  runs the identity store over the same pool.
+- The `logging` feature's `logging` module: `init_json(stack, server)`
+  installs a `tracing-subscriber` layer writing one JSON object per line on
+  stdout at `info`, with the TypeScript `createLogger`'s members: `level`,
+  `time` (RFC 3339 in UTC, to the millisecond) and `msg` first, then
+  `stack` and `server`, the fields of the spans the event is in (`api`, in
+  an `api_span(api)`), and the event's own. It re-exports `tracing`.
+
+The Postgres tests run on the database
+`SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;
+`SUPERSCHEMATIC_POSTGRES_TEST_TLS=1` says it offers TLS with a certificate
+the system's roots do not sign:
+
+```
+cargo test --features postgres,identity-postgres,identity-sqlite,logging
+```
 
 ## Identity (D50)
 

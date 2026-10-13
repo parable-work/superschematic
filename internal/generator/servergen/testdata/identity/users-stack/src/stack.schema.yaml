@@ -1,6 +1,8 @@
-# One server, Accounts, serves both APIs over users-db. Its one
-# environment, Local, runs on the local target, whose platform gives each
-# API's identity config a cookie without Secure.
+# One server, Accounts, serves both APIs over users-db. The site
+# users-web calls users-api, so Accounts answers CORS for it beside the
+# identity runtime's trusted origins. Its one environment, Local, runs on
+# the local target, whose platform gives each API's identity config a
+# cookie without Secure.
 kind: Stack
 types:
   Users:
@@ -10,6 +12,7 @@ types:
       deploy:
         - { name: users-api, kind: API }
         - { name: users-admin, kind: API }
+        - { name: users-web, kind: Site }
       expose:
         - deployable: Accounts
   Accounts:

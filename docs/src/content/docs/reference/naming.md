@@ -581,8 +581,8 @@ Where each API service's implementation lives, per language, and each
 site's code, as a path from the repository root (the parent of the
 schemas root) in which `{service}` is the service's name. A stack's build writes a missing
 implementation there for each API its servers serve, and
-`build --scaffold` and `build-all --scaffold` for each Go or TypeScript
-API built. A server's generated entrypoint imports the implementation
+`build --scaffold` and `build-all --scaffold` for each Go, TypeScript or
+Rust API built. A server's generated entrypoint imports the implementation
 from there. An absolute path, or one without `{service}`, is an error.
 
 ### `implementation_paths.go`
@@ -602,6 +602,17 @@ package's `Constructor` types. The scaffold names it
 output root's Bun workspace has every directory the template matches,
 with `*` for `{service}`, as a member, so keep other packages out of
 them.
+
+### `implementation_paths.rust`
+
+Default: `rust/{service}`
+
+The crate of a Rust API's implementation (D57), whose `create(deps)`
+returns the `Handlers` the generated API crate's `deps` module declares.
+The scaffold writes it once, a `Cargo.toml` and `src/lib.rs`, never into a
+directory that holds a `Cargo.toml`. It names the crate
+`<rust_crate_prefix><service>-implementation`, a name you may change, and
+depends on the API crate and the HTTP runtime by path.
 
 ### `implementation_paths.site`
 

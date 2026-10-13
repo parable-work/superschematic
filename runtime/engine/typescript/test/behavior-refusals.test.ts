@@ -20,20 +20,21 @@ import {
 } from '../dist/index.js';
 import { hold, holdDeclaration, holdRequests, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, openTestEngine, thrown } from './helpers.ts';
+import { testHooks } from './recorder.ts';
 
 afterEach(cleanup);
 beforeEach(() => {
   holdRequests.splice(0);
 });
 
-// What test.Rogue's guard answers; a test sets it.
-let rogueAnswer: unknown;
+// What test.Rogue's guard answers; a test sets it. A recorder hook.
+const rogueGuard = testHooks('rogue', { answer: undefined as unknown });
 
 // test.Rogue's guard answers whatever the test sets, to a delete.
 const rogue = defineBehavior({
   declaration: { name: 'test.Rogue', vetoes: [{ code: 'listed' }] },
   guard(_view, request) {
-    return request.kind === 'delete' ? (rogueAnswer as string | undefined) : undefined;
+    return request.kind === 'delete' ? (rogueGuard.answer as string | undefined) : undefined;
   },
 });
 
@@ -82,10 +83,10 @@ for (const driver of drivers) {
 
     test("a guard answers nothing, a reason, or { reason, code?, details? } with a code its declaration lists", () => {
       const engine = world([{ name: 'test.Rogue' }]);
-      rogueAnswer = 'a plain reason';
+      rogueGuard.answer = 'a plain reason';
       const plain = veto(() => engine.instances.delete(alice, 'Item', 'i1'));
       assert.deepEqual([plain.reason, plain.vetoCode, plain.vetoDetails], ['a plain reason', undefined, undefined]);
-      rogueAnswer = { reason: 'listed', code: 'listed', details: { at: 1 } };
+      rogueGuard.answer = { reason: 'listed', code: 'listed', details: { at: 1 } };
       assert.deepEqual(veto(() => engine.instances.delete(alice, 'Item', 'i1')).vetoDetails, { at: 1 });
       for (const answer of [
         { reason: 'unlisted', code: 'other' },
@@ -95,10 +96,10 @@ for (const driver of drivers) {
         { code: 'listed' },
         7,
       ]) {
-        rogueAnswer = answer;
+        rogueGuard.answer = answer;
         assert.ok(thrown(() => engine.instances.delete(alice, 'Item', 'i1'), BehaviorError).message.startsWith('behavior test.Rogue: '), JSON.stringify(answer));
       }
-      rogueAnswer = undefined;
+      rogueGuard.answer = undefined;
       assert.equal(engine.instances.delete(alice, 'Item', 'i1'), true);
     });
 

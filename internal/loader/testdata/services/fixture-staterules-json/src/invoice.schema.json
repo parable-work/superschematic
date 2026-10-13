@@ -1,0 +1,51 @@
+{
+  "kind": "General",
+  "name": "invoices",
+  "description": "An invoice an engine runs with the core's Workflow and StateRules and no extension: it is drafted with any fields, sent only with a customer, an amount and its lines, which then stay as they are, and paid or voided with no field left to change but by a caller who may amend it.",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number"
+    }
+  },
+  "types": {
+    "Invoice": {
+      "name": "Invoice",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["draft", "sent", "paid", "void"],
+            "transitions": [
+              { "from": "draft", "to": "sent" },
+              { "from": "sent", "to": "draft" },
+              { "from": "sent", "to": "paid" },
+              { "from": "draft", "to": "void" },
+              { "from": "sent", "to": "void" }
+            ],
+            "outcomes": { "void": "neutral" }
+          }
+        },
+        {
+          "name": "StateRules",
+          "config": {
+            "states": {
+              "sent": { "required": ["customer", "amount", "lines"], "frozen": ["customer", "amount", "lines"] },
+              "paid": { "frozen": "all" },
+              "void": { "frozen": "all" }
+            },
+            "permission": "invoices.amend"
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "customer", "typeRef": { "name": "string" } },
+        { "name": "amount", "typeRef": { "name": "Generic.Int64" } },
+        { "name": "lines", "typeRef": { "name": "string", "isArray": true } },
+        { "name": "notes", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

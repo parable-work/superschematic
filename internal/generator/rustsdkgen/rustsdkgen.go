@@ -252,6 +252,13 @@ func IsToolUnavailable(err error) bool {
 	return codegen.IsToolUnavailable(err)
 }
 
+// SDKStructName is the struct of the Rust SDK of the API service named
+// service, which its new builds from a ClientConfig: shop-api's is
+// ShopApiSdk.
+func SDKStructName(service string) string {
+	return toRustTypeName(service) + "Sdk"
+}
+
 // Generate generates Rust SDK metadata from API output.
 func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
@@ -271,7 +278,7 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		CrateName:        crateName,
 		TypesCrate:       typesCrate,
 		TypesCrateModule: rustutil.CrateNameToModulePath(typesCrate),
-		SDKStructName:    toRustTypeName(apiOutput.SchemaName) + "Sdk",
+		SDKStructName:    SDKStructName(apiOutput.SchemaName),
 		HasAuth:          apiOutput.HasAuth,
 		Timestamp:        clock.RFC3339(),
 		Version:          "1.0.0",

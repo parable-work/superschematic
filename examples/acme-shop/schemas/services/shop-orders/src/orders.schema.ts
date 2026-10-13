@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Nullable, Validate, display } from "@superschematic/schema";
+import { Nullable, Validate, display, docs } from "@superschematic/schema";
 import {
   Authenticated,
   HttpMethod,
@@ -48,7 +48,10 @@ export abstract class OrderView {
   totalCents: Generic.Int64;
 }
 
+// One line of an order a shopper places: a product and how many.
+@display({ noun: "Line", createLabel: "Add a line" })
 export abstract class PlaceOrderLine {
+  @docs({ title: "Product" })
   productId: Identity.UUID;
   quantity: Validate<number, { min: 1; max: 99 }>;
 }

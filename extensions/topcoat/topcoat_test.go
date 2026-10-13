@@ -24,8 +24,9 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixtures = "../../internal/loader/tsreader/testdata/services"
 
-// formsService is the extension's own fixture, whose input types are of
-// every kind a form field takes, and one a form cannot hold.
+// formsService is the extension's own fixture, whose input types hold a
+// field of every kind a form renders: values of each scalar, enums, nested
+// objects, rows of objects and of values, groups and JSON text.
 const formsService = "fixture-forms-api"
 
 // controlsService is the extension's own fixture whose routes do more than
@@ -40,10 +41,15 @@ const viewsService = "fixture-views-api"
 // serviceDir is a fixture's directory: the extension's own, or the
 // loader's.
 func serviceDir(name string) string {
-	if name == formsService || name == controlsService || name == viewsService {
-		return filepath.Join("testdata", "services", name)
+	if own := filepath.Join("testdata", "services", name); isDir(own) {
+		return own
 	}
 	return filepath.Join(fixtures, name)
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // rustOutputs are a fixture's outputs with the server in Rust and the
@@ -142,8 +148,8 @@ func TestTheCrateIsWrittenOnlyBesideARustServer(t *testing.T) {
 	}
 
 	unknown := rustOutputs()
-	unknown["topcoat"] = map[string]any{"enabled": true, "pages": true}
-	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "pages") {
+	unknown["topcoat"] = map[string]any{"enabled": true, "layouts": true}
+	if _, err := build(t, testpaths.TempDir(t), unknown); err == nil || !strings.Contains(err.Error(), "layouts") {
 		t.Errorf("an undeclared key in outputs.topcoat: %v", err)
 	}
 }
@@ -203,13 +209,14 @@ func skipped(result *registry.Result, reason string) bool {
 // fixture-forms-api, whose input types make forms, fixture-controls-api,
 // whose routes have a webhook's signature check, service clauses and
 // traffic controls, fixture-views-api, whose result's fields are of every
-// kind a display component renders, and fixture-user-routes-api, whose
-// users are the core user model's (D50), with testdata/golden/<service>;
-// -update rewrites them.
+// kind a display component renders, fixture-user-routes-api, whose users
+// are the core user model's (D50), fixture-args-api, whose arguments make
+// argument forms, and fixture-pages-api, whose resources make pages, with
+// testdata/golden/<service>; -update rewrites them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService} {
 		root := testpaths.TempDir(t)
-		if _, err := buildService(t, service, root, rustOutputs()); err != nil {
+		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
 		}
 		got := treeOf(t, topcoat.Dir(root, service))
@@ -309,26 +316,53 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // formsAppTest: a page renders the signup form's fields with the
 // attributes its input type's rules give them; a post that breaks a rule,
 // or that the operation refuses, re-renders as sent with 422 and each
-// field's errors; a valid post signs up and redirects. Its AccountKey,
-// whose fields are a secret one and a @uiHidden one, is an empty record
-// that clippy passes with warnings denied.
+// field's errors; a valid post signs up and redirects. The booking form
+// renders its nested objects, rows and typed controls at their names; a
+// valid post books with the input's JSON; a refused field, nested or in a
+// row, renders at its control with the values as sent and the secret
+// blank; row buttons add and remove rows within the list's bounds without
+// calling the operation; and the app's choices render a select. Its
+// AccountKey, whose fields are a secret one and a @uiHidden one, is an
+// empty record that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, formsService, formsAppTest)
 }
 
-// TestAnInputAFormCannotHoldHasNoForm builds fixture-forms-api: NoteInput
-// holds a list, so the crate has no form for it.
-func TestAnInputAFormCannotHoldHasNoForm(t *testing.T) {
+// TestEveryInputHasAForm builds fixture-forms-api: every input type its
+// calls take has a form, NoteInput's list of strings and BookingInput's
+// nested objects, rows, map and JSON value included, and each nested type
+// a struct; NoteInput, which annotate requires and draftNote takes
+// optionally, has one form and one component; with forms off the crate has
+// no forms module.
+func TestEveryInputHasAForm(t *testing.T) {
 	root := testpaths.TempDir(t)
-	if _, err := buildService(t, formsService, root, rustOutputs()); err != nil {
+	var log strings.Builder
+	if _, err := buildWithNaming(t, registry.DefaultNaming(), formsService, root, rustOutputs(), &log); err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	forms, err := os.ReadFile(filepath.Join(topcoat.Dir(root, formsService), "src", "forms.rs"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(forms), "pub struct SignupInputForm") || strings.Contains(string(forms), "NoteInputForm") {
-		t.Error("forms.rs: want a form for SignupInput and none for NoteInput")
+	for _, want := range []string{
+		"pub struct SignupInputForm",
+		"pub struct NoteInputForm",
+		"pub struct BookingInputForm",
+		"pub struct GuestForm",
+		"pub struct RoomRequestForm",
+		"pub async fn booking_input_fields(",
+	} {
+		if !strings.Contains(string(forms), want) {
+			t.Errorf("forms.rs: want %s", want)
+		}
+	}
+	for _, once := range []string{"pub struct NoteInputForm ", "pub async fn note_input_fields(", "impl NoteInputForm {"} {
+		if n := strings.Count(string(forms), once); n != 1 {
+			t.Errorf("forms.rs: %s %d times, want once", once, n)
+		}
+	}
+	if strings.Contains(log.String(), "no form") {
+		t.Errorf("build log: an input has no form:\n%s", log.String())
 	}
 
 	outputs := rustOutputs()
@@ -353,8 +387,10 @@ func TestViewsRenderRecords(t *testing.T) {
 
 // TestDisplayShapesTheComponents builds fixture-views-api: OrderView's
 // @display gives its table the caption Orders and its summary fields as
-// columns, in order, its title field heading each row and naming the
-// detail with the noun as fallback; a nested Address shows its title in a
+// columns, in order, its title field heading each row, a row's link
+// (hrefs) on it, its noun and id the link's text when the title is blank,
+// and naming the detail with the noun as fallback; a nested
+// Address shows its title in a
 // cell, and Money, which declares no title, its detail; Comment, which
 // nests itself, boxes its views.
 func TestDisplayShapesTheComponents(t *testing.T) {
@@ -383,10 +419,11 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<caption>"Orders"</caption>`,
-		`<th scope="row" data-field="reference">(row.reference)</th>`,
+		"<th scope=\"row\" data-field=\"reference\">\n                            if let Some(href) = &href {\n                                <a href=(href)>\n                                    if let Some(untitled) = untitled {\n                                        (untitled)\n                                    } else {\n                                        (text_of(&choices, \"reference\", &row.reference))\n                                    }\n                                </a>\n                            } else {\n                                (text_of(&choices, \"reference\", &row.reference))\n                            }\n                        </th>",
+		`let untitled = (href.is_some() && row.reference.trim().is_empty()).then(|| format!("Order {}", row.id));`,
 		`let label = label_of(Some(record.reference.as_str()), Some("Order"));`,
-		`<td data-field="shipTo">(row.ship_to.recipient)</td>`,
-		`<td data-field="price">money_detail(record: row.price)</td>`,
+		`<td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>`,
+		`<td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>`,
 		`<dt>"Ship to"</dt>`,
 		`"on_hold" => "On hold",`,
 	} {
@@ -429,8 +466,8 @@ func TestViewsOff(t *testing.T) {
 }
 
 // TestWhatHasNoProcedure builds fixture-controls-api. Its signed webhook
-// has a guard and neither an in-process call nor a procedure, its input,
-// whose fields a form holds, no form, and its result, which no other
+// has a guard and neither an in-process call nor a procedure, its input
+// no form, and its result, which no other
 // operation returns, no record and so no display components. Its
 // @requireService operation keeps its in-process call, whose doc says it
 // applies the end-user step alone, and has no procedure; its result keeps
@@ -485,8 +522,8 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	if strings.Contains(records, "ReceiptRecord") {
 		t.Error("records.rs mirrors the webhook's result, which no page receives")
 	}
-	if _, err := os.Stat(filepath.Join(topcoat.Dir(root, controlsService), "src", "forms.rs")); !os.IsNotExist(err) {
-		t.Errorf("forms.rs written for the webhook's input, which no page submits: %v", err)
+	if strings.Contains(read("forms.rs"), "PaymentEventForm") {
+		t.Error("forms.rs has a form for the webhook's input, which no page submits")
 	}
 	if strings.Contains(views, "pub async fn receipt_") {
 		t.Error("views.rs renders the webhook's result, which has no record")
@@ -529,11 +566,23 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 
 // crateOptions are what a test of the Topcoat crate adds to its build: the
 // crate's features, which clippy and cargo test turn on, lines of the
-// manifest's [dev-dependencies], and files of tests/ beside app.rs.
+// manifest's [dev-dependencies], files of tests/ beside app.rs, and the
+// config's outputs when they are not outputsOf the service's.
 type crateOptions struct {
 	features        []string
 	devDependencies string
 	files           map[string]string
+	outputs         map[string]any
+}
+
+// outputsOf are a fixture's outputs in the tests that build every fixture
+// alike: rustOutputs, with the pages on for fixture-pages-api, the one
+// fixture whose crate has them.
+func outputsOf(service string) map[string]any {
+	if service == pagesService {
+		return pagesOutputs()
+	}
+	return rustOutputs()
 }
 
 // cargoTestCrateWith is cargoTestCrate with options.
@@ -547,7 +596,11 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 		t.Skip("cargo not available")
 	}
 	root := testpaths.TempDir(t)
-	if _, err := buildService(t, service, root, rustOutputs()); err != nil {
+	outputs := options.outputs
+	if outputs == nil {
+		outputs = outputsOf(service)
+	}
+	if _, err := buildService(t, service, root, outputs); err != nil {
 		t.Fatalf("build %s: %v", service, err)
 	}
 	dir := topcoat.Dir(root, service)
@@ -653,6 +706,7 @@ use schemas_fixture_api_topcoat::api::{
     types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation,
     TenantListTenantsArgs, TenantUpdateSecretArgs,
 };
+use schemas_fixture_api_topcoat::forms::TenantGetTenantArgsForm;
 use schemas_fixture_api_topcoat::procedures::{self, TenantCreateTenantArgsRecord, TenantGetTenantArgsRecord};
 use schemas_fixture_api_topcoat::records::{CreateTenantInputRecord, TenantViewRecord};
 use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureApiExt};
@@ -776,6 +830,24 @@ async fn procedure_create_short(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <p>(said)</p> })
 }
 
+// Gets a tenant through its argument form, a filter read from the query:
+// the result, or the refusal's status, the form's messages and the
+// controls that have one.
+#[page("/tenants/by-form")]
+async fn get_by_form(cx: &Cx) -> topcoat::Result<impl View> {
+    let (status, said) = match TenantGetTenantArgsForm::from_query(cx)?.submit(cx).await {
+        Ok(tenant) => (StatusCode::OK, format!("got {}", tenant.name)),
+        Err(refused) => {
+            let fields: Vec<&String> = refused.errors.fields.keys().collect();
+            (refused.status, format!("{} {fields:?}", refused.errors.form.join("; ")))
+        }
+    };
+    Ok(view! {
+        (status)
+        <p>(said)</p>
+    })
+}
+
 #[page(POST "/procedures/get-unparsed")]
 async fn procedure_get_unparsed(cx: &Cx) -> topcoat::Result<impl View> {
     let args = TenantGetTenantArgsRecord { id: "not a uuid!".to_string(), include_archived: false };
@@ -819,6 +891,27 @@ async fn a_page_calls_an_operation_by_its_route_rules() {
     assert!(body.contains("readable by ada"), "{body}");
     let (_, body) = send(&app(None), "GET", "/tenants/readable").await;
     assert!(body.contains("401 unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_forms_submit_keeps_the_routes_status() {
+    let query = "/tenants/by-form?id=1&includeArchived=false";
+    let (status, body) = send(&app(None), "GET", query).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert!(body.contains("Authentication required []"), "{body}");
+    let (status, body) = send(&app(Some(Principal::new("ada", ["tenants.write"]))), "GET", query).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("Insufficient permissions []"), "{body}");
+    let reader = Some(Principal::new("ada", ["tenants.read"]));
+    let (status, body) = send(&app(reader.clone()), "GET", query).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("got got"), "{body}");
+    // A form parse refuses is 422, whoever sends it.
+    let (status, body) = send(&app(reader), "GET", "/tenants/by-form?id=1&includeArchived=maybe").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains(r#"[&quot;includeArchived&quot;]"#) || body.contains(r#"["includeArchived"]"#), "{body}");
+    let (status, _) = send(&app(None), "GET", "/tenants/by-form?id=1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -939,14 +1032,17 @@ fn a_record_holds_nested_lists_of_records() {
 `
 
 // formsAppTest is tests/app.rs of fixture-forms-api's Topcoat crate.
-const formsAppTest = `use std::sync::Arc;
+const formsAppTest = `use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
 use schemas_fixture_forms_api_topcoat::api::{
-    types, AccountAnnotateArgs, AccountImplementation, AccountRotateKeyArgs, AccountSignUpArgs, Implementations,
+    types, AccountAnnotateArgs, AccountDraftNoteArgs, AccountImplementation, AccountRotateKeyArgs, AccountSignUpArgs, BookingBookArgs, BookingImplementation,
+    Implementations,
 };
-use schemas_fixture_forms_api_topcoat::forms::{signup_input_fields, FormErrors, SignupInputForm};
+use schemas_fixture_forms_api_topcoat::forms::{
+    booking_input_fields, signup_input_fields, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
+};
 use schemas_fixture_forms_api_topcoat::records::AccountKeyRecord;
 use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
 use serde_json::json;
@@ -955,6 +1051,10 @@ use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
+
+const GARDEN: &str = "8d1f6c9e-0000-4000-8000-000000000001";
+const ATTIC: &str = "8d1f6c9e-0000-4000-8000-000000000002";
+const BOOKED: &str = "8d1f6c9e-0000-4000-8000-000000000003";
 
 struct Accounts;
 
@@ -978,9 +1078,37 @@ impl AccountImplementation for Accounts {
     async fn annotate(&self, _ctx: RequestContext, _args: AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
         Err(ApiError::not_implemented("annotate"))
     }
+    async fn draft_note(&self, _ctx: RequestContext, _args: AccountDraftNoteArgs) -> Result<types::AccountView, ApiError> {
+        Err(ApiError::not_implemented("draft_note"))
+    }
     async fn rotate_key(&self, _ctx: RequestContext, _args: AccountRotateKeyArgs) -> Result<types::AccountKey, ApiError> {
         Err(ApiError::not_implemented("rotateKey"))
     }
+}
+
+/// Bookings keeps each input the operation is called with, and refuses a
+/// booked room at its row.
+#[derive(Clone, Default)]
+struct Bookings {
+    calls: Arc<Mutex<Vec<types::BookingInput>>>,
+}
+
+#[async_trait]
+impl BookingImplementation for Bookings {
+    async fn book(&self, _ctx: RequestContext, args: BookingBookArgs) -> Result<types::BookingView, ApiError> {
+        let input = args.input;
+        self.calls.lock().unwrap().push(input.clone());
+        if let Some(index) = input.rooms.iter().position(|room| room.room_id == uuid(BOOKED)) {
+            let mut errors = serde_json::Map::new();
+            errors.insert(format!("rooms[{index}]"), json!({"roomId": [{"validator": "available", "message": "is booked"}]}));
+            return Err(ApiError::conflict("That room is booked").with_errors(serde_json::Value::Object(errors)));
+        }
+        Ok(types::BookingView { id: uuid(GARDEN), rooms: input.rooms.len() as f64 })
+    }
+}
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(json!(text)).unwrap()
 }
 
 #[page("/signup")]
@@ -1003,31 +1131,152 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     })
 }
 
-fn app() -> Router {
+#[page("/book")]
+async fn booking_form() -> topcoat::Result<impl View> {
+    Ok(view! { <form method="post">booking_input_fields()<button type="submit">"Book"</button></form> })
+}
+
+/// The booking form with the rooms a page offers: every row's, and the
+/// second row's own, and a row holding a room no choice is.
+#[page("/book/choices")]
+async fn booking_form_with_choices() -> topcoat::Result<impl View> {
+    let mut form = BookingInputForm::new();
+    form.rooms.push(RoomRequestForm::new());
+    form.rooms.push(RoomRequestForm { room_id: Some(BOOKED.to_owned()), ..RoomRequestForm::new() });
+    let choices = Choices::new()
+        .with("rooms.roomId", [(GARDEN, "Garden room"), (ATTIC, "Attic")])
+        .with("rooms[1].roomId", [(ATTIC, "Attic, the last one")]);
+    Ok(view! { <form method="post">booking_input_fields(form: form, choices: choices)</form> })
+}
+
+/// A row button renders the form again with its rows; any other post
+/// books, and a refusal renders the form again, 422, as sent.
+#[page(POST "/book")]
+async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    let (status, errors) = if form.apply_action() {
+        (StatusCode::OK, FormErrors::default())
+    } else {
+        match form.parse() {
+            Ok(input) => match operations::booking_book(cx, BookingBookArgs { input }).await {
+                Ok(_) => return Err(see_other("/booked").into()),
+                Err(err) => (StatusCode::UNPROCESSABLE_ENTITY, FormErrors::from_api(&err)),
+            },
+            Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, errors),
+        }
+    };
+    Ok(view! {
+        (status)
+        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+    })
+}
+
+fn app(bookings: Bookings) -> Router {
     Router::builder()
         .page(signup_form)
         .page(sign_up)
-        .fixture_forms_api(Implementations { account: Arc::new(Accounts) })
+        .page(booking_form)
+        .page(booking_form_with_choices)
+        .page(book)
+        .fixture_forms_api(Implementations { account: Arc::new(Accounts), booking: Arc::new(bookings) })
         .build()
 }
 
-async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
-    let response = app().handle(request).await;
+async fn send_to(router: &Router, request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    let response = router.handle(request).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
+async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    send_to(&app(Bookings::default()), request).await
+}
+
+fn post_request(path: &str, body: &str) -> http::Request<Body> {
+    http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
 async fn post(body: &str) -> (StatusCode, http::HeaderMap, String) {
-    send(
-        http::Request::builder()
-            .method("POST")
-            .uri("/signup")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from(body.to_owned()))
-            .unwrap(),
-    )
-    .await
+    send(post_request("/signup", body)).await
+}
+
+/// Pairs as a browser encodes them, brackets included.
+fn encode(pairs: &[(&str, &str)]) -> String {
+    let escape = |text: &str| {
+        text.bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+                b' ' => "+".to_string(),
+                _ => format!("%{byte:02X}"),
+            })
+            .collect::<String>()
+    };
+    pairs.iter().map(|(name, value)| format!("{}={}", escape(name), escape(value))).collect::<Vec<_>>().join("&")
+}
+
+/// Posts a booking form to a fresh app, and the inputs the operation was
+/// called with.
+async fn book_with(pairs: &[(&str, &str)]) -> (StatusCode, http::HeaderMap, String, Vec<types::BookingInput>) {
+    let bookings = Bookings::default();
+    let (status, headers, html) = send_to(&app(bookings.clone()), post_request("/book", &encode(pairs))).await;
+    let calls = bookings.calls.lock().unwrap().clone();
+    (status, headers, html, calls)
+}
+
+/// The markup of the control called name, from its label to its last
+/// error: the field's div.
+fn control<'a>(html: &'a str, name: &str) -> &'a str {
+    let at = html.find(&format!(r#"name="{name}""#)).unwrap_or_else(|| panic!("no control {name} in {html}"));
+    let start = html[..at].rfind(r#"<div class="field"#).unwrap();
+    let end = at + html[at..].find("</div>").unwrap();
+    &html[start..end]
+}
+
+/// A valid booking: a guest, two rooms, the amenities, a date, a time, a
+/// date-time, a secret, JSON values, and a blank optional billing address.
+fn booking() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("guest.name", "Ada Lovelace"),
+        ("guest.email", "ada@example.com"),
+        ("guest.phone", ""),
+        ("billing.line1", ""),
+        ("billing.city", ""),
+        ("billing.postcode", ""),
+        ("rooms[0]", ""),
+        ("rooms[0].roomId", GARDEN),
+        ("rooms[0].adults", "2"),
+        ("rooms[0].extras", "wifi"),
+        ("rooms[1]", ""),
+        ("rooms[1].roomId", ATTIC),
+        ("rooms[1].adults", "1"),
+        ("amenities", "wifi"),
+        ("amenities", "late_checkout"),
+        ("arrival", "2026-10-12"),
+        ("checkIn", "15:30"),
+        ("holdUntil", "2026-10-09T14:30"),
+        ("doorCode", "4321"),
+        ("currency", "GBP"),
+        ("preferences", r#"{"quiet": true}"#),
+        ("labels", r#"{"vip": "yes"}"#),
+    ]
+}
+
+/// booking() with changes: each name's value replaced, or added.
+fn booking_with(changes: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+    let mut pairs = booking();
+    for (name, value) in changes {
+        match pairs.iter_mut().find(|(sent, _)| sent == name) {
+            Some(pair) => pair.1 = value,
+            None => pairs.push((name, value)),
+        }
+    }
+    pairs
 }
 
 #[tokio::test]
@@ -1048,6 +1297,7 @@ async fn the_form_renders_its_rules_as_attributes() {
         assert!(html.contains(want), "missing {want} in {html}");
     }
     assert!(!html.contains("pattern=\"^[a-zA-Z0-9._%+-]"), "an email input carries the scalar's pattern: {html}");
+    assert!(!html.contains("_action"), "a form without rows has row buttons: {html}");
 }
 
 #[tokio::test]
@@ -1092,9 +1342,416 @@ fn a_form_parses_into_its_input() {
     assert_eq!((input.plan, input.seats, input.budget, input.newsletter), (types::Plan::Pro, Some(4), Some(2.5), Some(true)));
     assert_eq!(input.website, None);
 
+    // A number input sends what a reader typed: a whole number written
+    // with an exponent or a zero fraction is one.
+    for (sent, want) in [("1e1", 10), ("2.0", 2), ("3e0", 3), ("+7", 7)] {
+        let input = SignupInputForm { seats: Some(sent.to_string()), ..form.clone() }.parse().unwrap_or_else(|errors| panic!("{sent}: {errors:?}"));
+        assert_eq!(input.seats, Some(want), "{sent}");
+    }
+    for sent in ["2.5", "1e19", "-1e19", "NaN", "inf", "0x10", "1,5"] {
+        let errors = SignupInputForm { seats: Some(sent.to_string()), ..form.clone() }.parse().unwrap_err();
+        assert_eq!(errors.of("seats"), ["must be a whole number"], "{sent}");
+    }
+
     let errors = SignupInputForm { handle: Some("Not A Handle".to_string()), ..form }.parse().unwrap_err();
     assert!(!errors.of("handle").is_empty(), "{errors:?}");
     assert!(errors.of("email").is_empty(), "{errors:?}");
+}
+
+#[tokio::test]
+async fn the_booking_form_renders_nested_objects_rows_and_typed_controls() {
+    let (status, _, html) = send(http::Request::builder().uri("/book").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    for want in [
+        // Enter submits the form without a row action.
+        r#"<form method="post"><button type="submit" class="ss-submit" hidden=""></button>"#,
+        // A nested object, named by path; an optional one requires nothing.
+        r#"<fieldset class="ss-object" data-field="guest"><legend>Guest</legend>"#,
+        r#"<input id="booking-input-guest-name" name="guest.name" type="text" required="" minlength="2""#,
+        r#"<legend>Billing address</legend>"#,
+        r#"<label for="booking-input-billing-line1">Address line 1</label><input id="booking-input-billing-line1" name="billing.line1" type="text">"#,
+        // A new form's one room, which listMin keeps, and the button that
+        // adds a second.
+        r#"<fieldset class="ss-row"><legend>Room 1</legend><input type="hidden" name="rooms[0]" value="">"#,
+        r#"<label for="booking-input-rooms-0-room-id">Room</label><input id="booking-input-rooms-0-room-id" name="rooms[0].roomId" type="text" required="""#,
+        r#"name="rooms[0].adults" type="number" required="" step="1" min="1" max="4""#,
+        r#"<input type="checkbox" name="rooms[0].extras" value="late_checkout">Late checkout</label>"#,
+        r#"<button type="submit" class="ss-add" name="_action" value="add:rooms" formnovalidate="">Add a room</button>"#,
+        // A list of enums is a group of checkboxes.
+        r#"<fieldset class="ss-choices" data-field="amenities"><legend>Amenities</legend>"#,
+        r#"<input type="checkbox" name="amenities" value="wifi">Wifi</label>"#,
+        // A date, a time, a date-time read as UTC, a secret, a default and
+        // JSON values.
+        r#"name="arrival" type="date" required="""#,
+        r#"name="checkIn" type="time""#,
+        r#"<label for="booking-input-hold-until">Hold until (UTC)</label><input id="booking-input-hold-until" name="holdUntil" type="datetime-local" step="any""#,
+        // A list of secrets, without a listMax: a password per row, none yet.
+        r#"<fieldset class="ss-list" data-field="backupCodes"><legend>Backup codes</legend>"#,
+        r#"value="add:backupCodes" formnovalidate="">Add</button>"#,
+        r#"name="doorCode" type="password" minlength="4" autocomplete="off""#,
+        r#"name="currency" type="text" pattern="^[A-Z]{3}$" value="GBP""#,
+        r#"<label for="booking-input-preferences">Preferences (JSON)</label><textarea id="booking-input-preferences" name="preferences" rows="4" spellcheck="false"></textarea>"#,
+        r#"name="labels" rows="4""#,
+    ] {
+        assert!(html.contains(want), "missing {want} in {html}");
+    }
+    assert!(!html.contains("billing.line1\" type=\"text\" required"), "an optional object's field is required: {html}");
+    assert!(!html.contains("remove:"), "a row past listMin can be removed: {html}");
+    assert!(!html.contains("rooms[1]"), "{html}");
+}
+
+#[tokio::test]
+async fn a_valid_nested_post_books_with_the_inputs_json() {
+    let (status, headers, html, calls) = book_with(&booking()).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(headers[header::LOCATION], "/booked");
+    let [input] = &calls[..] else { panic!("{calls:?}") };
+    assert_eq!(input.rooms[0].room_id, uuid(GARDEN));
+    assert_eq!(input.rooms[1].room_id, uuid(ATTIC));
+    let mut json = serde_json::to_value(input).unwrap();
+    for room in json["rooms"].as_array_mut().unwrap() {
+        room.as_object_mut().unwrap().remove("roomId");
+    }
+    assert_eq!(
+        json,
+        json!({
+            "guest": {"name": "Ada Lovelace", "email": "ada@example.com"},
+            "rooms": [{"adults": 2, "extras": ["wifi"]}, {"adults": 1}],
+            "amenities": ["wifi", "late_checkout"],
+            "arrival": "2026-10-12",
+            "checkIn": "15:30",
+            "holdUntil": "2026-10-09T14:30:00Z",
+            "doorCode": "4321",
+            "currency": "GBP",
+            "preferences": {"quiet": true},
+            "labels": {"vip": "yes"},
+        })
+    );
+
+    // The currency's default fills in when the form sends none, and an
+    // optional object with a field sent is sent.
+    let (status, _, html, calls) = book_with(&booking_with(&[
+        ("currency", ""),
+        ("billing.line1", "1 Analytical Row"),
+        ("billing.city", "London"),
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(calls[0].currency.as_deref(), Some("GBP"));
+    let billing = serde_json::to_value(&calls[0].billing).unwrap();
+    assert_eq!(billing, json!({"line1": "1 Analytical Row", "city": "London"}));
+}
+
+#[tokio::test]
+async fn a_refused_nested_field_renders_at_its_control_as_sent() {
+    let (status, _, html, calls) = book_with(&booking_with(&[
+        ("guest.name", "A"),
+        ("rooms[1].adults", "9"),
+        ("billing.line1", "1 Analytical Row"),
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(calls.is_empty(), "{calls:?}");
+    let name = control(&html, "guest.name");
+    assert!(name.contains(r#"value="A" aria-invalid="true""#) && name.contains("must be at least 2 characters"), "{name}");
+    let adults = control(&html, "rooms[1].adults");
+    assert!(adults.contains(r#"value="9" aria-invalid="true""#) && adults.contains("must be at most 4"), "{adults}");
+    // The rows below the refused one, and their values, are as sent.
+    assert!(control(&html, "rooms[0].adults").contains(r#"value="2""#), "{html}");
+    assert!(!control(&html, "rooms[0].adults").contains("aria-invalid"), "{html}");
+    assert!(control(&html, "rooms[1].roomId").contains(&format!(r#"value="{ATTIC}""#)), "{html}");
+    // A billing address with a field sent needs its others.
+    let city = control(&html, "billing.city");
+    assert!(city.contains(r#"aria-invalid="true""#) && city.contains("required field"), "{city}");
+    assert!(html.contains(r#"<input type="checkbox" name="amenities" value="late_checkout" checked="">"#), "{html}");
+    assert!(html.contains(r#"<input type="checkbox" name="rooms[0].extras" value="wifi" checked="">"#), "{html}");
+    assert!(html.contains(r#"value="2026-10-09T14:30""#), "{html}");
+    assert!(html.contains("{&quot;quiet&quot;: true}") || html.contains(r#"{"quiet": true}"#), "{html}");
+    // A secret is never rendered back.
+    assert!(!html.contains("4321"), "{html}");
+
+    // A value a control cannot hold is refused at the control, before the
+    // input's rules.
+    let (status, _, html, _) = book_with(&booking_with(&[
+        ("holdUntil", "2026-02-30T10:00"),
+        ("preferences", "{quiet"),
+        ("rooms[0].adults", "two"),
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{html}");
+    assert!(control(&html, "holdUntil").contains("must be a date and time"), "{html}");
+    assert!(control(&html, "preferences").contains("must be JSON"), "{html}");
+    assert!(control(&html, "rooms[0].adults").contains("must be a whole number"), "{html}");
+
+    // The operation's refusal of a row's field renders at the field.
+    let (status, _, html, calls) = book_with(&booking_with(&[("rooms[1].roomId", BOOKED)])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 1), "{html}");
+    let room = control(&html, "rooms[1].roomId");
+    assert!(room.contains(r#"aria-invalid="true""#) && room.contains("is booked"), "{room}");
+    assert!(!control(&html, "rooms[0].roomId").contains("is booked"), "{html}");
+}
+
+#[tokio::test]
+async fn row_buttons_add_and_remove_rows_within_the_lists_bounds() {
+    // Adding a room keeps the rooms as sent and calls nothing.
+    let (status, _, html, calls) = book_with(&booking_with(&[("_action", "add:rooms")])).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(calls.is_empty(), "{calls:?}");
+    assert!(html.contains("<legend>Room 3</legend>"), "{html}");
+    assert!(control(&html, "rooms[0].roomId").contains(&format!(r#"value="{GARDEN}""#)), "{html}");
+    assert!(control(&html, "rooms[1].roomId").contains(&format!(r#"value="{ATTIC}""#)), "{html}");
+    assert!(html.contains(r#"name="rooms[2].roomId""#), "{html}");
+    assert!(html.contains(r#"value="remove:rooms[2]" formnovalidate="" aria-label="Remove Room 3""#), "{html}");
+    assert!(!html.contains("aria-invalid"), "a row button renders no errors: {html}");
+    assert!(!html.contains("4321"), "{html}");
+    // At listMax there is no add button, and adding adds nothing.
+    assert!(!html.contains("add:rooms"), "{html}");
+    let three = booking_with(&[("rooms[2]", ""), ("rooms[2].roomId", BOOKED), ("rooms[2].adults", "3"), ("_action", "add:rooms")]);
+    let (status, _, html, calls) = book_with(&three).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(html.contains(r#"name="rooms[2].roomId""#) && !html.contains("rooms[3]"), "{html}");
+
+    // Removing the first room numbers the second as the first.
+    let (status, _, html, calls) = book_with(&booking_with(&[("_action", "remove:rooms[0]")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(control(&html, "rooms[0].roomId").contains(&format!(r#"value="{ATTIC}""#)), "{html}");
+    assert!(control(&html, "rooms[0].adults").contains(r#"value="1""#), "{html}");
+    assert!(!html.contains("rooms[1]"), "{html}");
+    // At listMin there is no remove button, and removing removes nothing.
+    assert!(!html.contains("remove:"), "{html}");
+    let one: Vec<_> = booking().into_iter().filter(|(name, _)| !name.starts_with("rooms[1]")).chain([("_action", "remove:rooms[0]")]).collect();
+    let (status, _, html, calls) = book_with(&one).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(control(&html, "rooms[0].roomId").contains(&format!(r#"value="{GARDEN}""#)), "{html}");
+}
+
+#[tokio::test]
+async fn the_apps_choices_render_a_select() {
+    let (status, _, html) = send(http::Request::builder().uri("/book/choices").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    let first = control(&html, "rooms[0].roomId");
+    assert!(first.contains(r#"<select id="booking-input-rooms-0-room-id" name="rooms[0].roomId" required="">"#), "{first}");
+    assert!(first.contains(&format!(r#"<option value="{GARDEN}">Garden room</option><option value="{ATTIC}">Attic</option>"#)), "{first}");
+    // A row's own choices win over the list's.
+    let second = control(&html, "rooms[1].roomId");
+    assert!(second.contains(&format!(r#"<option value="{ATTIC}">Attic, the last one</option>"#)) && !second.contains("Garden"), "{second}");
+    // A value no choice is stays, selected, as sent.
+    let third = control(&html, "rooms[2].roomId");
+    assert!(third.contains(&format!(r#"<option value="{BOOKED}" selected="">{BOOKED}</option>"#)), "{third}");
+    // A field the app names no choices for is the input.
+    assert!(control(&html, "guest.name").contains(r#"<input id="booking-input-guest-name""#), "{html}");
+}
+
+#[test]
+fn a_form_decodes_rows_by_their_indexes() {
+    let pairs = [
+        ("rooms[7].adults", "1"),
+        ("rooms[2].adults", "2"),
+        ("rooms[x].adults", "9"),
+        ("[0]", "9"),
+        ("guest..name", "9"),
+        ("guest.name", "Ada"),
+        ("amenities", "wifi"),
+        ("amenities", ""),
+        ("_action", "add:rooms"),
+    ]
+    .map(|(name, value)| (name.to_owned(), value.to_owned()));
+    let form = BookingInputForm::from_pairs(pairs);
+    let adults: Vec<_> = form.rooms.iter().map(|room| room.adults.as_deref()).collect();
+    assert_eq!(adults, [Some("2"), Some("1")]);
+    assert_eq!(form.guest.name.as_deref(), Some("Ada"));
+    assert_eq!(form.amenities, ["wifi"]);
+    assert_eq!(form.row_action.as_deref(), Some("add:rooms"));
+    assert_eq!(form.currency, None, "a post is what it sent, not a new form");
+    assert_eq!(BookingInputForm::new().currency.as_deref(), Some("GBP"));
+
+    // A list of values: a blank row is refused at the row, and a row
+    // button adds none past listMax.
+    let mut note = NoteInputForm::from_pairs([("text", "Hi"), ("tags[0]", "a"), ("tags[1]", "")].map(|(n, v)| (n.to_owned(), v.to_owned())));
+    assert_eq!(note.tags, [Some("a".to_owned()), None]);
+    let errors = note.parse().unwrap_err();
+    assert!(!errors.of("tags[1]").is_empty(), "{errors:?}");
+    for _ in 0..3 {
+        note.row_action = Some("add:tags".to_owned());
+        assert!(note.apply_action());
+    }
+    assert_eq!(note.tags.len(), 3);
+    note.row_action = Some("remove:tags[0]".to_owned());
+    assert!(note.apply_action());
+    assert_eq!(note.tags, [None, None]);
+    assert!(!note.apply_action(), "an action applies once");
+}
+
+#[test]
+fn a_date_time_is_read_as_utc() {
+    let form = |value: &str| BookingInputForm { hold_until: Some(value.to_owned()), ..BookingInputForm::default() };
+    let hold = |value: &str| form(value).parse().map(|input| input.hold_until.map(|at| at.to_string())).map_err(|errors| errors.of("holdUntil"));
+    // parse refuses the rest of the empty form, so only holdUntil's errors
+    // count here.
+    for (sent, want) in [
+        ("2026-10-09T14:30", "2026-10-09T14:30:00Z"),
+        ("2026-10-09T14:30:15.5", "2026-10-09T14:30:15.5Z"),
+        ("2026-10-09T14:30:00+01:00", "2026-10-09T13:30:00Z"),
+        ("2024-02-29T00:00Z", "2024-02-29T00:00:00Z"),
+    ] {
+        let mut booking = BookingInputForm::from_pairs(booking().into_iter().map(|(n, v)| (n.to_owned(), v.to_owned())));
+        booking.hold_until = Some(sent.to_owned());
+        let input = booking.parse().unwrap_or_else(|errors| panic!("{sent}: {errors:?}"));
+        assert_eq!(input.hold_until.map(|at| at.to_string()).as_deref(), Some(want), "{sent}");
+    }
+    for sent in ["2026-02-29T10:00", "2026-10-09 14:30", "2026-10-09T24:00", "2026-10-09T14:30+1", "0999-01-01T00:00", "2026-1０-09T14:30"] {
+        assert_eq!(hold(sent).unwrap_err(), ["must be a date and time"], "{sent}");
+    }
+}
+
+#[tokio::test]
+async fn a_held_date_time_renders_in_utc_as_a_control_holds_it() {
+    // A datetime-local control holds no offset and no more than three
+    // digits of a second's fraction, and its step allows seconds.
+    for (sent, shown) in [
+        ("2026-10-09T14:30", "2026-10-09T14:30"),
+        ("2026-10-09T14:30+01:00", "2026-10-09T13:30"),
+        ("2026-01-01T00:30+01:00", "2025-12-31T23:30"),
+        ("2024-02-28T23:00-01:30", "2024-02-29T00:30"),
+        ("2026-10-09T14:30:15.250Z", "2026-10-09T14:30:15.250"),
+        ("2026-10-09T14:30:15.123456", "2026-10-09T14:30:15.123"),
+        // Not a date and time: shown as sent, with its error.
+        ("2026-02-30T10:00", "2026-02-30T10:00"),
+    ] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("guest.name", "A"), ("holdUntil", sent)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{sent}: {html}");
+        let control = control(&html, "holdUntil");
+        assert!(control.contains(&format!(r#"type="datetime-local" step="any" value="{shown}""#)), "{sent}: {control}");
+    }
+}
+
+/// Pairs that name rows from 0 to count, each with value.
+fn indexed(name: &str, count: usize, value: &str) -> Vec<(String, String)> {
+    (0..count).map(|index| (format!("{name}[{index}]"), value.to_owned())).collect()
+}
+
+fn encode_owned(pairs: &[(String, String)]) -> String {
+    encode(&pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect::<Vec<_>>())
+}
+
+/// The start of a page, for a failure's message.
+fn head(html: &str) -> &str {
+    &html[..html.char_indices().nth(4000).map_or(html.len(), |(at, _)| at)]
+}
+
+#[test]
+fn a_form_reads_a_bounded_number_of_rows_and_pairs() {
+    // Rows past a list's listMax: the form holds one more, which parse
+    // refuses at the list.
+    let form = BookingInputForm::from_pairs(indexed("rooms", 4000, ""));
+    assert_eq!((form.rooms.len(), form.overflow), (4, false));
+    let errors = form.parse().unwrap_err();
+    assert_eq!(errors.of("rooms"), ["must contain at most 3 items"], "{errors:?}");
+
+    // A list without a listMax holds at most MAX_ROWS, 1000, and one more.
+    let form = BookingInputForm::from_pairs(indexed("backupCodes", 4000, "1234"));
+    assert_eq!((form.backup_codes.len(), form.overflow), (1001, false));
+    assert_eq!(form.parse().unwrap_err().of("backupCodes"), ["must contain at most 1000 items"]);
+    let mut form = BookingInputForm::from_pairs(indexed("backupCodes", 1000, "1234"));
+    form.row_action = Some("add:backupCodes".to_owned());
+    assert!(form.apply_action());
+    assert_eq!(form.backup_codes.len(), 1000, "a row button adds no row past MAX_ROWS");
+
+    // More than MAX_PAIRS, 5000, pairs: the form reads the first of them
+    // and parse refuses it.
+    let form = BookingInputForm::from_pairs(indexed("rooms", 50_000, ""));
+    assert_eq!((form.rooms.len(), form.overflow), (4, true));
+    let errors = form.parse().unwrap_err();
+    assert_eq!(errors.form, ["The form sent more than 5000 fields, more than it reads"], "{errors:?}");
+    assert!(errors.fields.is_empty(), "{errors:?}");
+    let exactly: Vec<_> = indexed("tags", 4999, "a").into_iter().chain([("text".to_owned(), "Hi".to_owned())]).collect();
+    assert!(!NoteInputForm::from_pairs(exactly).overflow, "5000 pairs are read");
+}
+
+#[tokio::test]
+async fn a_post_of_too_many_rows_renders_a_form_of_bounded_size() {
+    // 50,000 rows sent to a list of at most three: refused with the form's
+    // error, its four rows rendered, and nothing called.
+    let body = encode_owned(&indexed("rooms", 50_000, ""));
+    assert!(body.len() > 500_000);
+    let bookings = Bookings::default();
+    let (status, _, html) = send_to(&app(bookings.clone()), post_request("/book", &body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(bookings.calls.lock().unwrap().is_empty());
+    assert!(html.contains(r#"<p class="form-error">The form sent more than 5000 fields, more than it reads</p>"#), "{}", head(&html));
+    assert_eq!(html.matches(r#"<fieldset class="ss-row">"#).count(), 4);
+    assert!(html.len() < 64 * 1024, "a response of {} bytes", html.len());
+
+    // 4,000 rooms, under the pairs a form reads: the list's error at the
+    // list, and its first four rows.
+    let mut pairs: Vec<(String, String)> = booking().into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect();
+    pairs.extend((2..4000).map(|index| (format!("rooms[{index}]"), String::new())));
+    let bookings = Bookings::default();
+    let (status, _, html) = send_to(&app(bookings.clone()), post_request("/book", &encode_owned(&pairs))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(bookings.calls.lock().unwrap().is_empty());
+    assert!(html.contains(r#"<legend>Rooms</legend><p class="field-error">must contain at most 3 items</p>"#), "{html}");
+    assert_eq!(html.matches(r#"<fieldset class="ss-row">"#).count(), 4);
+
+    // A list of secrets without a listMax: 1001 rows, none of them echoed.
+    let mut pairs: Vec<(String, String)> = booking().into_iter().map(|(name, value)| (name.to_owned(), value.to_owned())).collect();
+    pairs.extend(indexed("backupCodes", 2000, "s3cret-code"));
+    let (status, _, html) = send_to(&app(Bookings::default()), post_request("/book", &encode_owned(&pairs))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html.contains(r#"<p class="field-error">must contain at most 1000 items</p>"#), "{}", head(&html));
+    assert_eq!(html.matches(r#"id="booking-input-backup-codes-"#).count(), 1001);
+    assert!(!html.contains("s3cret-code"), "a secret is rendered back");
+    assert!(!html.contains("add:backupCodes"), "a list at MAX_ROWS has an add button");
+}
+
+#[tokio::test]
+async fn long_text_is_a_textarea_that_renders_as_sent() {
+    let (_, _, html) = send(http::Request::builder().uri("/book").body(Body::empty()).unwrap()).await;
+    // A maxLength of 500 makes text long: a textarea with the lengths, but
+    // no pattern, which parse checks. A newline follows its start tag,
+    // which a browser drops.
+    let requests = control(&html, "requests");
+    assert!(
+        requests.contains("<label for=\"booking-input-requests\">Requests</label><p class=\"field-hint\" id=\"booking-input-requests-hint\">Anything the hotel should know.</p><textarea id=\"booking-input-requests\" name=\"requests\" rows=\"6\" minlength=\"3\" maxlength=\"500\" aria-describedby=\"booking-input-requests-hint\">\n</textarea>"),
+        "{requests}"
+    );
+    assert!(!requests.contains("pattern"), "{requests}");
+    // A number that ends a name is a word of its label.
+    assert!(html.contains(r#"<label for="booking-input-billing-line2">Line 2</label>"#), "{html}");
+
+    // Its lines, and a newline it starts with, are the input's.
+    let text = "\nA quiet room.\nWe arrive late & tired.";
+    let (status, _, html, calls) = book_with(&booking_with(&[("requests", text), ("billing.line1", "1 Row"), ("billing.line2", "Flat 2"), ("billing.city", "Leeds")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(calls[0].requests.as_deref(), Some(text));
+    assert_eq!(serde_json::to_value(&calls[0].billing).unwrap()["line2"], "Flat 2");
+
+    // Refused by its pattern, it renders again as sent, escaped, after the
+    // newline the browser drops.
+    let (status, _, html, calls) = book_with(&booking_with(&[("requests", "\n<b>Quiet</b> & calm")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+    let requests = control(&html, "requests");
+    assert!(requests.contains("aria-invalid=\"true\">\n\n&lt;b&gt;Quiet&lt;/b&gt; &amp; calm</textarea><p class=\"field-error\">"), "{requests}");
+    // And past its maxLength, or short of its minLength, at the textarea.
+    let long: &'static str = "x".repeat(501).leak();
+    let (status, _, html, _) = book_with(&booking_with(&[("requests", long)])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(control(&html, "requests").contains("must be at most 500 characters"), "{html}");
+    let (_, _, html, _) = book_with(&booking_with(&[("requests", "Hi")])).await;
+    assert!(control(&html, "requests").contains("must be at least 3 characters"), "{html}");
+}
+
+#[tokio::test]
+async fn a_list_of_secrets_books_and_is_never_rendered_back() {
+    let (status, _, html, calls) = book_with(&booking_with(&[("backupCodes[0]", "1111-2222"), ("backupCodes[1]", "3333-4444")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(serde_json::to_value(&calls[0]).unwrap()["backupCodes"], json!(["1111-2222", "3333-4444"]));
+
+    // Refused, the rows render again, blank.
+    let (status, _, html, _) = book_with(&booking_with(&[("guest.name", "A"), ("backupCodes[0]", "1111-2222")])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html.contains(r#"<input id="booking-input-backup-codes-0" name="backupCodes[0]" type="password" required="" autocomplete="off">"#), "{html}");
+    assert!(!html.contains("1111-2222"), "{html}");
 }
 
 #[test]
@@ -1107,8 +1764,11 @@ fn a_record_whose_fields_are_all_left_out_is_empty() {
 `
 
 // viewsAppTest is tests/app.rs of fixture-views-api's Topcoat crate.
-const viewsAppTest = `use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
-use schemas_fixture_views_api_topcoat::views::{comment_detail, order_status_label, order_view_detail, order_view_table};
+const viewsAppTest = `use schemas_fixture_views_api_topcoat::choices::Choices;
+use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
+use schemas_fixture_views_api_topcoat::views::{
+    comment_detail, date_text, date_time_text, order_status_label, order_view_detail, order_view_table, time_text,
+};
 use serde_json::json;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
@@ -1122,6 +1782,7 @@ fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
         "status": status,
         "placedAt": "2026-10-09T08:30:00Z",
         "deliverBy": "2026-10-12",
+        "collectAt": "14:30:15",
         "note": "<script>alert(1)</script>",
         "gift": false,
         "shipTo": {"recipient": "Ada Lovelace", "city": "London & Co"},
@@ -1136,7 +1797,7 @@ fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
 
 // An order whose optional fields are absent.
 fn bare_order() -> OrderViewRecord {
-    OrderViewRecord { deliver_by: None, note: None, metadata: None, ..order("A-1003", "pending", false) }
+    OrderViewRecord { deliver_by: None, collect_at: None, note: None, metadata: None, ..order("A-1003", "pending", false) }
 }
 
 fn thread() -> CommentRecord {
@@ -1166,8 +1827,52 @@ async fn show_thread() -> topcoat::Result<impl View> {
     Ok(view! { comment_detail(record: thread()) })
 }
 
+/// An order whose values the app's choices name: a line's sku and
+/// quantity, a line's price's currency two records down, a tag, and the
+/// city of the address shipped to; a label is text, escaped.
+#[page("/order/choices")]
+async fn show_order_with_choices() -> topcoat::Result<impl View> {
+    let choices = Choices::new()
+        .with("lines.sku", [("anvil", "Anvil <heavy>")])
+        .with("lines.quantity", [("2", "Two")])
+        .with("lines.price.currency", [("GBP", "Pounds sterling")])
+        .with("tags", [("fragile", "Handle with care")])
+        .with("shipTo.city", [("London & Co", "London")])
+        // A form's control name, which a display component does not read.
+        .with("lines[0].sku", [("anvil", "First anvil")]);
+    Ok(view! { order_view_detail(record: order("A-1001", "on_hold", true), choices: choices) })
+}
+
+/// Orders whose references and recipients the app's choices name, one of
+/// each: the other row shows its own values.
+#[page("/orders/choices")]
+async fn show_orders_with_choices() -> topcoat::Result<impl View> {
+    let choices = Choices::new()
+        .with("reference", [("A-1001", "First order")])
+        .with("shipTo.recipient", [("Ada Lovelace", "Ada")]);
+    // Shipped to its billing address, Accounts.
+    let mut other = order("A-1002", "shipped", true);
+    other.ship_to = other.bill_to.take().unwrap();
+    Ok(view! { order_view_table(rows: vec![order("A-1001", "on_hold", true), other], choices: choices) })
+}
+
+/// An order placed at a time with an offset, which shows in UTC.
+#[page("/order/offset")]
+async fn show_order_at_an_offset() -> topcoat::Result<impl View> {
+    let record = OrderViewRecord { placed_at: "2026-01-01T00:15:00+01:00".to_string(), ..order("A-1004", "pending", false) };
+    Ok(view! { order_view_detail(record: record) })
+}
+
 async fn render(uri: &str) -> String {
-    let router = Router::builder().page(show_order).page(show_bare_order).page(show_orders).page(show_thread).build();
+    let router = Router::builder()
+        .page(show_order)
+        .page(show_bare_order)
+        .page(show_orders)
+        .page(show_thread)
+        .page(show_order_with_choices)
+        .page(show_orders_with_choices)
+        .page(show_order_at_an_offset)
+        .build();
     let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -1187,8 +1892,11 @@ async fn a_detail_renders_each_kind_of_field() {
         r#"<div class="ss-detail" data-type="OrderView" role="group" aria-label="A-1001"><dl>"#,
         r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
         r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">On hold</data></dd></div>"#,
-        r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></dd></div>"#,
-        r#"<dd><time datetime="2026-10-12">2026-10-12</time></dd>"#,
+        // A date, a date-time and a time read as text a reader reads, the
+        // value as sent in datetime.
+        r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></dd></div>"#,
+        r#"<dd><time datetime="2026-10-12">12 Oct 2026</time></dd>"#,
+        r#"<div data-field="collectAt"><dt>Collect at</dt><dd><time datetime="14:30:15">14:30</time></dd></div>"#,
         r#"<div data-field="gift"><dt>Gift</dt><dd>No</dd></div>"#,
         r#"<div data-field="shipTo"><dt>Ship to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Ada Lovelace"><dl><div data-field="recipient"><dt>Recipient</dt><dd>Ada Lovelace</dd></div><div data-field="city"><dt>City</dt><dd>London &amp; Co</dd></div></dl></div></dd></div>"#,
         r#"<div data-field="billTo"><dt>Bill to</dt><dd><div class="ss-detail" data-type="Address" role="group" aria-label="Accounts">"#,
@@ -1208,6 +1916,7 @@ async fn an_absent_value_leaves_its_entry_empty() {
     let html = render("/bare-order").await;
     assert_has(&html, &[
         r#"<div data-field="deliverBy"><dt>Deliver by</dt><dd></dd></div>"#,
+        r#"<div data-field="collectAt"><dt>Collect at</dt><dd></dd></div>"#,
         r#"<div data-field="note"><dt>Note</dt><dd></dd></div>"#,
         r#"<div data-field="billTo"><dt>Bill to</dt><dd></dd></div>"#,
         r#"<div data-field="metadata"><dt>Metadata</dt><dd></dd></div>"#,
@@ -1219,7 +1928,7 @@ async fn a_table_shows_the_summary_fields_under_its_caption() {
     let html = render("/orders").await;
     assert_has(&html, &[
         r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption><thead><tr><th scope="col" data-field="reference">Reference</th><th scope="col" data-field="status">Status</th><th scope="col" data-field="placedAt">Placed at</th><th scope="col" data-field="shipTo">Ship to</th></tr></thead><tbody>"#,
-        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">2026-10-09T08:30:00Z</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
+        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
         // A value the enum does not declare is its own label, escaped in
         // the attribute and the text.
         r#"<td data-field="status"><data value="x&quot; onclick=&quot;steal()">x" onclick="steal()</data></td>"#,
@@ -1241,6 +1950,72 @@ async fn a_record_that_nests_itself_renders_each_level() {
 fn an_enum_value_is_labeled_by_its_member() {
     assert_eq!(order_status_label("on_hold"), "On hold");
     assert_eq!(order_status_label("lost"), "lost");
+}
+
+#[tokio::test]
+async fn a_detail_shows_the_label_the_apps_choices_give_a_value() {
+    let html = render("/order/choices").await;
+    assert_has(&html, &[
+        // Two records down, each component handing the next the choices
+        // under its field.
+        r#"<td data-field="sku">Anvil &lt;heavy&gt;</td><td data-field="quantity">Two</td>"#,
+        r#"<div data-field="currency"><dt>Currency</dt><dd>Pounds sterling</dd></div>"#,
+        // A list's items: one labeled, one as it is.
+        r#"<ul class="ss-list"><li>Handle with care</li><li>heavy</li></ul>"#,
+        // The address shipped to has its city's label, the billing one,
+        // which the choices do not name, its own.
+        r#"<div data-field="city"><dt>City</dt><dd>London</dd></div>"#,
+        r#"<div data-field="city"><dt>City</dt><dd>Leeds</dd></div>"#,
+        // A value no choice names shows as it is.
+        r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
+    ]);
+    assert!(!html.contains("Anvil <heavy>") && !html.contains("First anvil"), "{html}");
+}
+
+#[tokio::test]
+async fn a_table_shows_the_label_the_apps_choices_give_a_value() {
+    let html = render("/orders/choices").await;
+    assert_has(&html, &[
+        r#"<th scope="row" data-field="reference">First order</th>"#,
+        r#"<td data-field="shipTo">Ada</td>"#,
+        r#"<th scope="row" data-field="reference">A-1002</th>"#,
+        r#"<td data-field="shipTo">Accounts</td>"#,
+    ]);
+}
+
+#[tokio::test]
+async fn a_date_time_shows_in_utc() {
+    let html = render("/order/offset").await;
+    assert_has(&html, &[r#"<time datetime="2026-01-01T00:15:00+01:00">31 Dec 2025, 23:15 UTC</time>"#]);
+}
+
+#[test]
+fn a_time_value_reads_as_text_a_reader_reads() {
+    for (sent, shown) in [
+        ("2026-10-09T14:30:00Z", "9 Oct 2026, 14:30 UTC"),
+        ("2026-10-09T14:30:59.999999Z", "9 Oct 2026, 14:30 UTC"),
+        ("2026-10-09T00:15:00+01:00", "8 Oct 2026, 23:15 UTC"),
+        ("2026-12-31T23:59:00-00:30", "1 Jan 2027, 00:29 UTC"),
+        ("2028-03-01T00:15:00+01:00", "29 Feb 2028, 23:15 UTC"),
+        ("2026-06-15 14:30:45", "15 Jun 2026, 14:30 UTC"),
+        ("2026-06-15t14:30z", "15 Jun 2026, 14:30 UTC"),
+        // Not a date and time: as it is.
+        ("2026-02-30T10:00:00Z", "2026-02-30T10:00:00Z"),
+        ("2026-10-09T25:00:00Z", "2026-10-09T25:00:00Z"),
+        ("2026-10-09T14:30:00+1", "2026-10-09T14:30:00+1"),
+        ("1786550463000", "1786550463000"),
+        ("", ""),
+    ] {
+        assert_eq!(date_time_text(sent), shown, "{sent}");
+    }
+    assert_eq!(date_text("2026-10-09"), "9 Oct 2026");
+    assert_eq!(date_text("2024-02-29"), "29 Feb 2024");
+    assert_eq!(date_text("2026-02-29"), "2026-02-29");
+    assert_eq!(date_text("9 Oct 2026"), "9 Oct 2026");
+    assert_eq!(time_text("09:05"), "09:05");
+    assert_eq!(time_text("23:59:60"), "23:59");
+    assert_eq!(time_text("9:30 AM"), "9:30 AM");
+    assert_eq!(time_text("24:00"), "24:00");
 }
 `
 

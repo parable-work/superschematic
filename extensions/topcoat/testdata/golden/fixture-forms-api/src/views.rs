@@ -9,16 +9,181 @@
 //! detail (`aria-label`) and heads its row, and its plural captions a table.
 //!
 //! An enum's value shows its member's name in words, a date or a time is a
-//! `<time>`, a boolean "Yes" or "No", a nested record its own detail (in a
-//! table, its title when its type declares one), a list of records a table,
-//! any other list a `<ul>`, a map a `<dl>` of its entries, and a union or
-//! any JSON value its JSON text in a `<pre>`. An absent optional value
-//! leaves its `<dd>` or `<td>` empty. Every value is text the view escapes.
-//! The markup has `ss-` classes and `data-field` attributes, the field's
-//! JSON key, for a stylesheet or a test, and no style of its own.
+//! `<time>` whose text a reader reads, in UTC ("9 Oct 2026, 14:30 UTC"), a
+//! boolean "Yes" or "No", a nested record its own detail (in a table, its
+//! title when its type declares one), a list of records a table, any other
+//! list a `<ul>`, a map a `<dl>` of its entries, and a union or any JSON
+//! value its JSON text in a `<pre>`. Text or a number the app's `choices`
+//! name shows its label, an id a record's name, say. An absent optional
+//! value leaves its `<dd>` or `<td>` empty. Every value is text the view
+//! escapes. The markup has `ss-` classes and `data-field` attributes, the
+//! field's JSON key, for a stylesheet or a test, and no style of its own.
 
-use crate::records::{AccountKeyRecord, AccountViewRecord, NoteInputRecord, SignupInputRecord};
+use crate::choices::Choices;
+use crate::records::{AccountKeyRecord, AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
 use topcoat::view::{View, component, view};
+
+/// Text as a component shows it: the label the app's choices give it at
+/// `field`, else the text itself.
+fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
+    choices.label(field, value).unwrap_or(value)
+}
+
+/// A number as a component shows it: the label the app's choices give its
+/// text at `field`, else the number itself. Its text is written only when
+/// the choices name the field.
+fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (Option<&'a str>, Option<T>) {
+    let label = choices.of(field, field).and_then(|options| {
+        let text = value.to_string();
+        options.iter().find(|choice| choice.value == text).map(|choice| choice.label.as_str())
+    });
+    match label {
+        Some(label) => (Some(label), None),
+        None => (None, Some(value)),
+    }
+}
+
+/// A date and time as a reader reads it, in UTC to the minute, whatever
+/// offset it was sent with: `2026-10-09T14:30:00Z` is "9 Oct 2026, 14:30
+/// UTC", and `2026-10-09T00:15:00+01:00` "8 Oct 2026, 23:15 UTC". Text
+/// that is no date and time, RFC 3339's, shows as it is. The `<time>`
+/// element's `datetime` keeps the value as sent.
+pub fn date_time_text(value: &str) -> String {
+    let Some((date, rest)) = value.split_once(['T', 't', ' ']) else {
+        return value.to_owned();
+    };
+    let (Some((year, month, day)), Some((hour, minute, east))) = (civil_date(date), clock(rest)) else {
+        return value.to_owned();
+    };
+    // Minutes since 1970-01-01T00:00Z.
+    let minutes = days_from_civil(year, month, day) * 1440 + i64::from(hour * 60 + minute) - east;
+    let (year, month, day) = civil_from_days(minutes.div_euclid(1440));
+    let minute = minutes.rem_euclid(1440);
+    format!("{day} {} {year}, {:02}:{:02} UTC", MONTHS[month as usize - 1], minute / 60, minute % 60)
+}
+
+/// A time, its seconds and their fraction or not, then its offset (`Z`,
+/// `+01:00`, or none for UTC): its hour, its minute and the offset east of
+/// UTC in minutes.
+fn clock(text: &str) -> Option<(u32, u32, i64)> {
+    let (time, offset) = text.split_at(text.find(['Z', 'z', '+', '-']).unwrap_or(text.len()));
+    let (hour, minute) = hour_minute(time)?;
+    let east = match offset.as_bytes() {
+        [] | [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), rest @ ..] if rest.len() == 5 => {
+            let (hours, minutes) = hour_minute(&offset[1..])?;
+            let east = i64::from(hours * 60 + minutes);
+            if *sign == b'-' { -east } else { east }
+        }
+        _ => return None,
+    };
+    Some((hour, minute, east))
+}
+
+/// The days from 1970-01-01 to a date of the proleptic Gregorian calendar.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let (era, year_of_era) = (year.div_euclid(400), year.rem_euclid(400));
+    let day_of_year = (153 * ((i64::from(month) + 9) % 12) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// The date `days` after 1970-01-01: its year, month and day.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let (era, day_of_era) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
+    let month = if shifted < 10 { shifted + 3 } else { shifted - 9 };
+    (year_of_era + era * 400 + i64::from(month <= 2), month as u32, day as u32)
+}
+
+/// A date as a reader reads it: `2026-10-09` is "9 Oct 2026". Text that is
+/// no date, `YYYY-MM-DD`, shows as it is.
+pub fn date_text(value: &str) -> String {
+    match civil_date(value) {
+        Some((year, month, day)) => format!("{day} {} {year}", MONTHS[month as usize - 1]),
+        None => value.to_owned(),
+    }
+}
+
+/// A time of day as a reader reads it, to the minute: `14:30:15` is
+/// "14:30". Text that is no 24-hour time, `HH:MM` with its seconds or
+/// not, shows as it is.
+pub fn time_text(value: &str) -> String {
+    match hour_minute(value) {
+        Some((hour, minute)) => format!("{hour:02}:{minute:02}"),
+        None => value.to_owned(),
+    }
+}
+
+/// The months as a reader reads them, in English and in short.
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// `YYYY-MM-DD`, a date that exists: its year, month and day.
+fn civil_date(text: &str) -> Option<(i64, u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year = digits(&bytes[0..4])?;
+    let month = digits(&bytes[5..7]).filter(|month| (1..=12).contains(month))?;
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    let day = digits(&bytes[8..10]).filter(|day| (1..=days).contains(day))?;
+    Some((i64::from(year), month, day))
+}
+
+/// `HH:MM` in 24 hours, with `:SS` and a fraction of a second or not: its
+/// hour and its minute.
+fn hour_minute(text: &str) -> Option<(u32, u32)> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 5 || bytes[2] != b':' {
+        return None;
+    }
+    let hour = digits(&bytes[0..2]).filter(|hour| *hour < 24)?;
+    let minute = digits(&bytes[3..5]).filter(|minute| *minute < 60)?;
+    let seconds = match &bytes[5..] {
+        [] => true,
+        [b':', rest @ ..] if rest.len() >= 2 => {
+            digits(&rest[..2]).is_some_and(|second| second <= 60)
+                && match &rest[2..] {
+                    [] => true,
+                    [b'.', fraction @ ..] => !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit),
+                    _ => false,
+                }
+        }
+        _ => false,
+    };
+    seconds.then_some((hour, minute))
+}
+
+/// The number its ASCII digits spell, when they are all digits.
+fn digits(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .iter()
+        .all(u8::is_ascii_digit)
+        .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
+}
+
+/// Labels a value of `Amenity`: its member's name in words. A value the
+/// enum does not declare is its own label.
+pub fn amenity_label(value: &str) -> &str {
+    match value {
+        "wifi" => "Wifi",
+        "breakfast" => "Breakfast",
+        "late_checkout" => "Late checkout",
+        other => other,
+    }
+}
 
 /// Labels a value of `Plan`: its member's name in words. A value the
 /// enum does not declare is its own label.
@@ -31,9 +196,11 @@ pub fn plan_label(value: &str) -> &str {
 }
 
 /// `AccountKeyRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn account_key_detail(record: AccountKeyRecord) -> topcoat::Result<impl View> {
+pub async fn account_key_detail(record: AccountKeyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let _ = record;
+    let _ = choices;
     Ok(view! {
         <div class="ss-detail" data-type="AccountKey" role="group">
             <dl>
@@ -43,8 +210,17 @@ pub async fn account_key_detail(record: AccountKeyRecord) -> topcoat::Result<imp
 }
 
 /// `AccountKeyRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
 #[component]
-pub async fn account_key_table(rows: Vec<AccountKeyRecord>) -> topcoat::Result<impl View> {
+pub async fn account_key_table(
+    rows: Vec<AccountKeyRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    let _ = choices;
+    let _ = hrefs;
     Ok(view! {
         <table class="ss-table" data-type="AccountKey">
             <thead>
@@ -62,22 +238,23 @@ pub async fn account_key_table(rows: Vec<AccountKeyRecord>) -> topcoat::Result<i
 }
 
 /// `AccountViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn account_view_detail(record: AccountViewRecord) -> topcoat::Result<impl View> {
+pub async fn account_view_detail(record: AccountViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="AccountView" role="group">
             <dl>
                 <div data-field="id">
                     <dt>"Id"</dt>
-                    <dd>(record.id)</dd>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
                 </div>
                 <div data-field="email">
                     <dt>"Email"</dt>
-                    <dd>(record.email)</dd>
+                    <dd>(text_of(&choices, "email", &record.email))</dd>
                 </div>
                 <div data-field="displayName">
                     <dt>"Display name"</dt>
-                    <dd>(record.display_name)</dd>
+                    <dd>(text_of(&choices, "displayName", &record.display_name))</dd>
                 </div>
                 <div data-field="plan">
                     <dt>"Plan"</dt>
@@ -85,7 +262,12 @@ pub async fn account_view_detail(record: AccountViewRecord) -> topcoat::Result<i
                 </div>
                 <div data-field="seats">
                     <dt>"Seats"</dt>
-                    <dd>(record.seats)</dd>
+                    <dd>
+                        match record.seats {
+                            Some(value) => (number_of(&choices, "seats", value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="newsletter">
                     <dt>"Newsletter"</dt>
@@ -97,8 +279,16 @@ pub async fn account_view_detail(record: AccountViewRecord) -> topcoat::Result<i
 }
 
 /// `AccountViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result<impl View> {
+pub async fn account_view_table(
+    rows: Vec<AccountViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="AccountView">
             <thead>
@@ -112,13 +302,32 @@ pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Account view");
                     <tr>
-                        <td data-field="id">(row.id)</td>
-                        <td data-field="email">(row.email)</td>
-                        <td data-field="displayName">(row.display_name)</td>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="email">(text_of(&choices, "email", &row.email))</td>
+                        <td data-field="displayName">(text_of(&choices, "displayName", &row.display_name))</td>
                         <td data-field="plan"><data value=(&row.plan)>(plan_label(&row.plan))</data></td>
-                        <td data-field="seats">(row.seats)</td>
+                        <td data-field="seats">
+                            match row.seats {
+                                Some(value) => (number_of(&choices, "seats", value)),
+                                None => "",
+                            }
+                        </td>
                         <td data-field="newsletter">(if row.newsletter { "Yes" } else { "No" })</td>
                     </tr>
                 }
@@ -127,15 +336,480 @@ pub async fn account_view_table(rows: Vec<AccountViewRecord>) -> topcoat::Result
     })
 }
 
-/// `NoteInputRecord` as a description list: each field's label and value.
+/// `BillingAddressRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn note_input_detail(record: NoteInputRecord) -> topcoat::Result<impl View> {
+pub async fn billing_address_detail(record: BillingAddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BillingAddress" role="group">
+            <dl>
+                <div data-field="line1">
+                    <dt>"Address line 1"</dt>
+                    <dd>(text_of(&choices, "line1", &record.line1))</dd>
+                </div>
+                <div data-field="line2">
+                    <dt>"Line 2"</dt>
+                    <dd>
+                        match record.line2 {
+                            Some(value) => (text_of(&choices, "line2", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="city">
+                    <dt>"City"</dt>
+                    <dd>(text_of(&choices, "city", &record.city))</dd>
+                </div>
+                <div data-field="postcode">
+                    <dt>"Postcode"</dt>
+                    <dd>
+                        match record.postcode {
+                            Some(value) => (text_of(&choices, "postcode", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BillingAddressRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn billing_address_table(
+    rows: Vec<BillingAddressRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BillingAddress">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="line1">"Address line 1"</th>
+                    <th scope="col" data-field="line2">"Line 2"</th>
+                    <th scope="col" data-field="city">"City"</th>
+                    <th scope="col" data-field="postcode">"Postcode"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.line1.trim().is_empty()).then_some("Billing address");
+                    <tr>
+                        <td data-field="line1">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "line1", &row.line1))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "line1", &row.line1))
+                            }
+                        </td>
+                        <td data-field="line2">
+                            match row.line2 {
+                                Some(value) => (text_of(&choices, "line2", &value)),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="city">(text_of(&choices, "city", &row.city))</td>
+                        <td data-field="postcode">
+                            match row.postcode {
+                                Some(value) => (text_of(&choices, "postcode", &value)),
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `BookingInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn booking_input_detail(record: BookingInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BookingInput" role="group">
+            <dl>
+                <div data-field="guest">
+                    <dt>"Guest"</dt>
+                    <dd>guest_detail(record: record.guest, choices: choices.under("guest"))</dd>
+                </div>
+                <div data-field="billing">
+                    <dt>"Billing address"</dt>
+                    <dd>
+                        match record.billing {
+                            Some(value) => billing_address_detail(record: value, choices: choices.under("billing")),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="rooms">
+                    <dt>"Rooms"</dt>
+                    <dd>room_request_table(rows: record.rooms, choices: choices.under("rooms"))</dd>
+                </div>
+                <div data-field="amenities">
+                    <dt>"Amenities"</dt>
+                    <dd>
+                        match record.amenities {
+                            Some(value) => {
+                                <ul class="ss-list">
+                                    for item in value {
+                                        <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                    }
+                                </ul>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="arrival">
+                    <dt>"Arrival"</dt>
+                    <dd><time datetime=(&record.arrival)>(date_text(&record.arrival))</time></dd>
+                </div>
+                <div data-field="checkIn">
+                    <dt>"Check-in time"</dt>
+                    <dd>
+                        match record.check_in {
+                            Some(value) => <time datetime=(&value)>(time_text(&value))</time>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="holdUntil">
+                    <dt>"Hold until"</dt>
+                    <dd>
+                        match record.hold_until {
+                            Some(value) => <time datetime=(&value)>(date_time_text(&value))</time>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="currency">
+                    <dt>"Currency"</dt>
+                    <dd>
+                        match record.currency {
+                            Some(value) => (text_of(&choices, "currency", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="requests">
+                    <dt>"Requests"</dt>
+                    <dd>
+                        match record.requests {
+                            Some(value) => (text_of(&choices, "requests", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="preferences">
+                    <dt>"Preferences"</dt>
+                    <dd>
+                        match record.preferences {
+                            Some(value) => <pre class="ss-json">(value)</pre>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="labels">
+                    <dt>"Labels"</dt>
+                    <dd>
+                        match record.labels {
+                            Some(value) => {
+                                <dl class="ss-map">
+                                    for (key, entry) in value {
+                                        <div>
+                                            <dt>(key)</dt>
+                                            <dd>(text_of(&choices, "labels", &entry))</dd>
+                                        </div>
+                                    }
+                                </dl>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BookingInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
+#[component]
+pub async fn booking_input_table(
+    rows: Vec<BookingInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BookingInput">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="guest">"Guest"</th>
+                    <th scope="col" data-field="billing">"Billing address"</th>
+                    <th scope="col" data-field="rooms">"Rooms"</th>
+                    <th scope="col" data-field="amenities">"Amenities"</th>
+                    <th scope="col" data-field="arrival">"Arrival"</th>
+                    <th scope="col" data-field="checkIn">"Check-in time"</th>
+                    <th scope="col" data-field="holdUntil">"Hold until"</th>
+                    <th scope="col" data-field="currency">"Currency"</th>
+                    <th scope="col" data-field="requests">"Requests"</th>
+                    <th scope="col" data-field="preferences">"Preferences"</th>
+                    <th scope="col" data-field="labels">"Labels"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    <tr>
+                        <td data-field="guest">
+                            if let Some(href) = &href {
+                                <a href=(href)>guest_detail(record: row.guest, choices: choices.under("guest"))</a>
+                            } else {
+                                guest_detail(record: row.guest, choices: choices.under("guest"))
+                            }
+                        </td>
+                        <td data-field="billing">
+                            match row.billing {
+                                Some(value) => billing_address_detail(record: value, choices: choices.under("billing")),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="rooms">room_request_table(rows: row.rooms, choices: choices.under("rooms"))</td>
+                        <td data-field="amenities">
+                            match row.amenities {
+                                Some(value) => {
+                                    <ul class="ss-list">
+                                        for item in value {
+                                            <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                        }
+                                    </ul>
+                                },
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="arrival"><time datetime=(&row.arrival)>(date_text(&row.arrival))</time></td>
+                        <td data-field="checkIn">
+                            match row.check_in {
+                                Some(value) => <time datetime=(&value)>(time_text(&value))</time>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="holdUntil">
+                            match row.hold_until {
+                                Some(value) => <time datetime=(&value)>(date_time_text(&value))</time>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="currency">
+                            match row.currency {
+                                Some(value) => (text_of(&choices, "currency", &value)),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="requests">
+                            match row.requests {
+                                Some(value) => (text_of(&choices, "requests", &value)),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="preferences">
+                            match row.preferences {
+                                Some(value) => <pre class="ss-json">(value)</pre>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="labels">
+                            match row.labels {
+                                Some(value) => {
+                                    <dl class="ss-map">
+                                        for (key, entry) in value {
+                                            <div>
+                                                <dt>(key)</dt>
+                                                <dd>(text_of(&choices, "labels", &entry))</dd>
+                                            </div>
+                                        }
+                                    </dl>
+                                },
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `BookingViewRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn booking_view_detail(record: BookingViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="BookingView" role="group">
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="rooms">
+                    <dt>"Rooms"</dt>
+                    <dd>(number_of(&choices, "rooms", record.rooms))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `BookingViewRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn booking_view_table(
+    rows: Vec<BookingViewRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="BookingView">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="rooms">"Rooms"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Booking view");
+                    <tr>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="rooms">(number_of(&choices, "rooms", row.rooms))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `GuestRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn guest_detail(record: GuestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="Guest" role="group">
+            <dl>
+                <div data-field="name">
+                    <dt>"Name"</dt>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
+                </div>
+                <div data-field="email">
+                    <dt>"Email"</dt>
+                    <dd>(text_of(&choices, "email", &record.email))</dd>
+                </div>
+                <div data-field="phone">
+                    <dt>"Phone"</dt>
+                    <dd>
+                        match record.phone {
+                            Some(value) => (text_of(&choices, "phone", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `GuestRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn guest_table(
+    rows: Vec<GuestRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Guest">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="name">"Name"</th>
+                    <th scope="col" data-field="email">"Email"</th>
+                    <th scope="col" data-field="phone">"Phone"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then_some("Guest");
+                    <tr>
+                        <td data-field="name">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "name", &row.name))
+                            }
+                        </td>
+                        <td data-field="email">(text_of(&choices, "email", &row.email))</td>
+                        <td data-field="phone">
+                            match row.phone {
+                                Some(value) => (text_of(&choices, "phone", &value)),
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `NoteInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn note_input_detail(record: NoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="NoteInput" role="group">
             <dl>
                 <div data-field="text">
                     <dt>"Text"</dt>
-                    <dd>(record.text)</dd>
+                    <dd>(text_of(&choices, "text", &record.text))</dd>
                 </div>
                 <div data-field="tags">
                     <dt>"Tags"</dt>
@@ -144,7 +818,7 @@ pub async fn note_input_detail(record: NoteInputRecord) -> topcoat::Result<impl 
                             Some(value) => {
                                 <ul class="ss-list">
                                     for item in value {
-                                        <li>(item)</li>
+                                        <li>(text_of(&choices, "tags", &item))</li>
                                     }
                                 </ul>
                             },
@@ -158,8 +832,16 @@ pub async fn note_input_detail(record: NoteInputRecord) -> topcoat::Result<impl 
 }
 
 /// `NoteInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<impl View> {
+pub async fn note_input_table(
+    rows: Vec<NoteInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="NoteInput">
             <thead>
@@ -169,15 +851,122 @@ pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<imp
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.text.trim().is_empty()).then_some("Note input");
                     <tr>
-                        <td data-field="text">(row.text)</td>
+                        <td data-field="text">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "text", &row.text))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "text", &row.text))
+                            }
+                        </td>
                         <td data-field="tags">
                             match row.tags {
                                 Some(value) => {
                                     <ul class="ss-list">
                                         for item in value {
-                                            <li>(item)</li>
+                                            <li>(text_of(&choices, "tags", &item))</li>
+                                        }
+                                    </ul>
+                                },
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `RoomRequestRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn room_request_detail(record: RoomRequestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="RoomRequest" role="group" aria-label="Room">
+            <dl>
+                <div data-field="roomId">
+                    <dt>"Room"</dt>
+                    <dd>(text_of(&choices, "roomId", &record.room_id))</dd>
+                </div>
+                <div data-field="adults">
+                    <dt>"Adults"</dt>
+                    <dd>(number_of(&choices, "adults", record.adults))</dd>
+                </div>
+                <div data-field="extras">
+                    <dt>"Extras"</dt>
+                    <dd>
+                        match record.extras {
+                            Some(value) => {
+                                <ul class="ss-list">
+                                    for item in value {
+                                        <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                    }
+                                </ul>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `RoomRequestRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn room_request_table(
+    rows: Vec<RoomRequestRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="RoomRequest">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="roomId">"Room"</th>
+                    <th scope="col" data-field="adults">"Adults"</th>
+                    <th scope="col" data-field="extras">"Extras"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.room_id.trim().is_empty()).then_some("Room");
+                    <tr>
+                        <td data-field="roomId">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "roomId", &row.room_id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "roomId", &row.room_id))
+                            }
+                        </td>
+                        <td data-field="adults">(number_of(&choices, "adults", row.adults))</td>
+                        <td data-field="extras">
+                            match row.extras {
+                                Some(value) => {
+                                    <ul class="ss-list">
+                                        for item in value {
+                                            <li><data value=(&item)>(amenity_label(&item))</data></li>
                                         }
                                     </ul>
                                 },
@@ -192,26 +981,37 @@ pub async fn note_input_table(rows: Vec<NoteInputRecord>) -> topcoat::Result<imp
 }
 
 /// `SignupInputRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
 #[component]
-pub async fn signup_input_detail(record: SignupInputRecord) -> topcoat::Result<impl View> {
+pub async fn signup_input_detail(record: SignupInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="SignupInput" role="group">
             <dl>
                 <div data-field="email">
                     <dt>"Email"</dt>
-                    <dd>(record.email)</dd>
+                    <dd>(text_of(&choices, "email", &record.email))</dd>
                 </div>
                 <div data-field="displayName">
                     <dt>"Display name"</dt>
-                    <dd>(record.display_name)</dd>
+                    <dd>(text_of(&choices, "displayName", &record.display_name))</dd>
                 </div>
                 <div data-field="handle">
                     <dt>"Handle"</dt>
-                    <dd>(record.handle)</dd>
+                    <dd>
+                        match record.handle {
+                            Some(value) => (text_of(&choices, "handle", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="website">
                     <dt>"Website"</dt>
-                    <dd>(record.website)</dd>
+                    <dd>
+                        match record.website {
+                            Some(value) => (text_of(&choices, "website", &value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="plan">
                     <dt>"Plan"</dt>
@@ -219,11 +1019,21 @@ pub async fn signup_input_detail(record: SignupInputRecord) -> topcoat::Result<i
                 </div>
                 <div data-field="seats">
                     <dt>"Seats"</dt>
-                    <dd>(record.seats)</dd>
+                    <dd>
+                        match record.seats {
+                            Some(value) => (number_of(&choices, "seats", value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="budget">
                     <dt>"Budget"</dt>
-                    <dd>(record.budget)</dd>
+                    <dd>
+                        match record.budget {
+                            Some(value) => (number_of(&choices, "budget", value)),
+                            None => "",
+                        }
+                    </dd>
                 </div>
                 <div data-field="newsletter">
                     <dt>"Newsletter"</dt>
@@ -240,8 +1050,16 @@ pub async fn signup_input_detail(record: SignupInputRecord) -> topcoat::Result<i
 }
 
 /// `SignupInputRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
 #[component]
-pub async fn signup_input_table(rows: Vec<SignupInputRecord>) -> topcoat::Result<impl View> {
+pub async fn signup_input_table(
+    rows: Vec<SignupInputRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="SignupInput">
             <thead>
@@ -257,15 +1075,49 @@ pub async fn signup_input_table(rows: Vec<SignupInputRecord>) -> topcoat::Result
                 </tr>
             </thead>
             <tbody>
-                for row in rows {
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.email.trim().is_empty()).then_some("Signup input");
                     <tr>
-                        <td data-field="email">(row.email)</td>
-                        <td data-field="displayName">(row.display_name)</td>
-                        <td data-field="handle">(row.handle)</td>
-                        <td data-field="website">(row.website)</td>
+                        <td data-field="email">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "email", &row.email))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "email", &row.email))
+                            }
+                        </td>
+                        <td data-field="displayName">(text_of(&choices, "displayName", &row.display_name))</td>
+                        <td data-field="handle">
+                            match row.handle {
+                                Some(value) => (text_of(&choices, "handle", &value)),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="website">
+                            match row.website {
+                                Some(value) => (text_of(&choices, "website", &value)),
+                                None => "",
+                            }
+                        </td>
                         <td data-field="plan"><data value=(&row.plan)>(plan_label(&row.plan))</data></td>
-                        <td data-field="seats">(row.seats)</td>
-                        <td data-field="budget">(row.budget)</td>
+                        <td data-field="seats">
+                            match row.seats {
+                                Some(value) => (number_of(&choices, "seats", value)),
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="budget">
+                            match row.budget {
+                                Some(value) => (number_of(&choices, "budget", value)),
+                                None => "",
+                            }
+                        </td>
                         <td data-field="newsletter">
                             match row.newsletter {
                                 Some(value) => (if value { "Yes" } else { "No" }),

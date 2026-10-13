@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
@@ -167,26 +168,26 @@ func TestClientCodegenParity(t *testing.T) {
 		entry := paritySchema{CreateParams: map[string]any{}, Fields: map[string]map[string]parityField{}}
 		aliases := map[string]any{}
 		for _, behavior := range model.behaviors {
-			for _, a := range behavior.narrowed.aliases {
-				aliases[a.name] = a.schema
+			for _, a := range behavior.Narrowed.Aliases {
+				aliases[a.Name] = a.Schema
 			}
 		}
 		for _, behavior := range model.behaviors {
-			if behavior.narrowed.createParams != nil {
-				entry.CreateParams[behavior.declaration.Name] = behavior.narrowed.createParams
+			if behavior.Narrowed.CreateParams != nil {
+				entry.CreateParams[behavior.Declaration.Name] = behavior.Narrowed.CreateParams
 			}
-			if len(behavior.narrowed.fields) == 0 {
+			if len(behavior.Narrowed.Fields) == 0 {
 				continue
 			}
 			fields := map[string]parityField{}
-			for name, shape := range behavior.narrowed.fields {
-				resolved, err := resolveRefs(shape.schema, aliases)
+			for name, shape := range behavior.Narrowed.Fields {
+				resolved, err := resolveRefs(shape.Schema, aliases)
 				if err != nil {
-					t.Fatalf("schema %s field %s.%s: %v", model.name, behavior.declaration.Name, name, err)
+					t.Fatalf("schema %s field %s.%s: %v", model.name, behavior.Declaration.Name, name, err)
 				}
-				fields[name] = parityField{Schema: resolved, Present: shape.present}
+				fields[name] = parityField{Schema: resolved, Present: shape.Present}
 			}
-			entry.Fields[behavior.declaration.Name] = fields
+			entry.Fields[behavior.Declaration.Name] = fields
 		}
 		corpus.Schemas[model.name] = entry
 	}
@@ -205,7 +206,7 @@ func TestClientCodegenParity(t *testing.T) {
 func resolveRefs(schema any, aliases map[string]any) (any, error) {
 	switch s := schema.(type) {
 	case map[string]any:
-		if name, ok := s[refKey].(string); ok {
+		if name, ok := s[behaviortypes.RefKey].(string); ok {
 			target, ok := aliases[name]
 			if !ok {
 				return nil, fmt.Errorf("%s is no alias of the type", name)
@@ -313,28 +314,5 @@ func TestRefusesWhatTheEngineRefuses(t *testing.T) {
 	_, err = Generate([]*ir.Schema{db}, Options{Registry: reg})
 	if want := "engine-client: schema shop is of kind DB; the engine runs General schemas"; err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
-	}
-}
-
-// Each core narrowing types only fields its behavior declares, so a field a
-// declaration renames fails here, whether or not a golden composes the
-// behavior. Variants is left out: its config names the type's own fields,
-// and it declares none.
-func TestCoreNarrowingsTypeDeclaredFields(t *testing.T) {
-	reg := coreRegistry(t)
-	document := ir.NewSchema("items", ir.SchemaKindGeneral)
-	target := narrowTarget{schema: "items", base: "Item", document: document, instance: &ir.TypeDef{Name: "Item"}}
-	for _, name := range sortedKeys(coreNarrowers) {
-		if name == "Variants" {
-			continue
-		}
-		declaration, ok := reg.Behavior(name)
-		if !ok {
-			t.Errorf("%s has a narrowing and no declaration", name)
-			continue
-		}
-		if _, err := narrow(declaration, nil, target); err != nil {
-			t.Errorf("%s: %v", name, err)
-		}
 	}
 }

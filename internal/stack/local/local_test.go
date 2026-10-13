@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,13 +69,36 @@ func shop() *ir.Stack {
 // which its process reads from WORKER_CONCURRENCY (D53).
 var pinnedConcurrency = 2
 
+// checkoutRoot is the schemas root of the checkout the goldens and most
+// tests resolve in: a path no test creates, since resolution only hashes
+// it.
+const checkoutRoot = "/checkout/schemas"
+
+// resolve resolves env of s in the checkout at checkoutRoot.
 func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
 	t.Helper()
-	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: services, Environment: env})
+	return resolveIn(t, reg, checkoutRoot, s, services, env)
+}
+
+// resolveIn resolves env of s in the checkout whose schemas root is
+// schemasRoot, or in none when it is empty.
+func resolveIn(t *testing.T, reg *registry.Registry, schemasRoot string, s *ir.Stack, services []stack.Service, env string) *ir.ResolvedEnvironment {
+	t.Helper()
+	resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: services, Environment: env, SchemasRoot: schemasRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return resolved
+}
+
+// postgresName and storageName are the names of the containers of a shop
+// stack's environment in the checkout at checkoutRoot.
+func postgresName(stackName, env string) string {
+	return local.ContainerName(stackName, env, local.Checkout(checkoutRoot, stackName, env))
+}
+
+func storageName(stackName, env string) string {
+	return local.StorageContainerName(stackName, env, local.Checkout(checkoutRoot, stackName, env))
 }
 
 // checkGolden compares got with the golden file at path, which -update
@@ -153,6 +177,43 @@ func TestTypeScriptGolden(t *testing.T) {
 	checkGoldenEnvironment(t, assemble(t), storefront(), stacktest.AcmeShop(), "Dev")
 }
 
+// rustStack is the shop with shop-api written in Rust (D57), over
+// rustShop's services.
+func rustStack() *ir.Stack {
+	s := shop()
+	s.Name = "rust-stack"
+	return s
+}
+
+// rustShop is the acme-shop services with shop-api written in Rust and no
+// bucket, which a Rust server does not reach (D57): its server, which
+// reaches shop-db through its authDb, is a Rust process.
+func rustShop() []stack.Service {
+	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+}
+
+// TestRustGolden resolves the shop with shop-api in Rust in Dev: shop-api's
+// process is a Rust one, with the sql edge and port a Go server's has, and
+// no binary in the program, since the provisioner reads the binary's name
+// from the crate as it builds it.
+func TestRustGolden(t *testing.T) {
+	checkGoldenEnvironment(t, assemble(t), rustStack(), rustShop(), "Dev")
+	env := resolve(t, assemble(t), rustStack(), rustShop(), "Dev")
+	prog, err := local.ProgramOf(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range prog.Servers {
+		want := local.LanguageGo
+		if s.Deployable == "shop-api" {
+			want = local.LanguageRust
+		}
+		if s.Language != want || (want == local.LanguageRust) != (s.Binary == "") {
+			t.Errorf("server %s is %s with binary %q, want %s, with a binary when it is Go", s.Deployable, s.Language, s.Binary, want)
+		}
+	}
+}
+
 // checkGoldenEnvironment resolves env of s and checks its environment.json
 // and the program the provisioner renders from it against the golden
 // files.
@@ -192,11 +253,11 @@ func TestWiring(t *testing.T) {
 	if dev.Provisioner != local.ProvisionerName {
 		t.Errorf("provisioner = %q, want %q", dev.Provisioner, local.ProvisionerName)
 	}
-	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev"}
+	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev", SchemasRoot: checkoutRoot}
 	pgPort := local.PostgresPort(env)
 	shopAPI := dev.Deployable("shop-api")
 	apiPort := local.ServerPort(env, *shopAPI)
-	if apiPort == local.ServerPort(registry.StackEnvironment{Stack: "shop-stack", Name: "Other"}, *shopAPI) {
+	if apiPort == local.ServerPort(registry.StackEnvironment{Stack: "shop-stack", Name: "Other", SchemasRoot: checkoutRoot}, *shopAPI) {
 		t.Errorf("shop-api gets port %d in two environments", apiPort)
 	}
 	if got, want := shopAPI.Address, local.ServerURL(apiPort); got != want {
@@ -255,8 +316,8 @@ func TestWiring(t *testing.T) {
 	if container == nil || strings.Join(container.Owners, ",") != "shop-db" {
 		t.Fatalf("container = %+v, want one owned by shop-db", container)
 	}
-	if got := container.Properties["name"]; got != "superschematic-shop-stack-dev-postgres" {
-		t.Errorf("container name = %v", got)
+	if got, want := container.Properties["name"], postgresName("shop-stack", "Dev"); got != want {
+		t.Errorf("container name = %v, want %s", got, want)
 	}
 
 	again := resolve(t, reg, shop(), stacktest.AcmeShop(), "Dev")
@@ -264,6 +325,128 @@ func TestWiring(t *testing.T) {
 	b, _ := stack.Marshal(again)
 	if !bytes.Equal(a, b) {
 		t.Error("two resolutions of Dev differ")
+	}
+}
+
+// listeners are the host ports of an environment's containers and the
+// ports of its servers, by node.
+func listeners(env *ir.ResolvedEnvironment) map[string]int {
+	number := func(v any) (int, bool) {
+		switch v := v.(type) {
+		case int:
+			return v, true
+		case float64:
+			return int(v), true
+		}
+		return 0, false
+	}
+	ports := map[string]int{}
+	for _, res := range env.Resources.Resources {
+		switch res.Type {
+		case local.TypeContainer:
+			published := res.Properties["ports"].([]any)[0].(map[string]any)
+			ports[res.ID], _ = number(published["hostPort"])
+		case local.TypeProcess, local.TypeSite:
+			if port, ok := number(res.Properties["port"]); ok {
+				ports[res.ID] = port
+			}
+		}
+	}
+	return ports
+}
+
+// TestCheckouts: two checkouts of a repository resolve an environment with
+// containers and default ports of their own, and one checkout resolves it
+// with the same ones every time (D30, amended). The checkout shifts every
+// default port of the environment by one offset, so two of its ports meet
+// in one checkout only where they meet in every one; the ports an
+// environment sets stay put; and a resolution in no checkout names the
+// containers and derives the ports as before checkouts were told apart.
+func TestCheckouts(t *testing.T) {
+	reg := assemble(t)
+	one := resolveIn(t, reg, "/one/schemas", shop(), stacktest.AcmeShop(), "Dev")
+	two := resolveIn(t, reg, "/two/schemas", shop(), stacktest.AcmeShop(), "Dev")
+	none := resolveIn(t, reg, "", shop(), stacktest.AcmeShop(), "Dev")
+
+	again := resolveIn(t, reg, "/one/schemas", shop(), stacktest.AcmeShop(), "Dev")
+	a, _ := stack.Marshal(one)
+	b, _ := stack.Marshal(again)
+	if !bytes.Equal(a, b) {
+		t.Error("one checkout resolves Dev twice with different containers or ports")
+	}
+
+	for _, tc := range []struct {
+		env         *ir.ResolvedEnvironment
+		schemasRoot string
+		postgres    string
+		storage     string
+	}{
+		{one, "/one/schemas", "superschematic-shop-stack-dev-" + local.Checkout("/one/schemas", "shop-stack", "Dev") + "-postgres", "superschematic-shop-stack-dev-" + local.Checkout("/one/schemas", "shop-stack", "Dev") + "-storage"},
+		{two, "/two/schemas", "superschematic-shop-stack-dev-" + local.Checkout("/two/schemas", "shop-stack", "Dev") + "-postgres", "superschematic-shop-stack-dev-" + local.Checkout("/two/schemas", "shop-stack", "Dev") + "-storage"},
+		{none, "", "superschematic-shop-stack-dev-postgres", "superschematic-shop-stack-dev-storage"},
+	} {
+		postgres, storage := tc.env.Resources.Resource(local.PostgresContainer), tc.env.Resources.Resource(local.StorageContainer)
+		if got := postgres.Properties["name"]; got != tc.postgres {
+			t.Errorf("checkout %q: Postgres container %v, want %s", tc.schemasRoot, got, tc.postgres)
+		}
+		if got := storage.Properties["name"]; got != tc.storage {
+			t.Errorf("checkout %q: storage container %v, want %s", tc.schemasRoot, got, tc.storage)
+		}
+		for _, c := range []*ir.Resource{postgres, storage} {
+			labels := c.Properties["labels"].(map[string]any)
+			if labels[local.LabelStack] != "shop-stack" || labels[local.LabelEnvironment] != "Dev" {
+				t.Errorf("checkout %q: %s labels %v, want shop-stack's Dev", tc.schemasRoot, c.ID, labels)
+			}
+			if got, want := labels[local.LabelCheckout], local.Checkout(tc.schemasRoot, "shop-stack", "Dev"); (want == "" && got != nil) || (want != "" && got != want) {
+				t.Errorf("checkout %q: %s label %s = %v, want %q", tc.schemasRoot, c.ID, local.LabelCheckout, got, want)
+			}
+		}
+	}
+	if c := local.Checkout("/one/schemas", "shop-stack", "Dev"); len(c) != 6 || strings.Trim(c, "0123456789abcdef") != "" {
+		t.Errorf("checkout %q is not six hexadecimal digits", c)
+	}
+	if local.Checkout("/one/schemas", "shop-stack", "Dev") == local.Checkout("/one/schemas", "shop-stack", "Other") {
+		t.Error("two environments of one checkout share a discriminator")
+	}
+
+	// Every default port differs between the two checkouts, and is the one
+	// from before checkouts in none. Within one checkout each lies where
+	// it does in another, shifted by the checkout's offset.
+	ports := map[string]map[string]int{"one": listeners(one), "two": listeners(two), "none": listeners(none)}
+	before := map[string]int{"postgres.container": 32259, "storage.container": 25259, "shop-api.process": 22424, "Orders.process": 21592}
+	if !maps.Equal(ports["none"], before) {
+		t.Errorf("ports in no checkout = %v, want the ones from before checkouts, %v", ports["none"], before)
+	}
+	for id := range before {
+		if ports["one"][id] == ports["two"][id] {
+			t.Errorf("%s listens on %d in both checkouts", id, ports["one"][id])
+		}
+	}
+	const span = 2768
+	for name, p := range ports {
+		if got, want := (p["shop-api.process"]-p["Orders.process"]+span)%span, (before["shop-api.process"]-before["Orders.process"]+span)%span; got != want {
+			t.Errorf("checkout %s: shop-api lies %d ports after Orders, want %d, as in every checkout", name, got, want)
+		}
+	}
+
+	// What the environment sets wins in every checkout.
+	pinned := listeners(resolveIn(t, reg, "/one/schemas", shop(), stacktest.AcmeShop(), "Pinned"))
+	if pinned["postgres.container"] != 55432 || pinned["shop-api.process"] != 8080 || pinned["Orders.process"] != 8081 {
+		t.Errorf("Pinned's ports in a checkout = %v, want its postgresPort and its servers' port settings", pinned)
+	}
+
+	// A name stays a DNS label's 63 bytes, the checkout kept whole.
+	long := strings.Repeat("a", 40) + "-stack"
+	for _, env := range []string{"Preview", "Preview2"} {
+		checkout := local.Checkout("/one/schemas", long, env)
+		for _, name := range []string{local.ContainerName(long, env, checkout), local.StorageContainerName(long, env, checkout)} {
+			if len(name) > 63 || !strings.HasPrefix(name, "superschematic-aaaa") || !strings.Contains(name, "-"+checkout+"-") {
+				t.Errorf("container name %s (%d bytes): want at most 63, the stack's name first and the checkout whole", name, len(name))
+			}
+		}
+	}
+	if local.ContainerName(long, "Preview", local.Checkout("/one/schemas", long, "Preview")) == local.ContainerName(long, "Preview2", local.Checkout("/one/schemas", long, "Preview2")) {
+		t.Error("two environments whose names differ past the limit share a container")
 	}
 }
 
@@ -283,7 +466,7 @@ func equalJSON(t *testing.T, got, want any) bool {
 // resolveErr resolves env and returns the resolution's failures.
 func resolveErr(t *testing.T, s *ir.Stack, services []stack.Service, env string) *stack.Errors {
 	t.Helper()
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: services, Environment: env})
+	_, err := stack.Resolve(assemble(t), stack.Input{Stack: s, Services: services, Environment: env, SchemasRoot: checkoutRoot})
 	var errs *stack.Errors
 	if !errors.As(err, &errs) {
 		t.Fatalf("resolve %s: got %v, want resolution errors", env, err)
@@ -322,12 +505,12 @@ func TestRefusals(t *testing.T) {
 	t.Run("a server on the Postgres port", func(t *testing.T) {
 		s := shop()
 		s.Environments[1].Settings[1].Values["port"] = float64(55432)
-		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and container superschematic-shop-stack-pinned-postgres listen on one port, 55432")
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "server Orders and container "+postgresName("shop-stack", "Pinned")+" listen on one port, 55432")
 	})
 	t.Run("the storage emulator on the Postgres port", func(t *testing.T) {
 		s := shop()
 		s.Environments[1].Values["storagePort"] = float64(55432)
-		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "container superschematic-shop-stack-pinned-postgres and container superschematic-shop-stack-pinned-storage listen on one port, 55432")
+		wantFailure(t, resolveErr(t, s, stacktest.AcmeShop(), "Pinned"), stack.CodePolicy, "container "+postgresName("shop-stack", "Pinned")+" and container "+storageName("shop-stack", "Pinned")+" listen on one port, 55432")
 	})
 	t.Run("a bucket whose name GCS refuses", func(t *testing.T) {
 		services := stacktest.AcmeShop()
@@ -341,14 +524,26 @@ func TestRefusals(t *testing.T) {
 		}
 		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
 	})
-	t.Run("a Rust server", func(t *testing.T) {
-		services := stacktest.AcmeShop()
-		for i := range services {
-			if services[i].Name == "shop-api" {
-				services[i].Language = registry.APILanguageRust
+	t.Run("a Rust server's bucket", func(t *testing.T) {
+		// shop-api lists shop-media; the Rust runtime has no Bucket, so
+		// the edge is refused as gcp refuses it, and nothing else is.
+		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-api"), "Dev")
+		want := "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)"
+		if len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering || !strings.Contains(errs.List[0].Message, want) {
+			t.Errorf("got %v, want the one lowering error %q", errs, want)
+		}
+	})
+	t.Run("a Rust job or worker", func(t *testing.T) {
+		// shop-orders' server is a Rust process; its job and its worker
+		// are left out of D57.
+		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-orders"), "Dev")
+		wantFailure(t, errs, stack.CodeUnrealizable, "job "+stacktest.ShipOrdersJob+" is a RUST job, and platform local.job runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
+		wantFailure(t, errs, stack.CodeUnrealizable, "worker "+stacktest.FulfilOrdersWorker+" is a RUST worker, and platform local.worker runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
+		for _, e := range errs.List {
+			if strings.Contains(e.Message, "local.process") {
+				t.Errorf("the Rust server Orders was refused: %s", e.Message)
 			}
 		}
-		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeUnrealizable, "platform local.process runs only GO, TYPESCRIPT")
 	})
 	t.Run("a PORT field", func(t *testing.T) {
 		services := stacktest.AcmeShop()

@@ -82,9 +82,11 @@ each instance the move reaches (movedOn: where the link pins what the
 move made, a revision or a release, the ones the target moved past)
 whose lease has a holder, with the entry's data and revised (the link,
 the target, its revision, or its release and the release's commit) and a
-dedupeKey per move, so a holder hears each move once. direct refuses a lapsed lease, which the reaction passes
-over; a free instance hears nothing, and nothing waits for its next
-holder. The runner's principal needs directPermission, or
+dedupeKey per move of a target, so a holder hears each move once. A
+many-valued link works the same: each of its targets that moves reaches
+the instances that hold it (D56). direct refuses a lapsed lease, which
+the reaction passes over; a free instance hears nothing, and nothing
+waits for its next holder. The runner's principal needs directPermission, or
 overridePermission, which parseConfig requires a directOn config to
 name; one that lacks it fails the subscription, forbidden. Without
 directOn the reactions are off (watches returns null), and the version
@@ -687,10 +689,12 @@ function checkDirectOn(raw: { directOn?: readonly RawDirectOn[]; directPermissio
 }
 
 // directKey is the dedupe key of a directOn directive: one per lease for
-// each move of the link's target, a revision by its number and a release
-// by the release pointer's version it made.
-function directKey(rule: LeaseDirectOn, move: TargetMove): string {
-  return move.kind === 'revision' ? `revised ${rule.link} ${move.revision}` : `released ${rule.link} ${move.release}`;
+// each move of a target of the link, by the target's id, a revision by
+// its number and a release by the release pointer's version it made. A
+// many-valued link's targets move apart, and a moved link's new target
+// may reach a number its old one had.
+function directKey(rule: LeaseDirectOn, target: string, move: TargetMove): string {
+  return move.kind === 'revision' ? `revised ${rule.link} ${target} ${move.revision}` : `released ${rule.link} ${target} ${move.release}`;
 }
 
 // heldAmong lists the ids, of the given ones, whose lease has a holder in
@@ -1171,7 +1175,7 @@ export const lease = defineBehavior<LeaseConfig>({
           move.kind === 'revision'
             ? { link: rule.link, schema: rule.schema, id: target, revision: move.revision }
             : { link: rule.link, schema: rule.schema, id: target, release: move.release, commit: move.commit };
-        const params = { name: rule.name, data: { ...rule.data, revised }, dedupeKey: directKey(rule, move) };
+        const params = { name: rule.name, data: { ...rule.data, revised }, dedupeKey: directKey(rule, target, move) };
         for (const id of heldAmong(context, movedOn(context, rule.link, rule.pin, target, move))) {
           try {
             context.instances.invoke(context.schema, id, 'direct', params as unknown as FrozenJSON);

@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants and Branches behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
 sidebar:
   order: 7
 ---
@@ -20,15 +20,15 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares eighteen behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements eleven itself
+The core declares twenty-two behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements fifteen itself
 and registers them when it opens. The other seven are claimable work,
 implemented by `@superschematic/engine-workqueue`; the engine refuses a
 schema that composes one until a deployment registers that package.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
-| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
+| `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
 | `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
@@ -39,6 +39,10 @@ schema that composes one until a deployment registers that package.
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
 | `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
+| `StateRules` | own fields a Workflow state requires to enter it, and ones it freezes while an instance is in it | `Workflow` | [StateRules](#staterules) |
+| `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
+| `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
+| `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 
 A running engine lists the behaviors it runs, an extension's included,
@@ -131,7 +135,7 @@ behavior's:
 { "id": "t1", "seq": 3,
   "data": { "title": "Build", "status": "draft" },
   "behaviors": {
-    "Workflow": { "status": "doing" },
+    "Workflow": { "status": "doing", "enteredAt": 1790790700324 },
     "Dependencies": { "blocked": false },
     "Links": { "targets": { "project": { "schema": "projects", "id": "launch" } } } } }
 ```
@@ -155,9 +159,193 @@ same.
   entry, `{}` while none has a value; a field with no value is absent.
   A behavior that adds no field, such as `Search` or `Constants`, has
   none.
+- **Volatile fields.** A field the engine computes at a read, from other
+  instances, the clock or the config, moves with no event of its own
+  instance: `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
+  `Lease.active` and `Budget.meters`. Its declaration says
+  `"volatile": true`, and so does the describe document.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`.
+
+### In the generated types
+
+The `types` output types what a read returns under `behaviors`. For each
+type that composes behaviors, each language's types write
+`<Type>Behaviors` beside the type itself, which stays the own fields, the
+read's `data`. It has a member per behavior that declares a field, under
+the behavior's name, holding those fields as the type's config narrows
+them, as [`engine-client`](/superschematic/reference/cli/#engine-client---out-filets-schema-file)
+types them: Workflow's status is one of the type's states, Links' targets
+holds each link of the config with its target's schema, Timers' deadlines
+each deadline of the config. A field a read can leave out is optional.
+For the `Task` above, in TypeScript (`types/behaviors.ts`):
+
+```ts
+/** A state of a Task's Workflow. */
+export type TaskState = 'todo' | 'doing' | 'done' | 'dropped';
+
+export interface TaskBehaviors {
+  readonly Workflow: {
+    readonly status: TaskState;
+    readonly enteredAt?: number;
+  };
+  readonly Dependencies: {
+    readonly blocked: boolean;
+  };
+  readonly Links: {
+    readonly targets: {
+      parent?: { id: string; schema: 'tasks' };
+      project: { id: string; schema: 'projects' };
+      spec?: {
+        id: string;
+        latest?: number;
+        revision?: number;
+        schema: 'documents';
+        stale?: boolean;
+      };
+    };
+  };
+}
+```
+
+and in Go (`behaviors.go`), where each object a field holds is a struct
+named by its path:
+
+```go
+type TaskBehaviors struct {
+	Workflow     TaskWorkflow     `json:"Workflow"`
+	Dependencies TaskDependencies `json:"Dependencies"`
+	Links        TaskLinks        `json:"Links"`
+}
+
+type TaskWorkflow struct {
+	Status    TaskState `json:"status"`
+	EnteredAt *int64    `json:"enteredAt,omitempty"`
+}
+```
+
+Rust's `src/behaviors.rs` writes the same structs with serde, and
+Python's `behaviors.py` Pydantic models, with `from_json` and
+`to_json_dict` on `<Type>Behaviors`. Where a language's names cannot hold
+a behavior's name or a config's key, the member takes it in PascalCase,
+each run of letters and digits capitalized and the runs joined
+(`acme.Rating` is `AcmeRating`, a state `in-progress` is `InProgress`),
+snake_case for a Rust or Python field (`acme_rating`), and the JSON keeps
+the exact name. A behavior with no narrowing, an extension's, types its
+fields as any JSON, and so do Go, Rust and Python for a value that is one
+of several types, such as a rollup's (`{ "over": true }` past its limit).
+
+A General schema whose types compose behaviors builds: its types write
+`<Type>Behaviors`, and nothing else of its build reads a behavior. A DB
+schema's builds too, and gets an engine document (below). An API's own
+type cannot compose a behavior, and the API generators do not serve an
+engine type yet, so an API that imports or projects one fails its build,
+naming the first generator that would run
+([`build`](/superschematic/reference/cli/#build-service-dir)).
+
+## Engine types
+
+A type of a DB schema that composes a behavior is an engine type (D58).
+Its instances are the engine's, kept in the engine's own tables: in a
+stack, the DB service's database, under a Postgres schema of the
+engine's (`engine` unless configured), once the generated servers open
+the engine, which they do not yet. So `sql` writes no table for it, `orm`
+no repository, and a migration plan (D27) never creates, alters or drops
+one. Tables and engine types share one schema:
+
+```json
+"Customer": { "name": "Customer", "role": "DBTable", "fields": [ ... ] },
+"Address": { "name": "Address", "role": "DBTable", "jsonField": true, "fields": [ ... ] },
+"Ticket": {
+  "name": "Ticket", "role": "DBTable",
+  "behaviors": [
+    { "name": "Workflow", "config": { "states": ["open", "resolved"], "transitions": [{ "from": "open", "to": "resolved" }] } },
+    { "name": "Links", "config": { "links": { "account": { "schema": "Account", "required": true } } } }
+  ],
+  "fields": [
+    { "name": "title", "typeRef": { "name": "string" }, "required": true },
+    { "name": "shipTo", "typeRef": { "name": "Address" } },
+    { "name": "customerId", "typeRef": { "name": "Identity.UUID" } }
+  ]
+}
+```
+
+An engine type's fields hold primitives, scalars, enums, lists and value
+types: `@jsonField` types, which a table holds as a JSON column too, and
+types a General dependency declares. It reaches another engine type's
+instances through `Links`, which names the type as its schema, and a
+table's row through the row's key in a plain field. The build refuses,
+before its generators run, an engine type that reaches a table or
+another engine type through a field, a table that references an engine
+type, an engine type that declares what only a table has (`@versioned`,
+`@optimistic`, a version graph, the `User` trait, a queue) or a field the
+database generates (`AutoGenerate`: the engine gives each instance its
+id), and a map or a union, which the engine does not validate. Each
+message names the way out.
+
+### The engine document
+
+The `enginedoc` generator writes what a server puts into the engine for
+the DB service: `engine/<service>.json` in its Go types module, which the
+Go types also hold as `EngineDocument`, the TypeScript types as
+`engineDocument` (imported from `<types package>/engine`, so a client of
+the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
+
+```json
+{
+  "version": 1,
+  "namespace": "support-db",
+  "tools": {
+    "invocationPolicy": { "key": "invocationPolicy", "values": ["auto", "ask"], "default": "auto" },
+    "keys": { "scalar": "x-superschematic-scalar", "guidance": "superschematic/operation-guidance", "parameters": [] }
+  },
+  "behaviors": [
+    { "name": "Links", "package": "@superschematic/engine" },
+    { "name": "Workflow", "package": "@superschematic/engine" }
+  ],
+  "schemas": [
+    { "name": "Account", "kind": "General", "types": { "Account": { ... } } },
+    { "name": "Ticket", "kind": "General", "scalars": { ... }, "types": { "Ticket": { ... }, "Address": { ... } } }
+  ],
+  "metaSchema": { "$defs": { ... } }
+}
+```
+
+- **`namespace`** is the engine namespace the documents are defined and
+  published in: `outputs.engine.namespace` in the service's config, else
+  the service's name, which must then be an engine namespace name
+  (lowercase letters, digits and hyphens).
+- **`schemas`** holds one schema-file document per engine type, the form
+  `format --to=json` writes: `kind: General`, named after the type, with
+  the type, the value types it reaches, and the enums and scalars they
+  use, and no imports. A scalar the core's catalog holds is its name and
+  language primitive; any other is its whole definition.
+- **`metaSchema`** is what this binary's `json-schema` prints, so a
+  document that carries an extension's decorators loads; **`tools`** are
+  the invocation policy and the vendor keys the binary registers (D11),
+  the engine's `tools` option; **`behaviors`** names each behavior the
+  types compose and the package that implements it.
+
+With today's TypeScript engine:
+
+```ts
+import { engineDocument } from '@schemas/support-db-types/engine';
+
+const engine = openEngine({
+  path, policy,
+  metaSchema: engineDocument.metaSchema,
+  tools: engineDocument.tools,
+  namespaces: { names: [engineDocument.namespace] },
+});
+const target = { namespace: engineDocument.namespace };
+for (const schema of engineDocument.schemas) engine.schemas.define(system, schema, target);
+for (const schema of engineDocument.schemas) engine.schemas.publish(system, schema.name as string, target);
+```
+
+Every document is defined before any is published, since a link may name
+a type the document defines after it. A generated server will do this
+itself before it reports ready, once the servers open the engine.
 
 ## Display
 
@@ -324,8 +512,8 @@ preconditions say.
 ## The runner
 
 Some work happens after a change commits rather than inside it:
-`Reactions` rules, and timed sweeps such as expiring leases or missed
-worker heartbeats. `engine.runner` runs it, in your server's process, as a
+`Reactions` rules, and timed sweeps such as `Timers`' deadlines, expiring
+leases or missed worker heartbeats. `engine.runner` runs it, in your server's process, as a
 principal you name:
 
 ```ts
@@ -447,7 +635,7 @@ cannot be done while a task it waits on is open.
 engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
 // { schema: 'Task', id: 't2', status: 'todo', open: true }
 engine.instances.get(alice, 'Task', 't1')?.behaviors;
-// { Workflow: { status: 'todo' }, Dependencies: { blocked: true } }
+// { Workflow: { status: 'todo', enteredAt: 1790790700324 }, Dependencies: { blocked: true } }
 ```
 
 - A blocker that ends in a `failure` or `neutral` state stays open, so a
@@ -474,16 +662,16 @@ engine.instances.get(alice, 'Task', 't1')?.behaviors;
 ## Links
 
 Typed links from an instance to instances of other schemas, or its own:
-a task's project, its parent, the spec it implements.
+a task's project, its parent, the spec it implements, its reviewers.
 
 | | |
 | --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches` |
-| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, absent when the instance holds none |
-| Operations | `link({ name, id, revision?, release? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
-| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link |
-| Guard | deleting the target of a required link is `vetoed` (`required_target`) |
-| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `required_link`, unlinking a required link; `required_target` |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned?, many?, max? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches`. `many: true` holds a list of up to `max` targets, from 1 to 100 |
+| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, a list of those for a many-valued link; absent when the instance holds none |
+| Operations | `link({ name, id, revision?, release? })`, `unlink({ name, id? })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
+| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link; a list of them for a many-valued link |
+| Guard | deleting the target of a required link is `vetoed` (`required_target`), for a many-valued link only its last target |
+| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `too_many`, a new target of a many-valued link that holds `max`; `not_linked`, unlinking a target the link does not hold; `required_link`, unlinking a required link or the last target of a required many-valued one; `required_target` |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p1' });
@@ -493,12 +681,24 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
 ```
 
 - `link` again moves a link to another target.
+- A **many-valued** link (`many: true` with a `max`) holds a list of
+  targets, a ticket's reviewers or a stylist's services, in the order they
+  were linked: `link` adds one, or pins again one it holds,
+  `unlink({ name, id })` removes one, and a create gives a list, each
+  target once. A deleted target leaves every list that holds it. While
+  the schema has instances, a link keeps whether it holds a list, and its
+  `max` may rise, not fall. What reads one target of a link, Reactions'
+  `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`
+  say, refuses a many-valued one; `listLinked`, Rollups and `revised`
+  read across the list.
 - A **required** link is given at every create, so every instance holds
   it: a create without it is refused, it can be moved but not unlinked,
-  and its target cannot be deleted while it points there. While the
-  schema has instances, a new version cannot make a link required, as it
-  cannot make a field required; with none, in any namespace that reads
-  it, a new version may change its links in any way.
+  and its target cannot be deleted while it points there. A required
+  many-valued link keeps at least one target: its last can be neither
+  unlinked nor deleted. While the schema has instances, a new version
+  cannot make a link required, as it cannot make a field required; with
+  none, in any namespace that reads it, a new version may change its
+  links in any way.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, or with `pinned:
@@ -674,11 +874,16 @@ Rules that move Workflow statuses after a change commits. They need
 
 | | |
 | --- | --- |
-| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `then` is `{ transition: <state>, link? }` |
+| Config | `rules`: 1 to 64, each `{ when, then }`. `when` is `{ enters: <state> }`, `{ changes: { field, to?, from? } }`, `{ allTerminal: { schema, link, outcomes? } }`, `{ anyTerminal: { schema, link, outcomes } }`, `{ holds: <rollup> }` or `{ revised: { link } }`; `then` is `{ transition: <state>, link? }` |
 | Fields, operations | none |
 
 - `enters` fires when this instance's status becomes the state, by a
   create or a transition.
+- `changes` fires when a create, an update or an operation of this
+  instance moves `field`, to `to` and from `from` when they are given.
+  `field` is an own field or a behavior's by qualified name, with a
+  member path after it for an object (`Lease.ended.reason`). A create
+  moves a field from absent; a delete moves nothing.
 - `allTerminal` fires when an instance of `schema` that links here
   through `link` changes or goes, and every such instance is in a
   terminal state of its Workflow, with an outcome `outcomes` lists when
@@ -749,6 +954,21 @@ failed step while the first is still failed; `anyTerminal` would fail it
 again. An `all` over no step sets nothing off, so removing a run's last
 unfinished step completes it only when a passed step is left.
 
+A ticket escalates when its priority turns urgent, and is triaged at its
+first comment:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
+    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+```
+
+A rule reads the move from the event, so an update that gives the
+priority the ticket already holds moves nothing. A rule with `to` on the
+instance itself, as the first is, acts only while the field still holds
+`to` when the runner gets to it, as an `enters` rule acts only while the
+status is still in its state.
+
 Work done against a spec goes back to review when the spec changes:
 
 ```json
@@ -765,9 +985,14 @@ claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)
   is left alone.
-- States, links and rollups that do not exist, a `holds` rollup that is
-  not an `all` or an `any`, and `enters` rules that cycle, are refused
-  when the schema is defined.
+- States, links, rollups and fields that do not exist, a `holds` rollup
+  that is not an `all` or an `any`, and `enters` and `changes` rules on
+  the status that cycle, are refused when the schema is defined. So is a
+  `changes` on a volatile field, one the engine computes at a read from
+  other instances, the clock or the config (`Rollups.values`,
+  `Dependencies.blocked`, `Links.targets`), since no event records its
+  moves, and on `Workflow.enteredAt`, which every move of the status
+  moves.
 - Rules across instances can chain, a `holds` rule up a tree of tasks
   say; the runner's `maxDepth` stops a loop.
 
@@ -1003,6 +1228,280 @@ engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the re
   `releaseCommit`, not `release`, because `Lease` has `release`, so a
   type composes both. Lease's guard then holds `Branches`' writes to the
   lease's holder, as it holds any writing operation
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## StateRules
+
+Fields that a state of the type's `Workflow` requires or freezes. An
+invoice is drafted with any fields, is sent only with a customer, an
+amount and its lines, which then stay as they are, and keeps every field
+once it is paid.
+
+| | |
+| --- | --- |
+| Config | `states`: by a state of the type's Workflow, `required`, the type's own top-level fields an instance must hold to enter the state and keeps while in it, and `frozen`, the ones that do not change while it is in it, a list or `"all"`; `permission`: what a caller needs to change a frozen field, optional |
+| Fields, operations | none |
+| Guard | a transition into a state without a field it requires is `vetoed` (409) with `details.code` `missing_fields`; while the instance is in a state, an update that clears a field the state requires is `required_fields`, and one that changes a frozen field `frozen_fields`. `details.details` names the `state` and the `fields` |
+| Validates | a create whose Workflow's initial state requires a field it does not give: `invalid_instance` (422), with the rule `required` at the field |
+
+```ts
+import { Generic } from "superscalar";
+import { Validate, behavior } from "@superschematic/schema";
+
+@behavior("Workflow", {
+  states: ["draft", "sent", "paid", "void"],
+  transitions: [
+    { from: "draft", to: "sent" },
+    { from: "sent", to: "draft" },
+    { from: "sent", to: "paid" },
+    { from: "draft", to: "void" },
+    { from: "sent", to: "void" },
+  ],
+  outcomes: { void: "neutral" },
+})
+@behavior("StateRules", {
+  states: {
+    sent: { required: ["customer", "amount", "lines"], frozen: ["customer", "amount", "lines"] },
+    paid: { frozen: "all" },
+    void: { frozen: "all" },
+  },
+  permission: "invoices.amend",
+})
+export abstract class Invoice {
+  title: Validate<string, { maxLength: 200 }>;
+  customer?: string;
+  amount?: Generic.Int64;
+  lines?: string[];
+  notes?: string;
+}
+```
+
+```ts
+engine.instances.create(me, 'invoices', { title: 'March', customer: 'Acme' }, { id: 'march' });
+engine.instances.invoke(me, 'invoices', 'march', 'transition', { to: 'sent' });
+// BehaviorVetoError (missing_fields): invoices march cannot move to sent
+// without amount and lines, which sent requires
+engine.instances.update(me, 'invoices', 'march', { amount: 1200, lines: ['Consulting'] });
+engine.instances.invoke(me, 'invoices', 'march', 'transition', { to: 'sent' });
+engine.instances.update(me, 'invoices', 'march', { amount: 1300 });
+// BehaviorVetoError (frozen_fields): invoices march is sent, which freezes amount
+```
+
+- **Held.** A field is held when it is neither absent nor null, so `""`,
+  `0` and `[]` are held.
+- **Every write.** The rules bind a caller's update and a behavior's
+  `update()` alike: a `Retries` result in a frozen field refuses the
+  attempt, and a `Revisions` approval of a patch to one is vetoed.
+  `propose` checks its patch without guards, so the proposal is accepted
+  and its approval refused.
+- **Every move.** A transition is held to what the state requires
+  whoever asks: a caller, a reaction, an expiring lease, another
+  behavior's call. An operation that updates the fields and moves the
+  status in one call is judged on the fields as its update left them.
+- **The permission.** A caller with `permission` may change a frozen
+  field. Nobody clears a field the state requires, and nobody moves the
+  instance into a state without what it requires.
+- **New versions.** Any config may change, and `StateRules` can be added
+  to and removed from a schema with instances. An instance that predates
+  a requirement keeps working: only clearing a required field it holds
+  is refused, until it next enters the state.
+
+## Approvals
+
+Sign-offs that gate the type's Workflow: an expense is not approved
+until two managers have signed it off, and not paid until finance has.
+
+| | |
+| --- | --- |
+| Config | `gates`: by state of the type's Workflow, `{ count, permission, from?, excludeCreator? }`: how many distinct principals must sign off, the permission each needs, the states a move from is gated (every state when absent), and whether the instance's creator is refused (`true` when absent); `resetOnChange` (`true` when absent) |
+| Field | `gates`: `{ <state>: { signedBy } }`, the subjects whose sign-offs count, in the order they signed; a gate with none is absent |
+| Operations | `signOff({ state, note? })`, `withdrawSignOff({ state })`, and the read-only `listSignOffs({ state?, limit?, cursor? })`, which lists the consumed ones too, with `consumedAt` |
+| Guard | a transition into a gated state, from a state its `from` allows, with fewer sign-offs than `count` is `vetoed` (`approvals_missing`), with `{ state, required, count }` in `details.details` |
+| Vetoes | `no_gate`, a state the config does not gate; `in_state`, a sign-off for the state the instance is in; `creator_cannot_sign`; `already_signed`; `not_signed`, a withdrawal with no sign-off to withdraw. A caller without the gate's permission is `forbidden` (403) |
+
+On an `expenses` schema whose claims move from `submitted` to
+`approved` and on to `paid`:
+
+```json
+{ "name": "Approvals", "config": { "gates": {
+    "approved": { "count": 2, "permission": "expenses.approve" },
+    "paid": { "count": 1, "permission": "expenses.pay", "from": ["approved"] } } } }
+```
+
+```ts
+engine.instances.invoke(ann, 'expenses', 'trip', 'signOff', { state: 'approved' });
+// { state: 'approved', subject: 'ann', at: 1760000000000, signedBy: ['ann'], count: 2 }
+engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals;
+// { gates: { approved: { signedBy: ['ann'] } } }
+```
+
+- **What consumes a sign-off.** A change of the instance's own fields, an
+  update or another behavior's write such as `Revisions`' `approve`,
+  consumes every gate's sign-offs, so what was signed is what moves;
+  `resetOnChange: false` keeps them. Entering a gated state consumes its
+  own, whoever moves the instance (a caller, `Reactions` on the runner,
+  another behavior), so a claim sent back to `submitted` is signed again
+  before it is approved again.
+- **Who signs.** A sign-off is the caller's, by subject, so one principal
+  counts once. Nobody signs for the state the instance is in, and the
+  instance's creator not at all unless `excludeCreator` is `false`. The
+  count a gate needs stays in the config: a new version that changes it
+  applies to the sign-offs already given.
+- **New versions.** Gates may be added, changed and removed; a removed
+  gate's sign-offs are consumed. `Approvals` can be added to a schema
+  with instances, and not removed from one.
+- **Deleting.** Deleting an instance deletes its sign-offs.
+- **Lease.** On a leased type, list `Approvals.signOff` and
+  `Approvals.withdrawSignOff` in `Lease`'s `exempt`, or the lease refuses
+  every principal but its holder
+  ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## Numbering
+
+A number a person reads on each instance: an invoice's `INV-2026-0042`,
+a ticket's `T-17`. The count runs per schema, per target of a scope
+link and per year, as the config says, and the create sets the number
+in its own transaction.
+
+```ts
+import { behavior } from "@superschematic/schema";
+
+@behavior("Links", { links: { project: { schema: "projects", required: true } } })
+@behavior("Numbering", { format: "INV-{yyyy}-{seq:4}", scope: { link: "project" }, reset: "yearly" })
+export abstract class Invoice {
+  title: string;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `format` (required): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` or `{yy}`, the UTC year the instance was created in; `scope: { link }`: a required, single-valued link of the type's `Links`, each of whose targets counts on its own; `reset: "yearly"`: each count starts again at 1 every UTC year, which needs the year in `format` |
+| Fields | `seq`, the number in its count, and `label`, the number as `format` prints it; both absent until the instance is numbered |
+| Operation | `assignNumber()`, which numbers an instance made before its schema composed `Numbering` |
+| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year, and a `scope` link that is not a required, single-valued link of the type's `Links` (`invalid_schema`) |
+
+```ts
+engine.instances.create(me, "invoices", { title: "Kickoff" }, { behaviors: { Links: { project: "launch" } } }).behaviors.Numbering;
+// { seq: 1, label: 'INV-2026-0001' }
+engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-0001" } });
+// the launch project's first invoice of 2026, and each other project's
+```
+
+- **No gap a refused create leaves.** The number is set after every
+  behavior's `initialize`, in the create's transaction, so a create
+  refused after it takes none. A delete leaves a gap: the next create
+  takes the next number.
+- **Unique within its scope.** A label never repeats within its count.
+  With `scope`, each target counts from 1, so a list by label can return
+  one instance per target. Moving the scope link keeps the number.
+- **The year.** `{yyyy}`, `{yy}` and `reset` read the year the instance
+  was created in, UTC, so a number given later still counts in its year.
+- **Nothing changes a number.** An update writes own fields only, and no
+  operation writes a number once set.
+- **Filters.** `where: { "Numbering.label": ... }` and `"Numbering.seq"`
+  read through an index each.
+- **Adding it later.** `Numbering` can be added to a schema with
+  instances; each holds no number (`behaviors.Numbering` is `{}`, and
+  `where: { "Numbering.seq": null }` lists them) until `assignNumber()`
+  numbers it with an event. A deployment backfills by invoking it on
+  each in creation order; on an instance numbered already it changes
+  nothing.
+- **New versions.** While the schema has instances, `format`, `scope`
+  and `reset` stay, and `Numbering` stays: added again, it would count
+  from 1. With none, any change, and the counts start again at 1.
+- **Lease.** On a type that composes `Lease`, list
+  `"Numbering.assignNumber"` in its `exempt`, or a backfill of a leased
+  instance is refused for anyone but its holder.
+
+## Timers
+
+Deadlines on an instance that move it on when nobody does: a request open
+four hours without an answer is escalated, one waiting a week on its
+customer is resolved, and a visit is reminded a day before its time. The
+runner fires each deadline once it is due.
+
+```ts
+import { Temporal } from "superscalar";
+import { behavior } from "@superschematic/schema";
+
+@behavior("Workflow", {
+  states: ["open", "waiting", "escalated", "resolved"],
+  transitions: [
+    { from: "open", to: "waiting" },
+    { from: "waiting", to: "open" },
+    { from: "open", to: "escalated" },
+    { from: "escalated", to: "open" },
+    { from: "open", to: "resolved" },
+    { from: "waiting", to: "resolved" },
+    { from: "escalated", to: "resolved" },
+  ],
+})
+@behavior("Timers", {
+  deadlines: {
+    respond: { start: { enters: "open" }, afterMs: 14400000, then: { transition: "escalated" }, until: { leaves: "open" } },
+    lapse: { start: { enters: "waiting" }, afterMs: 604800000, then: { transition: "resolved" }, until: { leaves: "waiting" } },
+    remind: { start: { field: "visitAt" }, afterMs: -86400000, until: { enters: ["resolved"] } },
+  },
+  sweepMs: 60000,
+  permission: "requests.timers",
+})
+export abstract class Request {
+  title: string;
+  visitAt?: Temporal.DateTime;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `deadlines` (required): by name, `{ start, afterMs?, then?, until? }`. `start` is `{ create: true }`, `{ enters: <state> }`, each entry into a state of the type's Workflow, or `{ field: <own date-time field> }`; `afterMs`, from the start, 0 by default and negative only for a field start; `then: { transition, from? }`, the move a fire makes, from the state the deadline starts in unless `from` names others (a field start names them); `until: { leaves }` (the state it starts in) or `{ enters: [states] }`, what cancels a pending deadline. `sweepMs` (5000 by default, at least 1000); `permission`, to reset or snooze a deadline, which nobody may without it |
+| Field | `deadlines`: `{ <name>: { dueAt, fired, firedAt?, outcome? } }`, each started deadline; `outcome` is what its `then` met: `moved`, `skipped` (the status was not one it moves from), `vetoed` or `forbidden` |
+| Operations | `fireTimer({ deadline })`, which the runner calls on each due deadline; `resetTimer({ deadline })`; `snoozeTimer({ deadline, dueAt })` |
+| Vetoes | `no_deadline`, a deadline the config does not name; `not_armed`, a reset with nothing to start from now or a snooze of a deadline not started, either while `until` holds. A caller without `permission` is `forbidden` (403) |
+| Refusals at define | a state the type's Workflow lacks, a `start.field` that is not an own date-time field, a negative `afterMs` for another start, a `then` with no transition from a `from` state to its state, a field start's `then` without `from` or `until.leaves`, and an `enters`, a `then` or an `until` on a type without `Workflow` (`invalid_schema`) |
+
+```ts
+engine.instances.create(me, "requests", { title: "Printer jams" }, { id: "jam" }).behaviors.Timers;
+// { deadlines: { respond: { dueAt: 1760014800000, fired: false } } }
+// four hours later, the runner's sweep fires it:
+engine.instances.get(me, "requests", "jam")?.behaviors;
+// { Workflow: { status: 'escalated', ... }, Timers: { deadlines: { respond: { dueAt: 1760014800000, fired: true, firedAt: 1760014860000, outcome: 'moved' } } } }
+```
+
+- **What a deadline starts from.** A deadline arms when its fact
+  changes: the create, the status's entry into the state (its
+  `enteredAt`), or the field's value. A write that leaves the fact as it
+  is changes nothing, so a snooze survives it, and a status that leaves
+  the state and comes back, within one call too, starts the deadline
+  again. A field moved arms it again, unfired; a field cleared cancels
+  it.
+- **Fired once, whatever the move meets.** A fire marks the deadline
+  fired, then moves the status when it is one of `from`. A guard's veto
+  or a transition permission the caller lacks leaves the status as it
+  is, and `outcome` records which; the deadline is not tried again, so a
+  stuck instance holds nothing back.
+- **Overdue.** Nothing in `deadlines` follows the clock: a deadline not
+  fired is overdue once its `dueAt` has passed. A `Reactions` rule hears
+  a fire with `{ when: { changes: { field: "Timers.deadlines.respond.fired", to: true } } }`.
+- **The runner.** Every `sweepMs`, the runner fires the due deadlines of
+  each schema in each namespace, earliest first, up to 1000 a run, as its
+  principal, which needs `read` and `write` on the schema and any
+  permission a `then` transition names. An archived namespace fires nothing until it
+  is unarchived; then its overdue deadlines fire, 1000 a run. A caller
+  who may write the instance can call `fireTimer` itself; on a deadline
+  not due, or fired already, it changes nothing.
+- **Snooze and reset.** `snoozeTimer` moves a started deadline to
+  `dueAt`, epoch milliseconds, and a fired one fires again then;
+  `resetTimer` starts one again from its fact. Both need `permission`.
+- **New versions.** Any change: a new `afterMs` moves each pending
+  deadline from its start, but a snoozed one; a removed deadline, or one
+  whose `start` changes, is dropped, and arms again at the instance's
+  next write. A new field deadline arms every instance at the publish; a
+  new `create` or `enters` deadline arms at each instance's next write, so
+  an instance never written again never arms it. `Timers` can be added
+  to and removed from a schema with instances.
+- **Deleting.** Deleting an instance deletes its deadlines.
+- **Lease.** On a leased type, list `"Timers.fireTimer"` in `Lease`'s
+  `exempt`, or the holder's lease refuses the runner's fire
   ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ## Where to go next

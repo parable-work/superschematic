@@ -65,6 +65,17 @@
       },
       "type": "object"
     },
+    "EngineOutputConfig": {
+      "additionalProperties": false,
+      "description": "A DB service's engine document (D58), which the build writes when a type of the schema composes a behavior: an engine type, whose instances the engine keeps, which sql and orm leave out.",
+      "properties": {
+        "namespace": {
+          "description": "The engine namespace the schema's engine types are defined, published and instantiated in: lowercase letters, digits and hyphens, starting with a letter, at most 63 characters. Unset is the service's name.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ExtensionKind": {
       "description": "The name of a kind an extension registers (\"Platform\"). The authoring packages cannot see the registry, so the name is any string here; superschematic checks it against the registered kinds when it loads the config.",
       "type": "string"
@@ -151,6 +162,9 @@
         },
         "ci": {
           "$ref": "#/definitions/CiOutputConfig"
+        },
+        "engine": {
+          "$ref": "#/definitions/EngineOutputConfig"
         },
         "sdk": {
           "$ref": "#/definitions/SdkOutputConfig"

@@ -76,6 +76,18 @@ jobs:
       - name: Compile server shop-api
         working-directory: schemas/dist/server/shop-stack/shop-api
         run: go build -mod=mod -o /dev/null .
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
+      - name: Build site shop-web
+        working-directory: web/shop-web
+        run: bun run build
 
   plan-beta:
     name: plan Beta
@@ -209,6 +221,16 @@ jobs:
       - name: Build the services
         if: github.event.action != 'closed'
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        if: github.event.action != 'closed'
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
       - name: Deploy Review for the pull request
         if: github.event.action != 'closed'
         run: superschematic stack deploy Review --stack schemas/services/shop-stack --param pr=${{ github.event.pull_request.number }}
@@ -260,6 +282,15 @@ jobs:
           service_account: shop-stack-deployer@acme-beta.fake.test
       - name: Build the services
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
       - name: Deploy Beta
         run: superschematic stack deploy Beta --stack schemas/services/shop-stack
 
@@ -307,5 +338,14 @@ jobs:
           service_account: shop-stack-deployer@acme-live.fake.test
       - name: Build the services
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
       - name: Deploy Live
         run: superschematic stack deploy Live --stack schemas/services/shop-stack

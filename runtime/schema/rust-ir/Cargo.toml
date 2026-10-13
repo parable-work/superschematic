@@ -1,0 +1,54 @@
+[package]
+name = "superschematic-schema-ir"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.99.0"
+description = "The behavior engine's run-time schema reader: the IR reader, validation and parse, and the strict schema-file loader"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+# It links superscalar's core by path, from the checkout superschematic.toml's
+# [paths] scalar_rust names, which no registry holds; the engine (D58)
+# depends on it by path.
+publish = false
+
+# Standalone crate, as the schema runtime beside it is: it carries its own
+# dependency versions and lock file.
+[workspace]
+
+[features]
+# JSON Schema checked with the jsonschema crate and its failures written as
+# ajv writes them: what the schema-file loader and the behavior engine's
+# registry (a behavior's config, parameters and results) tell a client.
+ajv = ["dep:jsonschema"]
+# The strict schema-file loader: a schema file in the JSON data form,
+# checked against a meta-schema with the jsonschema crate and decoded as the
+# Go reader decodes it.
+schemafile = ["ajv"]
+
+[dependencies]
+regex = "1.12"
+serde = "1.0.228"
+serde_json = "1.0.149"
+# The ajv feature's JSON Schema validator (2020-12). Without its default
+# features it fetches nothing over the network or from files.
+jsonschema = { version = "0.55.1", default-features = false, optional = true }
+# What the generated Rust validators share: the error types, code-point
+# lengths and the pattern translation.
+superschematic-schema-runtime = { path = "../rust" }
+# The scalar core every scalar's own checks are. Without its default
+# lossless-json feature it leaves serde_json's arbitrary_precision to the
+# build that links this crate; it always turns on preserve_order.
+superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
+
+# The schema-file corpus and the reader's syntax errors need the loader.
+[[test]]
+name = "schema_file_parity"
+required-features = ["schemafile"]
+
+[[test]]
+name = "json_syntax_errors"
+required-features = ["schemafile"]
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

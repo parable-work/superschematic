@@ -37,6 +37,9 @@ type fakeCloud struct {
 	objects map[string][]byte
 	secrets map[string]*fakeSecret
 
+	// lifecycle holds each bucket's lifecycle rule.
+	lifecycle map[string]gcp.LifecycleRule
+
 	// images holds each pushed image's digest by `<repository>:<tag>`;
 	// builds and jobs what RunBuild and EnsureJob were last given;
 	// graphJobs the image of each Cloud Run job the graph made, which a
@@ -104,7 +107,7 @@ var _ gcp.Cloud = (*fakeCloud)(nil)
 
 func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
-		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{},
+		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string]gcp.LifecycleRule{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
 		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
@@ -124,6 +127,14 @@ func (c *fakeCloud) ImageDigest(_ context.Context, image string) (string, error)
 	defer c.mu.Unlock()
 	if digest, ok := c.images[image]; ok {
 		return digest, nil
+	}
+	// An image by digest exists when a tag of its repository names it.
+	if repo, digest, ok := strings.Cut(image, "@"); ok {
+		for tagged, d := range c.images {
+			if d == digest && strings.HasPrefix(tagged, repo+":") {
+				return digest, nil
+			}
+		}
 	}
 	return "", fmt.Errorf("%s: %w", image, fs.ErrNotExist)
 }
@@ -255,6 +266,20 @@ func (c *fakeCloud) EnsureBucket(_ context.Context, project, bucket, location st
 	}
 	c.buckets[bucket] = location
 	c.change("create bucket %s in %s/%s", bucket, project, location)
+	return true, nil
+}
+
+func (c *fakeCloud) EnsureLifecycleRule(_ context.Context, bucket string, rule gcp.LifecycleRule) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.buckets[bucket]; !ok {
+		return false, fmt.Errorf("no bucket %s", bucket)
+	}
+	if prev, ok := c.lifecycle[bucket]; ok && slices.Equal(prev.Prefixes, rule.Prefixes) && prev.AgeDays == rule.AgeDays {
+		return false, nil
+	}
+	c.lifecycle[bucket] = gcp.LifecycleRule{Prefixes: slices.Clone(rule.Prefixes), AgeDays: rule.AgeDays}
+	c.change("lifecycle of bucket %s: delete %s after %d days", bucket, strings.Join(rule.Prefixes, ", "), rule.AgeDays)
 	return true, nil
 }
 
@@ -571,6 +596,7 @@ func TestBootstrap(t *testing.T) {
 		"enable certificatemanager.googleapis.com", "enable dns.googleapis.com", "enable sts.googleapis.com",
 		"enable cloudscheduler.googleapis.com",
 		"create bucket acme-staging-superschematic-state in acme-staging/us-east1",
+		"lifecycle of bucket acme-staging-superschematic-state: delete superschematic/builds/, superschematic/migrations/ after 30 days",
 		"create key acme-staging/us-east1/superschematic/pulumi-state",
 		"create secret acme-staging/shop-cloudflare-dns-acme_dev",
 		"grant serviceAccount:shop-deployer@acme-staging.iam.gserviceaccount.com on acme-staging/shop-cloudflare-dns-acme_dev",

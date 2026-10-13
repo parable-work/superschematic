@@ -168,7 +168,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			Name:      CloudRunWorker,
 			Extension: Name,
 			Kind:      ir.DeployableWorker,
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			Settings:  json.RawMessage(cloudRunWorkerSettings),
 			NameOf:    serviceName,
 			AddressOf: func(registry.PlatformContext) any { return nil },

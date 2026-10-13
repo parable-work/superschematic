@@ -1,0 +1,499 @@
+# Projects, as pages: listed by status, read, started from an input,
+# edited with a patch whose tags and milestones are rows, deleted, and
+# archived with a reason, each owned by a member the app's choices name; a
+# project's tasks, listed, read and added under it; the tasks a label
+# marks, listed under a label that has no pages; members, which only a
+# member reader lists; and the signed-in viewer, one object on a path with
+# no parameter, which is no resource. Reading a project needs
+# projects.read and changing one projects.write.
+#
+# Documents, whose paths are the edge cases: a title that may be absent,
+# the drafts' list at documents/drafts beside a document at
+# documents/{id}, a document read with a query argument, started from an
+# optional input that its replacement requires, and a document's comments,
+# which a PUT and a DELETE of their whole collection would change and a
+# DELETE of its cover would remove, none of which has a page. Reading a
+# document needs documents.read and changing one documents.write.
+name: fixture-pages-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Temporal.Date:
+    name: Temporal.Date
+    languagePrimitive: string
+enums:
+  # Where a project is.
+  ProjectStatus:
+    name: ProjectStatus
+    values:
+      - name: Planned
+        serializedAs: planned
+      - name: Active
+        serializedAs: active
+      - name: Done
+        serializedAs: done
+types:
+  Project:
+    name: Project
+    role: APIView
+    display:
+      noun: Project
+      plural: Projects
+      titleField: name
+      createLabel: Start a project
+      summaryFields: [name, ownerId, status, budget]
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+      # Who owns the project, a member's id, which the app's choices name.
+      - name: ownerId
+        title: Owner
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: ProjectStatus }
+        required: true
+      - name: budget
+        typeRef: { name: number }
+        required: true
+      - name: description
+        typeRef: { name: string }
+      - name: dueOn
+        title: Due on
+        typeRef: { name: Temporal.Date }
+      - name: archived
+        typeRef: { name: boolean }
+        required: true
+      - name: tags
+        typeRef: { name: string, isArray: true }
+      - name: milestones
+        typeRef: { name: Milestone, isArray: true }
+  Milestone:
+    name: Milestone
+    role: APIView
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+      - name: dueOn
+        title: Due on
+        typeRef: { name: Temporal.Date }
+  MilestoneInput:
+    name: MilestoneInput
+    role: APIInput
+    display:
+      noun: Milestone
+      createLabel: Add a milestone
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 1
+      - name: dueOn
+        title: Due on
+        typeRef: { name: Temporal.Date }
+  ProjectInput:
+    name: ProjectInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 2
+        validateMaxLength: 80
+      - name: ownerId
+        title: Owner
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: ProjectStatus }
+        required: true
+      - name: budget
+        typeRef: { name: number }
+        required: true
+        validateMin: 0
+      - name: description
+        typeRef: { name: string }
+        validateMaxLength: 500
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        validateListMax: 3
+  ProjectPatch:
+    name: ProjectPatch
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 2
+        validateMaxLength: 80
+      - name: ownerId
+        title: Owner
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: ProjectStatus }
+        required: true
+      - name: budget
+        typeRef: { name: number }
+        required: true
+        validateMin: 0
+      - name: description
+        typeRef: { name: string }
+        validateMaxLength: 500
+      - name: dueOn
+        title: Due on
+        typeRef: { name: Temporal.Date }
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        validateListMax: 3
+      - name: milestones
+        typeRef: { name: MilestoneInput, isArray: true }
+        validateListMax: 5
+      # Whether the project's owner hears of the change; the project does
+      # not hold it, so the edit form starts it as a new form does.
+      - name: notifyOwner
+        typeRef: { name: boolean }
+        default: "true"
+  Task:
+    name: Task
+    role: APIView
+    display:
+      noun: Task
+      plural: Tasks
+      titleField: title
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+      - name: done
+        typeRef: { name: boolean }
+        required: true
+  TaskInput:
+    name: TaskInput
+    role: APIInput
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 1
+        validateMaxLength: 120
+  # A document, whose title may be absent: a list links such a document
+  # by its noun and id.
+  Document:
+    name: Document
+    role: APIView
+    display:
+      titleField: title
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: title
+        typeRef: { name: string }
+      - name: body
+        typeRef: { name: string }
+  DocumentInput:
+    name: DocumentInput
+    role: APIInput
+    fields:
+      - name: title
+        typeRef: { name: string }
+        validateMaxLength: 80
+      - name: body
+        typeRef: { name: string }
+        validateMaxLength: 2000
+  Comment:
+    name: Comment
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: text
+        typeRef: { name: string }
+        required: true
+  Member:
+    name: Member
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: email
+        typeRef: { name: string }
+        required: true
+  Viewer:
+    name: Viewer
+    role: APIView
+    fields:
+      - name: subject
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: ProjectQueries
+    operations:
+      # The projects in any of the statuses, or every project.
+      - name: listProjects
+        typeRef: { name: Project, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: projects
+        permissions: [projects.read]
+        arguments:
+          - name: statuses
+            typeRef: { name: ProjectStatus, isArray: true }
+            isQuery: true
+      # One project.
+      - name: getProject
+        typeRef: { name: Project }
+        required: true
+        httpMethod: GET
+        restPath: "projects/{id}"
+        permissions: [projects.read]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+  - name: ProjectMutations
+    operations:
+      # Starts a project.
+      - name: createProject
+        typeRef: { name: Project }
+        required: true
+        httpMethod: POST
+        restPath: projects
+        permissions: [projects.write]
+        arguments:
+          - name: input
+            typeRef: { name: ProjectInput }
+            required: true
+      # Changes a project.
+      - name: updateProject
+        typeRef: { name: Project }
+        required: true
+        httpMethod: PATCH
+        restPath: "projects/{id}"
+        permissions: [projects.write]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: ProjectPatch }
+            required: true
+      # Deletes a project and its tasks.
+      - name: deleteProject
+        typeRef: { name: Project }
+        required: true
+        httpMethod: DELETE
+        restPath: "projects/{id}"
+        permissions: [projects.write]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+      # Archives a project, recording why; an archived one cannot be
+      # archived again.
+      - name: archiveProject
+        typeRef: { name: Project }
+        required: true
+        httpMethod: POST
+        restPath: "projects/{id}/archive"
+        permissions: [projects.write]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: reason
+            description: Why the project is archived.
+            typeRef: { name: string }
+            required: true
+            validateMinLength: 3
+            validateMaxLength: 200
+  - name: TaskQueries
+    operations:
+      # A project's tasks.
+      - name: listTasks
+        typeRef: { name: Task, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "projects/{projectId}/tasks"
+        permissions: [projects.read]
+        arguments:
+          - name: projectId
+            typeRef: { name: Identity.UUID }
+            required: true
+      # One task of a project.
+      - name: getTask
+        typeRef: { name: Task }
+        required: true
+        httpMethod: GET
+        restPath: "projects/{projectId}/tasks/{id}"
+        permissions: [projects.read]
+        arguments:
+          - name: projectId
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+      # The tasks a label marks, under a label nothing lists or reads.
+      - name: listLabelledTasks
+        typeRef: { name: Task, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "labels/{label}/tasks"
+        permissions: [projects.read]
+        arguments:
+          - name: label
+            typeRef: { name: string }
+            required: true
+  - name: TaskMutations
+    operations:
+      # Adds a task to a project.
+      - name: addTask
+        typeRef: { name: Task }
+        required: true
+        httpMethod: POST
+        restPath: "projects/{projectId}/tasks"
+        permissions: [projects.write]
+        arguments:
+          - name: projectId
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: input
+            typeRef: { name: TaskInput }
+            required: true
+  - name: DocumentQueries
+    operations:
+      # Every document.
+      - name: listDocuments
+        typeRef: { name: Document, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: documents
+        permissions: [documents.read]
+      # The documents not yet published, a collection whose path extends
+      # the documents'.
+      - name: listDrafts
+        typeRef: { name: Document, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: documents/drafts
+        permissions: [documents.read]
+      # One document, at its latest revision unless the query names one.
+      - name: getDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: GET
+        restPath: "documents/{id}"
+        permissions: [documents.read]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: revision
+            typeRef: { name: number }
+            isQuery: true
+            validateMin: 1
+      # A document's comments.
+      - name: listComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.read]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+  - name: DocumentMutations
+    operations:
+      # Starts a document, blank unless the input says otherwise.
+      - name: createDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: POST
+        restPath: documents
+        permissions: [documents.write]
+        arguments:
+          - name: input
+            typeRef: { name: DocumentInput }
+      # Replaces a document's title and body.
+      - name: replaceDocument
+        typeRef: { name: Document }
+        required: true
+        httpMethod: PUT
+        restPath: "documents/{id}"
+        permissions: [documents.write]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: input
+            typeRef: { name: DocumentInput }
+            required: true
+      # Replaces every comment of a document.
+      - name: replaceComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.write]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+          - name: texts
+            typeRef: { name: string, isArray: true }
+            required: true
+      # Removes every comment of a document.
+      - name: clearComments
+        typeRef: { name: Comment, isArray: true }
+        required: true
+        httpMethod: DELETE
+        restPath: "documents/{documentId}/comments"
+        permissions: [documents.write]
+        arguments:
+          - name: documentId
+            typeRef: { name: string }
+            required: true
+      # Removes a document's cover image.
+      - name: removeCover
+        typeRef: { name: Document }
+        required: true
+        httpMethod: DELETE
+        restPath: "documents/{id}/cover"
+        permissions: [documents.write]
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: MemberQueries
+    operations:
+      # Everyone who works on projects.
+      - name: listMembers
+        typeRef: { name: Member, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: members
+        permissions: [members.read]
+  - name: ViewerQueries
+    operations:
+      # The signed-in caller.
+      - name: me
+        typeRef: { name: Viewer }
+        required: true
+        httpMethod: GET
+        restPath: auth/me
+        auth: true

@@ -3228,7 +3228,7 @@ func ShippingAddressFromYAMLNonStrict(data []byte) (*ShippingAddress, error) {
 	return decoded, nil
 }
 
-// StockLevel - How many units of a product the warehouse holds.
+// StockLevel - How many units of a product the warehouse holds, one row per product.
 type StockLevel struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 

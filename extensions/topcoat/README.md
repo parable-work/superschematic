@@ -21,14 +21,20 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
   nests, as a Topcoat record a page can hand the browser.
-- reads and renders a form per input type an operation a page calls takes
-  whose fields a form holds, by the input type's rules ([Forms](#forms)).
+- reads and renders a form per input type an operation a page calls
+  takes, nested objects and lists included, by the input type's rules,
+  and per operation a page submits with arguments, path, query and body,
+  by the router's rules, a GET's a filter read from the query
+  ([Forms](#forms)).
 - lets browser code call each operation through a Topcoat procedure, its
   arguments and result records and a refusal a record it reads
   ([Procedures](#procedures)).
 - renders each record as a description list and as a table, labeled by
-  the schema's titles and its types' `@display`
+  the schema's titles and its types' `@display`, a time in words and an
+  id by the name the app's choices give it
   ([Display components](#display-components)).
+- when asked, serves a page per resource the operations describe, under a
+  prefix, with a layout, a nav and an index ([Pages](#pages)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -71,10 +77,13 @@ outputs: {
 }
 ```
 
-Records, forms, procedures and views are on by default. `forms: false`,
-`procedures: false` and `views: false` each leave out their module;
+Records, forms, procedures and views are on by default. `forms: false`
+leaves out both kinds of form; `procedures: false` and `views: false` each
+leave out their module;
 `records: false` leaves out the records, and with them the procedures and
-the views, which are built on records.
+the views, which are built on records. Pages are off by default:
+`pages: { enabled: true, prefix: "/console" }` turns them on, and they
+need the records, the forms and the views ([Pages](#pages)).
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -92,7 +101,31 @@ services = ["shop-orders"]
 ```
 
 A listed service gets the crate with every default when its server is
-Rust. `outputs.topcoat` in its config, when present, wins.
+Rust. `outputs.topcoat` in its config, when present, wins. The table's
+`pages_prefix` also turns on the listed service's pages, under it:
+
+```toml
+[extension.topcoat]
+services = ["shop-orders"]
+pages_prefix = "/console"
+```
+
+A path serves one listed service. With more than one, `pages_prefix` is a
+table of the services whose pages are on, each with its own prefix, and a
+service it does not name has none:
+
+```toml
+[extension.topcoat]
+services = ["shop-orders", "shop-catalog"]
+pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/catalog" }
+```
+
+An app that links two crates registers each one's pages, layout and
+index at its prefix, so the table refuses one path for several services,
+which would register a page twice, as Topcoat's router refuses, and a
+prefix that is, or is under, another's, which would put one console's
+layout around the other's pages. It refuses a service `services` does
+not list too.
 
 ## The app
 
@@ -103,16 +136,19 @@ guide walks it. Its `app` mounts the crate:
 
 ```rust
 let implementations = implementations(shop, Arc::clone(&users));
-let pages = IdentityPageAuthenticator::of(&implementations);
+let authenticator = IdentityPageAuthenticator::of(&implementations);
 Router::builder()
     .discover()
     .app_context(users)
-    .shop_orders(implementations, pages)
+    .app_context(console_settings())
+    .shop_orders(implementations, authenticator)
     .build()
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
+`console_settings()` is the [pages](#pages)' `pages::Settings`, since
+acme's `superschematic.toml` turns shop-orders' console on.
 The authenticator establishes a page's caller, here from the session the
 shop's users sign in with ([Users and sessions](#users-and-sessions)); an
 app whose users are its own writes one over a Topcoat session, say. The
@@ -181,30 +217,56 @@ the API's value.
 
 ## Forms
 
-The input type of an operation with an in-process call whose fields a
-form holds (a string, a number, a boolean or an enum, each alone, declared
-by the service itself) gets a form in `forms`:
+`forms` has two kinds of form, which share their controls, their
+decoding and their errors:
 
-- **`<Input>Form`** holds each field as the browser sends it
-  (`Option<String>`), so it deserializes from Topcoat's `Form<T>`, and a
-  refused form renders again exactly as it was sent.
-- **`parse()`** reads the fields as the input type's JSON and parses it with
-  the generated `parse_<type>` and its rules ([D14](../../docs/DECISIONS.md)),
-  undeclared keys refused. A checkbox is true when sent. Each field's
-  errors come back as `FormErrors`. `FormErrors::from_api` reads an
-  operation's refusal the same way, so a form shows both.
-- **`<input>_fields(form, errors)`** is a component that renders each field
-  with its label, its value as sent, and its errors:
-  - each field's input type: email, url, tel, number (`step="1"` for an
-    integer) or checkbox, from the field's type; `<select>` for an enum;
-  - the attributes its rules give it: `required`, `min`/`max`,
-    `minlength`/`maxlength`, and `pattern`. A pattern is written only when
-    a browser reads it as the server does: no group syntax, and nothing
-    the HTML `v` flag refuses. It is never written on an email or URL
-    input, which checks its own syntax.
+- an **input form**, `<Input>Form`, per input type an operation with an
+  in-process call takes, declared by the service itself, parsed by the
+  input type's rules ([D14](../../docs/DECISIONS.md)). The user model's
+  operations have no in-process call, so login's input and the
+  administration routes' arguments get none: a page signs a user in
+  through the identity service, as above;
+- an **argument form**, `<Ns><Op>ArgsForm`, per operation a form submits:
+  a GET operation with a query argument, whose form is a filter (a GET
+  whose path carries its arguments alone is a link, and gets none), and
+  any other operation with an argument beside its input (one whose only
+  argument is its path's is a button). It holds each argument, embeds the
+  input's form when the operation takes one, and is parsed by the
+  router's own rules (`Args::check`, [D43](../../docs/DECISIONS.md)).
 
-  A browser checks those attributes before sending, and `parse` checks
-  every rule again.
+A form holds each field as the browser sends it, so a refused form
+renders again exactly as it was sent. A control is named by its field's
+path: `email`, a nested object's `shippingAddress.city`, a row's
+`lines[0].productId`, a list of values' `tags[0]`, and an argument by its
+name, beside its input's fields. It is labeled by the field's `@docs`
+title, else by its name in words, in which a number that ends a word is
+a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
+unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
+bucket").
+
+### Input forms
+
+- **`<Input>Form`** holds a value as `Option<String>`, a nested object as
+  its type's own `<Type>Form`, a list of objects as a `Vec` of them, a list
+  of values as `Vec<Option<String>>` and a list of an enum's members as
+  `Vec<String>`, and `overflow`, true when the post sent more than the
+  form reads ([Decoding](#decoding)). `new()` is a new form: each field's
+  `@default`, a required nested object's new form, and each list's first
+  rows (its `listMin`, or one when the input requires the list).
+  `Default` is the empty form.
+- **`parse()`** writes the fields as the input type's JSON and parses it
+  with the generated `parse_<type>`, undeclared keys refused. A checkbox
+  is true when sent, a blank control is no value, and a blank row of a
+  list of values is null, which the rules refuse at the row.
+- **`<input>_fields(form, errors, choices)`** renders each field, every
+  prop optional (`form` defaults to `new()`): a nested object as a
+  `<fieldset class="ss-object">` with its label as `<legend>`; a list of
+  objects as a `<fieldset class="ss-list">` of rows, each a
+  `<fieldset class="ss-row">` numbered by the row type's `@display` noun
+  (else the list's label); a list of values as a control per row; and a
+  list of an enum's members as a `<fieldset class="ss-choices">` of
+  checkboxes. An optional nested object is sent only when one of its
+  fields is, so none of its controls is `required`, and it starts empty.
 
 ```rust
 #[page(POST "/signup")]
@@ -223,12 +285,233 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 }
 ```
 
-An input type with a list, a map, an object, a union or any JSON value
-gets no form, and the build log says why. A form submits through the
-operation's in-process call, so the input of an operation without one, a
-webhook's or one the service mounts itself, gets none either
-([what has no procedure](#what-has-no-procedure)). `forms: false` in
-`outputs.topcoat` leaves out the module.
+### Argument forms
+
+- **`<Ns><Op>ArgsForm`** holds each argument as an `Option<String>`, a
+  list's every value as a `Vec<String>`, the input's form as `input`
+  when the operation takes one, and `overflow`. `METHOD` is `"get"` for a
+  filter and `"post"` for any other. `new(<path arguments>)` is the form
+  of one resource, its path arguments hidden inputs the page fills (the
+  order's id, say), each argument's declared default, and the input's new
+  form.
+- **`parse()`** writes each argument as the JSON a request carries,
+  decodes it into the operation's `Args` struct, parses the input by its
+  form, and runs `Args::check`, so a value the JSON API would refuse with
+  400 is that argument's error. A blank optional argument is absent and
+  one with a declared default reads it; an optional input is absent when
+  none of its fields was sent, and parsed by its rules when one was;
+  `check` refuses the first argument that breaks a rule. **`submit(cx)`**
+  parses the form and makes the in-process call
+  (`operations::<ns>_<op>`). Its refusal is a `Refusal`, the status a
+  page answers with and the errors it renders the form again with: 422
+  and `parse`'s errors, or the route's status (401, 403, 404, 409, ...)
+  and the operation's ([Errors](#errors)).
+- **`<ns>_<op>_args_fields(form, errors, choices)`** renders each argument
+  with the control an input field of its type gets, labeled by its name in
+  words, its description a hint (`aria-describedby`), then the input's
+  fields. A list of an enum is a group of checkboxes; any other list an
+  input per value sent and a blank one for another; a path argument a
+  hidden input.
+- A **filter** (a GET's form) reads the query: `Form<T>` reads it on GET,
+  and `from_query(cx)` outside an extractor, so the controls show the
+  filters in effect. A filter's boolean is a `<select>` of Yes (`true`)
+  and No (`false`), after a blank option when the filter may leave it
+  out, which reads its declared default or filters nothing; a new form
+  selects the default. A checkbox could not say false, nor turn off a
+  flag whose default is true, since an unchecked box sends nothing.
+- Any other form's boolean is a **checkbox**, as an input's is: checked is
+  true and unchecked false, whatever the argument's default, which only
+  checks a new form's box when it is true.
+
+A page whose route holds a path argument fills it from the route before
+`submit`, rather than trusting the hidden input, which a reader can change.
+The page answers with the refusal's status, so a refused caller gets the
+route's 401 or 403, and a cancel the operation refuses its 409, as the JSON
+API would answer:
+
+```rust
+path_param!(id: types::IdentityUUID, error = not_found);
+
+#[page(POST "/orders/{id}/cancel")]
+async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
+    let form = OrderCancelOrderArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let refused = match form.submit(cx).await {
+        Ok(_) => return Err(see_other("/orders").into()),
+        Err(refused) => refused,
+    };
+    Ok(view! {
+        (refused.status)
+        <form method="post">order_cancel_order_args_fields(form: form, errors: refused.errors)</form>
+    })
+}
+
+#[page("/orders")]
+async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
+    let (status, orders, errors) = match filter.submit(cx).await {
+        Ok(orders) => (StatusCode::OK, orders, FormErrors::default()),
+        Err(refused) => (refused.status, Vec::new(), refused.errors),
+    };
+    let rows: Vec<OrderViewRecord> = orders.iter().map(OrderViewRecord::from).collect();
+    Ok(view! {
+        (status)
+        <form method=(OrderListOrdersArgsForm::METHOD)>
+            order_list_orders_args_fields(form: filter, errors: errors)
+            <button type="submit">"Filter"</button>
+        </form>
+        order_view_table(rows: rows)
+    })
+}
+```
+
+### Decoding
+
+`Form<T>` decodes either kind, a post's body or a GET's query, as does
+`T::from_pairs(pairs)`: the pairs become a tree of their names. A list's
+rows are read in the order of their indexes, so a gap or a removed row
+closes up. An input field takes the last value sent (a checkbox row sends
+a hidden input of its name first), and an argument the first, as the
+router reads a parameter sent twice. A list argument's values are each
+value sent, a query list's split on commas as the router splits it. A
+blank value is none, and a name no control has is ignored.
+
+A form reads what a browser could send it and little more, so a post of
+more names than any form has costs no more than a form does:
+
+- **`MAX_PAIRS`, 5000**: a form reads at most this many names and
+  values, and none after them. `overflow` says it was sent more, and
+  `parse` refuses the form with the form's own message.
+- **A list's limit**: its `listMax`, or **`MAX_ROWS`, 1000**, for a list
+  without one or with one above it. A form reads one row past the limit
+  and no more, and `parse` refuses a list past it at the list ("must
+  contain at most 3 items"). So a post of 4,000 rows to a list of at most
+  3 renders again with 4 rows and that message, and one of 50,000 with 4
+  rows and the form's.
+
+### Controls
+
+A control is typed by its field's or argument's type, and carries the
+attributes its rules give it:
+
+- email, url, tel, number (`step="1"` for an integer) or checkbox, and a
+  `<select>` for an enum. A number input sends what a reader typed, so an
+  integer reads any whole number in an i64's range, `1e1` and `2.0`
+  too;
+- `type="date"` for `Temporal.Date` and `type="time"` for
+  `Temporal.Time`; `type="datetime-local"` for `Temporal.DateTime`, which
+  carries no offset, so the form reads it as UTC
+  (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in
+  "(UTC)". A value held with an offset renders in UTC
+  (`2026-10-09T14:30+01:00` as `2026-10-09T13:30`), with its seconds and
+  up to three digits of their fraction, and the control takes any step
+  (`step="any"`), so a held value with seconds is not refused;
+- `type="password"` for a `@secret` field, never rendered with its value:
+  a form holds what a reader types, though a record leaves the field out;
+- a `<textarea>` for long text, a text field or argument whose
+  `maxLength`, its own or its scalar's, is **500** or more: a reason, a
+  review's body, not a name or a title. It takes `minlength` and
+  `maxlength`, but no `pattern`, which `parse` checks, and a newline after
+  its start tag, which a browser drops, so a value that starts with one
+  renders as sent;
+- a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
+  control holds: a union, any JSON value, a map, a list of lists, an
+  argument's object or list of booleans, or a type that nests the type
+  holding it;
+- `required`, `min`/`max`, `minlength`/`maxlength`, and `pattern`. A
+  pattern is written only when a browser reads it as the server does: no
+  group syntax, and nothing the HTML `v` flag refuses. It is never written
+  on an email or URL input, which checks its own syntax.
+
+A browser checks those attributes before sending, and `parse` checks every
+rule again. A value a control cannot hold (`seats=many`, JSON that does
+not parse, a date that does not exist) is refused at the control.
+
+### Errors
+
+`FormErrors` holds each control's messages in a map by its name, so a
+control finds its own, and the names under it, without reading every
+other control's. `parse`'s errors,
+and an operation's refusal through `FormErrors::from_api` (its `errors`,
+nested for a nested object's fields, and a refused parameter the router's
+400 names in its details), are read by path, so each message renders at
+its control: a quantity over 99 on the second line is shown on
+`lines[1].quantity`. `errors.of(name)` is a control's messages and
+`errors.under(name)` a JSON value's or a list's with the place of each. A
+message no rendered control shows, an `@uiHidden` field's or a path
+argument's, renders with the form's own, after its name.
+
+A `Refusal` is the status a page answers with and the errors it renders
+the form again with. An argument form's `submit` returns one, and a page
+over an input form, which knows its operation, builds one:
+`Refusal::from(errors)` is `parse`'s refusal, 422, and
+`Refusal::from_api(&err)` the operation's, with the route's status (401,
+403, 404, 409, ...) and `FormErrors::from_api(&err)`.
+
+### Rows without JavaScript
+
+A form whose input holds a list as rows has submit buttons named
+`_action`: `add:lines` after a list's rows, unless it holds its limit
+(its `listMax`, or `MAX_ROWS`), and `remove:lines[1]` in each row,
+unless the list holds no more than its `listMin`. They carry
+`formnovalidate`, so a row can be added before the others are valid, and
+the component renders a hidden submit button ahead of them, which Enter
+presses. The form holds the button pressed in `row_action`.
+`apply_action()`, on the input form and on an argument form that embeds
+it, applies it, numbering the rows after a removed one again with their
+values as sent, and is true when a row button submitted the form: the
+page renders the form again, 200, without calling the operation.
+
+```rust
+#[page(POST "/book")]
+async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    let (status, errors) = if form.apply_action() {
+        (StatusCode::OK, FormErrors::default())
+    } else {
+        match form.parse() {
+            Ok(input) => match operations::booking_book(cx, BookingBookArgs { input }).await {
+                Ok(_) => return Err(see_other("/booked").into()),
+                Err(err) => (StatusCode::UNPROCESSABLE_ENTITY, FormErrors::from_api(&err)),
+            },
+            Err(errors) => (StatusCode::UNPROCESSABLE_ENTITY, errors),
+        }
+    };
+    Ok(view! {
+        (status)
+        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+    })
+}
+```
+
+### Choices the app supplies
+
+An input type does not say which values an id may take: a line's
+`productId` is a UUID, not a product. The page says, with `Choices`
+(`crate::choices`, re-exported from `forms`), which either kind of form
+component takes, as the [display components](#display-components) do: a
+text or number control it names renders as a `<select>` of the options,
+after a blank one, and the value held stays an option when no choice is
+it. A field is named by its path without the rows' indexes, for every
+row, or by its control's name, for one row, which wins:
+
+```rust
+let choices = Choices::new()
+    .with("rooms.roomId", rooms.iter().map(|room| (room.id.clone(), room.name.clone())))
+    .with("rooms[1].roomId", [(attic_id, "Attic")]);
+view! { booking_input_fields(form: form, choices: choices) }
+```
+
+### What has no form
+
+An input type a dependency declares gets no form, nor does an operation
+whose input has none or one with an argument named as one of its input's
+fields, as its input's row buttons (`_action`) or as the form's
+`overflow`, and the build log says why. An input with a field of a name
+the form keeps for itself, `overflow`, or in a form with rows
+`row_action` or the JSON name `_action`, fails the build. A form submits
+through the operation's in-process call, so an operation without one, a
+webhook's or one the service mounts itself, gets none ([what has no
+procedure](#what-has-no-procedure)). `forms: false` in `outputs.topcoat`
+leaves out both kinds.
 
 ## Procedures
 
@@ -307,13 +590,16 @@ page is a route of the app, and its controls are the app's to set.
 `views` has two components per record, which a page renders as it
 renders any component:
 
-- **`<type>_detail(record: <Type>Record)`** renders a record as a
+- **`<type>_detail(record: <Type>Record, choices)`** renders a record as a
   description list: a `<dt>` label and a `<dd>` value per field, each in a
   `<div data-field="<json key>">`, inside
   `<div class="ss-detail" data-type="<Type>" role="group">`.
-- **`<type>_table(rows: Vec<<Type>Record>)`** renders records as a
-  `<table class="ss-table">`: a header row of labels, then a row per
+- **`<type>_table(rows: Vec<<Type>Record>, choices)`** renders records as
+  a `<table class="ss-table">`: a header row of labels, then a row per
   record, each cell `data-field="<json key>"`.
+
+`choices`, optional, is the `Choices` a form takes ([Choices the app
+supplies](#choices-the-app-supplies)).
 
 A procedure's argument record has them too. A type without a record has
 none: a webhook's result, say ([what has no procedure](#what-has-no-procedure)).
@@ -333,9 +619,11 @@ in words. A value renders by its field's type:
 
 | The type's field | Renders as |
 | --- | --- |
-| A string, a UUID, a number | its text |
+| A string, a UUID, a number | its text, or the label the app's `choices` give it |
 | An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
-| `Temporal.DateTime`, `Temporal.Date`, `Temporal.Time` | `<time datetime="...">` with the text the API sends |
+| `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
+| `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
+| `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
 | A boolean | "Yes" or "No" |
 | An object type | its detail; in a table, its title when its type declares one |
 | A list of objects | its type's table |
@@ -343,6 +631,27 @@ in words. A value renders by its field's type:
 | A map | `<dl class="ss-map">` of its entries |
 | A union, or any JSON value | its JSON text in `<pre class="ss-json">` |
 | Optional, absent | nothing: an empty `<dd>` or `<td>` |
+
+A time's text is the same for every reader, in English and in UTC, with
+no locale or zone of the server's; `datetime` keeps the value as the API
+sends it, for a script that shows it in the reader's own zone. Text that
+is no date or time shows as it is. `views::date_time_text`, `date_text`
+and `time_text` write it for a page's own markup.
+
+An API type does not say which record an id names either, so a component
+shows the label the app's `choices` give a text or number value, an
+order line's product's name for its `productId`, and the value itself
+when they give none. A field is named by its path without the rows'
+indexes, `lines.productId` for each line of an order's detail, and a
+nested record's component gets the choices under its field. A choice
+matches a value whose text is the choice's value exactly: an id as the
+API sends it, its compact text, which a record holds and `to_string()`
+gives.
+
+```rust
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id().to_string(), product.name)));
+view! { order_view_detail(record: OrderViewRecord::from(order), choices: choices) }
+```
 
 The type's `@display` ([D48](../../docs/DECISIONS.md)) shapes both:
 `summaryFields` chooses and orders a table's columns (else every field),
@@ -354,3 +663,143 @@ no CSS and no inline styles: a stylesheet styles them by their `ss-`
 classes and `data-field` attributes, and fills an empty value with
 `:empty`. A type that nests itself boxes its components' views, as
 Topcoat requires of a recursive component.
+
+A table's rows link to pages through `hrefs`, a prop every
+`<type>_table` takes, empty by default: its i-th entry, unless it is
+empty, links row i, on its title's cell, or on its first cell when the
+columns hold no title. A linked cell without text, an absent or blank
+title say, links the type's noun in its place (its `@display` noun, else
+its name in words), with the row's `id` when the record holds one as
+text or a whole number, `Document intro`, as the pages' trail names an
+item without a title, so every row can be reached. The [pages](#pages)
+fill `hrefs`; a page of the app's own can too:
+
+```rust
+let hrefs: Vec<String> = rows.iter().map(|row| format!("/orders/{}", row.id)).collect();
+view! { order_view_table(rows: rows, hrefs: hrefs) }
+```
+
+## Pages
+
+`pages: { enabled: true }` in `outputs.topcoat` (or `pages_prefix` in
+`[extension.topcoat]`) adds `pages`: a page for every resource the API's
+operations describe, under a prefix, `/console` unless `prefix` says
+otherwise. A prefix starts with `/`, does not end with one, holds only
+segments of letters, digits and `-._~`, and is not under `/api` or
+`/_superschematic`, which the crate serves itself. The pages need the
+records, the forms and the display components; turning one of those off
+with the pages on fails the build.
+
+### Resources
+
+The resources come from the operations a page can call (the ones with an
+in-process call, and not `@requireService`), by REST path and result:
+
+| Operation | Page |
+| --- | --- |
+| `GET C` returning `T[]` | C's list, `<prefix>/C`, its query arguments the filter form |
+| `GET C/{p}` returning `T` | an item's page, `<prefix>/C/{p}` |
+| `POST C` with an input or arguments | the new page, `<prefix>/C/new`, and its POST |
+| `PUT` or `PATCH C/{p}` with an input | the edit page, `<prefix>/C/{p}/edit`, and its POST |
+| `DELETE C/{p}` | a link to `<prefix>/C/{p}/delete`, which confirms, and its POST |
+| `POST`, `PUT` or `PATCH C/{p}/<verb>`, where `C/{p}/<verb>` names no collection | the action's form on the item's page, posting to `<prefix>/C/{p}/<verb>` |
+| `C/{p}/D` | D nested under C's item: its pages under `<prefix>/C/{p}/D`, and its list and new link a section of C's item page when C has one |
+
+A list or a detail makes C a resource; the edit page, the delete and the
+actions need the detail, whose page holds them. Every other operation is
+left out, and the build log says why: `no page for viewer.me: a GET of
+auth/me, a path that ends in a word, is a list only when it returns a list
+of records`. Among them are a `PUT`, `PATCH` or `DELETE` of a
+collection's own path, `widgets` or `widgets/{id}/parts`, which would
+change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action's
+form posts from the item's page in one click and a delete asks first.
+
+A resource is named by its type's `@display` (`noun`, `plural`,
+`createLabel`, `titleField`), else by its path's last word: `projects`
+is Projects, an item a Project, the new page "New project". A list's rows
+link to their items' pages when the list returns the detail's type and
+the detail's path parameter names one of its fields (`{id}` and `id`).
+
+### What each page does
+
+Every page calls its operation through `operations`, so the route's
+rules hold, and takes its input through the [forms](#forms). The route's
+traffic controls are not among those rules: an in-process call applies
+no `@rateLimit`, `@bodyLimit` or `@timeout` ([route
+controls](#route-controls)), so the pages are limited only as the app
+limits its own routes.
+
+- **A list** checks the guard, renders the filter form (a GET, read from
+  the query), and the result as `<type>_table` with each row linked, and a
+  link to the new page when the caller may create one.
+- **An item's page** renders `<type>_detail`, headed by its title, links
+  to its edit and delete pages, a form per action and a section per
+  resource under it, each only when the caller may.
+- **The new and edit pages** render their form, the edit form filled
+  from the item: each field the update's input and the item's type share
+  by JSON name and kind; any other starts as the form's `new()`.
+- **The delete page** shows the item and the form that deletes it, so a
+  GET never deletes and no script confirms.
+
+A route's values come from the page's path, set on the form over its
+hidden inputs, which a reader can change, and decoded as an argument form
+decodes them; one that does not decode is no page, 404.
+
+A successful post goes on with 303: to the new item after a create, to
+the item after an edit or an action, to the list after a delete. A post
+is an argument form's `submit`, or an input form's `parse` and its
+operation, and a refusal is its [`Refusal`](#argument-forms): the form
+renders again, each error at its control, with the refusal's status, 422
+for what `parse` refuses and the route's for what the operation refuses,
+a conflict's (409) message the form's own. A row button renders the form
+again with 200. A refused caller keeps the route's status on a page of
+its own: 401 with a link to sign in, 403, and 404 for an item that is not
+there.
+
+### Layout, nav and index
+
+A `#[layout]` at the prefix puts each page in `<main class="ss-main">`,
+after `<nav class="ss-nav">`, a link to each resource no item holds whose
+list the caller may use (`can_<operation>`), the current one
+`aria-current`, and `<nav class="ss-trail">`, the trail from the index to
+the page: each list, each item by its title (its type's `titleField`),
+else by its noun and id, then the page. Where a collection's path extends
+another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
+pages' collection, current in the nav and the trail, never an item named
+`archived`; under an item, a collection is read before the item's
+actions. The item's detail, which the
+item's page calls too, is called once per request (`#[memoize]`). The
+index at the prefix lists the same resources. The markup is semantic HTML
+with `ss-` classes and ships no styles.
+
+### Mounting them
+
+The pages, the layout and the index are `#[page]`s and a `#[layout]`,
+which the app's `.discover()` registers, as it registers the procedures:
+
+```rust
+let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id().to_string(), product.name)));
+Router::builder()
+    .discover()
+    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in").choices(choices))
+    .shop_orders(implementations, page_authenticator)
+    .build()
+```
+
+`pages::Settings`, which the app puts in its app context, names the
+site's title (the service's name in words without it), its sign-in page
+(a 401 links to it with the page to come back to as `next`, the item's
+page for an action; without it a 401 has no link), and the
+[choices](#choices-the-app-supplies) every form and display component of
+the pages takes, by each field's path: `lines.productId` makes each
+line's product a select on the new-order page and its name in an order's
+lines. They are one set for every resource, so a path names its field in
+each form and component that holds one; choices per resource or per page
+are open. The page functions and their path parameters are public, so an
+app's own page can link to one with
+`href!(pages::projects_item_page, pages::ProjectId(id))`.
+
+An app that mounts two services' pages gives each a prefix of its own,
+as the [table](#the-config) requires: each crate registers its index and
+its layout at its prefix, and Topcoat's router refuses a page registered
+twice.

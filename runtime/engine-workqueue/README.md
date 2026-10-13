@@ -92,7 +92,7 @@ and numbered by a fencing token.
 | --- | --- |
 | Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (at most half of `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`, one per link of the type's `Links`, and a permission that sends directives); all optional |
 | Precondition | `{ token }`, the lease's current token: `preconditions: { Lease: { token } }` on any write |
-| Fields | under `Lease`: `holder`, `token`, `acquiredAt`, `renewedAt` (its acquire or last heartbeat), `expiresAt`, `active`, `expiries` and `ended`; `holder`, `acquiredAt`, `renewedAt` and `expiresAt` absent when it is free; `ended`, `{ reason, at }`, how the last lease ended, absent while one is held. A list filters on `Lease.holder`, the holder's column, through an index on it (migration 4): `where: { "Lease.holder": "wren" }`, and `null` for a free instance |
+| Fields | under `Lease`: `holder`, `token`, `acquiredAt`, `renewedAt` (its acquire or last heartbeat), `expiresAt`, `active`, `expiries` and `ended`; `holder`, `acquiredAt`, `renewedAt` and `expiresAt` absent when it is free; `active` volatile, since the clock moves it past `expiresAt`; `ended`, `{ reason, at }`, how the last lease ended, absent while one is held. A list filters on `Lease.holder`, the holder's column, through an index on it (migration 4): `where: { "Lease.holder": "wren" }`, and `null` for a free instance |
 | Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat({ acknowledge? })` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder?, notRenewedAfter? })` -> `{ expired, reason? }`; `direct({ name, data?, dedupeKey? })` -> `{ id, created }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder, notRenewedAfter? })` -> `{ expired, reasons, ids }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
 | Schedules | `expire`, every `sweepMs`, on the engine's runner |
 | Reactions | with `directOn`, on the runner: a link's target's new revision or release sends the holder of each instance it moves on the entry's directive ("Directives"); off without `directOn` |
@@ -271,8 +271,19 @@ An operation another behavior's reference hook invokes on a leased
 instance, as `Dependencies`' `removeBlocker` when a blocker is deleted or
 `Links`' `unlink` when a target is, runs as the principal of that change
 and is refused like any other, so that change is refused too; a
-deployment that wants it through lists it in `exempt`. Nothing changes
-the field `maxHoldField` names while a lease is held, unless with
+deployment that wants it through lists it in `exempt`. Another
+principal's sign-off is refused the same way: on a type that also
+composes the engine's `Approvals`, `"Approvals.signOff"` and
+`"Approvals.withdrawSignOff"` in `exempt` let approvers sign the leased
+instance off. So is a
+backfill's: `Numbering`'s `assignNumber`, which numbers an instance made
+before its schema composed `Numbering`, writes, so a deployment that
+backfills leased instances lists `"Numbering.assignNumber"`; a create
+holds no lease, and numbers its instance whatever the guard. So is the
+runner's fire of a `Timers` deadline, `fireTimer`, which the sweep leaves
+for its next run: `"Timers.fireTimer"` in `exempt` lets a deadline move
+leased work on, its move a `call()` the guard lets through. Nothing
+changes the field `maxHoldField` names while a lease is held, unless with
 `overridePermission`, so a holder cannot extend its own hold.
 
 ### Directives
@@ -307,7 +318,9 @@ holder. Deleting the instance deletes its directives.
 operation whose change carries `revision`) or a release of `Branches`
 (`releaseCommit`). Where the link pins what the move made, a revision
 or a release (`pinned`), it reaches only the instances the target moved
-past; otherwise every instance that points at the target. The runner sends
+past; otherwise every instance that points at the target. A many-valued
+link works the same, each of its targets reaching the instances whose
+list holds it (D56). The runner sends
 `direct` to each such instance with a holder, as its principal, which
 needs `directPermission` (or `overridePermission`); `parseConfig` refuses
 `directOn` when the config names neither, and a principal that lacks it
@@ -325,8 +338,9 @@ it.
   version, as a link pins it. An entry's `data` may not hold
   `revised`.
 - **Once per lease and move.** Its `dedupeKey` is `revised <link>
-  <revision>`, or `released <link> <release>`, so a holder hears each
-  move once, and two moves twice.
+  <target> <revision>`, or `released <link> <target> <release>`, by the
+  target's id, so a holder hears each move of each target once, and two
+  moves twice.
 - **No holder, no directive.** An instance whose lease is free, or lapsed
   (`direct` refuses it), hears nothing, and nothing waits for its next
   holder: the next holder takes the instance after the move, and a
@@ -364,7 +378,7 @@ counts them.
 
 | | |
 | --- | --- |
-| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent); `excludeStale`, pinned links of the type's `Links`, to a revision or a release (1 to 16). Requires `Workflow` and `Lease` |
+| Config | `claim`: `{ from, to }`, the Workflow states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field of the type; `match`, the type's own top-level scalar fields `claimNext` may filter on; `maxCandidates` (1 to 1000; 100 when absent); `excludeStale`, pinned links of the type's `Links`, to a revision or a release, each holding one target (1 to 16). Requires `Workflow` and `Lease` |
 | Fields | none |
 | Operations | `claim({ ttlMs? })` -> `{ id, token, expiresAt, heartbeatMs }`, writes; `refresh()` -> `{}`, writes; schema-level `claimNext({ match?, assignedOnly?, ttlMs? })` -> `{ claimed }`, the claim or null, writes; schema-level `countClaimable({ match?, assignedOnly? })` -> `{ count }`, read-only. A `match` value is a value or a list of values |
 | Guards | Lease's `acquire` by anything but Queue's own claim: `vetoed` (`claim_required`), so the lease of a claimable instance is taken only by claiming it |
@@ -585,7 +599,7 @@ which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema, which composes `Constants` over `keyField` and every copied field), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Config | `schema` (the child schema, which composes `Constants` over `keyField` and every copied field), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks`. Each link it names holds one target |
 | Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
 | Fields | `children`, under `Blueprint`: `[{ key, id }]`, in the order they were created; absent until the instance is stamped |
 | Operations | none |
@@ -680,8 +694,10 @@ this type's Links pinned to a revision, of a schema that composes
 Revisions and has the field, an object or JSON: a release pins the
 definition's version graph, not the fields the map is in. `copyLinks`
 are links of both Links
-configs to one schema. A map read through `from` is held to the same
-rules against this type when it is stamped.
+configs to one schema. Each of these links holds one target: one that
+holds a list (`many`, D56) is refused, and a list the instance holds
+all the same is read as no link when it stamps. A map read through
+`from` is held to the same rules against this type when it is stamped.
 
 A child is routed by what its stamp set: the step it is, in `keyField`,
 and the fields it copied. Any writer of the child, the holder of its
@@ -719,8 +735,8 @@ points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) and `limitField` (an integer field of the type, whose value of at least 0 replaces `limit`), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
-| Fields | `meters`, under `Budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) and `limitField` (an integer field of the type, whose value of at least 0 replaces `limit`), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config that holds one target) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
+| Fields | `meters`, under `Budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it; volatile, since a daily meter starts again at a read |
 | Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, each scope `{ schema, id, hears }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
 | Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`), the config's `limit` counting for a change that empties the field |
 | Refusals | `reserve` that does not fit here or in a scope (`over_limit`, details `{ meter, amount, remaining, limit, scope }`, `scope` the instance whose limit refused it), through a scope its link has moved from while the old one holds a reservation (`scope_moved`), and on a type with `Lease` without an active lease (`not_leased`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `not_configured` when the config names none) and below what is used and reserved (`below_committed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`exceeds_reservation`). `recordUsage` is never refused for its amount. Each code is a veto's (`vetoed`) |
@@ -798,10 +814,10 @@ whose usage is over its limit afterwards, this one first.
 
 ### Scopes
 
-A meter's `scope` names a link of the type's `Links` config; its target
-is the enclosing scope, a pool the work draws on, say, and its schema
-composes `Budget` with the same meter, which the package checks when the
-schema is defined. Budget never writes another instance's rows: the
+A meter's `scope` names a link of the type's `Links` config that holds
+one target, not a list (D56); its target is the enclosing scope, a pool
+the work draws on, say, and its schema composes `Budget` with the same
+meter, which the package checks when the schema is defined. Budget never writes another instance's rows: the
 instance invokes `reserveFor`, `settleFor` or `recordUsageFor` on its
 scope, as the caller, which applies the scope's own limit, records what
 it holds for the instance, appends the scope's own event and passes the
@@ -935,8 +951,10 @@ A success's result is kept. A failure's is kept only with `keepBest`:
 when its score beats the best kept score by at least `minDelta`, and no
 `neverRegress` predicate that held for the last kept attempt fails for it
 (a predicate the attempt does not report fails). A kept result is written
-to `resultField` through `update()`, with the checks of an update, so a
-result the live version refuses fails the attempt and records nothing.
+to `resultField` through `update()`, with the checks and guards of an
+update, so a result the live version refuses fails the attempt and
+records nothing, and so does one the engine's `StateRules` freezes in
+the instance's state (`frozen_fields`).
 
 ### Stuck failures
 

@@ -236,6 +236,17 @@ type MigrationRunner interface {
 	Migrate(ctx context.Context, req MigrationRequest) error
 }
 
+// MigrationPreparer is a MigrationRunner that readies, before a deploy
+// changes anything, what each phase it runs will need, and refuses a run
+// it could not migrate: on gcp, the runner's image, which it finds, or
+// builds from the release, or refuses with what to set (D46). The deploy
+// calls it once, after the migration plans and the hazard gate, when the
+// run has a phase to migrate; an error stops the deploy before its first
+// step.
+type MigrationPreparer interface {
+	PrepareMigrations(ctx context.Context, run Run, log io.Writer) error
+}
+
 // BuildRequest is one image build (docs/stack-model.md, section 11.2): a
 // server or a job, its Dockerfile and its context. The deploy writes the
 // context: the build context directory as the Dockerfile's ignore file cuts

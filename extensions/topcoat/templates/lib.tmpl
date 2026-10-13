@@ -9,9 +9,10 @@
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
 {{- end }}
-{{- if .Forms }}
+{{- if .HasForms }}
 //! `forms` reads and renders a form per input type a call in `operations`
-//! takes whose fields a form holds.
+//! takes, its controls named by their fields' paths, and per call with
+//! arguments a form submits, a GET's a filter read from the query.
 {{- end }}
 {{- if .Procedures }}
 //! `procedures` lets browser code call each operation a browser may, its
@@ -24,14 +25,30 @@
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
 {{- end }}
+{{- if .HasChoices }}
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
+{{- end }}
+{{- if .Pages }}
+//! `pages` serves a page per resource the operations describe, under
+//! `{{ .Pages.Prefix }}`, with a layout and a nav; the app's `.discover()`
+//! registers them, and `pages::Settings` in its app context names its
+//! sign-in page and its choices.
+{{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
-{{ if .Forms -}}
+{{ if .HasChoices -}}
+pub mod choices;
+{{ end -}}
+{{ if .HasForms -}}
 pub mod forms;
 {{ end -}}
 pub mod operations;
+{{- if .Pages }}
+pub mod pages;
+{{- end }}
 {{- if .Procedures }}
 pub mod procedures;
 {{- end }}

@@ -120,7 +120,7 @@ type Data = Record<string, any>;
 type Behaviors = Record<string, Record<string, any>>;
 
 test('a worker claims the most urgent job, works it and finishes it', async () => {
-  const { operator, client, worker } = await start();
+  const { clock, operator, client, worker } = await start();
   await operator.instances.create('jobs', { title: 'Rebuild the nightly index', topic: 'search', priority: 1 }, { id: 'nightly' });
   await operator.instances.create('jobs', { title: 'Reindex the catalog', topic: 'search', priority: 9 }, { id: 'catalog' });
   // A worker does the work, and queues none.
@@ -148,8 +148,9 @@ test('a worker claims the most urgent job, works it and finishes it', async () =
   const catalog = await operator.instances.get<Data, Behaviors>('jobs', 'catalog');
   assert.deepEqual(catalog.data, { title: 'Reindex the catalog', topic: 'search', priority: 9, result: 'Reindexed 1200 products' });
   // Its behaviors' fields sit apart, by behavior: a free lease has no holder, and a job no batch stamped no links.
+  // The clock has not moved, so the job entered done at the time it was created.
   assert.deepEqual(catalog.behaviors, {
-    Workflow: { status: 'done' },
+    Workflow: { status: 'done', enteredAt: clock.ms },
     Lease: { token: 2, active: false, expiries: 0, ended: { reason: 'release', at: 1_000_000 } },
     Budget: { meters: { cpuSeconds: { used: 45, reserved: 0, limit: 600, remaining: 555 } } },
     Retries: { total: 0, classAttempts: { cancelled: 0, invalid: 0, transient: 0 }, exhausted: false, stuck: false },
@@ -345,7 +346,9 @@ test('a batch runs its steps in order, retries a transient failure, and settles 
   const broken = await batch('broken');
   assert.deepEqual([broken.Workflow.status, broken.Rollups.values], ['failed', { steps: { failed: 1, queued: 2 } }]);
 
-  // The runner moved the batch, as its own principal, and the event says why.
+  // The runner moved the batch, as its own principal, and the event says
+  // why. The clock has not moved since the batch's create, so enteredAt
+  // holds its value and the patch leaves it out.
   const { events } = await operator.events.read({ after: 0, schema: 'batches', behaviors: ['Workflow'] });
   assert.deepEqual(
     events.map((event: EngineEvent) => [event.instanceId, event.actor, event.cause?.behavior, (event.change as { patch: unknown }).patch]),

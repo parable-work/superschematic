@@ -4268,9 +4268,27 @@ its tests fake; its golden job document is
 runner's `job` command, its Cloud SQL dialer and its grants run in its
 tests against Postgres, the dialer replaced by one of a local server and
 Cloud Storage by a fake of its API. None of it has run against Google
-Cloud. Not built: a deploy lock beyond the provisioner's and the
-runner's, and a lifecycle rule that prunes old contexts and job documents
-from the bucket.
+Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
+that exists already too, that deletes the build contexts under
+`superschematic/builds/` and the job documents and plans under
+`superschematic/migrations/` after 30 days, live and noncurrent versions
+alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). A
+deploy with a migration phase to run readies the runner's image after the
+plans and the gate, before any step, through an optional seam of the
+runner, `registry.MigrationPreparer`: gcp's finds the release's image by
+its tag or builds it, checks in Artifact Registry that an image
+`SUPERSCHEMATIC_MIGRATE_IMAGE` names exists (`ImageDigest` now takes an
+image by digest), and refuses a checkout's binary with no image named, so
+a missing image no longer fails the deploy after its infrastructure step
+(`TestMigrationJobNeedsARelease`, `TestDeployPreparesTheMigrationRunner`). Nothing
+reads one after the build or the execution it was written for: a deploy
+compares a context's digest with the manifest's, the builder finds an
+image by its tag and uploads the context again for a build, and each
+execution's documents are written again, so a deleted one costs nothing.
+Pulumi's state and the manifests have no rule.
+`TestStateBucketLifecycle` deletes every object the rule covers after a
+deploy, and the next deploy builds nothing. Not built: a deploy lock
+beyond the provisioner's and the runner's.
 
 ### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
 
@@ -4342,9 +4360,16 @@ Status: built.
   goldens actionlint checks.
 
 The amendments below ship the archives the workflow's builds link and
-pin each generated module to the release. No generated workflow has run
-on GitHub Actions: a run needs a release, a project bootstrapped with a
-GitHub remote, and a repository that turns the workflow on.
+pin each generated module to the release. The workflow builds a stack's
+static sites (D55): `check` installs the output root's Bun workspace and
+builds each site, and the deploy and preview jobs of an environment with
+a site set up Bun, even in an npm project, and install the workspace,
+since `stack deploy` builds the site on the runner (`CIStack.Sites`,
+`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+workflow: the deploy builds their images on the target and applies the
+rest as graph resources. No generated workflow has run on GitHub
+Actions: a run needs a release, a project bootstrapped with a GitHub
+remote, and a repository that turns the workflow on.
 
 Not built:
 - a check that the committed workflow is current;
@@ -4578,10 +4603,10 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- TypeScript jobs;
 - passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
-- `stack init`, which would write the amendment's ignore rule.
+- `stack init`, which would write the amendment's ignore rule; D59
+  builds it.
 
 The rule is reversible until the first release.
 
@@ -4634,9 +4659,10 @@ Cloud Run starts an execution on every firing, even while the last one
 runs, where `stack dev` skips that firing.
 
 Not built:
-- TypeScript jobs;
-- a job that runs on every deploy (Cloud Run's `runExecutionToken`);
-- workers.
+- a job that runs on every deploy (Cloud Run's `runExecutionToken`).
+
+Workers came with queues in D53, built in #336 and #339, and TypeScript
+jobs and workers in #348.
 
 The rule is reversible until the first release.
 
@@ -4653,7 +4679,7 @@ CI installed nothing of the workspace and set up an unpinned Bun.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | The project commits `<output-root>/bun.lock`. No build removes it: each generator empties only directories of its own under the output root, such as `server/<stack>`, never the root. The root's `package.json` is the same bytes on every build of the same schemas, so a committed lockfile stays current until a manifest changes. Nothing else under the output root is committed for it: the build writes the root and every generated member's manifest before an install, and the implementations' manifests are the project's. The lockfile to commit is the one an install writes after `build-all`: a frozen install needs every member it names that another member depends on, and an install after a partial build drops the members it did not find. | Resolving afresh in every image and CI run, which lets two deploys of one commit differ and keeps dependency changes out of review. Moving the workspace's root to the repository's `package.json`, the project's own file, which the generator would then edit, and whose lockfile would mix the project's packages with the generated ones. |
-| A project ignores the output root's contents, not the directory, and takes the lockfile back: `dist/*` and `!dist/bun.lock`, since git cannot take back a file under an ignored directory. Where a broader rule ignores the directory, the schemas root's `.gitignore` takes it back first (`!/dist/`). The rules are the project's: the build of a stack with a TypeScript server asks git whether it ignores the lockfile (`git check-ignore`) and, when it does, prints one line naming the rule and the fix. `stack init` (section 11.1 of `docs/stack-model.md`), which is not built, will write the rule. | The build editing `.gitignore`, a file the project owns, behind its back. Committing the whole output root, which puts every generated file in review twice. |
+| A project ignores the output root's contents, not the directory, and takes the lockfile back: `dist/*` and `!dist/bun.lock`, since git cannot take back a file under an ignored directory. Where a broader rule ignores the directory, the schemas root's `.gitignore` takes it back first (`!/dist/`). The rules are the project's: the build of a stack with a TypeScript server asks git whether it ignores the lockfile (`git check-ignore`) and, when it does, prints one line naming the rule and the fix. `stack init` (section 11.1 of `docs/stack-model.md`, D59) writes the rule. | The build editing `.gitignore`, a file the project owns, behind its back. Committing the whole output root, which puts every generated file in review twice. |
 | A server's image keeps installing frozen when its context holds the lockfile, and keeps resolving afresh without one, now printing that it does. The generated CI enforces the lockfile instead: `check` refuses a missing or stale one, and every plan, preview and deploy job waits for `check`. | The image refusing a missing lockfile when `CI=true`, a build argument the deploy would pass and a second rule for one file, which would still leave a deploy from an engineer's machine resolving afresh. Refusing it always, which would stop a deploy from a checkout where no install has run and no lockfile is committed yet. |
 | For a stack with a TypeScript server, the `github` renderer's `check` installs the output root's workspace after the build, `bun install --frozen-lockfile` in a step named for the lockfile, which first refuses a missing lockfile, since Bun's frozen install installs without one, and says to run `bun install` after `build-all` and commit it. Then each TypeScript server's entrypoint package and the implementation of each API one serves type-checks, `bun x --no-install tsc --noEmit -p tsconfig.json`. The ci generator finds the implementations where the server generator does and hands them to the renderer, `CIStack.TypeScriptImplementations`. Every job that sets up Bun pins `oven-sh/setup-bun` to `tools.env`'s release, `servergen.BunVersion`. | `bunx tsc`, which downloads the npm package named `tsc` where none is installed. Building the runtime checkouts `[paths]` names in the workflow, as the image does, which repeats the image's knowledge of each checkout for a project whose CI checkout may not hold them; the published packages carry their declarations. |
 | `stack dev` runs a plain `bun install`, as an engineer would: it writes the lockfile, or brings the committed one up to date with the build's packages, so the lockfile follows the schemas through normal use, and it never fails on a missing lockfile. `CI=true` does not make Bun 1.4's install frozen. | A frozen install in `stack dev`, which would refuse every schema change until someone installed by hand. |
@@ -4955,8 +4981,7 @@ database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
 on Postgres.
 
 Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
-the Go and TypeScript ones do; and a check of an `@envVars` field that
-collides with it outside a stack.
+the Go and TypeScript ones do.
 
 The design is reversible until the first release.
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
@@ -5001,7 +5026,51 @@ backing by picking the database.
 | A worker's `main` builds `Deps`, claims and handles up to `concurrency` messages, and on SIGTERM stops claiming, lets running handlers finish within the platform's grace, and releases the rest. `stack dev` runs it as a process with no port; its exit stops the environment, as a server's does. | Restarting a worker that exits under `stack dev`, which section 8.3 leaves for servers too. |
 | On gcp a worker is a Cloud Run worker pool (`gcp:cloudrunv2/workerPool:WorkerPool`, in the pinned pulumi-gcp 9.37.1), with no port and no URL, and an instance count from its settings, one unless set. | A Cloud Run service with a health port, `minInstances` and CPU always allocated, which bills like a server for a process that serves nothing. |
 
-Status: not built.
+Status: built, as narrowed below.
+- #336 adds queues and Go workers, on the local target:
+  - `@queue` and `ir.QueueDef` on a DB class, whose table sqlgen writes
+    in each dialect the service lists and the migration plan carries;
+  - the Go ORM's `queues.go`: `Enqueue<Queue>` in the caller's
+    transaction, and the claims (`Claim`, `Complete`, `Fail`, `Extend`
+    and `Release`, each refusing a lost claim with `ErrClaimLost`);
+  - `@worker` and `ir.Worker`, the generated `Workers` interface and its
+    scaffold;
+  - the `worker` kind, with settings (`{ of, worker, instances,
+    concurrency, enabled }`) and `ir.ResolvedWorker`;
+  - each worker's Go module and image at `server/<stack>/<worker>/`,
+    which runs `runtime/http/go/worker`'s claim loop, and `stack dev`'s
+    worker processes.
+- #339 adds the `gcp.cloudrunworker` platform, a Cloud Run worker pool
+  scaled by hand to the worker's instances, and its connectors to Cloud
+  SQL, Cloud Run and Cloud Storage. The migration job grants each
+  worker's IAM database user read and write privileges.
+
+The claims run on Postgres alone, since the Go ORM does: resolution
+refuses a worker whose queue's database an environment places on SQLite
+or D1.
+
+acme-shop's `shop-db` declares `OrderPlaced`, which `PlaceOrder` enqueues
+in its transaction, and `shop-orders`' worker `FulfilOrders` fulfils the
+order, which `TestStackDevRunsTheShop` waits for.
+`TestGeneratedQueuesOnPostgres` runs the generated queue on Postgres when
+`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` is set, claiming with two pools
+at once among its cases. `runtime/http/go/worker`'s tests cover the loop's
+concurrency, its extended claims, its grace and its wait after a failed
+claim, and gcp's `cloudrunworker_test.go` the platform, its settings and
+its refusals.
+
+No worker has run on Google Cloud.
+
+#348 adds TypeScript workers, which claim through the HTTP runtime with
+the Go ORM's statements (the amendment below).
+
+Not built:
+- Rust workers;
+- claims on SQLite and D1, in a write transaction (the amendment below);
+- removing `done` messages, and an operator's command to read and retry
+  dead ones;
+- a backoff that grows with each attempt;
+- scaling a worker with its queue's depth.
 
 The rule is reversible until the first release.
 
@@ -5020,7 +5089,52 @@ can see it.
 | `stack dev` runs fake-gcs-server in a container beside Postgres, one per environment, with a bucket per Bucket service. The local target's container gains a command and a readiness check per image. | A directory served by `stack dev`, which would need an implementation of its own. MinIO, whose S3 API the GCS implementation does not speak. |
 | On gcp a bucket is a `gcp:storage/bucket:Bucket` with uniform access and public access prevention, named after the project and the stack, since names are global. The connector grants `roles/storage.objectUser` on the bucket, and the account the right to sign as itself. A member of a parameterized environment gets its own bucket, which its destroy empties. Bootstrap gives `deployer` the role to create buckets and set their IAM. | One bucket for a parameterized environment's members with a prefix each, whose objects a member's destroy could not remove cleanly. |
 
-Status: not built.
+Status: built, as amended below.
+- #334 adds buckets on the local target:
+  - the `Bucket` kind and its sentinel, and `buckets` on an API's
+    config, which the IR records as `Schema.Buckets`;
+  - the `bucket` deployable and edge kinds, and `ir.BucketConnection`
+    in the field `{SERVICE}_BUCKET` (`[derived_fields] bucket`), which
+    Go's `stackconfig.LoadBucket` and TypeScript's `loadBucket` read,
+    held to one encoding by `stackconfig_parity.json`;
+  - the `Bucket` interface in the Go and TypeScript HTTP runtimes, and a
+    `Deps` field per bucket;
+  - its GCS implementation: Go's in the `buckets.go` the build writes
+    beside an entrypoint's `main.go`, TypeScript's in the runtime's
+    `./gcs` entry;
+  - `stack dev`'s fake-gcs-server container, with a bucket per Bucket
+    service, and `--remove-data`.
+- #338 adds the `gcp.storage` platform, the connectors from a Cloud Run
+  service and job, and the policy rule `buckets-never-public`. The
+  Storage Admin role #337 gave `deployer` for sites creates the buckets
+  and sets their IAM. #339 adds a worker's connector.
+
+The GCS implementation is linked into every Go server or job whose APIs
+list a bucket, and a TypeScript server's package depends on
+`@google-cloud/storage` only then (`TestOnlyAServerWithABucketLinksGCS`).
+Every bucket connection is GCS's today, the local emulator's too, so the
+build decides by the bucket, not by the environments that place the
+workload on gcp.
+
+acme-shop's `shop-api` lists `shop-media` and signs the upload of a
+product's image (`createProductImageUpload`), which
+`TestStackDevRunsTheShop` puts through the signed URL and reads back from
+the emulator. servergen's `TestBucketsReachTheEmulator` runs the Go
+interface against fake-gcs-server under Docker, and the HTTP runtime's
+`gcs.test.ts` runs the TypeScript one when
+`SUPERSCHEMATIC_TEST_GCS_EMULATOR` names an emulator. gcp's
+`storage_test.go` covers the platform, its refusals, the connectors'
+grants and `buckets-never-public`.
+
+No bucket has run on Google Cloud. A live run should check whether a new
+bucket's IAM policy carries the project's convenience bindings, through
+which `planner`'s `roles/viewer` would read its objects. A project bootstrapped before #338 needs `stack
+bootstrap` again for `deployer`'s new role.
+
+Not built:
+- a `Bucket` in the Rust runtime, so gcp's connectors refuse a bucket
+  edge from a Rust server or job;
+- buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5041,7 +5155,49 @@ is a TypeScript or Rust server, not a site.
 | `stack dev` serves the built directory and its config from a small file server with the fallback. | The front-end tool's dev server, which each site would configure to find the APIs. |
 | superscalar's browser build is a prerequisite: the SDKs validate through superscalar, whose WebAssembly build the checkout does not make (D51). | Sites that skip the SDKs, which gives up their types. |
 
-Status: not built.
+Status: built, as amended below.
+- #333 adds sites on the local target, the first half:
+  - the `Site` kind, with `site: { build, output, fallback }`, and
+    `[implementation_paths] site`, where the build scaffolds a site once
+    and writes its typed browser config on every build (the first
+    amendment below);
+  - the `site` deployable and edge kinds, `site-calls-unexposed`, and
+    `PlatformSpec.PublicAddressOf`, which the local platform gives;
+  - the `<API>_CORS` field of each API a site calls, which Go's `cors`
+    package and `stackconfig.LoadCORS` and TypeScript's `corsHandler`
+    and `loadCors` read and check, held to one decision by
+    `runtime/http/testdata/cors_parity.json`;
+  - the `Sites` seam (`registry.SitePublisher`), the deploy's frozen
+    install, build and digest (`DigestSite`), `PinSites`, the manifest's
+    `sites`, and `--site` on `stack plan` and `stack deploy`, which
+    `stack build` prints;
+  - `stack dev`'s file server for each site, with its config and
+    fallback.
+- #337 adds the `gcp.site` platform, the `gcp.site-cloudrun` connector,
+  a Cloud Run service's public address, the publisher and
+  `deployer`'s Storage Admin role (the second amendment below), and the
+  Pulumi program exports the outputs each deployable's public address
+  references.
+
+acme-shop's `web/shop-web` lists shop-api's products through
+`loadApis()`, and `TestStackDevRunsTheShop` fetches its page, its config
+and a path that names no file, which the fallback answers, then sends
+shop-api a preflight from the site's origin, which it allows, and from
+another, which it does not. Resolution's `sites_test.go`, the deploy's
+`TestDeployPublishesASite` and `TestDigestSite`, and gcp's `site_test.go`
+cover the rest: the platform with a domain, without one and without a
+fallback, the publisher, and a deploy (`TestDeploySiteOnGCP`).
+
+No site has run on Google Cloud; the second amendment below says what to
+check first.
+
+#347 builds each site in the generated CI's `check`, and sets up Bun for
+the deploy and preview jobs of an environment with a site. #349 reads
+the CORS field on a Rust server (D57), and #344 lets the identity runtime
+answer its trusted origins on an API a site calls (the amendment below).
+
+Not built: a site's SDK clients in the browser, which wait on
+superscalar's browser build (the first amendment below).
 
 The rule is reversible until the first release.
 
@@ -5105,3 +5261,758 @@ Google Cloud, where the anchor and the rewrite of the root path are the
 first things to check.
 
 The rule is reversible until the first release.
+
+### D55, amended: a file whose name holds a hex hash of its content is cached for a year
+
+The amendment above served every file of a site `no-cache`, since a file
+of a new build may come under the path of one of the last, and Google's
+documentation does not say whether Cloud CDN keys a file on its path
+before or after the URL map's rewrite to the build's prefix. So every
+request for a script or a stylesheet asked the bucket whether it
+changed, though a bundler names those files by their content. This
+replaces that amendment's refusal to tell such files by their names.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A file whose name holds a hash of its content is served `public, max-age=31536000, immutable`, by the gcp publisher on its object and by `stack dev`'s file server alike. Such a name has the same content in every build, so a cached copy is right whichever path the CDN keys it on. `index.html` and every other HTML file, the fallback, which the URL map serves for each path that names no file, and every other file stay `no-cache`; the config and the publisher's marker stay `no-store`. One function decides, `ir.SiteFileCacheControl`. | A long `max-age` for every file but the HTML, which the amendment above refused. A list of long-cached paths in the site's config, a setting for what the names already say. |
+| The pattern is conservative. A name holds a hash when its part before the extension, or that part's last piece after a `.` or a `-`, is 8 or more lowercase hex digits, at least one a digit and one a letter: `app.3f9a2c1d.js`, `vendor-3f9a2c1d.css`, `3f9a2c1d5e7b.png`. Digits alone are a date or a number (`photo-20261012.jpg`), and letters alone a word. A hash in another alphabet does not count: Bun's and esbuild's (`index-5psy29er.js`), and Rollup's, so Vite's, unless its `output.hashCharacters` is `hex`. The scaffold's `bun build` output, acme's among it, stays `no-cache`. | Bun's shape too, 8 lowercase letters and digits after a hyphen, which names written by hand also have (`og-1200x630.png`, `logo-retina2x.png`): such a file changed under its name would be stale for a year. |
+
+Status: built. `TestContentHashedName` and `TestSiteFileCacheControl`
+hold the pattern. gcp's `TestSitePublisher` and
+`TestSiteFallbackIsRevalidated`, and the local target's `TestSiteHandler`,
+serve a hashed file for a year and every other file, a hashed fallback
+too, `no-cache`. None of it has run against Google Cloud.
+
+The rule is reversible until the first release.
+
+### D44, amended: a form for every input type and every operation a form submits, its controls named by path
+
+The first forms amendment gave a form only to an input type whose fields
+were each a string, a number, a boolean or an enum, since Topcoat's
+`Form<T>` decodes flat names and not `lines[0].quantity`. Every other
+input got none, with its reason in the build log: acme's
+`PlaceOrderInput`, whose `lines` are a list of one to fifty products with
+their quantities and whose `shippingAddress` is a nested object, got
+"field lines is a list or a map". And an operation's arguments beside its
+input, in its path, its query or its body, had no form at all, so a page
+that cancels an order by its id and a reason, or lists orders by a set of
+statuses and a limit, wrote its controls, their rules, their names,
+their parsing and their errors by hand. The router already decodes and
+checks each argument (`ParamSpec`), and `Args::check` runs those rules
+in-process (D43).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `forms` has two kinds of form, which share their controls, their decoding and their errors. An input form, `<Input>Form`, per input type an in-process call takes and the service declares, one with one component whether an operation requires the input or takes it optionally; the user model's operations have no in-process call, since the identity runtime serves them (D50), so login's input and the administration routes' arguments get no form, and a page signs a user in through the identity service. An argument form, `<Ns><Op>ArgsForm`, named after its `Args` struct, per operation a form submits: a GET operation with a query argument, whose form is a filter, and any other operation with an argument beside its input. A GET whose path carries its only arguments, `getOrder(id)`, is a link, and an operation whose only argument is its input uses the input's form. An argument form embeds its input's form as `input`, so one `<form>`, one `parse()` and one component cover every argument. `outputs.topcoat.forms` turns both off. | A module per kind, which split one feature and its helpers; a switch of its own for argument forms; an argument form for a GET by id, a form with nothing to fill; an argument form wrapping an input form alone |
+| A control is named by its field's path, as the validators and the API's `errors` spell a path (D14): `shippingAddress.city`, `lines[0].productId`, `tags[0]`; an argument by its name, beside its input's fields. Each object type a form holds has one struct, `<Type>Form`, wherever it appears: a value is an `Option<String>` as sent, a nested object its type's struct, a list of objects a `Vec` of them, a list of values `Vec<Option<String>>`, a list of an enum's members `Vec<String>`; an argument is an `Option<String>`, a list argument's values a `Vec<String>`. | A map of names to values, which a page could neither build nor read by field; a struct per place a type appears |
+| Every form implements `Deserialize` from the pairs a browser sends, which Topcoat's `Form` hands it as `Vec<(String, String)>` for a post's body or a GET's query, so `Form<T>` decodes any form, a flat one too, and `from_pairs` is the same for a page that holds the pairs; `from_query(cx)` reads a filter outside an extractor. The names become a tree; a list's rows are read in the order of their indexes, so a gap closes up; a name no control has, one that is not a path, or one deeper than 32 steps is ignored. An input field takes the last value sent (a checkbox row sends a hidden input of its name first), and an argument the first, as the router reads a parameter sent twice; a list argument's values are every value sent, a query list's split on commas as the router splits it; a blank value is none. An argument form reads its input's fields from the same tree. | `Form<Vec<(String, String)>>` in each page and a decode after it; a derived `Deserialize`, which reads no nested name and refuses a repeated key; re-encoding an argument form's other pairs for the input's form to decode again |
+| A form reads what a browser could send it and little more, since a page decodes a post before it asks who sent it. It reads at most 5000 pairs (`MAX_PAIRS`) and none after them, and sets its `overflow`, which `parse` refuses with the form's own message. Of a list's rows it reads one past the list's limit, its `listMax`, or 1000 (`MAX_ROWS`) for a list without one or with one above it, and `parse` refuses a list past the limit at the list, "must contain at most 3 items", as its listMax rule would; the add button shows while the list holds fewer. So a post's cost is a form's, whatever it sent: acme's `POST /orders/new`, which anyone may send, with 20,000 empty lines, 269 KB, rendered every line's errors in 6.5 s and 30.7 MB in release, and now renders 51 lines and the form's message in 5 ms and 40 KB; 4,000 lines render 51 and the list's message. | Reading every row sent, whose errors and answer grew with the rows sent, quadratically; Topcoat's body limit alone, whose 2 MB default holds 160,000 rows; dropping rows past the limit unsaid, which would accept a list cut short; refusing the request in `Deserialize`, which renders no form |
+| An input form's `parse()` writes the struct as the input's JSON and runs `parse_<type>` with undeclared keys refused. An argument form's writes each argument as the JSON a request carries (a blank optional one absent, one with a declared default the default), decodes it into the `Args` struct, parses the input by its form, then runs `Args::check`, which refuses the first argument that breaks a rule; an optional input is parsed only when one of its fields was sent, and is absent when none was, as the API takes no input; `submit(cx)` parses the form and makes the in-process call. | Restating each `ParamSpec`'s rules in the form, which would drift from the router's; making the router's specs public, a change to every Rust server |
+| `FormErrors` keys each message by its control's name, in a map, so a control finds its own messages, and those of the names under it, in a range of names rather than a scan of every message. `parse`'s errors are the validators' paths, flattened (`lines[0].productId`); `from_api` walks the API's nested `errors` as a procedure's `field_errors` does and places a refused parameter's error, which the router's 400 names in `details.parameter`, on that argument's control; `errors.under(name)` gathers a JSON value's or a list's with the place of each. Each form has a `shows` that says which paths its component renders a control for, and a message at any other place (an `@uiHidden` field, a hidden path argument, an undeclared key) renders with the form's own messages, after its name. A value a control cannot hold, a number that is not one, JSON that does not parse, a date-time that does not exist, is refused at the control before the rules run. | Dropping an error no control shows, which would refuse a form with nothing on it; a list of rendered names per component, which a row's names cannot be; a list of names and messages, which each control scanned, quadratic in a form's messages |
+| A control is typed by its field's or argument's type, by one renderer for both kinds, with the attributes its rules give it (`required`, `min`/`max`, lengths, a pattern a browser reads as the server does): a select for an enum; `Temporal.Date` `type="date"` and `Temporal.Time` `type="time"`; `Temporal.DateTime` `type="datetime-local"`, which carries no offset, so the form reads it as UTC (`2026-10-09T14:30` is `2026-10-09T14:30:00Z`) and its label ends in "(UTC)", a value with an offset sent as it is, and a held value shown in UTC as the control holds it (`2026-10-09T14:30+01:00` as `2026-10-09T13:30`), with its seconds and up to three digits of their fraction, the control taking `step="any"` so a held value with seconds is not refused; an integer reads any whole number a number input sends in an i64's range, `1e1` and `2.0` too; a `@secret` field `type="password"`, a list of them a password per row, never rendered with its value, since a form holds what a reader types, though a record, which reaches the browser, leaves the field out; and a `<textarea>` of JSON text, "(JSON)" in its label, for a value no control holds: a union, any JSON value, a map, a list of lists, an argument's object or list of booleans, or a type that nests the type holding it. A description is a hint under the label (`aria-describedby`); an argument is labeled by its name in words. | Text holding the canonical RFC 3339 form, which a reader would type by hand; reading the local time in the server's zone; showing a held value as sent, which a browser blanks when it has an offset; a map as key and value rows, whose errors (`labels.vip`) name a key a row may have changed; leaving an operation or an input without a form for one such value |
+| A nested object is a `<fieldset>` with its label as `<legend>`. An optional one is part of the input only when one of its values was sent: its controls are never `required`, its select has a blank option, and a new form starts it empty, its `@default`s left to the API. A list of objects is a fieldset of rows, each numbered by the row type's `@display` noun, else the list's label, after a hidden input of the row's name that keeps a row whose controls send nothing; an input's list of values is a control per row, and a blank row is null, which the rules refuse at the row; a list of an enum's members is a group of checkboxes in the enum's order; an argument's list of values is an input per value sent and a blank one for another. `new()` is a new form, each value's `@default` filled in and each list's first rows, its `listMin` or one when the input requires it, and the component's default; an argument form's `new(<path arguments>)` fills its hidden path inputs, each argument's default and the input's new form. `Default` is the empty form. | A checkbox that includes an optional object, one more control to tick; prefilling an optional object's defaults, which would send the object a reader left blank; rows for a list of an enum's members, which would let a reader pick a member twice |
+| A row is added and removed without JavaScript, by submit buttons named `_action`: `add:lines` after a list's rows, with the row type's `@display` createLabel as its text, until the list holds its limit, `listMax` or `MAX_ROWS`, and `remove:lines[1]` in each row while it holds more than its `listMin`. They carry `formnovalidate`, so a row can be added before the others are valid, and the component renders a hidden submit button ahead of them, which Enter presses. The form holds the button in `row_action`; `apply_action()`, on the input's form and on an argument form that embeds it, applies it within the bounds, numbering the rows after a removed one again with their values as sent, and is true when a row button submitted the form, in which case the page renders the form again, 200, without calling the operation. A form keeps its names: an input field named `overflow`, or in a form with rows `row_action` or the JSON name `_action`, fails the build, and an argument so named gets no argument form. | Script that clones a row; a route per action; a row count field, which a reader could set past the bounds |
+| A filter's boolean is a select of Yes (`true`) and No (`false`), after a blank option when the filter may leave it out, which reads the argument's declared default or filters nothing; a new form selects the default. Any other boolean argument is a checkbox, as an input's field is: unchecked is false whatever the default, which only checks a new form's box when it is true. A path's boolean reads `true` or `false`. | A filter's checkbox, whose unchecked box sends nothing, as a flag left out does: false could not be filtered on, and a flag whose default is true read true checked or not; reading an action's unchecked box as its default, which a default of true made impossible to turn off |
+| The app supplies choices: `Choices` maps a field's path without its rows' indexes (`lines.productId`, every line's) or a control's name (`lines[0].productId`, one line's, which wins) to value and label pairs, and either kind of component renders each text or number control it names as a `<select>` (`choice_select`, one call per control), a blank option first, keeping the value held as an option when no choice is it. The generator infers no picker. | Inferring a table from an id's name or type, which an input type does not declare (`productId` is a plain `Identity.UUID`); an inline select per control, which doubled the generated view |
+| A flat input form keeps its public shape: `WriteReviewInputForm`, `Form<WriteReviewInputForm>`, `parse()`, `write_review_input_fields(form, errors)`, `FormErrors::from_api` and `FormErrors::of`, and it renders the same HTML. Each component also takes `choices`, and each prop is optional; each form gains `overflow`, and `FormErrors::fields` is a map of names. | |
+
+Status: built. The goldens cover a seventh fixture, the extension's own
+`fixture-args-api`: a filter of a list of enums, a list of strings, a
+limit, an integer page, a flag and two flags with defaults, true and
+false, in the query; an order fetched by its id alone, which has no
+argument form; a cancel by a path UUID, an enum and an optional reason
+with `maxLength` and a description in the body; a hold by a path UUID
+and two flags with defaults in the body; a note by a path UUID and an
+optional input; a review written by a path id and an input; and a tag
+map, which its form holds as JSON text. `fixture-forms-api` gains
+`BookingInput`: a required nested `Guest` with an optional field, an
+optional nested `BillingAddress`, `rooms` of one to three
+`RoomRequest`s, each with an id, a bounded integer and a list of
+`Amenity` members, a list of `Amenity` members, a date, a time, a
+date-time, a secret, a list of secrets without a listMax, a default, any
+JSON value and a map; `NoteInput`'s `tags` are rows of at most three,
+and `draftNote` takes it optionally where `annotate` requires it, so the
+type has one form and one component however operations take it.
+`TestFormsServeATopcoatApp` drives a Topcoat app through
+`Router::handle`: the booking form renders its controls at their names
+with their attributes; a valid nested post books with the input's JSON,
+the date-time in UTC, the blank billing address left out and the default
+filled in; a refused field, nested or in a row, renders 422 at its
+control with the values as sent and the secrets blank, a list of them
+too, as does a value no control holds and the operation's refusal of a
+row's field; a held date-time renders in UTC, its seconds and fraction
+kept; an integer reads `1e1` and `2.0` and refuses `2.5` and `1e19`; row
+buttons add and remove rooms within one and three without calling the
+operation; choices render a select, a row's own winning; and 50,000
+posted rooms render 4 rows and the form's message in under 64 KB, 4,000
+the list's, while a list without a listMax holds 1001 rows.
+`TestArgumentFormsServeATopcoatApp` does the same for fixture-args-api:
+the cancel form renders its id hidden, its select required and its
+reason's `maxlength` and hint; a valid post calls the operation, a blank
+reason absent; an over-long reason re-renders with 422 and the router's
+message at its control, a forged id with the form's message naming it,
+and the operation's refusal as the form's; the GET filter reads repeated
+statuses, a comma-separated tag list, a limit, a page and its flags from
+the query and renders them checked, filled and selected, a blank flag
+absent or its default, `false` read as false, `on` refused, and a limit
+out of range at its control; the hold form's unchecked boxes are false
+whatever their defaults; the note form calls without its optional input
+when none of its fields is sent; the review form, its input embedded,
+parses both; the tag map is JSON text, refused at its control when it
+does not parse; choices make the reason a select; and a query of 5001
+pairs is the form's error. `TestEveryInputHasAForm`,
+`TestWhatHasNoArgumentForm`, `TestHowAFormHoldsAField`,
+`TestArgumentControls`, `TestBooleanArguments`,
+`TestAFormHoldsBoundedRows`, `TestASecretRowReadsNoValue`,
+`TestReservedNames`, `TestArgumentsTheFormKeeps` and `TestControlNames`
+check the generator, and `TestIdentityOperationsHaveNoForm` that
+fixture-user-routes-api, whose other operation takes nothing, writes no
+forms. acme-shop's crate gains `PlaceOrderInputForm` and argument forms
+for `cancelOrder`, `listOrders`, `listReviews` and `writeReview`. Its app
+places an order through the first at `/orders/new`, a row per line and
+each line's product a select of the app's catalog (`PlaceOrderLine`'s
+`@display` numbers the rows and labels the add button), filters
+`/orders` through the `listOrders` form, keeping the route's 401 and 403,
+and cancels an order from its page through the `cancelOrder` form, with
+the route's id in place of the hidden input's. A page whose operation
+refuses a signed-out shopper shows a Sign in button, which opens the
+app's sign-in page, over the identity service, and comes back to the
+page after it, a path of the app only. Its tests drive each page through
+`Router::handle`, in memory and over SQLite: a row added without placing
+the order, a quantity refused at `lines[0].quantity`, a limit refused at
+`limit`, a reason past its 500 characters refused at `reason`, a second
+cancel's 409 as the form's message, and a signed-out post of 4,000 or
+50,000 lines rendered with 51.
+
+The rule is reversible until the first release.
+
+## D56. Business records get deadlines, state rules, numbers and sign-offs, and a link may hold many targets
+
+The behaviors D16 ships came from claimable work: leases, queues,
+budgets, retries. A store, a salon, a help desk or an invoice needs
+other things of the instances it keeps: a deadline that moves an item
+on when nobody does, fields a state requires or freezes, a number a
+person reads out, and a sign-off by more than one person. This entry
+adds four core behaviors to `@superschematic/engine`, `Timers`,
+`StateRules`, `Numbering` and `Approvals`, and amends three, `Workflow`,
+`Reactions` and `Links`, for what they need. Holds, stock, calendars and
+payments come later and build on it.
+
+Three rules hold throughout. A duration or a time is an integer of
+milliseconds, as every config before has it (`ttlMs`, `sweepMs`):
+`Temporal.Duration` is written `1h30m`, and the engine has no parser for
+it. A change a read shows goes through an operation with its event; a
+sweep invokes an operation and writes nothing a read shows itself (D16).
+An operation name is flat across behaviors, a route, an MCP tool and the
+policy's `operation`, so each new one says what it acts on
+(`fireTimer`, `signOff`).
+
+### Workflow's `enteredAt`, the `volatile` flag and Reactions' `changes`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Workflow` gains the field `enteredAt`, when the status last changed, in epoch milliseconds: its create and each `transition` set it beside `status`. An instance that predates it has none until its next transition, since a behavior's migration and `afterConfigChange` reach only its own storage. | A reader that falls back to the instance's `createdAt`, one query more on every read, and wrong for an instance that moved before; an event read back from the log, which retention prunes |
+| A declaration's field may say `"volatile": true`: it can move without an event of its own instance, computed at read from other instances, the clock or the config. `Rollups.values`, `Dependencies.blocked`, `Lease.active`, `Links.targets` (whose `latest` and `stale` read the target) and `Budget.meters` (a daily meter starts again at read) are. The describe document carries the flag. | Marking nothing, under which a rule on a field can wait forever for an event that never records it; a flag per member of a field, for one field so far |
+| `ConfigTarget` gains `behaviorFields`, each behavior on the type with its declared fields and whether each is volatile. `behaviors` stays the list of names `parseConfig`s already read. | Turning `behaviors` into records, which breaks every `parseConfig` that calls `includes` on it, an extension's among them |
+| `Reactions` takes `{ when: { changes: { field, to?, from? } } }`. `field` is an own field (no dot) or a behavior's by qualified name, a member path after it allowed (`Timers.deadlines.sla.fired`), the behavior found by the longest of the type's behavior names that prefixes it. It fires on a create, an update or an operation event of its schema that moves the value: to `to` when given, from `from` when given; a create moves a field from absent; a delete fires nothing. An unknown field, a volatile one and `Workflow.enteredAt`, which every move of the status moves, are refused at define, and so is a `to` or `from` of `Workflow.status` that is not a state of the type's Workflow. | A signal each behavior declares and Reactions subscribes to, a second vocabulary beside the fields every reader already has; triggers per behavior added to Reactions one by one, as `enters` was |
+| A rule reads the move from the event: an operation's patch and an update's `behaviors` part are diffs, so a field the patch leaves out has not moved. It folds the instance before the event only for `from`, an object value, or an own field of an update, whose `data` is the caller's patch rather than a diff, once per event. A value the event keeps in the value store is compared once loaded. As with `enters`, a rule on the instance itself acts only while the field still holds `to`. A `changes` on `Workflow.status` joins the cycle check `enters` has: with `to` it moves on from that state, without it from each state a transition to its own state leaves. | Folding the instance for every rule on every event, which grows with each instance's history; comparing a value-store ref with a value |
+
+### Many-valued links
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A link may say `many: true` with a `max` from 1 to 100: it holds a list of targets, a ticket's reviewers or a stylist's services. `required` then means at least one. `targets.<name>` is a list for it, in the order the targets were linked, and the object it was for every other link. | A separate behavior for lists of links, which repeats pins, references and `listLinked`; no bound, under which every write reads every target twice for its event |
+| `link` adds a target to a many-valued link, or pins again one it holds, which keeps its place, and `unlink({ name, id })` removes one; a new target past `max` is `too_many`, a target it does not hold `not_linked`, the last of a required link `required_link`. Its create parameter is a list of at most `max` targets, at least one for a required link, each target once, a list that breaks one of these refused as an invalid argument before anything is stored. On a link that holds one target, `unlink`'s `id`, when given, must be the one it holds. A deleted target leaves the lists that hold it, and the delete is refused only when it would empty a required one. | `addLink` and `removeLink` beside `link`, two operations more on every type with Links, for what `link` and `unlink` already name |
+| The table is rebuilt once, keyed by the target as well as the name, its rows and their order kept. While a schema has instances, a link's `many` does not change and its `max` does not fall. | A second table for many-valued links, two layouts for one behavior |
+| What reads one target refuses a many-valued link, at define and again at run time, since another schema's Links config changes after: Reactions' `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`, Blueprint's `parentLink`, `from.link` and `copyLinks`, Budget's `scope`, Queue's `excludeStale` and Numbering's `scope`. `listLinked`, Rollups, Reactions' `revised` and Lease's `directOn` work over a list, `directOn` keyed by the target too. | Reading the first target, which picks one by an order nobody chose |
+
+### Timers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Timers` keeps named deadlines: `{ deadlines: { <name>: { start, afterMs?, then?, until? } }, sweepMs?, permission? }`. A deadline starts at the create (`{ create: true }`), each time the status enters a state (`{ enters }`), or at an own `date-time` field (`{ field }`), `afterMs` after it, before it with a negative `afterMs` for a field alone. When it comes due it fires; `then: { transition, from? }` moves the status, from the state the deadline starts in alone unless `from` says otherwise (the `enters` state, or the Workflow's initial state for a create), so an item resolved in time is never moved; a field start is in no state of its own and names `from`. `until` cancels a pending deadline once a change leaves the status out of the state it starts in (`{ leaves }`, which a field start cannot name) or in one of the states given (`{ enters }`). | ISO 8601 or Go durations, a parser in the engine for one config; a cron expression, which is a recurrence, a behavior of its own; `from` any state by default, under which a deadline moves an item already resolved |
+| A deadline arms when the fact it starts from changes, the `enteredAt` or the field's value, which `afterChange` reads from the instance as it is, never from which operation ran: a Lease expiry and a Reactions move change the status too. A later write that leaves the fact alone keeps a snooze or a reset, and a status that left and came back within one call is caught by its `enteredAt`. A field cleared cancels its deadline, and one moved arms it again. | Computing every deadline again at every write, which undoes a snooze; reading `change.operation === 'transition'`, which misses every other way the status moves |
+| `Timers.deadlines` gives each armed deadline's `dueAt`, `fired`, `firedAt` and the `outcome` of its move. Nothing in it follows the clock, so it is not volatile, and a rule hears `Timers.deadlines.<name>.fired` turn true; a reader works out what is overdue from `dueAt`. | An `overdue` member, which moves with the clock and no event |
+| The runner's `fire` schedule pages through due deadlines per namespace and schema, in order of due time and keyset by deadline, at most 1000 a run, and invokes `fireTimer` on each, passing over one a veto refuses, a Lease's guard say; any other failure, a policy that refuses the runner write, fails the run, which `runner.status()` shows. `fireTimer` fires one deadline that is due and has not fired, and changes nothing otherwise, so the sweep and a caller cannot fire one twice. It marks the deadline fired whatever its move meets, a veto or a missing permission, and records which in `outcome`, so one stuck instance never holds the sweep back. `resetTimer` and `snoozeTimer({ deadline, dueAt })` need the config's `permission`, which nobody holds when the config names none; a snoozed deadline that fired fires again at its new time. A deadline whose `until` holds when it comes due, as after a version that added the `until`, is cancelled instead of fired. | A permission only the runner holds, which no context can tell; a veto of a fire that is not due, which races the sweep; retrying a move a guard refused, which fires the same deadline forever |
+| A new version may change any deadline, and `Timers` joins and leaves a schema with instances, leaving with every row it kept. A changed `afterMs` moves due times from each deadline's start, which its row keeps, but a snoozed one's; a removed deadline's rows go, and so do those of a deadline whose `start` changes, which arms again at each instance's next write; a new `field` deadline arms every instance at publish, and a new `create` or `enters` one at each instance's next write. On a type with `Lease`, `"Timers.fireTimer"` belongs in its `exempt`, or the holder's lease refuses it. | Arming `enters` deadlines at publish, which needs Workflow's columns no other behavior reads in bulk |
+
+### StateRules
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `StateRules` says, per state of the type's `Workflow`, the own fields an instance must hold to enter it (`required`) and the ones that cannot change while it is in it (`frozen`, a list or `"all"`). A field is held when it is neither absent nor null. `permission` lets a caller change a frozen field. | Rules in `Workflow`'s own config, which every type that only moves a status would carry; conditions in an expression language, which this entry does not add |
+| A transition into a state missing a required field is vetoed (`missing_fields`), and a create into an initial state that requires one is refused as an invalid instance. An update, or an operation's `update()`, that changes a frozen field or clears a required one while the instance is in the state is vetoed (`frozen_fields`, `required_fields`, the second asked first, since no permission lifts it), a behavior's write included: a frozen result stays as it is. | Checking the state in `validate`, which sees the fields and not the status |
+| Any change of the rules is allowed: an instance that predates a requirement keeps working until it would lose a field the rule requires or enter the state. Flagged: Revisions' `propose` checks a patch without guards, so a proposal that changes a frozen field is refused at `approve`. | Refusing a stricter rule while the schema has instances, which keeps a business from ever tightening its own process |
+
+### Numbering
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Numbering` gives each instance a number a person reads, from `format`, a template of `{seq}` or `{seq:N}` (zero-padded to N digits, 1 to 10) exactly once and `{yyyy}` or `{yy}`, no other brace allowed: `INV-{yyyy}-{seq:4}` is `INV-2026-0042`. The count runs per namespace and schema, per target of a required single-valued link with `scope: { link }`, and starts again each UTC year with `reset: "yearly"`, which needs the year in the format, so a label is unique within its scope. | Any string template, under which two scopes print the same label; the year at the time of numbering, which puts a backfilled instance in the wrong year |
+| The number is set in the create's transaction, from its own table of counts, so a refused create takes none and leaves no gap; a delete leaves one. `Numbering.seq` and `Numbering.label` are filters, so `where: { "Numbering.label": "INV-2026-0042" }` finds the instance, and nothing changes a number once set. | An own field the behavior writes, which a create's event would not carry; a lookup operation beside the list's filter |
+| An instance made before the schema composed Numbering has no number until `assignNumber()`, which numbers it with an event and changes nothing on one numbered already; a deployment backfills in creation order. While the schema has instances, the format, the scope and the reset stay, and Numbering stays: added again, it would start counting again. With none, any of them may change, and the counts start again at 1. | Numbering every instance at publish, with no event for any of them; keeping the counts across a change made with no instance, which carries a count into a format that may print what it counted already |
+
+### Approvals
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Approvals` gates states of the type's `Workflow` on sign-offs: `{ gates: { <state>: { count, permission, from?, excludeCreator? } }, resetOnChange? }`. A transition into a gated state, from a state its `from` allows, waits for `count` distinct principals holding `permission` to sign off (`approvals_missing`). The creator cannot sign unless `excludeCreator` is false. | `Revisions`' review, one permission and one approval per proposed patch, which approves a change rather than a move; counting any principal, which lets one approver sign twice under two names only the policy knows apart |
+| `signOff({ state, note? })`, `withdrawSignOff({ state })` and the read-only `listSignOffs`, named apart from `Revisions`' `approve` and `reject`. A sign-off is refused while the instance is in the gated state (`in_state`), since entering it consumed the gate's. `Approvals.gates` lists each gate's current sign-offs, by subject; the count a gate needs stays in the config, since a publish that changes it writes no event. | `approve` and `reject`, which a type composing `Revisions` already has |
+| A change of the own fields, an update or an operation's `update()`, consumes the sign-offs of every gate unless `resetOnChange` is false, so what was signed is what moves. Entering a gated state consumes its sign-offs too: a return to it signs again. Both read the instance as it is, whichever operation ran. Consumed sign-offs stay in the behavior's table for `listSignOffs`. On a type with `Lease`, `signOff` and `withdrawSignOff` belong in its `exempt`. | Sign-offs that outlive a change of what was signed; resetting only on a transition, which a Timers or a Lease move would skip |
+| A new version may add, change and remove gates: a removed gate's sign-offs are consumed, and a gate's new count or permission applies to the sign-offs already given. `Approvals` joins a schema that has instances, which start with none, and does not leave one, whose sign-offs would stay behind with nothing to delete them. A withdrawal deletes its sign-off, which the operation's event records. | Refusing a higher count while the schema has instances, which keeps a business from tightening its own process; keeping a withdrawn sign-off beside the consumed ones, a third kind of row for `listSignOffs` to tell apart |
+
+Status: built. `@superschematic/engine` registers `Timers`, `StateRules`,
+`Numbering` and `Approvals` when it opens, beside the core's other
+behaviors, and the core declares them, twenty-two behaviors in all;
+`Workflow` gives `enteredAt`, `Reactions` takes `changes`, a link may be
+many-valued, and five declared fields are volatile. Each has a suite in
+`runtime/engine/typescript/test` (`core-timers`, `core-staterules`,
+`core-numbering`, `core-approvals`, `core-reactions-changes`,
+`core-links-many`), run on both SQLite drivers, and the work-queue
+package's tests compose them with `Lease`. `make cli-smoke` loads a
+fixture of each new behavior in both forms; the engine runs them in
+`core-behaviors.test.ts`; `superschematic engine-client` types their
+fields. The names and rules are reversible until the first release.
+
+
+## D57. A Rust server gets a generated entrypoint, a `Deps` over a Postgres pool, and an implementation crate, and reaches Cloud SQL through the socket Cloud Run mounts
+
+D51 gave a TypeScript API what a Go one has in a stack: a generated
+entrypoint, an image, a `Deps`, an implementation scaffold, and readers of
+the derived fields (section 3.4 of `docs/stack-model.md`). A Rust API has
+none of these. The generator logs "a RUST server, which gets no generated
+entrypoint yet" and writes nothing; the `local` target refuses the
+language; gcp's sql and bucket connectors refuse it; the Rust HTTP runtime
+reads no derived field, opens no database and logs nothing; and the
+generated `config.rs` reads `@envVars` alone. So acme-shop's Rust server
+runs beside the stack, by hand, over a SQLite file. D50's Rust stack
+entrypoint, which would read `<API>_IDENTITY`, waits on this. This entry is
+D51's twin for Rust.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server is Rust when the APIs it serves are, by `outputs.api.language` `RUST`, as D51 reads TypeScript. `local.process` and the local provisioner take `rust`, and `gcp.cloudrun` already did. `stack dev` builds a server with `cargo build --release --locked` into `<output-root>/program/<stack>/<environment>/target`, which every Rust server of an environment shares and a rebuild reuses, and runs the crate's single binary. Jobs and workers stay Go, as D52 and D53 leave TypeScript ones, and the resolver says so ("Rust jobs and workers are not built (D57)"). A Rust server's bucket edge is refused on both targets. | A language on `@server`, which could disagree with the API's own generated server. A target directory per server, which compiles the shared dependencies once per server. |
+| The Rust HTTP runtime gains `stackconfig`: `load_database`, `load_service`, `load_bucket`, `load_callers` and `load_cors`, each with a `_from` form over a map, reading the variables Go's `stackconfig` reads, with their refusals and two more that Go makes later or not at all: an unknown algorithm at load, and a variable under a field's prefix that is not UTF-8. `Database` is an enum, a URL or a Cloud SQL instance, whose `Debug` hides a password, as `Credential`'s hides a key. `runtime/http/testdata/stackconfig_parity.json` holds it to Go's encoding, as it holds TypeScript's. `credential_source` turns a callee's credential into the token source the SDK takes, the same type, so the entrypoint converts nothing. `<API>_IDENTITY` is the identity config's JSON, which `identity::Config::parse` reads. | Readers in the generated crate, written once per API. |
+| A Rust server's database is a pool of tokio-postgres connections (`deadpool-postgres`), behind the runtime's `postgres` feature: `connect(&Database)`, which opens nothing until a connection is asked for, and `ping(&Pool)`. A URL connects as it says, with TLS by its `sslmode` as libpq reads it. A Cloud SQL database connects over the Unix socket Cloud Run mounts at `/cloudsql/<connection name>`, which gcp's workload already adds, without TLS, which Cloud Run's connection terminates, as the IAM database user the connector creates, with an access token from the metadata server as the password, fetched for each new connection. So no Google library enters the runtime (D6), and connectors in other languages are untouched. The identity store runs over the same pool (`identity::PostgresPool`). | Google's Cloud SQL Rust connector, which does not exist. The Cloud SQL Auth Proxy as a sidecar, a second container per server. A password in Secret Manager, which section 7.4 keeps for platforms without IAM authentication. sqlx, a larger tree than the tokio-postgres the identity store already uses. A cached token, which a connection made after it expires would fail with. |
+| The generated `config.rs` writes `EnvConfig` and `load_env_config()`, the names Go and TypeScript use, beside the `@envVars` struct `load_config()` already reads. `EnvConfig` holds the `@envVars` fields and each derived field the server's resolution gives the API: `<DB>_DATABASE`, `<API>_SERVICE` per callee, `<API>_CALLERS` with a service clause, `<API>_IDENTITY` (parsed, the defaults when unset) with an identity authDb, and `<API>_CORS` on every Rust API, empty when no site calls it, since the API's build cannot see its sites. Every refusal is reported together. | Reading the variables in the entrypoint alone, which leaves a project's own binary without them. |
+| The API crate gains `deps.rs`: `Deps` (`config`, the pool of the API's database, a client per callee from its Rust SDK crate, and a `tracing` span for the API), and `Handlers`, the namespace implementations with what only the implementation can build: an authenticator of its own when the API has no identity authDb, and the webhook verifiers. `Implementations::new(handlers, …)` takes the identity and service authenticators the entrypoint builds as typed arguments, so a server cannot leave one out. `[implementation_paths] rust` defaults to `rust/{service}`, and the scaffold writes a crate there once, whose `create(deps)` returns the `Handlers`, never into a directory that holds a `Cargo.toml`. A Rust API with a bucket, or a callee with no Rust SDK, is refused. | `Implementations` as the implementation's return, which would make it build the identity and service authenticators the entrypoint already builds. |
+| The entrypoint is `<output-root>/server/<stack>/<server>/`: a crate named `<prefix><stack>-<server>-server` whose binary is the server's name, `src/main.rs`, a Dockerfile and its ignore file. `main.rs`, on a tokio runtime, initializes JSON-line logging (the runtime's `logging`); loads each API's `EnvConfig`; opens a pool per database; builds a client per `calls` edge with its credential source; calls each `create`; builds an identity service per authDb from `<API>_IDENTITY` and the service authenticator from `<API>_CALLERS`; builds each API's router; serves `/healthz` and `/readyz` (bounded pings, 503 while draining) on `$PORT`; and drains for ten seconds on SIGTERM. A server of two APIs hands a request to the API whose operations take it, as Go's dispatch does. The site CORS layer (the runtime's `cors`, held by `cors_parity.json`) is outermost, and each API keeps its identity CORS inside it. A config error stops the server, naming every variable. | One binary per API, which a server that serves two APIs cannot be. Merging the APIs' routers, which their shared OpenAPI routes make collide. |
+| The Rust servers are the members of a Cargo workspace at `<output-root>/Cargo.toml`, which the build writes and which excludes the generated `api`, `sdk` and `types` crates. Its lockfile, `<output-root>/Cargo.lock`, lives outside the emptied `server/`, so a project commits it, as D51's amendment has it commit `bun.lock`; each build runs `cargo update --workspace`, which writes or prunes it without moving a pin. The image, `stack dev` and the generated CI build with `--locked`, and CI's `check` refuses a lockfile git does not track or the build changed, then runs `cargo check --locked` on each server. The image builds with the Rust toolchain `tools.env` pins, from the build context that holds the superscalar and runtime checkouts its crates name by path, and runs as `distroless/cc` non-root; it fails, rather than resolve afresh, without the lockfile. | A lockfile per server, which every build would empty. Building on the host and copying the binary, which ties the image to the host's architecture and libc. |
+| acme-shop proves it with `shop-stock`, the API the auth guide's service callers section sketches (D37): a Rust API over `shop-db`'s `StockLevel`, whose stock anyone may list, whose levels staff with `stock.write` set, and whose reservations only `shop-orders`' server may make (`@requireService`). `shop-orders` reserves stock through it when an order is placed, so a Go server calls a Rust one with a service credential and forwards the shopper. `shop-stack` deploys it on a Rust server, and `TestStackDevRunsTheShop` calls it. | Moving `shop-orders` to Rust, which the Topcoat app and the Go tests are built on. A fixture alone, which nothing would run end to end. |
+
+Status: built.
+- The Rust HTTP runtime gains `stackconfig`, the `postgres`, `logging`
+  and site `cors` pieces and `identity::PostgresPool`. The stack config,
+  CORS and identity vectors hold it to Go's, and its Cloud SQL path is
+  tested through a socket relay and a fake metadata server.
+- `rustrestgen` and `envgen` write `deps.rs` and `EnvConfig`, and the
+  scaffold writes the implementation crate at `[implementation_paths]
+  rust`.
+- The `local` target builds and runs a Rust server, and gcp's sql edge
+  serves one; both refuse its bucket edge.
+- servergen writes each Rust server's crate, the workspace and its
+  lockfile, and the image, and cigen's `check` refuses a stale lockfile
+  and compiles each server. A fixture stack (`rs-stock`, `rs-pricing`,
+  `rs-orders`, `rs-web`) builds, serves and runs in Docker, with identity
+  over Postgres, Rust and Go callers and a site. `stack dev` runs a Rust
+  server over Postgres (`TestStackDevRunsARustServer`).
+- acme-shop's `shop-stock` is a Rust API on a Rust server in
+  `shop-stack`, whose stock `shop-orders` reserves in each order's
+  transaction with a service credential, and `TestStackDevRunsTheShop`
+  calls it. The shop commits `schemas/dist/Cargo.lock`, and `check.sh`
+  refuses a build that changes it.
+
+No Rust server has run on Cloud Run.
+
+Not built:
+- an implementation crate that builds with the API crate somewhere other
+  than the output root its `Cargo.toml` names by path, so `stack dev
+  --out` elsewhere collides in Cargo's lockfile;
+- Rust jobs and workers;
+- buckets from a Rust server;
+- OpenTelemetry export.
+
+The rule is reversible until the first release.
+
+## D58. The engine is one Rust library every server links, over Postgres in a stack and SQLite in one process, and it serves its own routes
+
+D16 built the engine as the TypeScript package `@superschematic/engine`:
+one SQLite file, one process writing it, behavior code synchronous inside
+the write transaction. A generated server refuses a type that composes a
+behavior, so behaviors reach only a deployment written by hand in
+TypeScript, as `examples/engine-notes` and `examples/engine-jobs` are. A
+stack's servers are Go, TypeScript and Rust (D51, D57); Cloud Run runs
+each as many instances, and their data is in Postgres. This entry puts
+the engine in every one of them, as one implementation, so a type's
+behaviors do the same thing whichever language serves it: the engine
+becomes a Rust library each server links through a binding.
+
+It departs from D19 for the engine. The version graph's core is pure, so
+each language keeps an engine of its own around it, over its own driver.
+The behavior engine's logic is the SQL its behaviors run; split by
+language, it would be three implementations of every behavior, which is
+what D17 turned down for the merge rules.
+
+The engine:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine is the Cargo workspace `runtime/engine/rust`: `superschematic-engine` (the engine, the behavior API and its transport-neutral HTTP layer), `superschematic-engine-storage` (both databases), `superschematic-engine-behaviors` (the core's behaviors), a test kit, and a crate per binding. The work-queue behaviors are `superschematic-engine-workqueue` in `runtime/engine-workqueue/rust`, on the engine's public API alone, as the TypeScript package is. Every crate builds with the toolchain `tools.env` pins. | An engine in Go, which a TypeScript server would reach through a subprocess or wasm; keeping the TypeScript engine and adding a Go and a Rust one held equal by vectors, three implementations of every behavior |
+| The engine is synchronous. A call runs on one thread; behavior hooks run inside its transaction and call back into the engine, each nested call in a savepoint, sixteen deep at most, as D16 has them. It reaches Postgres through the `postgres` crate, the synchronous client over the tokio-postgres the version graph's Rust engine uses, and SQLite through rusqlite and the SQLite it bundles. A binding gives its host an asynchronous call by running the synchronous one off the host's event loop. | Asynchronous hooks, which make every behavior's code a future that holds the transaction across awaits; an engine that owns a scheduler of its own inside every server |
+| A behavior is a Rust type that implements the engine's `Behavior` trait: its declaration, the JSON file D16 copies into the crate; a config typed in Rust, parsed from the declared JSON; and its hooks, each optional, since an absent hook means something of its own, as in TypeScript. An extension's behavior is a crate implementing the same trait. A project's engine is a value its build assembles from the core's behaviors, the work queue's and its extensions', not a registry the linker collects. A project that uses an extension's behavior builds its engine from a crate the compiler writes; one that uses the core's alone takes the release's build. | WebAssembly plugins, one engine for every project but a plugin interface, a runtime and slower hooks; behaviors in the host's language called back across the binding, which a server in another language cannot run; registration the linker collects, which a static archive's link can drop |
+
+Storage:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine keeps its data in Postgres or SQLite. In a stack it uses the database of the DB service its types belong to, its tables in a Postgres schema of their own (`engine` unless configured). SQLite is a file one process writes: a test, a local run, a Topcoat app (D44). | SQLite alone, which two instances of a server cannot share; Postgres alone, which takes the engine out of a Topcoat app and puts a database server under every test |
+| Behaviors keep writing SQL text with `?` placeholders, which the engine numbers for Postgres. A statement the two databases word differently is written once for each, as JSON access and a parameter whose type Postgres cannot infer need, a few dozen of some 165. A behavior declares its tables as specs the engine writes for each database, `STRICT` and SQLite's types or Postgres's, and keeps `up()` for the rest. Full-text search is the engine's own: FTS5 on SQLite, a `tsvector` with a GIN index on Postgres. Search ranks differently on each, and its documentation says so. | A dialect layer every statement passes through, which D16 turned down; a query builder, which rewrites every statement and has neither JSON nor full-text search |
+| Postgres keeps D16's one writer per namespace. A write transaction runs at READ COMMITTED and takes an advisory lock on its namespace and a shared one on the catalog; a define, a publish, a change of namespaces and a migration take the catalog's alone; a lock that waits past the busy timeout is the engine's refusal `busy` (503, and the call may be tried again) on both databases, as SQLite's `SQLITE_BUSY` is, a code the TypeScript engine lacked: it let `SQLITE_BUSY` through as an internal error. Migrations at start hold a lock of the session, so instances that start together migrate once. | SERIALIZABLE with retries, which runs a behavior's code twice; a row lock per instance, which every behavior that reads another instance would have to take |
+| Postgres aborts a transaction at any error, so a statement whose error the engine handles runs in a savepoint, a behavior handles one through `try_run`, and a unique conflict is `ON CONFLICT DO NOTHING` and a count. `unchanged()` reads a count of the rows the call wrote, which never goes down, as SQLite's `total_changes()` never does. An instance's data stays JSON text in both, its keys and numbers as written, and a Postgres filter casts the member it reads. | Catching errors as SQLite allows, which leaves a Postgres transaction refusing every later statement |
+| On Postgres a commit notifies (`pg_notify`) and each process listens, so an event stream, `watch` and the runner wake on every instance; a cache holds only what never changes; the runner runs while its process holds a lock of the session. The engine keeps its migration ledger, and a file the TypeScript engine wrote opens and migrates. | A notifier inside the process, which one process writing the file allowed |
+
+Schemas, messages and access:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine reads schema-file documents and validates instances against their IR in Rust. The schema runtime's Rust crate gains an IR reader and validator and the strict schema-file loader, held to Go's and TypeScript's by `runtime/schema/testdata/validation_parity.json` and `schema_file_parity.json`. JSON Schema, for configs and operations' parameters and results, is the `jsonschema` crate, its messages written as ajv writes them and in one defined order, since clients and agents read them. Numbers are written as JavaScript writes them. | Validators generated per schema, which a schema defined while the engine runs has none of; new wording, which every client that matches a message would see change |
+| Access is a policy the engine reads as data: ordered rules, the first that matches deciding (a question no rule matches is refused), each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold (`hasAnyPermission`, `{schema}`, `{action}`, `{namespace}` and `{operation}` standing for the question's) or allowing or refusing outright; `allowAll` and `permission`, today's `permissionPolicy`, are shorthands. A deployment that needs more compiles a Rust policy into its engine. What D16's deployment passed as functions, the ids, the clock, the value store's driver and the permission matcher, is config. A `system` principal, which no request can be, publishes when a server starts. | A policy function the host supplies and the engine asks on every call, which a Go or Rust host would answer through a callback across the binding |
+
+What it serves, and the bindings:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine serves its own routes. A request goes in, with its method, prefix, path, query, headers, body and the caller the host authenticated, and a response comes out, its body bytes or a stream. Routing, decoding, ETags and preconditions, the success envelope and RFC 9457 problems (D15), the service-caller rule (D37), the event stream's frames and the MCP endpoint's JSON-RPC are the engine's. Authentication (D50, D37), request ids, body and rate limits, timeouts and CORS stay with the host's HTTP runtime, which mounts the engine at a prefix. MCP is the stateless streamable transport, so instances share nothing for it. | Routes in each runtime held equal by vectors, as D50's identity routes are: twenty-six routes, an event stream and MCP in three languages |
+| Go reaches the engine through a C ABI over a static archive, in the module `runtime/engine/go`, as the version graph's Go binding does (D17, D47 amended): JSON in and out, output the engine allocates and frees, a panic caught at every export and returned as an `internal` error, and an engine that panicked inside a transaction refusing every later call, so its server's readiness fails. The release's archives gain the engine's. The version graph's C functions go behind a feature the engine leaves off, so a binary that links both archives defines each symbol once. | One archive carrying superscalar's, the version graph's and the engine's C functions, which superscalar's Go binding, linking its own archive by name, cannot use |
+| TypeScript reaches it through a Node-API addon, which Bun loads as it loads superscalar's. `@superschematic/engine` keeps its API: `openEngine` returns the synchronous `Engine` it returns today, over SQLite, and `openEngineAsync` the same methods returning promises, for a server on Postgres. `engineApp` and `engineMcp` become Hono adapters over the engine's routes. `@superschematic/engine/client` stays TypeScript. | The version graph's wasm build, which opens no socket and no file; an asynchronous API everywhere, which rewrites every test and local use for a server's sake |
+| A Rust server links the crate, mounts the engine's axum router at a prefix and calls the engine through `spawn_blocking`. | |
+
+Servers:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type in a DB schema that composes a behavior is an engine type: its instances are the engine's, in that DB service's database, and `sql`, `orm` and D27's migrations leave it and the engine's schema out. A behavior on an API's own type stays refused. The types generators write a behavior's fields under its name (D16, amended), so each generator that meets an engine type renders behaviors. A new generator writes each engine database's document: its namespace, the meta-schema, the D11 tool options, the behaviors and their crates, and a schema-file document per engine type. | A service kind of its own for engine types, a fourth kind for what a DB service already is |
+| A server whose API's database holds engine types opens the engine on it, reaching Cloud SQL through the socket Cloud Run mounts, with an IAM token, as D57 does. It migrates and publishes the document before it reports ready, under a lock, and does nothing when the live versions match. It mounts the engine at the database's `engine.mount` (`/engine/<db>` unless set), behind its API's identity and service callers. On gcp the engine's runner is a worker pool of its own, one instance of the server's image, since Cloud Run gives a request-serving instance CPU only while it serves (D53); on `local` the server runs it. | A runner in every server instance, idle between requests; publishing from CI, which a server that migrates its database at start does not need |
+
+Proving it:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Before the TypeScript engine goes, its behavior is recorded as data: scenarios of calls and their results, with fixed ids and a fixed clock, in `runtime/engine/testdata/scenarios`; its HTTP, event-stream and MCP exchanges; and SQLite files at each migration version. The Rust engine, each binding and each server runtime replay them, on SQLite and on Postgres. The engine's TypeScript suite runs against the addon, a list of the files not yet passing shrinking to none; a test that defines a behavior in TypeScript runs it through a bridge built into the test addon alone. One script drives a Go, a TypeScript and a Rust server, and their transcripts must match. | The TypeScript suite alone, which the Go and Rust bindings cannot run |
+
+This entry amends D16: the engine is the Rust library, not the
+TypeScript package; its storage is Postgres or SQLite; the access policy
+is data; an extension that declares a behavior ships it as a Rust crate;
+and generators render behaviors on DB types. It amends D19 for the
+engine alone; D32 for Branches, which runs the version graph's Rust
+engine over the behavior's transaction in place of the TypeScript
+`SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
+the engine mounts in.
+
+Status: not built. `runtime/engine/rust` holds the workspace;
+`superschematic-engine-storage`: both databases' transactions, savepoints
+and writer locks, the write counter, the migration ledger with the
+engine's migrations for each, a behavior's storage and SQL checker, and
+the commit notifier; in `superschematic-engine`, opening an engine on its
+storage and migrating it, the namespaces, the schema registry with its
+validator over `superschematic-schema-ir`, the compatibility rule and the
+display and index checks, the access policy read as rules (or a Rust
+policy compiled in) with the `system` principal always allowed, the
+instances with their filters, unique indexes and lookups, the event log
+with its reads and its watch on the notifier, the value store with its
+configured driver, the engine's refusals with their codes, the calls by
+name with JSON arguments that the bindings will make, the principal, and
+JSON written and hashed as JavaScript writes it; the behavior API
+(milestone 5): a behavior is a Rust type with its declaration, a typed
+config and optional hooks, registered when the engine opens or later,
+composed and checked at define and publish, its storage migrated and its
+afterConfigChange run in the publish's transaction, and run with every
+call on its instances (initialize with create parameters, guards with
+veto codes and preconditions, validate, operations and schema-level
+operations through invoke, operate and invokeSchema, update and
+unchanged, the fields it adds, afterChange, reads, invokes and creates of
+other instances, references with their guards and hooks, and the relation
+over its columns), a panic in a hook a BehaviorError, and the paging of
+a behavior's list operations; the runner (milestone 6), which runs
+reactions after the commit and schedules every everyMs, driven by its
+host (`run_due`, `next_wake`) or by a thread of its own that waits on the
+notifier, and on Postgres only in the process that holds its session
+advisory lock, another taking over when it stops, with retention pruning
+the event log; the describe and tools documents, the behavior catalog
+and a tool run by its MCP handle, under the invocation policy and vendor
+keys the engine's options give; the HTTP API as one request and one
+response any host mounts (`engine::api`): the 26 routes and the MCP
+endpoint, their parameters, media types, ETags and preconditions,
+envelope and problems, `Location` under the prefix, 401 with no caller
+and the D37 stand-in, the event stream's every byte, which the host
+pulls a frame at a time, and MCP's stateless JSON-RPC on the 2025
+revisions and 2026-07-28, the host keeping authentication, request ids,
+body and rate limits, timeouts and CORS; the calls by name for all of
+it, an event stream held by an id; and a Postgres connect bounded by its
+connect timeout end to end; `superschematic-engine-behaviors`, the
+core's behaviors, each over the copy of its declaration that `make
+behaviors` writes into the crate and CI checks, which a host passes in
+its options (`core()`) since the engine cannot depend on them: wave 1
+(milestone 8) has ported Workflow (with D56's enteredAt), Comments,
+Constants and Variants, and wave 2 (milestone 9) Revisions,
+Dependencies, Links (with D56's many-valued links, and what a move of a
+link's target moves on, which Reactions and Lease hear), and D56's
+Numbering, StateRules, Approvals and Timers, whose deadlines the runner
+fires, with their guidance, migrations on both databases, configs,
+guards, fields, operations, schedules and veto codes; and
+`superschematic-engine-testkit`, which ports the TypeScript tests'
+behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
+retention's and the tools', and those of the ported behaviors'
+`test/core-*.test.ts` against the engine, and replays the scenario and
+HTTP corpora, those behaviors' files included, giving their recorded
+answers on SQLite and Postgres for every case whose behaviors it has,
+an event cursor on Postgres held to the recorded order rather than its
+number (a write a rollback undid leaves a gap in a Postgres identity
+column), but for a step it lists with what explains it (a change the
+recording does not see). CI tests the
+workspace on both databases. The Node-API addon is milestone 7, the
+other core behaviors (Rollups, Search and Reactions, then Branches)
+milestones 10 and 11, and the work queue's milestone 12. Until the Rust
+engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
+
+The rule is reversible until the first release.
+
+### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
+
+D52 built jobs for Go APIs: a TypeScript API's job resolved, on gcp, but
+got no `Jobs`, no scaffold and no entrypoint, and the local job platform
+took Go alone. A TypeScript job is the twin of a Go one, written as D51
+writes a TypeScript server.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The API package's `deps.ts` declares `Jobs`, a method per job in camel case, `shipOrders(signal: AbortSignal): Promise<void>`, and `JobsConstructor`, `(deps: Deps) => Jobs \| Promise<Jobs>`. The signal is Go's context: SIGTERM aborts it. The scaffold exports `createJobs`, each method throwing the runtime's `notImplemented()`. | A method with no argument, which SIGTERM could not reach. An optional signal, which an implementation could not rely on. |
+| A job's entrypoint is a package at `<output-root>/server/<stack>/<job>/`, as a TypeScript server's is (D51): `package.json`, `tsconfig.json`, a Dockerfile that sets no `PORT` and exposes nothing, and `main.ts`. `main.ts` takes the server's wiring from the templates they share (`wiring.ts.tmpl`): the API's config, a pool per database, a client per API called and a handle per bucket, in the `Deps` literal the server builds. It builds no identity service and reads no callers or CORS field, since a job serves no request. It calls `createJobs`, runs the method once, logs `job started`, then `job done` or `job failed` with how long the run took, ends its pools and exits 1 on a failure. A second signal exits at once, as a server's does. | A subcommand of the server's `main.ts`, which D52 refused for Go: it ties a job's image to a server's. Its own copy of the wiring, which would drift from the server's. |
+| An implementation that exists and exports no `createJobs` fails the stack's build, saying what to add, as a Go one without `NewJobs` does. The build reads the exports from the package's sources: a declaration, an export list, or a re-export of a whole module, which may export it. | Leaving it to `tsc`, which the generated CI runs on servers alone, or to Bun, which fails only when the job runs. |
+| `local.job` takes TypeScript: the provisioner installs the output root's workspace once, as for a TypeScript server, and runs `bun main.ts` in the job's package for each run, `stack run`'s included, with nothing to build. The program's job node records its language. `gcp.cloudrunjob` already took TypeScript, since it runs the image. | A binary from `bun build --compile`, a build step D51 avoids. |
+
+Status: built in #348. `TestTypeScriptJobAndWorkerRunOnPostgres` runs
+ts-shop's job under Bun against Postgres: it enqueues in a transaction
+that commits and one that rolls back, logs its start and end, and exits 1
+with `job failed` when it fails.
+`TestStackDevRunsTypeScriptJobsAndWorkers` runs `stack run` on a
+TypeScript job against `stack dev`. `TestTypeScriptJobAndWorkerRunOnBun`
+checks the local provisioner's commands,
+`TestATypeScriptImplementationThatPredatesItsJobsFails` the build's
+refusal, and the servergen goldens the packages. No TypeScript job has run
+on Cloud Run.
+
+### D53, amended: a TypeScript worker claims through the HTTP runtime, over queue definitions the DB's TypeScript types export, with the Go ORM's statements
+
+D53 built queues and workers for Go: the Go ORM enqueues and claims, and
+there is no TypeScript ORM. A TypeScript API needs both, with the Go
+ORM's semantics, since one queue may have Go and TypeScript callers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One function, `sqlutil.PostgresQueueStatements`, writes a queue's statements on Postgres: the start of an enqueue, the expiry of a last attempt's claim, the claim with `FOR UPDATE SKIP LOCKED`, and complete, fail, extend and release under a claim token. The Go ORM's `queues.go` carries them per queue, and so does the TypeScript `queues.ts`, so the two cannot drift. A test holds `queues.ts` to the Go ORM's statements, columns and encodings, and another runs both against one Postgres, each claiming, failing, releasing and completing what the other enqueued and claimed. | SQL written by hand in the runtime, held to Go's by shared vectors, a copy that only a failing test would bring back in step. SQL the runtime builds from a table's name and columns, a second writer of the same statements. |
+| The queue client's typed half is data in the DB's TypeScript types package: `queues.ts`, exported as `./queues`, with a `QueueDefinition<OrderPlaced>` per queue, `orderPlacedQueue`, holding its table, arguments, the column each field writes, and its statements. It imports nothing but the messages' types, as the identity descriptor the package exports (D50). The HTTP runtime's `./postgres` entry runs a definition: `enqueue(client, orderPlacedQueue, msg)` in the transaction `client` runs, and `postgresQueue(pool, orderPlacedQueue)`'s claims, typed by the definition's message, with `ClaimLostError`. | The API package, where each API on a database would carry a copy and the API generator would need the database's schema. The runtime alone, which knows no queue's columns, encodings or message. Waiting for a TypeScript ORM. |
+| A field writes its column as the Go ORM writes it, classified alike: a JSON field its JSON text, an unset optional field or list nothing, so the column's default, and an unset enum its schema default. A claim reads each column as the TypeScript types hold it, through type parsers of its own: a 64-bit integer a number, a date its text, and a list of a type pg does not know, such as `citext[]`, from its text. A queue whose message holds a `POINT` or an `INTERVAL` column, which the client cannot read back as its type yet, is left out of `queues.ts`, which says why, and a TypeScript worker of it is refused. | Refusing the DB's TypeScript types for such a queue, which would break a build whose workers are Go's. Returning the message as JSON from Postgres, which would make the claim's statement other than the Go ORM's. |
+| The API package's `deps.ts` declares `Workers`, a method per worker, `fulfilOrders(message: OrderPlaced, signal: AbortSignal): Promise<void>`, and `WorkersConstructor`, importing the message from the database's TypeScript types, which an API with workers must generate. The scaffold exports `createWorkers`, whose package depends on those types, and an implementation without it fails the build, as one without `createJobs` does. | A message typed `unknown`, which would leave the implementation to check what the schema says. |
+| The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
+| `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
+
+Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
+Go ORM and the TypeScript client against one Postgres, and
+`TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
+`TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
+it handles a message, retries one that fails once after the backoff, marks
+dead one that fails past its retries, and on SIGTERM gives the handler
+still running its grace, then releases its message and exits 0.
+`TestStackDevRunsTypeScriptJobsAndWorkers` runs a TypeScript worker under
+`stack dev`, and the runtime's tests run `runWorker` and the client, the
+latter against Postgres when
+`SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
+worker has run on Cloud Run.
+
+Not built:
+- a `POINT` or `INTERVAL` column in a TypeScript queue's message;
+- type-checking a TypeScript job's or worker's package in the generated
+  CI, which checks the servers';
+- a Rust worker.
+
+The rule is reversible until the first release.
+
+## D59. `stack init` writes a stack over a tree's APIs, from flags and the answers to what they leave out, and runs nothing
+
+Section 11.1 of `docs/stack-model.md` listed `stack init` among the stack
+commands and said nothing more, and D51's amendment left it the ignore
+rule to write. A project that had API services had to write its first
+stack by hand: the Stack kind's config, the schema that imports each
+service's handle, the environments, the gcp target's types for tsc, and
+the rules that keep the output root out of git but its lockfile.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| init starts a stack in a tree that already has API services. It writes one Stack service, `<services-root>/<name>/`: its `package.json` when its siblings have one, a `tsconfig.json` extending the base theirs do, `schema.config.ts`, and `src/stack.schema.ts`, which the TypeScript writer writes from the stack's declarations, so it follows the authoring package. It writes the ignore rules in the `.gitignore` that covers the schemas root, and creates no other project file. A tree with no API service is refused. | Scaffolding a whole project, schemas root, naming file, a DB and an API, which `superschematic` has no other command for and which the first-project pages walk through. A template of the schema, which drifts from `@superschematic/stack` as it grows. |
+| `deploy` lists every API and every Site service of the tree, by name; the DB and Bucket services come with them, as resolution reaches them. `expose` lists each API an end user or a third party calls, one with an operation whose service clause, its own or its set's (`ir.EffectiveServiceCallers`), is none or `@allowService`, so a `@publicRoute` in a `@requireService` set counts, and each API a site calls, which D55 requires. An API whose every operation is `@requireService`, or that has none, is internal. The summary says why for each API, and `--expose` replaces the list. | Exposing every API, which puts every internal API on the load balancer. Exposing none, which gives the stack no way in. Reading the `calls` graph, leaving out each API another one calls, which hides an API that end users and servers both call. APIs alone in `deploy`, which leaves a tree's site out of its stack. |
+| Its environments are `Dev` on the local target and, given a Google Cloud project and region, one on gcp, `Staging` unless `--environment` names it. A gcp environment comes with `src/gcp-target.ts`, the augmentation of `Targets` (section 4.3), each type read from the JSON Schema the target or its platform registers, so the file says what the binary that wrote it checks. A binary that does not link the gcp target, the core alone, refuses a gcp environment. `--ci github` sets `outputs.ci`. | A hand-written gcp augmentation in the CLI, which the gcp target's next setting would outdate. An authoring package for gcp, which no extension ships yet. Asking for every target the binary links, when gcp is the one the installed binary deploys to. |
+| Every value is a flag: `--name`, `--gcp-project`, `--region`, `--environment`, `--ci`, `--expose` and `--force`. At a terminal init asks for each value no flag gives, through a line prompter beside the secret prompter `stack secrets set` uses, each question with a default from the tree or from gcloud's active configuration (`project`, then `run/region` or `compute/region`), which init reads in the background with no stdin, its prompts off and a ten-second deadline, and skips without `gcloud`. Without a terminal, a missing value is an error. Only the name is required, and it has a default: the first word the deployed services' names share and `-stack`, else the naming file's `npm_scope`, else the project's directory. So `stack init` alone writes `Dev` alone. | Prompts only, which a script cannot drive. Flags only, which leave a person to look up a project and a region gcloud already knows. A terminal UI library, a dependency for a few questions. gcloud's defaults without a terminal, which makes a script's output depend on the machine. |
+| init writes files and runs nothing: no bootstrap, no build, no deploy. It loads the stack and resolves each environment as the `stack` generator does, prints each problem that does not resolve yet, such as a required config field no setting binds, which only a person can fill, and ends with the commands to run next: `stack dev --environment Dev` and, for a gcp environment, `stack bootstrap <environment>`, each naming the stack's directory when the stack commands would not find it. | Bootstrapping a gcp environment, which needs an owner's credentials and changes a cloud project, from a command that otherwise only writes files. Failing on a stack that does not resolve, which it has written all the same. |
+| The ignore rules go in the nearest `.gitignore` at or above the schemas root, no higher than its repository's root, else in a new `<schemas-root>/.gitignore`, anchored to the schemas root: `dist/*`, `!dist/bun.lock` and `.superschematic/`. A rule on the output root itself, anchored there, becomes the rule on its contents in place. When git still ignores the lockfile, because a broader rule ignores the directory, init adds `!dist/` after it; when another rule ignores the lockfile itself, init names it and leaves it. A rule already there is not added again, so a second run changes nothing. | Always writing `<schemas-root>/.gitignore`, beside a repository's own that already covers it. Rewriting a broader rule such as a repository's `dist/`, which ignores other trees' output too. |
+| A tree with a Stack service is refused without `--force`, which replaces the Stack service of the name given, removing its config in every form and its `src`, so no file of the old stack is read with the new one, or writes another stack beside the first. A name that is another kind of service's is refused. | Refusing only a stack of the same name, which lets a second stack appear in a tree whose stack commands then need `--stack` every time. Merging into an existing stack, which a person edits from then on. |
+
+The TypeScript writer now closes a class with no fields of its own on its
+line (`export abstract class Dev {}`), as it writes `@job` and `@worker`
+classes and as the Stack schemas the docs show are written.
+
+Status: built. `internal/stackinit` holds the rules and renders the files;
+`cli/stack_init.go` is the command. `internal/stackinit`'s goldens hold
+the files of a stack with both environments on stacktest's fake target in
+gcp's place, and its tests the expose rule, the default name, the class
+name and the ignore rules in and out of a repository, twice over.
+`cli/stack_init_test.go` drives the command over
+`internal/stackinit/testdata/tree`, two APIs, one of them internal, a
+database and a site: with no flag, every flag, a scripted terminal and a
+gcloud that never answers, each refusal, `--force`, and the ignore rules
+in a repository whose root ignores every `dist`, and builds the stack it
+wrote. `cmd/superschematic` writes a gcp environment over the same tree,
+which loads and resolves, and over a copy of acme-shop's services writes
+the `@stack` acme-shop's `shop-stack` declares by hand.
+
+The rule is reversible until the first release.
+
+### D44, amended: a submission keeps its route's status, long text is a textarea, and a display component reads a time and names an id
+
+Building acme's order pages on the generated forms found five gaps.
+`submit` folded every refusal, a 401, 403, 404 or 409, into `FormErrors`,
+so a page that answered with the route's status, as `/orders` did,
+parsed the form and called the operation itself. A label ran a number
+into its word: `line1` read "Line1". A cancel's reason of up to 500
+characters and a review's body of up to 5000 were one-line inputs. And a
+display component showed a timestamp as the API's text,
+`2026-10-09T14:30:00Z`, and an order line's product as its raw id, since
+an API type does not say which table an id refers to.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An argument form's `submit(cx)` returns `Result<Output, Refusal>`. `Refusal { status, errors }` is the status a page answers with and the errors it renders the form again with: 422 for a form `parse` refused, else the route's status, as the JSON API answers, and `FormErrors::from_api`. `Refusal::from(errors)` and `Refusal::from_api(&err)` build one for a page over an input form, which knows the operation it calls. `parse()` is unchanged. acme's `/orders`, its cancel and `/orders/new` answer with it: a signed-out shopper's order is 401, a second cancel 409. | A `(StatusCode, FormErrors)` tuple, whose parts a page names itself; a status on `FormErrors`, which `parse`'s errors would carry as 422 too; a `submit` on an input form, which does not know the operation that takes it, as one input type may serve several |
+| A number that ends a word is a word of its own in a label: `line1` is "Line 1", `addressLine2` "Address line 2". An acronym or a single letter keeps its digits (`awsS3Bucket` is "Aws S3 bucket", `HTTP2Enabled` "HTTP2 enabled", `v2` "V2"), and a number followed by lowercase letters stays in its word (`md5sum`). A form, a display component and an argument share the rule; ids are unchanged. | Splitting every letter from a digit, which reads `awsS3Bucket` as "Aws S 3 bucket"; a list of technical words that keep their digits (`sha256`, `base64`), which a `@docs` title gives one field instead |
+| A text field or argument whose `maxLength`, its own or its scalar's, is 500 or more is long text, a `<textarea rows="6">` with `minlength`, `maxlength`, a placeholder and its hint, which renders the value as sent after a newline, since a browser drops one after the start tag. A textarea takes no `pattern`, so `parse` alone checks it. The app's choices still make it a select. | 200, which would make the titles and names this repository's schemas bound at 200 textareas; a hint per field in the schema, which no schema declares yet |
+| A display component shows a date, a time or a date-time as a `<time>` whose `datetime` is the value as the API sends it and whose text is the same for every reader, in English and UTC, with no locale or zone of the server's: a date-time "9 Oct 2026, 14:30 UTC", converted from its offset and cut to the minute, a date "9 Oct 2026", a time "14:30". Text that is none of them shows as it is. `views.rs` writes the text itself, `date_time_text`, `date_text` and `time_text`, public, each written when a component shows its kind, so the crate gains no dependency. This replaces the display amendment's text the API sends. | The API's text, which a reader parses by eye; the server's locale or zone, which are not the reader's; a date crate the crate does not otherwise need; formatting in the reader's zone, which takes a script the components do not ship, and which `datetime` leaves an app free to add |
+| `choices` is a module of its own, written when the crate has a form or a display component, and `forms` re-exports `Choices` and `Choice`, so code that names `forms::Choices` compiles. `<type>_detail` and `<type>_table` take an optional `choices` and show the label it gives a text or number value, else the value: a list's items and a map's values by their field's path, and a nested record's component gets `choices.under(field)`, so `lines.productId` names the products of an order's lines table. A choice matches a value whose text is its value exactly, an id's compact text, which a record holds and `to_string()` gives; acme's catalog choices are that text, and its order page names each line's product. `Choices` gains `label` and `under`, and shares its entries, so `under` copies none for each row. | Inferring the table an id refers to from its name or a source table's foreign key, which an API type does not declare; matching a UUID in either of its texts, which would parse values per cell and differ from what a form's select sends back; a second type of choices for display |
+| Money is not formatted. superscalar's `Finance.Money` is an integer of a currency's smallest unit that names no currency, so neither its decimal places nor its symbol are known, and no scalar holds a currency code; no schema here uses it outside test fixtures, and acme's prices are `Generic.Int64` fields named `*Cents`. A component shows such values as numbers. | Formatting a `*Cents` field by its name, a rule no schema states; assuming two decimal places for `Finance.Money` |
+
+Status: built. The goldens cover the seven fixtures again: fixture-forms-api
+gains `BillingAddress.line2` and `BookingInput.requests`, long text with
+a minLength, a pattern and a description, and fixture-views-api's
+`OrderView` gains `collectAt`, a `Temporal.Time`. `TestLabelsAndIDs`
+checks the label rule. Through `Router::handle`,
+`TestTheCrateServesATopcoatApp` submits `getTenant`'s filter signed out
+(401), without its permission (403), as a reader (200) and with a flag
+that is no boolean (422); `TestArgumentFormsServeATopcoatApp` answers a
+cancel the operation refuses as not found (404) or in conflict (409), a
+missing code with 422, builds each `Refusal`, and renders the 500
+characters of a reason as a textarea; `TestFormsServeATopcoatApp`
+renders the requests' textarea with its lengths and hint and no pattern,
+books its lines and leading newline as sent, renders a refused one again
+escaped after the newline, and labels `line2` "Line 2";
+`TestViewsRenderRecords` renders a date-time, a date and a time as text,
+one with an offset in UTC across a year's end, and the three functions'
+edge cases, then a detail's and a table's values by the app's choices,
+two records down, in a list and in a row's title cell, an unnamed value
+as it is and a label escaped, all in a crate with no forms. acme's tests
+see `/orders` signed out answer 401 with the form's message, a
+signed-out order 401, a second cancel 409, the reason and the review's
+body as textareas, "Line 1", the order's line named "Anvil", and its
+placing time in UTC.
+
+The rule is reversible until the first release.
+
+### D44, amended: a page per resource the operations describe, under a prefix, with a layout and a nav
+
+The display components left routing to the app: a component per record,
+not a page per operation. An app over an API whose operations list, read,
+create, edit, delete and act on records still wrote each page by hand,
+though the operations already say most of it: a GET of a collection
+returning a list is its list, a GET of an item its detail, a POST to the
+collection its new page, a PATCH or PUT of an item its edit page, a
+DELETE its delete, and a POST to a word after an item an action. The
+forms, the records, the display components and, since the amendment
+above, a submission's `Refusal` and the app's choices in a display
+component, each page needs exist. An admin surface of those pages, off
+by default and under a prefix of its own, takes no route from the app
+that does not ask for it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Pages are opt-in. `outputs.topcoat.pages: { enabled, prefix }` turns them on under `prefix`, `/console` by default, and `[extension.topcoat] pages_prefix = "/console"` in `superschematic.toml` does so for the one service the table lists, so a project that builds its configs with the core binary has them too; for several, `pages_prefix` is a table of the listed services whose pages are on, each with its prefix (`{ "shop-orders" = "/console" }`). The table refuses one path for several services, a service it does not list, and a prefix that is, or is under, another's: an app that links two crates registers each one's pages, layout and index at its prefix, and would register a page twice, which Topcoat's router refuses, or put one console's layout around the other's pages. A prefix starts with `/`, does not end with one, holds no parameter and only segments of letters, digits and `-._~`, and is not, nor is under, `/api` or `/_superschematic`, which the crate serves itself. The pages need the forms and the display components, and so the records; turning any of them off with the pages on is the build's error. They are written to `pages.rs`, `pub mod pages`, and no other module changes when they are off. | Pages on by default, an admin surface no app asked for; a prefix per resource; leaving the pages out silently when forms or views are off; deriving `<prefix>/<service>` for each of several services, a path the project never wrote |
+| The resources come from the operations with an in-process call, by REST path and result. `GET C` returning `T[]` is C's list and `GET C/{p}` returning `T` its detail, either making C a resource; `POST C` with an input or arguments is its new page; `PUT` or `PATCH C/{p}` with an input its edit page, `DELETE C/{p}` its delete and a `POST`, `PUT` or `PATCH` of `C/{p}/<verb>`, a path that names no collection, an action, each needing the detail, whose page holds them; `C/{p}/D` is D nested under C's item, even when nothing lists or reads C. Every other operation is left out with its reason in the build log, `GET auth/me` returning one object among them, and so is a `@requireService` one, since a browser holds no service credential. So are a `PUT`, `PATCH` or `DELETE` of a collection's own path (`widgets`, `widgets/{id}/parts`), which would change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action is a form on the item's page that posts in one click and a delete asks first. A collection is named by its words, its parameters' names aside, so `{id}` and `{projectId}` at one place are one collection's. | A resource declaration in the schema, which no schema has; grouping by operation set, which acme's `OrderQueries` and `OrderMutations` split across one collection; matching operations by type names; any method on `C/{p}/<verb>` an action, which made `PUT widgets/{id}/parts` an action named parts and a `DELETE` one click; a confirmation page per `DELETE` action |
+| Names and labels: the type's `@display` (D48) `noun`, `plural`, `createLabel` and `titleField` when it declares them, else the collection's last word in words, singular for the noun by English rules. A list's row links to its item's page when the list's element type is the detail's result type and the detail's last path parameter names one of its fields, a text or a whole number (`{id}` and `id`). | Linking every row by a field named `id` whatever the detail's parameter |
+| Every page calls its operation through `operations::*`, so the route's caller rule and argument checks hold, and submits through the forms. The route's traffic controls do not: an in-process call applies no `@rateLimit`, `@bodyLimit` or `@timeout`, since the pages are routes of the app, whose controls are the app's to set, where a procedure, a second route any browser reaches, keeps its route's (the procedures amendment). Each page submits through an argument form's `submit`, or through the input form of an operation whose only argument is its input, parsed, with the operation called and its refusal `Refusal::from_api`, the amendment above's. A route's values come from the page's path, set on the form over its hidden inputs, which a reader can change, and are decoded as an argument form decodes them; one that does not decode, or that the operation refuses at its parameter, is no page, 404. Every page but an item's renders the form it submits; an item's page submits its detail's argument form, when the detail takes a query argument, without rendering it, so `pages.rs` imports a form's component only where a page renders it. | Calling the implementations directly; trusting a hidden input; a submit helper of the pages' own beside the forms' |
+| A successful post goes on with 303 (POST-redirect-GET): to the new item's page after a create, when the result holds the field its detail's parameter names, else to the list; to the item after an edit or an action; to the list, or the parent's item, after a delete. A refused post renders the form again with the `Refusal`'s status and each error at its control: 422 for what the form's `parse` refuses, the route's status for what the operation refuses, a conflict's (409) as the form's own message; a row button renders it again, 200. A refused caller or a missing item keeps the route's status on a page of its own: 401 says so and, when the app's `Settings` name a sign-in page, links to it with the page to come back to as `next`, which for an action is the item's page; 403 and 404 say so. | Every refusal as 200 with a message; redirecting a 401 to the sign-in page, which the pages do not know and which loses the status |
+| A delete asks first: the item's page links to `<item>/delete`, a page that shows the item and posts the delete's form, so a GET never deletes and no script confirms. An action is a form on the item's page that posts to `<item>/<verb>`; a refused action renders the item's page again with its form as sent. A nested resource's list and new link are a section of the parent's item page when the parent has a detail, and its pages live under the parent's item either way. | A script's `confirm()`; a page per action; nested pages only as sections |
+| An edit page fills the update's input form from the detail's result, as its JSON: each field the two types share by JSON name and kind (a value of the same type's values, an object, rows of objects or of values, a group of one enum's members, JSON text of one type), recursively; any other field starts as the form's `new()`, and a secret or hidden one is not filled. | Requiring the update's input to be the detail's type |
+| A `#[layout]` at the prefix puts each page in `<main>` after a nav of the resources no item holds whose list the caller may use (`can_*`), the current one `aria-current`, and a breadcrumb trail read from the path: the index, each list, each item by its title, its type's `titleField` value, else by its noun and id, then the page. Both read the most specific path: the current resource is the one whose list's path is the longest the page's begins with, and each step of the trail the collection with the most words that begin the rest of the path, so `widgets/archived` beside `widgets/{id}` is a list of its own, never an item named archived whose detail is called; under an item, a collection is read before the item's edit, delete and actions. The item's detail is the page's own call, kept for the request (`#[memoize]`), so the trail costs no second call. The index at the prefix lists the same resources, and a sign-in link when a guard refused a caller who is not signed in. A list under an item, even one of a collection without pages, is in neither: it needs the item's id. The markup is semantic HTML with `ss-` classes and no styles. | A layout the app writes, which would restate the resources; marking only an exact match current; the first collection whose words match, in key order, which read `widgets/archived` as a widget; the item's id alone in the trail, which reads as a UUID; handing the title from the page to the layout, which Topcoat renders without an order between them |
+| The pages, the layout and the index are `#[page]`s and a `#[layout]` with paths fixed at build time, which the app's `.discover()` registers, as it registers the procedures. Links and redirects are built as strings, each value a percent-encoded segment, and the page functions and their path parameters are public, so an app's own page can link to one with `href!`. A route's parameters are named after their collections, `project_id`, so each place of a path has one name in every route through it, as Topcoat's router requires. | Registering them in `<service>(...)`, which panics beside `.discover()`; `href!` inside the crate, which panics for a page not registered and for an empty or dot segment; the API's parameter names, which differ between operations at one place |
+| `<type>_table` takes `#[default] hrefs: Vec<String>`: the i-th entry, unless empty, links row i, on its title's cell, or its first when the columns hold no title. A linked cell without text, an absent or blank title, an absent value, an empty list, links the type's noun (its `@display` noun, else its name in words) in its place, with the row's `id` when the record holds one as text or a whole number, `Document intro`, as the trail names an item without a title, so every row can be reached. Without `hrefs` a table renders as before, so the display components stay usable without pages. | A column of links, one more cell per row; a function from a record to its link, which would tie the component to the pages' routes; an empty link, which no reader can see or follow; "Open" for every untitled row, links a screen reader cannot tell apart |
+| What the app tells the pages is `pages::Settings`, its site title, its sign-in page and its `Choices`, in its app context, read with `try_app_context`; without it the title is the service's name in words, a 401 has no link and there are no choices. Every form and display component the pages render takes the choices, by each field's path, so `lines.productId` makes each line's product a select on the new-order page and its name in an order's lines. They are one set for every resource: a path names its field in each form and component that holds one, and choices per resource or per page are open. `RouterBuilder<Service>Ext::<service>(implementations, page_authenticator)` is unchanged. | New arguments to `<service>(...)`, a change to every app; choices per page, which the generated pages could not take from the app |
+
+Status: built. The goldens cover an eighth fixture, the extension's own
+`fixture-pages-api`, the only golden with pages: projects listed by
+status, read, started from an input, edited with a patch whose tags and
+milestones are rows, deleted and archived with a reason, each owned by a
+member and needing `projects.read` or `projects.write`; a project's
+tasks, listed, read and added under it; the tasks a label marks, under a
+label without pages; members, which only a member reader lists;
+`GET auth/me`, which is no resource; and documents, whose paths are the
+edge cases: a title that may be absent, the drafts' list at
+`documents/drafts` beside `documents/{id}`, a detail with a query
+argument, a create whose input is optional and a replace that requires
+it, and a document's comments, which a `PUT` and a `DELETE` of their
+collection, and a `DELETE` of its cover, would change, none of which has a
+page. `TestPagesServeATopcoatApp` drives a Topcoat app over it through
+`Router::handle`: the index and the nav list only what the caller may
+list, the current one marked, and the trail names a project by its name,
+or by its noun and id for a caller who may not read it; the list filters
+by the query, links each row's title to its project, names each owner by
+the app's choices and offers the new page to a writer only; the item's
+page shows the detail, the edit and delete links, the archive form and
+the tasks' section, and a reader none of what changes it; the new page's
+owner is a select of the choices; a create
+posts, refuses a short name with 422 at its control and goes to the new
+project (303); the edit form is filled from the project, its tags and its
+milestones as rows, the milestones from another type with the same
+fields, its unmatched `notifyOwner` checked by its default; a row button
+renders it again, 200, and saves nothing; a save goes to the route's
+project whatever the hidden id says; a delete confirms on its own page and
+goes to the list; an archive goes back to the item, and a second one
+renders the item's page again with 409 and the conflict as the form's
+message; the tasks' pages live under the project, a new task under the
+route's project; the label's tasks have a page of their own and no place
+in the nav; and a caller who is not signed in gets 401 with a sign-in
+link that comes back (to the item for an action), one without the
+permission 403, a project that is not there and a route's id that is not
+a UUID 404; an untitled document's row links "Document intro"; the
+drafts are current in the nav and the trail on their own page, and no
+document named drafts is read; a document's page has its comments'
+section and no form for their `PUT` or `DELETE`, nor for its cover's, and
+the comments' trail runs through the document to them, never to an
+action; and a document created from a
+blank optional input is linked by its noun and id, and one replaced
+through the edit page goes back to it. Clippy, with warnings denied,
+passes a detail whose query argument's form the page submits and does not
+render. `TestPagesServeAnAPIWithoutCallers` turns the pages on for
+`fixture-args-api`, whose operations need no caller: its orders' index,
+list and page, four actions on one item, one refused with 409 and one with
+422 at a JSON control, and a nested create whose parent has no pages and
+which gets none. `TestTheOperationsDescribeResources` classifies an
+operation of every shape and each one left out with its reason;
+`TestPagesAreOffByDefault`,
+`TestThePagesServeUnderTheirPrefix`, `TestABadPagesConfigIsRefused`,
+`TestTheNamingFileTurnsPagesOn` and `TestATableLinksItsRows` check the
+config, the table and the generated code: a table of prefixes turns on
+the pages of the services it names, each under its own, and one path for
+several services, a service the table does not list and one prefix under
+another are refused.
+
+acme's `superschematic.toml` sets `pages_prefix = "/console"`, so
+shop-orders' crate has a console: its orders' list, new page, item page
+and cancel, and a product's reviews and new review under
+`/console/products/{product_id}/reviews`. The app gives
+`pages::Settings` its title, its sign-in page and the catalog's choices,
+and links the console from its own pages. Its tests, in memory and over
+SQLite, see the console list nothing and offer to sign in for a shopper
+who is not signed in, the orders answer 401 with a link that comes back,
+the nav list the orders once signed in, an order cancelled from its
+console page (303) and a second cancel's 409, an order placed with the
+product's select, and a product's reviews listed and one written. The
+copies in acme's `testdata/generated/` are unchanged: the core binary
+never reads the table.
+
+The rule is reversible until the first release.
+
+### D55, amended: a site's CORS answers the preflights of the origins its field lists, and hands any other on to the API, whose identity runtime answers its trusted origins
+
+D55 had each API a site calls answer CORS for the origins its CORS field
+lists, in a handler around the whole server, and D50 had an identity
+API's router answer CORS for the trusted origins of its identity config.
+The site's handler answered every preflight to such an API's routes
+itself, 204 with `Vary` alone for an origin it did not list, so no
+preflight reached the identity runtime: an origin the identity config
+trusts that is not a site had its preflights refused on every API a site
+calls. Its ordinary requests were answered, since each layer sets the
+headers of the origins it allows. The acme shop's Dev identity config
+trusts no origin, so nothing showed it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site's CORS answers a preflight itself only from an origin its field lists. A request from any other origin, a preflight included, reaches the API with `Vary` alone, as an ordinary request already did, and the API answers it as it would with no site: an identity API's CORS answers its config's trusted origins with the method and headers they ask for. The parity vectors carry the decision as `answer`, beside `preflight`. | servergen merging the identity config's trusted origins into the API's CORS policy, which would answer a trusted origin with the site's methods and headers rather than those it asks for, so one origin would get a different answer on an API a site calls, and would tie the site's handler to the identity config. The identity runtime's CORS outside the site's, which on a server of several APIs would have to match each request to its API as the site's handler does. |
+| An origin that is both a site and trusted gets the site's answer to a preflight, the outer one: the methods of the API's operations, and `Accept`, `Authorization` and `Content-Type`. | |
+| A preflight from an origin neither lists gets the API's own answer, 405 from a Go router and 404 from a TypeScript app, with no `Access-Control-Allow-Origin`, which the browser refuses as it refused the 204. | The 204 with `Vary` alone, which is what kept the identity runtime from answering. |
+
+Status: built in both runtimes' `cors` (`Decision.Answer`,
+`CorsDecision.answer`) and the vectors. The identity fixture's sites
+`users-web` and `users-ts-web` call an identity API on a Go and a
+TypeScript server, whose tests send preflights from the site, a trusted
+origin and another.
+
+The rule is reversible until the first release.
+
+### D30, amended: a local environment's containers and default ports are its checkout's
+
+The local target named an environment's containers after the stack and
+the environment alone, `superschematic-<stack>-<environment>-postgres`
+and `-storage`, and hashed their host ports and the servers' from the
+same names. Two checkouts of a repository, two git worktrees, running
+`stack dev` on one stack shared one Postgres container and one emulator,
+and their servers asked for the same ports. Two agents' acme checks met
+this way: one run lost its schema in the middle of its test, a column
+missing, when the other's run took the container over and migrated it to
+its own branch's model.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A checkout's discriminator is six hexadecimal digits of a SHA-256 of the absolute path of the environment's state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`, with the schemas root's links resolved. Two checkouts differ, one keeps it from run to run, and a checkout that moves gets a new one. | An ID generated into the state directory at the first run, which survives a move, but which a copied checkout carries to a second one, and which the build would read from a file the machine writes. The worktree's name, which a plain clone has not. A variable or flag naming the copy, as `COMPOSE_PROJECT_NAME` does, which each run must remember to set. |
+| Every build of the CLI resolves a local environment in its checkout: `Options.SchemasRoot` reaches the stack's generator, which hands the canonical root to resolution as `stack.Input.SchemasRoot`, which platforms see as `StackEnvironment.SchemasRoot`. `environment.json` names the checkout's containers and holds its ports, so the build, `stack dev` and `stack run` agree. The build cache keys a Stack service by its checkout, since its output is that checkout's. A resolution with no schemas root, a library's or a test's, names no checkout and keeps the names and ports from before. | The provisioner renaming the containers and moving the ports when it runs, which would leave `environment.json` holding URLs no process listens on, the reason the ports are derived at resolution. Only `stack dev`'s build naming the checkout, which would leave a later `build-all` writing an environment whose program `stack run` refuses as stale. |
+| A container is `superschematic-<stack>-<environment>-<checkout>-postgres` or `-storage`, lower case, and carries the label `superschematic.checkout` beside the stack's and the environment's. A name stays within 63 bytes, a DNS label's, by losing the end of its stack and environment and keeping the checkout whole, which still tells them apart. | The hash in place of the readable name, which `docker ps` would no longer tie to a stack. |
+| The discriminator, read as a number modulo the ranges' span, is one offset that shifts every default port of the environment within its range. Two default ports of an environment meet in one checkout only where they meet in every one, so `local-distinct-ports` says the same of an environment wherever it resolves. | Hashing the checkout with each deployable's name, under which two servers could meet in one checkout and not another, and a build would fail in one worktree alone. |
+| What the environment sets wins in every checkout: `postgresPort`, `storagePort`, the images and a server's or a site's `port`. An environment that sets a port runs in one checkout at a time, as before, and such a port can meet a default one in some checkouts only. | Shifting a set port too, which would no longer be the port it says. |
+| A container of the environment that names no checkout, one an older superschematic created, stays as it is with its data. The provisioner runs the checkout's own and prints the `docker rm --force --volumes` that removes the old one, which it finds by the stack's and the environment's labels; `--remove-data` and `--remove-database` remove the checkout's containers alone. | Adopting the old container, which an older binary in another checkout may still run, the sharing this ends. Removing it, which deletes data no one asked to lose. |
+| acme-shop's `scripts/check.sh` compares the `environment.json` it quotes with its copy with each port and the discriminator masked, and keeps the copy while they match so. | A fixed checkout for the build the pages quote, which would need the variable the first row declines. |
+
+Status: built. `internal/stack/local`'s `TestCheckouts` resolves the shop
+in two checkouts and in none, and checks the names, the labels, the
+ports, their offsets, the set ports and the 63-byte limit;
+`TestContainersOfNoCheckout` has the provisioner name each old container
+and purge the checkout's alone; the goldens resolve in a checkout of
+their own. `stackgen`'s `TestResolveInTheBuildsCheckout` builds through a
+link to the checkout, and `buildcache`'s `TestStackKeyIsItsCheckouts`
+keys a stack, but not an API, by its checkout. `cli`'s
+`TestStackDevRunsALocalEnvironment` runs `stack dev` beside a container
+of no checkout, which it names and which `--remove-data` leaves.
+
+The rule is reversible until the first release.
+
+### D53, amended: a worker's queue claims only on Postgres for now
+
+D53 named Postgres, SQLite and D1 as a queue's backings. The Go ORM speaks
+only Postgres through pgx, and D1 exists only in the migration runner. So
+SQLite gets a queue's table and its migrations, but no claim.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
+
+Status: built in #336.
+
+### D54, amended: a workload links the GCS client whenever its APIs list a bucket
+
+D54 said only a workload some environment places on gcp links the GCS
+client, as the Cloud SQL connector is linked. The local storage emulator
+speaks the same API, and the runtimes reach it through the same client
+(`STORAGE_EMULATOR_HOST`), so a workload that uses a bucket anywhere needs
+it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The `server` generator writes `buckets.go` into a Go server's, job's or worker's entrypoint, and adds `cloud.google.com/go/storage` to its `go.mod`, when its APIs list a bucket. A TypeScript server depends on `@google-cloud/storage` then. Against the emulator, the runtimes sign real V4 URLs with a key the process generates, since the emulator checks that a signature is present but not what it signs. | A filesystem implementation for local runs, a second code path the emulator choice (D54) set out to avoid. Linking per environment, which gives the local build a client it would not have. |
+| `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
+
+Status: built in #334.

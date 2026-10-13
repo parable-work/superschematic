@@ -3,8 +3,10 @@ The cross-origin requests a static site's browser makes to the APIs it
 calls (D55, section 8.10 of docs/stack-model.md), the twin of the Go
 runtime's cors package. Each API a site calls has a CORS field in a stack,
 the origins of the sites that call it, which loadCors reads; its server
-answers CORS for those origins and no other, with credentials, the
-Authorization header and the methods the API's operations use. The vectors
+answers CORS for those origins, with credentials, the Authorization header
+and the methods the API's operations use. It answers no other origin
+itself: a preflight from one reaches the API's routes, whose identity
+runtime answers its config's trusted origins (D55, amended). The vectors
 in runtime/http/testdata/cors_parity.json hold both runtimes to one
 decision. Nothing here imports from node: or a framework, so it runs
 wherever a fetch handler does.
@@ -26,9 +28,18 @@ export interface CorsPolicy {
   readonly methods: readonly string[];
 }
 
-/** What a request's CORS check decides: whether it is a preflight the server answers itself with 204, and the headers the answer carries. */
+/**
+ * What a request's CORS check decides: whether it is a preflight, whether
+ * the server answers it itself with 204 and the headers alone, which it
+ * does for a preflight from an origin the policy lists, and the headers
+ * the answer carries. Any other request reaches the API with the headers,
+ * a preflight from an origin the policy does not list included, so a CORS
+ * check of the API's own, the identity runtime's for its trusted origins,
+ * answers it.
+ */
 export interface CorsDecision {
   readonly preflight: boolean;
+  readonly answer: boolean;
   readonly headers: Readonly<Record<string, string>>;
 }
 
@@ -52,17 +63,20 @@ export function isPreflight(method: string, headers: HeaderSource): boolean {
  * Decides a request's CORS under policy, as Go's Policy.Decide does. A
  * request with no Origin gets no header. One with an Origin the policy
  * lists gets Access-Control-Allow-Origin with that origin and
- * Access-Control-Allow-Credentials; its preflight gets the methods, the
- * headers and the max age too. One with an Origin the policy does not list
- * gets Vary alone, so the browser refuses its answer.
+ * Access-Control-Allow-Credentials; its preflight is the server's to
+ * answer, and gets the methods, the headers and the max age too. One with
+ * an Origin the policy does not list gets Vary alone and is not the
+ * server's to answer, a preflight included: the API answers it, and unless
+ * a CORS check of its own allows the origin, the browser refuses the
+ * answer.
  */
 export function corsDecision(policy: CorsPolicy, method: string, headers: HeaderSource): CorsDecision {
   const preflight = isPreflight(method, headers);
   const origin = headerOf(headers, 'Origin');
   const out: Record<string, string> = {};
-  if (origin === '') return { preflight, headers: out };
+  if (origin === '') return { preflight, answer: false, headers: out };
   out['Vary'] = preflight ? CORS_PREFLIGHT_VARY : CORS_VARY;
-  if (!policy.origins.includes(origin)) return { preflight, headers: out };
+  if (!policy.origins.includes(origin)) return { preflight, answer: false, headers: out };
   out['Access-Control-Allow-Origin'] = origin;
   out['Access-Control-Allow-Credentials'] = 'true';
   if (preflight) {
@@ -70,7 +84,7 @@ export function corsDecision(policy: CorsPolicy, method: string, headers: Header
     out['Access-Control-Allow-Headers'] = CORS_ALLOWED_HEADERS.join(', ');
     out['Access-Control-Max-Age'] = String(CORS_MAX_AGE);
   }
-  return { preflight, headers: out };
+  return { preflight, answer: preflight, headers: out };
 }
 
 /** An API a server serves, with its policy: match reports whether its routes take a method on a path, and none takes every request. */
@@ -112,9 +126,11 @@ export function corsMethods(operations: readonly CorsOperation[]): string[] {
  * Answers CORS for the APIs a server serves around next, a fetch handler,
  * as Go's Handler does. A request with an Origin is the first API's whose
  * match takes it, by the method a preflight asks for in place of OPTIONS:
- * a preflight one takes is answered 204 with its policy's headers, and any
- * other request it takes reaches next, whose answer carries them. A
- * request no API takes reaches next as it is.
+ * a preflight from an origin its policy lists is answered 204 with the
+ * policy's headers, and any other request it takes reaches next, whose
+ * answer carries them, a preflight from an origin the policy does not list
+ * included, which the API's routes answer, through the identity runtime's
+ * CORS for a trusted origin. A request no API takes reaches next as it is.
  */
 export function corsHandler<A extends unknown[]>(
   apis: readonly CorsApi[],
@@ -127,7 +143,7 @@ export function corsHandler<A extends unknown[]>(
     const api = apis.find(candidate => !candidate.match || candidate.match(method, path));
     if (!api) return next(request, ...rest);
     const decision = corsDecision(api.policy, request.method, request.headers);
-    if (decision.preflight) return new Response(null, { status: 204, headers: decision.headers });
+    if (decision.answer) return new Response(null, { status: 204, headers: decision.headers });
     const response = await next(request, ...rest);
     const answer = new Response(response.body, response);
     for (const [name, value] of Object.entries(decision.headers)) answer.headers.set(name, value);

@@ -17,3 +17,19 @@ types:
       - name: sku
         typeRef: { name: string }
         required: true
+  # A queue's message (D53): ts-shop's worker RemindShoppers handles it. One
+  # retry, a second after a failure, so a test sees a message die quickly.
+  CartAbandoned:
+    name: CartAbandoned
+    role: EmbeddedStruct
+    queue: { retries: 1, backoff: 1s, lease: 30s }
+    fields:
+      - name: cartId
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: tags
+        typeRef: { name: string, isArray: true }
+        required: true

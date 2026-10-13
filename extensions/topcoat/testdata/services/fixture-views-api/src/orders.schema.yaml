@@ -1,6 +1,7 @@
 # Orders, shown by the display components: an order's fields are an enum,
-# a date-time, a date, optional values, a boolean, nested records, a list
-# of records, a list of strings, a map, any JSON value and a hidden field.
+# a date-time, a date, a time, optional values, a boolean, nested records,
+# a list of records, a list of strings, a map, any JSON value and a hidden
+# field.
 # Its @display names its title, its summary fields, its noun and plural; an
 # address's names its title, and a line's price has none. A comment's
 # replies are comments.
@@ -15,6 +16,9 @@ scalars:
     languagePrimitive: string
   Temporal.Date:
     name: Temporal.Date
+    languagePrimitive: string
+  Temporal.Time:
+    name: Temporal.Time
     languagePrimitive: string
   Generic.JSON:
     name: Generic.JSON
@@ -89,6 +93,8 @@ types:
         required: true
       - name: deliverBy
         typeRef: { name: Temporal.Date }
+      - name: collectAt
+        typeRef: { name: Temporal.Time }
       - name: note
         typeRef: { name: string }
       - name: gift

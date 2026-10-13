@@ -190,6 +190,18 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Counter']?.count, 0);
     });
 
+    test("parameters' issues come in a defined order: by path, then keyword, then message, with ajv's messages", () => {
+      const engine = open();
+      publishItem(engine, [{ name: 'test.Counter' }]);
+      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      const error = thrown(() => engine.instances.invoke(alice, 'Item', 'i1', 'increment', { zeta: 1, by: 0, alpha: 2 }), OperationParamsError);
+      assert.deepEqual(error.issues, [
+        { path: '', message: 'must NOT have additional properties: alpha' },
+        { path: '', message: 'must NOT have additional properties: zeta' },
+        { path: '/by', message: 'must be >= 1' },
+      ]);
+    });
+
     test('a guard vetoes an update, a delete and an operation; the first veto wins and nothing changes', () => {
       const engine = open();
       publishItem(engine, [{ name: 'test.Counter', config: { limit: 3 } }, { name: 'test.Flag' }]);

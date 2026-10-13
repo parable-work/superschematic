@@ -1,6 +1,8 @@
 package registrytest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,8 +35,9 @@ const wantItemBehaviors = `"behaviors": [
 
 // The fixture extension's behaviors reach the IR from both data forms, byte
 // for byte the same though the YAML twin writes acme.Stock's config keys in
-// another order; the generators refuse the schema, naming themselves; a
-// registry without the extension refuses the behaviors by name.
+// another order; the General pipeline builds the schema, the types writing
+// ItemBehaviors with the extension's behavior under its exact name (D58);
+// a registry without the extension refuses the behaviors by name.
 func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	reg := acmeRegistry(t)
 	jsonSchema, cfg, err := loader.LoadServiceWithConfig("testdata/stock-json", loader.WithRegistry(reg))
@@ -65,18 +68,25 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 		t.Errorf("JSON and TypeScript forms produced different IR\njson:\n%s\nts:\n%s", out, tsOut)
 	}
 
-	_, err = generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: t.TempDir(), ServicePath: "testdata/stock-json", Registry: reg})
-	if want := "generator: types does not render behaviors yet: type Item composes behavior acme.Stock"; err == nil || err.Error() != want {
-		t.Fatalf("generator.Run: err = %v, want %q", err, want)
+	root := t.TempDir()
+	if _, err := generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: root, ServicePath: "testdata/stock-json", Registry: reg}); err != nil {
+		t.Fatalf("generator.Run: %v", err)
+	}
+	behaviorsTS, err := os.ReadFile(filepath.Join(generator.TypesDir(root, generator.LangTypeScript, "stock"), "types", "behaviors.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "readonly 'acme.Stock': {"; !strings.Contains(string(behaviorsTS), want) {
+		t.Errorf("behaviors.ts lacks %q:\n%s", want, behaviorsTS)
 	}
 
 	n := naming.Default()
 	n.AuthProvider = sessionauth.Name
 	core := generator.CoreRegistry(n)
 	for dir, want := range map[string]string{
-		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
-		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
-		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`,
+		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`,
+		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`,
+		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`,
 	} {
 		_, err := loader.LoadService(dir, loader.WithRegistry(core))
 		if err == nil || !strings.Contains(err.Error(), want) {

@@ -77,10 +77,21 @@ type ConfigOutput struct {
 	Derived []DerivedField
 	// CallersField is the name of the API's callers field
 	// (ir.CallersField) when an operation of the API has a service clause
-	// and Options.Callers asks for it: the TypeScript EnvConfig holds it
-	// (D51), while Go's entrypoint reads it itself and values-schema.json
-	// never lists it, since its variables follow the environment's edges.
+	// and Options.Callers asks for it: the TypeScript and Rust EnvConfigs
+	// hold it (D51, D57), while Go's entrypoint reads it itself and
+	// values-schema.json never lists it, since its variables follow the
+	// environment's edges.
 	CallersField string
+	// CORSField is the name of the API's CORS field (ir.CORSField) when
+	// Options.CORS asks for it: the Rust EnvConfig holds it (D57), empty
+	// in an environment where no site calls the API. values-schema.json
+	// never lists it, as it never lists the callers field.
+	CORSField string
+	// IdentityField is the name of the API's identity config field
+	// (ir.IdentityConfigField) when Options.Identity asks for it: the Rust
+	// EnvConfig holds the identity runtime's config parsed from it (D57),
+	// and values-schema.json never lists it.
+	IdentityField string
 }
 
 // EnvConfigTypeName is the Go type that holds an API's settings and the
@@ -198,16 +209,25 @@ type Options struct {
 	Naming naming.Naming
 
 	// Derived adds the config fields an API's edges derive, and EnvConfig,
-	// which joins them to the @envVars settings: what the Go and
-	// TypeScript APIs' Deps hold (D51). The output then exists for an API
-	// with derived fields and no @envVars type. The Rust loader does not
-	// read the derived fields yet.
+	// which joins them to the @envVars settings: what the Go, TypeScript
+	// and Rust APIs' Deps hold (D51, D57). The output then exists for an
+	// API with derived fields and no @envVars type.
 	Derived bool
 
 	// Callers adds the API's callers field, when an operation has a
-	// service clause, to the TypeScript EnvConfig (CallersField). The
-	// output then exists for an API with a service clause alone.
+	// service clause, to the TypeScript and Rust EnvConfigs
+	// (CallersField). The output then exists for an API with a service
+	// clause alone.
 	Callers bool
+
+	// CORS adds the API's CORS field to the Rust EnvConfig (CORSField,
+	// D57). The output then exists for every API.
+	CORS bool
+
+	// Identity adds the API's identity config field to the Rust EnvConfig
+	// (IdentityField, D57), for an API whose server authenticates with the
+	// identity runtime. The output then exists for such an API.
+	Identity bool
 }
 
 // Generate generates configuration code from an IR schema with @envVars directive.
@@ -236,32 +256,55 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 			return nil, err
 		}
 	}
-	callers := ""
-	if opts.Callers && schema.Kind == ir.SchemaKindAPI && schema.HasServiceCallers() {
-		callers = ir.CallersField(schemaName)
-		if envVarsType != nil {
-			for _, setting := range envVarsType.Fields {
-				if ir.DerivedFieldClaims(callers, setting.Name) {
-					return nil, fmt.Errorf("envgen: %s: @envVars field %s of %s collides with %s, the API's callers field", schemaName, setting.Name, envVarsType.Name, callers)
-				}
+	// The fields of the API's own that a stack sets, beside the edges'.
+	collides := func(field, what string) error {
+		if envVarsType == nil {
+			return nil
+		}
+		for _, setting := range envVarsType.Fields {
+			if ir.DerivedFieldClaims(field, setting.Name) {
+				return fmt.Errorf("envgen: %s: @envVars field %s of %s collides with %s, the API's %s", schemaName, setting.Name, envVarsType.Name, field, what)
 			}
+		}
+		return nil
+	}
+	api := schema.Kind == ir.SchemaKindAPI
+	callers, cors, identity := "", "", ""
+	if opts.Callers && api && schema.HasServiceCallers() {
+		callers = ir.CallersField(schemaName)
+		if err := collides(callers, "callers field"); err != nil {
+			return nil, err
+		}
+	}
+	if opts.CORS && api {
+		cors = ir.CORSField(schemaName)
+		if err := collides(cors, "CORS field"); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Identity && api {
+		identity = ir.IdentityConfigField(schemaName)
+		if err := collides(identity, "identity config field"); err != nil {
+			return nil, err
 		}
 	}
 	if envVarsType == nil {
-		if len(derived) == 0 && callers == "" {
+		if len(derived) == 0 && callers == "" && cors == "" && identity == "" {
 			return nil, nil
 		}
 		return &ConfigOutput{
-			PackageName:  toPackageName(schemaName),
-			SchemaName:   schemaName,
-			ModulePath:   names.GoAPIModule(schemaName),
-			TypesModule:  names.GoTypesModule(schemaName),
-			Naming:       names,
-			Fields:       []ConfigField{},
-			Enums:        []codegen.EnumInfo{},
-			EnvConfig:    true,
-			Derived:      derived,
-			CallersField: callers,
+			PackageName:   toPackageName(schemaName),
+			SchemaName:    schemaName,
+			ModulePath:    names.GoAPIModule(schemaName),
+			TypesModule:   names.GoTypesModule(schemaName),
+			Naming:        names,
+			Fields:        []ConfigField{},
+			Enums:         []codegen.EnumInfo{},
+			EnvConfig:     true,
+			Derived:       derived,
+			CallersField:  callers,
+			CORSField:     cors,
+			IdentityField: identity,
 		}, nil
 	}
 	if opts.Derived && envVarsType.Name == EnvConfigTypeName {
@@ -281,17 +324,19 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	scalarMap := buildScalarMapIR(schema)
 
 	output := &ConfigOutput{
-		PackageName:  toPackageName(schemaName),
-		SchemaName:   schemaName,
-		TypeName:     envVarsType.Name,
-		ModulePath:   names.GoAPIModule(schemaName),
-		TypesModule:  names.GoTypesModule(schemaName),
-		Naming:       names,
-		Fields:       []ConfigField{},
-		Enums:        []codegen.EnumInfo{},
-		EnvConfig:    opts.Derived,
-		Derived:      derived,
-		CallersField: callers,
+		PackageName:   toPackageName(schemaName),
+		SchemaName:    schemaName,
+		TypeName:      envVarsType.Name,
+		ModulePath:    names.GoAPIModule(schemaName),
+		TypesModule:   names.GoTypesModule(schemaName),
+		Naming:        names,
+		Fields:        []ConfigField{},
+		Enums:         []codegen.EnumInfo{},
+		EnvConfig:     opts.Derived,
+		Derived:       derived,
+		CallersField:  callers,
+		CORSField:     cors,
+		IdentityField: identity,
 	}
 
 	usedEnums := make(map[string]bool)

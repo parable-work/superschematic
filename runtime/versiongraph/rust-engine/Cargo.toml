@@ -43,6 +43,10 @@ tokio = { version = "1.52", features = ["macros", "sync", "time"] }
 tokio-postgres = { version = "0.7.18", optional = true }
 
 [dev-dependencies]
+# The synchronous client a test host's Postgres transaction is, as D58's
+# engine's is: the fixed layout on Postgres runs through it (tests/host.rs,
+# tests/scenarios.rs).
+postgres = "0.19.14"
 # raw_value reads a member of a Postgres rendering exactly as Postgres wrote it.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "raw_value"] }
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync", "time"] }
@@ -51,6 +55,10 @@ tokio-postgres = "0.7.18"
 # The Postgres tests use the default client.
 [[test]]
 name = "canonical"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "host"
 required-features = ["tokio-postgres"]
 
 [[test]]

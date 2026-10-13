@@ -34,6 +34,7 @@ import {
   tasksDocument,
 } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
+import { appFor, recordedApp } from './recorder.ts';
 
 // The bearer token is the caller's subject; reader may only read.
 const authenticate: Authenticator = async (ctx) => {
@@ -93,14 +94,14 @@ async function listen(app: Hono): Promise<Listening> {
 const servers: Listening[] = [];
 const clients: Client[] = [];
 
-afterEach(async () => {
+afterEach(async (t) => {
   for (const client of clients.splice(0)) {
     await client.close();
   }
   for (const server of servers.splice(0)) {
     await server.close();
   }
-  cleanup();
+  cleanup(t);
 });
 
 interface Served {
@@ -128,9 +129,16 @@ async function served(
     ...engineOptions,
   });
   setup(engine);
-  const app = new Hono();
-  app.route('/api', engineApp(engine, { authenticate }));
-  app.route('/api', engineMcp(engine, { authenticate, ...mcpOptions }));
+  const app = recordedApp(new Hono(), {
+    kind: 'mount',
+    engine,
+    mounts: [
+      { prefix: '/api', kind: 'engine', options: { authenticate } },
+      { prefix: '/api', kind: 'mcp', options: { authenticate, ...mcpOptions } },
+    ],
+  });
+  app.route('/api', appFor(engineApp, engine, { authenticate }));
+  app.route('/api', appFor(engineMcp, engine, { authenticate, ...mcpOptions }));
   const listening = await listen(app);
   servers.push(listening);
   return { engine, url: listening.url };
@@ -761,11 +769,11 @@ describe("the core's behaviors", () => {
       data: { title: 'Build' },
       behaviors: { Links: { project: 'launch', parent: 'plan' }, Dependencies: { blockers: [{ id: 'plan' }] } },
     });
-    const instance = created.structuredContent as { seq: number; data: unknown; behaviors: unknown };
+    const instance = created.structuredContent as { seq: number; data: unknown; behaviors: unknown; createdAt: number };
     assert.deepEqual([instance.data, instance.behaviors], [
       { title: 'Build' },
       {
-        Workflow: { status: 'todo' },
+        Workflow: { status: 'todo', enteredAt: instance.createdAt },
         Dependencies: { blocked: true },
         Links: { targets: { parent: { schema: 'tasks', id: 'plan' }, project: { schema: 'projects', id: 'launch' } } },
       },

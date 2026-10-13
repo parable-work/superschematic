@@ -23,9 +23,10 @@ const (
 )
 
 // TestRatingBehavior: acme declares acme.Rating with no core edit, a
-// General schema composes it and the IR carries it; the generators refuse
-// the schema until they render behaviors; the core registry does not know
-// the behavior.
+// General schema composes it and the IR carries it; the build writes the
+// TypeScript types with ProductBehaviors, the behavior's fields under its
+// exact name, since every generator of the General pipeline renders
+// behaviors (D58); the core registry does not know the behavior.
 func TestRatingBehavior(t *testing.T) {
 	reg, names := assemble(t)
 	rating, ok := reg.Behavior(ext.RatingBehavior)
@@ -54,9 +55,18 @@ func TestRatingBehavior(t *testing.T) {
 		t.Fatalf("the TypeScript and JSON forms give different IR\njson:\n%s\nts:\n%s", want, got)
 	}
 
-	if _, err := registry.Generate(schema, cfg, registry.Options{OutputRoot: t.TempDir(), ServicePath: shopRatings, Naming: names, Registry: reg}); err == nil ||
-		!strings.Contains(err.Error(), "types does not render behaviors yet: type Product composes behavior acme.Rating") {
-		t.Fatalf("Generate: err = %v, want the types generator's refusal", err)
+	out := t.TempDir()
+	if _, err := registry.Generate(schema, cfg, registry.Options{OutputRoot: out, ServicePath: shopRatings, Naming: names, Registry: reg}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	behaviorsTS, err := os.ReadFile(filepath.Join(out, "types", "typescript", "shop-ratings", "types", "behaviors.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"export interface ProductBehaviors {", "readonly 'acme.Rating': {"} {
+		if !strings.Contains(string(behaviorsTS), want) {
+			t.Errorf("behaviors.ts lacks %q:\n%s", want, behaviorsTS)
+		}
 	}
 
 	// A config the declaration rejects fails the load, naming the type and
@@ -85,7 +95,7 @@ func TestRatingBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := loader.LoadService(shopRatings, loader.WithRegistry(core)); err == nil ||
-		!strings.Contains(err.Error(), `behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`) {
+		!strings.Contains(err.Error(), `behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`) {
 		t.Fatalf("core registry: err = %v", err)
 	}
 }

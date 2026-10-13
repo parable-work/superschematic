@@ -873,6 +873,8 @@ for (const driver of drivers) {
       assert.match(refusal(engine, 'Run', [budgetOn({ reserveField: 'size' })]), /meter cpu: reserveField "size" is not a field of Run \(its fields: title, cap, estimate\)/);
       assert.match(refusal(engine, 'Run', [budgetOn({ scope: 'pool' })]), /meter cpu: scope pool is a link of Links, which the type does not list/);
       assert.match(refusal(engine, 'Run', [links('Pool'), budgetOn({ scope: 'parent' })]), /meter cpu: scope parent is not a link of the type's Links config \(its links: pool\)/);
+      const pools: BehaviorRef = { name: 'Links', config: { links: { pool: { schema: 'Pool', many: true, max: 2 } } } };
+      assert.match(refusal(engine, 'Run', [pools, budgetOn({ scope: 'pool' })]), /meter cpu: scope pool holds a list of targets, and a meter draws on one scope/);
       assert.match(refusal(engine, 'Run', [links('Pool'), budgetOn({ scope: 'pool' })]), /meter cpu: scope pool: schema Pool, which the link points at, has no live version; publish it first/);
       publish(engine, budgetDocument('Pool', [{ name: 'Comments' }]));
       assert.match(refusal(engine, 'Run', [links('Pool'), budgetOn({ scope: 'pool' })]), /scope pool: Pool, which the link points at, does not compose Budget/);

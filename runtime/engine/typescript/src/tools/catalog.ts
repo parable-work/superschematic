@@ -139,7 +139,8 @@ export interface DescribeDocument {
   /**
    * The JSON Schema of an instance's behaviors: by behavior name, an
    * object of each field the behavior declares, read-only, for every
-   * behavior on the type that declares one.
+   * behavior on the type that declares one; a volatile field says
+   * `volatile: true`.
    */
   instanceBehaviors: JSONSchemaObject;
   behaviors: DescribedBehavior[];
@@ -165,7 +166,8 @@ export interface DescribedBehavior {
   config: unknown;
   /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
   summary?: string;
-  fields: Array<{ name: string; description?: string }>;
+  /** Its fields, as its declaration lists them; volatile, true or absent, for one that can move without an event of its own instance. */
+  fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: string[];
   /** The codes its vetoes carry, as its declaration lists them. */
   vetoes: Array<{ code: string; description?: string }>;
@@ -462,6 +464,7 @@ export class ToolCatalog {
         fields: (bound.declaration.fields ?? []).map((field) => ({
           name: field.name,
           ...(field.description ? { description: field.description } : {}),
+          ...(field.volatile === true ? { volatile: true as const } : {}),
         })),
         operations: (bound.declaration.operations ?? []).map((operation) => operation.name),
         vetoes: (bound.declaration.vetoes ?? []).map((veto) => ({
@@ -1414,7 +1417,8 @@ function paramsRequired(params: unknown): boolean {
  * behaviorsSchema is the JSON Schema of an instance's behaviors as reads
  * return them: by behavior name, for each behavior on the type that
  * declares a field, an object of its fields, read-only, each absent while
- * it holds no value.
+ * it holds no value, and a volatile one marked `volatile: true`, an
+ * annotation, as readOnly is.
  */
 function behaviorsSchema(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
   const properties: Record<string, unknown> = {};
@@ -1429,7 +1433,10 @@ function behaviorsSchema(behaviors: readonly ComposedBehavior[]): JSONSchemaObje
       additionalProperties: false,
       readOnly: true,
       properties: Object.fromEntries(
-        fields.map((field) => [field.name, { ...(field.description ? { description: field.description } : {}), readOnly: true }])
+        fields.map((field) => [
+          field.name,
+          { ...(field.description ? { description: field.description } : {}), readOnly: true, ...(field.volatile === true ? { volatile: true } : {}) },
+        ])
       ),
     };
   }

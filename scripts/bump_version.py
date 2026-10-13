@@ -58,6 +58,9 @@ Version sites (relative to the repository root):
                                       superschematic-schema-runtime packages
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
+  runtime/schema/rust-ir/Cargo.toml   [package] version
+  runtime/schema/rust-ir/Cargo.lock   the superschematic-schema-ir package and
+                                      the schema runtime it builds on
   runtime/versiongraph/rust/Cargo.toml
                                       [package] version
   runtime/versiongraph/rust/Cargo.lock
@@ -359,6 +362,26 @@ def sites():
         (
             ROOT / "runtime" / "schema" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    # The engine's schema reader is not published; it carries the release
+    # version as the version graph's engine does, and its lockfile records
+    # the schema runtime's, a path dependency.
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust-ir" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-schema-ir"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "rust-ir" / "Cargo.lock",
+            [
+                (r'(\[\[package\]\]\nname = "superschematic-schema-ir"\nversion = ")' + V + r'(")', 1),
+                (r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1),
+            ],
             "semver",
         )
     )

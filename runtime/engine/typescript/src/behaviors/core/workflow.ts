@@ -14,7 +14,11 @@ tell a blocker or a child that finished well from one that failed.
 A read returns the status as Workflow.status, under the behavior's name,
 apart from the type's own fields. A list filters on it
 (where: { 'Workflow.status': 'doing' }), which Workflow's column holds and
-an index of its own on that column serves.
+an index of its own on that column serves. Workflow.enteredAt is when the
+status last changed, the create's time and then each transition's, in
+epoch milliseconds (D56). An instance created before the column existed
+has none until its next transition, since a behavior's migration and
+afterConfigChange reach only its own storage, which never held the time.
 
 Nothing else can move the status. It is Workflow's own column: a create
 or an update writes own fields only, so neither reaches it, and another
@@ -170,12 +174,13 @@ export const workflow = defineBehavior<WorkflowConfig>({
   migrations: [
     { version: 1, name: 'status', columns: { status: { type: 'text' } } },
     { version: 2, name: 'status index', indexes: { status: ['status'] } },
+    { version: 3, name: 'entered at', columns: { entered_at: { type: 'integer' } } },
   ],
 
   filters: { status: { column: 'status', type: 'string' } },
 
   initialize(context) {
-    context.columns.set({ status: context.config.initial });
+    context.columns.set({ status: context.config.initial, entered_at: context.now });
   },
 
   guard(view, request) {
@@ -223,12 +228,16 @@ export const workflow = defineBehavior<WorkflowConfig>({
       if (!context.config.transitions.some((transition) => transition.from === from && transition.to === to)) {
         throw new BehaviorError('Workflow', `transition from ${from} to ${to} reached its handler without its guard`);
       }
-      context.columns.set({ status: to });
+      context.columns.set({ status: to, entered_at: context.now });
       return { from, to };
     },
   },
 
   fields: {
     status: (view) => view.columns.get().status,
+    enteredAt: (view) => {
+      const at = view.columns.get().entered_at;
+      return at === null || at === undefined ? undefined : Number(at);
+    },
   },
 });

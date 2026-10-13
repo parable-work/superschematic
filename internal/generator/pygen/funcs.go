@@ -19,17 +19,22 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	enumLookup := buildEnumLookup(output)
 	holdsModels := buildModelFieldLookup(output)
 	return template.FuncMap{
-		"snakeCase":           codegen.ToSnakeCase,
-		"pythonFieldName":     toPythonFieldName,
-		"pythonString":        pythonString,
-		"pythonRawString":     pythonRawString,
-		"pythonComment":       pythonComment,
-		"pythonScalarType":    pythonScalarType,
-		"pythonScalarSymbol":  pythonScalarSymbol,
-		"pythonScalarModule":  pythonScalarModule,
-		"pythonParsesJSON":    pythonParsesJSON,
-		"pythonScalarLibType": pythonScalarLibType,
-		"pythonExample":       pythonExample,
+		"snakeCase":             codegen.ToSnakeCase,
+		"pythonBehaviorField":   pythonBehaviorField,
+		"pythonBehaviorType":    pythonBehaviorType,
+		"pythonBehaviorDefault": pythonBehaviorDefault,
+		"pythonEnumMember":      pythonEnumMember,
+		"leavesFirst":           leavesFirst,
+		"pythonFieldName":       toPythonFieldName,
+		"pythonString":          pythonString,
+		"pythonRawString":       pythonRawString,
+		"pythonComment":         pythonComment,
+		"pythonScalarType":      pythonScalarType,
+		"pythonScalarSymbol":    pythonScalarSymbol,
+		"pythonScalarModule":    pythonScalarModule,
+		"pythonParsesJSON":      pythonParsesJSON,
+		"pythonScalarLibType":   pythonScalarLibType,
+		"pythonExample":         pythonExample,
 		"scalarDoc": func(s codegen.ScalarInfo) string {
 			return codegen.DocText(s.Description, s.Comment)
 		},

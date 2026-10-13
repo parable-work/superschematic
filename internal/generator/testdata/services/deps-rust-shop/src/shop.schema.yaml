@@ -1,0 +1,53 @@
+name: deps-rust-shop
+kind: API
+types:
+  ShopConfig:
+    name: ShopConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: STOREFRONT_REGION
+        typeRef: { name: string }
+        required: true
+        default: "eu"
+  CartView:
+    name: CartView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: Products
+    operations:
+      - name: listProducts
+        typeRef: { name: CartView, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: products
+  - name: Carts
+    operations:
+      - name: getCart
+        typeRef: { name: CartView }
+        required: true
+        httpMethod: GET
+        restPath: carts/{id}
+        auth: true
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+  - name: Stock
+    serviceCallers: { mode: require }
+    operations:
+      - name: reserveStock
+        typeRef: { name: CartView }
+        required: true
+        httpMethod: POST
+        restPath: stock/reserve

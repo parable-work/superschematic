@@ -7,15 +7,22 @@
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
+//! `forms` reads and renders a form per input type a call in `operations`
+//! takes, its controls named by their fields' paths, and per call with
+//! arguments a form submits, a GET's a filter read from the query.
 //! `procedures` lets browser code call each operation a browser may, its
 //! arguments and result records; the app's `.discover()` registers them.
 //! `fixture_controls_api` puts each route's traffic controls in front of its
 //! procedure.
 //! `views` renders each record as a description list and as a table.
+//! `choices` holds the values the app names for a field, which a form
+//! offers and a display component labels.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
 
+pub mod choices;
+pub mod forms;
 pub mod operations;
 pub mod procedures;
 pub mod records;
