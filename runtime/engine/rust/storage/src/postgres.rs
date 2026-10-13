@@ -50,7 +50,8 @@ use crate::value::SqlValue;
 pub struct PostgresOptions {
     /// The schema the engine's tables live in, created if absent:
     /// lowercase letters, digits and `_`, starting with a letter or `_`,
-    /// at most 63 bytes, and not `pg_`.
+    /// at most 63 bytes, not `pg_`, and not `public`, where a database's
+    /// own tables are.
     pub schema: String,
     /// How long a write waits for another writer's lock (`lock_timeout`)
     /// or for a pooled connection.
@@ -166,13 +167,19 @@ fn check_schema(schema: &str) -> Result<()> {
             .iter()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
         && !schema.starts_with("pg_");
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::usage(format!(
+    if !valid {
+        return Err(Error::usage(format!(
             "the engine's Postgres schema {schema:?} is lowercase letters, digits and _, starting with a letter or _, at most 63 bytes, and not pg_"
-        )))
+        )));
     }
+    // The engine's tables live in a schema of their own (D58): the one a
+    // database's own tables are in would put them in a behavior's reach.
+    if schema == "public" || schema == "information_schema" {
+        return Err(Error::usage(format!(
+            "the engine's Postgres schema is one of its own, not {schema}"
+        )));
+    }
+    Ok(())
 }
 
 // create_schema creates the engine's schema unless it exists. Two
@@ -789,8 +796,16 @@ mod tests {
     #[test]
     fn a_schema_name_is_checked() {
         assert!(check_schema("engine").is_ok());
-        assert!(check_schema("_tenant_2").is_ok());
-        for bad in ["", "Engine", "pg_engine", "a-b", "1st"] {
+        assert!(check_schema("_shop_2").is_ok());
+        for bad in [
+            "",
+            "Engine",
+            "pg_engine",
+            "a-b",
+            "1st",
+            "public",
+            "information_schema",
+        ] {
             assert!(check_schema(bad).is_err(), "{bad}");
         }
     }

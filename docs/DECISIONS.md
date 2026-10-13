@@ -5280,9 +5280,13 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: not built. `runtime/engine/rust` holds the workspace and an
-empty `superschematic-engine`, which CI lints and tests. Until the Rust
-engine passes the TypeScript suite, `@superschematic/engine` is the
-TypeScript implementation and nothing uses the workspace.
+Status: not built. `runtime/engine/rust` holds the workspace, an
+empty `superschematic-engine`, and `superschematic-engine-storage`: both
+databases' transactions, savepoints and writer locks, the write counter,
+the migration ledger with the engine's migrations for each, a behavior's
+storage and SQL checker, and the commit notifier, which CI tests on
+SQLite and Postgres. Until the Rust engine passes the TypeScript suite,
+`@superschematic/engine` is the TypeScript implementation and nothing
+uses the workspace.
 
 The rule is reversible until the first release.

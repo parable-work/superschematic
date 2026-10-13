@@ -8,7 +8,11 @@ instances and an event log in one SQLite file.
 `rust/` is the Cargo workspace of the Rust engine, which replaces this
 package under D58. It is built in steps, and nothing uses it until it
 passes this package's test suite; until then the TypeScript package is
-the engine.
+the engine. Built there so far: `superschematic-engine-storage`
+(`rust/storage`), the storage over SQLite and Postgres, with transactions
+and savepoints, one writer per namespace, the write counter, the migration
+ledger and the engine's migrations for both databases, a behavior's own
+storage and the checker its SQL passes, and the notifier a commit wakes.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -4376,3 +4380,15 @@ the modules `superschematic engine-client` writes (`test/generated/`,
 which `go test ./internal/generator/engineclientgen -update` rewrites)
 against an engine, and its `typos()` holds a misspelled field, state,
 link and parameter to a compile error.
+
+The Rust workspace builds and tests with `make engine-rust`, under the
+toolchain `tools.env` pins (`RUSTUP_TOOLCHAIN`). The storage crate's tests
+run on SQLite, and on Postgres too when
+`SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, each test in a
+schema it creates and drops:
+
+```
+docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine
+SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable' make engine-rust
+docker rm -f engine-pg
+```

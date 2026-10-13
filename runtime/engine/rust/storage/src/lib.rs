@@ -1,11 +1,34 @@
 //! The engine's storage (D16, D58): SQLite in one process, Postgres in a
-//! stack, behind one synchronous API.
+//! stack, behind one synchronous API, a port of the TypeScript engine's
+//! `src/storage/`, `src/migrations.ts`, `src/behaviors/storage.ts` and
+//! `src/behaviors/sql.ts`.
 //!
-//! Statements are SQL text with `?` placeholders ([`Sql`]); a statement
-//! the databases word differently is written for each ([`Sql::per`]), and
-//! a table is declared as a [`TableSpec`] each database gets in its own
-//! types. A behavior's statements pass the checker ([`sql_refusal`])
-//! before they run.
+//! - [`Db`] is a SQLite file ([`Db::open_sqlite`], feature `sqlite`) or a
+//!   schema of a Postgres database ([`Db::open_postgres`], feature
+//!   `postgres`); both features are on by default, since the bindings every
+//!   server links open both, and a build that needs one names it.
+//! - [`Db::write`] runs a function in a transaction ([`Tx`]) that excludes
+//!   the writers its [`Lock`] names; a nested call runs in
+//!   [`Tx::savepoint`]. A failure ends the transaction until a savepoint
+//!   around it rolls back, on both databases, so a failure the caller
+//!   handles runs in [`Tx::try_run`] and its kin. [`Tx::changes`] counts the
+//!   rows written and never goes down.
+//! - Statements are SQL text with `?` placeholders ([`Sql`]), numbered for
+//!   Postgres ([`postgres_placeholders`]); a statement the databases word
+//!   differently is written for each ([`Sql::per`]). Values are SQLite's
+//!   five storage classes ([`SqlValue`]) on both, and rows plain data
+//!   ([`Row`]).
+//! - A table is declared as a [`TableSpec`] each database gets in its own
+//!   types. Migrations run through a ledger per owner ([`Db::migrate`]);
+//!   [`engine_migrations`] is the engine's own.
+//! - A behavior's storage ([`behavior`]) is its prefix, its migrations and
+//!   its SQL handle, whose every statement passes the checker
+//!   ([`sql_refusal`]).
+//! - [`Tx::notify`] wakes waiters on the [`Notifier`] when the write
+//!   commits, in every process on Postgres.
+//!
+//! Nothing here is the engine's logic: the registry, instances, events
+//! and behaviors build on it.
 
 pub mod behavior;
 mod checker;

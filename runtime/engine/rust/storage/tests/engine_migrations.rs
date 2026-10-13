@@ -475,7 +475,7 @@ fn seed(tx: &Tx<'_>, version: usize) -> Result<(), Error> {
     if version >= 11 {
         tx.run(
             "INSERT INTO engine_namespaces (name, created_at, created_by) VALUES (?, ?, ?)",
-            params!["tenant", 800, "alice"],
+            params!["shop", 800, "alice"],
         )?;
     }
     Ok(())
