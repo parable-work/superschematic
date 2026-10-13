@@ -1,0 +1,143 @@
+package runtime
+
+import (
+	"encoding/json"
+	"fmt"
+	"iter"
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+type PublicEncryptionKey struct {
+	PublicKey string
+	Algorithm string
+	KeyID     string
+}
+
+type EncryptedRequestOptions struct {
+	PublicEncryptionKey *PublicEncryptionKey
+}
+
+type EncryptedPayloadEnvelope struct {
+	Algorithm    string `json:"algorithm"`
+	Payload      string `json:"payload"`
+	EncryptedKey string `json:"encryptedKey,omitempty"`
+	IV           string `json:"iv,omitempty"`
+	KeyID        string `json:"keyId"`
+}
+
+type UploadFile struct {
+	Filename    string
+	Reader      []byte
+	ContentType string
+}
+
+type MultipartBody struct {
+	JSONData any
+	Files    map[string]UploadFile
+}
+
+func StripFieldsForMultipart(input any, fieldNames []string) (any, error) {
+	if input == nil || len(fieldNames) == 0 {
+		return input, nil
+	}
+
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal multipart input: %w", err)
+	}
+	result := map[string]any{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal multipart input: %w", err)
+	}
+	for _, fieldName := range fieldNames {
+		delete(result, fieldName)
+	}
+	return result, nil
+}
+
+func AddQueryParam(values url.Values, key string, value any) {
+	if value == nil {
+		return
+	}
+	values.Set(key, fmt.Sprintf("%v", value))
+}
+
+// AddQueryList sets key to the items of list as one comma-separated value
+// (?key=a,b), the form the Go route reads a list query parameter in. An
+// empty list sets nothing: the route refuses a present empty value.
+func AddQueryList[T any](values url.Values, key string, list []T) {
+	if len(list) == 0 {
+		return
+	}
+	items := make([]string, len(list))
+	for i, item := range list {
+		items[i] = fmt.Sprint(item)
+	}
+	values.Set(key, strings.Join(items, ","))
+}
+
+// PageRequest is the page a paged operation's method asks for (D60): Cursor
+// is the Next of the page before, "" for the first page, and Limit the most
+// items the page holds, 0 for the operation's default.
+type PageRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// Page is one page of a paged operation's list (D60): its items, which may
+// be fewer than the limit asked for, even none, and Next, the cursor of the
+// next page, nil after the last. Ask for the next page with
+// PageRequest{Cursor: *page.Next}.
+type Page[T any] struct {
+	Items []T     `json:"items"`
+	Next  *string `json:"next"`
+}
+
+// AddPageRequest sets a page request's cursor and limit in values as the
+// query parameters cursor and limit, leaving out each that asks for the
+// default.
+func AddPageRequest(values url.Values, page PageRequest) {
+	if page.Cursor != "" {
+		values.Set("cursor", page.Cursor)
+	}
+	if page.Limit != 0 {
+		values.Set("limit", strconv.Itoa(page.Limit))
+	}
+}
+
+// AllItems yields the items of every page of a paged operation in turn
+// (D60). fetch asks for one page: first with page, then with the Next of
+// the page before and page's Limit. It asks for a page only when the loop
+// has taken every item of the one before, and stops after the page whose
+// Next is nil or when the loop stops. An error ends the iteration, yielded
+// with the zero item: the one fetch returned, or, for a page whose Next is
+// the cursor it was asked with, one naming the operation rather than a
+// loop.
+func AllItems[T any](operation string, page PageRequest, fetch func(PageRequest) (Page[T], error)) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for {
+			current, err := fetch(page)
+			if err != nil {
+				var zero T
+				yield(zero, err)
+				return
+			}
+			for _, item := range current.Items {
+				if !yield(item, nil) {
+					return
+				}
+			}
+			if current.Next == nil {
+				return
+			}
+			if *current.Next == page.Cursor {
+				var zero T
+				yield(zero, fmt.Errorf("%s returned the cursor it was sent", operation))
+				return
+			}
+			page.Cursor = *current.Next
+		}
+	}
+}

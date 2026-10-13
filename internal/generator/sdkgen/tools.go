@@ -54,6 +54,7 @@ type ToolDefinition struct {
 	InputFields              []ToolInputField         // the input type's fields, in order, if HasInput
 	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
 	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
+	Page                     *apigen.PageInfo         // @paginated (D60): cursor and limit join the query; nil otherwise
 	Encrypted                bool                     // Whether endpoint payload must be encrypted
 	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
 	InputSchemaDigest        string                   // sha256 of the encoded Parameters
@@ -95,6 +96,9 @@ type ToolsOutput struct {
 	// HasListOfListsReturns reports whether a tool returns an array of
 	// arrays (T[][]), whose return schema nests a second items level.
 	HasListOfListsReturns bool
+	// HasPagedReturns reports whether a tool returns a page (D60), whose
+	// return schema has properties, {items, next}.
+	HasPagedReturns bool
 }
 
 // ToolsNamespace groups tools by namespace for TypeScript generation
@@ -166,6 +170,9 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			}
 			if tool.Returns.Items != nil && tool.Returns.Items.Items != nil {
 				output.HasListOfListsReturns = true
+			}
+			if len(tool.Returns.Properties) > 0 {
+				output.HasPagedReturns = true
 			}
 			if tool.MCP != nil && !tool.MCP.Hidden {
 				output.VisibleTools = append(output.VisibleTools, tool)
@@ -293,6 +300,7 @@ func endpointToTool(
 		InputFields:              inputFields,
 		ScalarArgs:               scalarArgs,
 		QueryArgs:                queryArgs,
+		Page:                     endpoint.Page,
 		Encrypted:                endpoint.Encrypted,
 		BindingStatus:            bindingStatus,
 		InputSchemaDigest:        fmt.Sprintf("sha256:%x", sha256.Sum256(parametersJSON)),
@@ -445,6 +453,20 @@ func buildMCPToolBinding(
 			Target:        fmt.Sprintf("query.%s", queryParam.Name),
 		})
 		querySources = append(querySources, paramName)
+	}
+	// A paged endpoint's cursor and limit (D60) are query parameters the
+	// method takes in its query object.
+	if endpoint.Page != nil {
+		for _, name := range []string{apigen.PageCursorParam, apigen.PageLimitParam} {
+			_, isRequired := required[name]
+			arguments = append(arguments, MCPToolArgumentBinding{
+				ToolParameter: name,
+				Required:      isRequired,
+				Kind:          "query",
+				Target:        "query." + name,
+			})
+			querySources = append(querySources, name)
+		}
 	}
 
 	inputPosition := position

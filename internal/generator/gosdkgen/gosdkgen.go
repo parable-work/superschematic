@@ -94,6 +94,10 @@ type SDKOutput struct {
 	// namespaces/common.go then carries the pathSegment helper that
 	// encodes it.
 	HasPathParams bool
+	// HasPagedEndpoints reports whether an endpoint pages its list
+	// (@paginated, D60); runtime/runtime.go then carries PageRequest, Page
+	// and AllItems, and namespaces/validation.go pageLimitErrors.
+	HasPagedEndpoints bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -155,6 +159,14 @@ type EndpointInfo struct {
 	FileUploadFields         []FileUploadField
 	FilesStructName          string
 	Filterable               bool
+
+	// Page is the endpoint's @paginated (D60), nil when it does not page.
+	// The method then takes a runtime.PageRequest after its arguments and
+	// returns a runtime.Page of ItemGoType (OutputGoType), and
+	// AllMethodName yields the items of every page in turn.
+	Page          *apigen.PageInfo
+	ItemGoType    string
+	AllMethodName string
 }
 
 // PathParam represents a path parameter.
@@ -292,12 +304,6 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
-	// Until this generator renders @paginated, it refuses a paged operation
-	// rather than read a list where the servers answer a page (D60).
-	if err := apigen.RefusePages("the Go SDK (gosdkgen)", apiOutput); err != nil {
-		return nil, err
-	}
-
 	names := apiOutput.Naming.OrDefault()
 	if modulePath == "" {
 		modulePath = names.GoSDKModule(apiOutput.SchemaName)
@@ -375,6 +381,9 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 				output.ChecksQueryListItems = true
 			}
 		}
+		if converted.Page != nil {
+			output.HasPagedEndpoints = true
+		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}
 
@@ -384,10 +393,10 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			return ns.Endpoints[i].MethodName < ns.Endpoints[j].MethodName
 		})
 		for _, ep := range ns.Endpoints {
-			if ep.HasQueryParams || (ep.HasScalarArgs && ep.HTTPMethod == "GET") {
+			if ep.HasQueryParams || (ep.HasScalarArgs && ep.HTTPMethod == "GET") || ep.Page != nil {
 				ns.NeedsURLPkg = true
 			}
-			if ep.HasFileUpload || ep.HasEncryptedBody || ep.HasQueryParams {
+			if ep.HasFileUpload || ep.HasEncryptedBody || ep.HasQueryParams || ep.Page != nil {
 				ns.NeedsRuntimePkg = true
 			} else if ep.HasScalarArgs && ep.HTTPMethod == "GET" {
 				// runtime.AddQueryParam is only called for non-array scalar args;
@@ -523,6 +532,16 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	methodName := goutil.GoPublicIdentifier(ep.Name)
 	hasEncryptedBody := ep.Encrypted && apigen.EncryptedBodyMethod(sdkHTTPMethod)
 
+	// A paged operation's list is one level (D60): its method returns a
+	// page of the list's items.
+	outputGoType := outputType(ep.OutputType, ep.OutputArrayDepth(), scalarSymbols)
+	var itemGoType, allMethodName string
+	if ep.Page != nil {
+		itemGoType = qualifyType(ep.OutputType, scalarSymbols)
+		outputGoType = "runtime.Page[" + itemGoType + "]"
+		allMethodName = methodName + "All"
+	}
+
 	return EndpointInfo{
 		MethodName:            methodName,
 		HTTPMethod:            strings.ToUpper(sdkHTTPMethod),
@@ -530,7 +549,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		PathArgs:              pathArgs,
 		InputType:             qualifyType(ep.InputType, scalarSymbols),
 		OutputType:            ep.OutputType,
-		OutputGoType:          outputType(ep.OutputType, ep.OutputArrayDepth(), scalarSymbols),
+		OutputGoType:          outputGoType,
 		HasInput:              ep.HasInput,
 		RequiresAuth:          ep.RequiresAuth,
 		PathParams:            pathParams,
@@ -547,6 +566,9 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		FileUploadFields:      fileUploadFields,
 		FilesStructName:       nsPrefix + methodName + "Files",
 		Filterable:            ep.Filterable,
+		Page:                  ep.Page,
+		ItemGoType:            itemGoType,
+		AllMethodName:         allMethodName,
 	}
 }
 
@@ -666,6 +688,10 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			for namespaceIndex := range output.Namespaces {
 				for endpointIndex := range output.Namespaces[namespaceIndex].Endpoints {
 					endpoint := &output.Namespaces[namespaceIndex].Endpoints[endpointIndex]
+					if endpoint.Page != nil {
+						// A page decodes its items itself.
+						continue
+					}
 					outputType := normalizeTypeName(endpoint.OutputType)
 					if _, ok := unionTypes[outputType]; !ok {
 						continue
@@ -728,6 +754,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			NeedsStrings     bool
 			NeedsRegexp      bool
 			NeedsFilterparse bool
+			NeedsIter        bool
 		}{
 			SDK:              output,
 			Namespace:        ns,
@@ -738,6 +765,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			NeedsStrings:     needsStrings,
 			NeedsRegexp:      needsRegexp,
 			NeedsFilterparse: needsFilterparse,
+			NeedsIter:        namespacePages(ns),
 		}
 		namespacePath := filepath.Join(outputDir, "namespaces", strings.ToLower(ns.Name)+".go")
 		if err := generateFile(renderer, "namespace.tmpl", namespacePath, namespaceOutput, customFuncs); err != nil {
@@ -1103,8 +1131,25 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 			needsFilterparse = true
 			needsURL = true
 		}
+		if ep.Page != nil {
+			// The page request is sent in the query, and the page and its
+			// iterator are the runtime's.
+			needsURL = true
+			needsRuntime = true
+		}
 	}
 	return
+}
+
+// namespacePages reports whether an endpoint of the namespace pages its
+// list (D60), whose <Method>All returns an iter.Seq2.
+func namespacePages(ns NamespaceInfo) bool {
+	for _, ep := range ns.Endpoints {
+		if ep.Page != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func endpointUsesTypes(endpoint EndpointInfo) bool {

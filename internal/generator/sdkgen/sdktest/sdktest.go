@@ -160,3 +160,34 @@ func AddPlaceOrderOperation(schema *ir.Schema) error {
 	}
 	return fmt.Errorf("schema %s has no GridMutations operation set", schema.Name)
 }
+
+// AddShelfItemsOperation adds Catalog.listShelfItems to the loaded
+// fixture-paged-api schema: a paged GET (D60, two to a page, up to five)
+// whose path takes a shelf's id (shelves/{shelfId}/items) and whose other
+// arguments, maker and color, are not QueryParam and so are an SDK's body
+// arguments, which a GET sends in its query. Its SDK methods take a path
+// parameter and body arguments beside the page, which the fixture's own
+// paged operations do not.
+func AddShelfItemsOperation(schema *ir.Schema) error {
+	for _, set := range schema.OperationSets {
+		if set.Name != "Catalog" {
+			continue
+		}
+		set.Operations = append(set.Operations, &ir.FieldDef{
+			Name:     "listShelfItems",
+			Comment:  "The items on one shelf, by maker and color.",
+			TypeRef:  ir.TypeRef{Name: "ItemView", IsArray: true},
+			Required: true,
+			Arguments: []*ir.ArgumentDef{
+				{Name: "shelfId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+				{Name: "maker", TypeRef: ir.TypeRef{Name: "string"}},
+				{Name: "color", TypeRef: ir.TypeRef{Name: "string"}},
+			},
+			HTTPMethod: "GET",
+			RestPath:   "shelves/{shelfId}/items",
+			Page:       &ir.OperationPage{DefaultLimit: 2, MaxLimit: 5},
+		})
+		return nil
+	}
+	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
+}

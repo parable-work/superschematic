@@ -6062,7 +6062,11 @@ parameters, page and sentence (`toolsutil`); Go's `paging`, TypeScript's
 reads a parameter's first value and an empty one as absent. Every server
 and SDK generator refuses a paged operation until it renders it
 (`apigen.RefusePages`), and `internal/generator/page_refusal_test.go`
-holds each to it.
+holds each to it. The Go and TypeScript SDKs render it: a paged method
+takes the page request and returns `runtime.Page[T]` or `Page<T>`,
+`ListItemsAll` (an `iter.Seq2`) and `listItemsAll` (an `AsyncIterable`)
+ask for each page as the loop reaches it, and their tools take `cursor`
+and `limit` in the query and return the page.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
