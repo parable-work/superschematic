@@ -244,6 +244,37 @@ impl ReservationsImplementation for Reservations {
 }
 `
 
+// rustOrdersImplementation is rs-orders' Go implementation: an order
+// reserves its product's stock on rs-stock, a Rust server, through
+// rs-stock's Go SDK, which sends the credential rs-orders' edge names.
+const rustOrdersImplementation = `package rsorders
+
+import (
+	"context"
+
+	api "example.com/schemas/api/rs-orders"
+	types "example.com/schemas/types/go/rs-orders"
+)
+
+func New(deps api.Deps) (api.Implementations, error) {
+	return api.Implementations{Orders: &Orders{deps: deps}}, nil
+}
+
+var _ api.Constructor = New
+
+type Orders struct {
+	deps api.Deps
+}
+
+func (impl *Orders) PlaceOrder(ctx context.Context, sku string) (*types.Order, error) {
+	level, err := impl.deps.RsStock.ReservationsNamespace.ReserveStock(ctx, sku)
+	if err != nil {
+		return nil, err
+	}
+	return &types.Order{Sku: level.Sku, Status: "reserved"}, nil
+}
+`
+
 // rustIdentityConfig is rs-stock's identity config in the serve test: a
 // trusted origin, a cookie without Secure, and a cheap password hash.
 const rustIdentityConfig = `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
@@ -302,7 +333,9 @@ func buildRustFixture(t *testing.T, cargo string) (string, string) {
 // the output root's workspace, frozen to the lockfile the stack's build
 // wrote, with its implementation, and passes clippy; its main.rs is laid
 // out as rustfmt lays it out. Warehouse hands each request to the API
-// whose operations take it. rs-pricing verifies a calling service's
+// whose operations take it. rs-orders' Go server reserves stock on
+// rs-stock through rs-stock's Go SDK with its edge's credential.
+// rs-pricing verifies a calling service's
 // credential against its callers field. rs-stock starts with no database
 // up, answers /healthz and reports its database in /readyz, prices a level
 // through rs-pricing, which it calls with a token signed with its edge's
@@ -323,6 +356,11 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	}
 	repoRoot, bin := buildRustFixture(t, cargo)
 	out := filepath.Join(repoRoot, "schemas", "dist")
+	if err := os.WriteFile(filepath.Join(naming.Default().GoImplementationDir(repoRoot, "rs-orders"), "implementation.go"), []byte(rustOrdersImplementation), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ordersBinary := filepath.Join(t.TempDir(), "rs-orders")
+	goCommand(t, servergen.ServerDir(out, rustStack, "rs-orders"), "build", "-mod=mod", "-o", ordersBinary, ".")
 	if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
 		for _, server := range [][2]string{{rustStack, "rs-pricing"}, {rustStack, "rs-stock"}, {rustMergedStack, rustMergedServer}} {
 			main := filepath.Join(servergen.ServerDir(out, server[0], server[1]), filepath.FromSlash(servergen.RustMainFile))
@@ -368,6 +406,10 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ordersPrivateJWK, err := json.Marshal(map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": "orders-1", "x": base64.RawURLEncoding.EncodeToString(ordersPublic), "d": base64.RawURLEncoding.EncodeToString(ordersPrivate.Seed())})
+	if err != nil {
+		t.Fatal(err)
+	}
 	callers := variables(t, ir.CallersField("rs-stock"), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
 		Issuer:             "rs-orders",
 		Audience:           "rs-stock",
@@ -395,6 +437,14 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	stock.sendWith(t, http.MethodPost, reserve, "{}", map[string]string{"Service-Authorization": "Bearer " + signEdgeToken(t, ordersPrivate, "orders-1", "rs-orders", "rs-pricing")}, http.StatusUnauthorized, "service_unauthorized")
 	stock.sendWith(t, http.MethodPost, reserve, "{}", nil, http.StatusUnauthorized, "service_unauthorized")
 	stock.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound)
+
+	// rs-orders' Go server places an order, which reserves the stock on
+	// rs-stock through its Go SDK with the token its edge signs.
+	orders := start(t, ordersBinary, variables(t, "RS_STOCK_SERVICE", ir.ServiceEndpoint{URL: stock.base, Credential: &ir.ServiceCredential{
+		Source: ir.CredentialSignedToken, Audience: "rs-stock", Issuer: "rs-orders", Key: string(ordersPrivateJWK),
+	}})...)
+	orders.expect(t, http.MethodPost, "/api/orders/tea", http.StatusOK, `"sku":"tea:rs-orders"`, `"status":"reserved"`)
+	orders.stop(t)
 	checkCORS(t, stock.base, http.MethodOptions, "/api/levels", siteOrigin, http.MethodGet, http.StatusNoContent, siteOrigin)
 	checkCORS(t, stock.base, http.MethodOptions, "/api/levels", "https://evil.example", http.MethodGet, 0, "")
 	checkCORS(t, stock.base, http.MethodGet, "/api/levels", siteOrigin, "", http.StatusOK, siteOrigin)
