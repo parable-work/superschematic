@@ -85,7 +85,9 @@ impl std::error::Error for ClientError {
 
 /// Runs the adapter's statements on one connection. The adapter asks it for
 /// one transaction per engine operation. On SQLite `crate::sqlite::Rusqlite`
-/// binds rusqlite; another driver implements the two traits itself.
+/// binds rusqlite; another driver implements the two traits itself, and
+/// [`crate::fixed::HostClient`] binds a synchronous transaction a host
+/// holds, in either dialect.
 #[async_trait]
 pub trait Client: Send + Sync {
     /// Begins one transaction. On a SQLite connection in autocommit mode it

@@ -40,7 +40,13 @@
 //!
 //! The adapter reaches its database through [`Client`], a two-trait seam as
 //! [`crate::postgres::Client`] is; on SQLite `crate::sqlite::Rusqlite` binds
-//! rusqlite (the `rusqlite` feature, off by default). On SQLite a
+//! rusqlite (the `rusqlite` feature, off by default). A host that holds a
+//! synchronous transaction, as D58's engine holds a behavior's call,
+//! implements [`HostTx`] over it, statements with `?` placeholders in and
+//! rows of [`SqlValue`]s out, and [`HostClient`] makes that a client whose
+//! futures are always ready; [`FixedLayout::bind`] binds it for the call
+//! and [`crate::Engine::run_on`] runs each operation over it on the
+//! calling thread. On SQLite a
 //! transaction begins with `BEGIN IMMEDIATE`, which takes the file's write
 //! lock, and inside a transaction the caller holds on the connection it is
 //! a savepoint. Either way one writer holds the file, so [`Tx::lock_ref`]
@@ -70,6 +76,7 @@
 //!   Postgres always checks.
 
 mod client;
+mod host;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -89,6 +96,7 @@ use crate::storage::{
 };
 use crate::Error;
 pub use client::{Client, ClientError, Conn, SqlValue};
+pub use host::{HostClient, HostTx};
 
 /// The database a [`FixedLayout`] runs on, which words a few of its
 /// statements ([`crate::fixed`] lists them).
@@ -813,6 +821,20 @@ impl FixedLayout {
             adapter: Arc::clone(self),
             client,
         })
+    }
+
+    /// Binds the adapter to a client and runs nothing: for a client in a
+    /// transaction the caller holds, as a [`HostClient`] is, whose
+    /// connection the caller has checked (on SQLite: 3.37.0 or later, with
+    /// `json_each` and `json_extract`, and foreign keys on) and whose
+    /// transaction may refuse the checks' statements, as D16 refuses a
+    /// behavior's `PRAGMA` and `sqlite_version`. Binding costs a reference
+    /// count, so a host binds a storage for each call.
+    pub fn bind<C: Client>(self: &Arc<Self>, client: C) -> FixedStorage<C> {
+        FixedStorage {
+            adapter: Arc::clone(self),
+            client,
+        }
     }
 
     fn kind(&self, name: &str) -> Result<&Kind, Error> {

@@ -30,7 +30,9 @@
 //! over tokio-postgres (the `tokio-postgres` feature, on by default), and
 //! [`sqlite`] the SQLite adapter (D32), which keeps every graph in one fixed
 //! layout of tables, with a default client over rusqlite (the `rusqlite`
-//! feature, off by default).
+//! feature, off by default). [`fixed`] is that layout in either dialect,
+//! SQLite or Postgres without a trigger (D58), with [`fixed::HostClient`],
+//! which runs it in a synchronous transaction a host holds.
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), superschematic_versiongraph_engine::Error> {
