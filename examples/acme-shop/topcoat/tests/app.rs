@@ -590,7 +590,7 @@ async fn the_console_lists_and_writes_a_products_reviews() {
     assert!(empty.body.contains(r#"<p class="ss-empty">There are no reviews.</p>"#), "{}", empty.body);
     assert!(!empty.body.contains("ss-new"), "{}", empty.body);
     assert!(empty.body.contains(&format!(
-        r#"<li><span>Products</span></li><li><span>Product {PRODUCT}</span></li><li><span aria-current="page">Reviews</span></li>"#
+        r#"<li><span>Products</span></li><li><span>{PRODUCT}</span></li><li><span aria-current="page">Reviews</span></li>"#
     )), "{}", empty.body);
 
     let cookie = sign_in(&router).await;

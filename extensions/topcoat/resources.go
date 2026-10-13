@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -125,6 +126,10 @@ type resourceNode struct {
 	actions                           []*classified
 	// param is the page route's parameter of an item: project_id.
 	param string
+	// extends are the words of the longest collection beside this one
+	// whose path this one's extends, `documents` for `documents/drafts`:
+	// the collection is titled by its own words after them.
+	extends []string
 }
 
 // isResource reports whether the collection has a page of its own to
@@ -344,6 +349,7 @@ func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*reso
 		}
 		node.actions = actions
 	}
+	leaveCollisions(nodes, leave)
 	for _, key := range sortedKeys(nodes) {
 		node := nodes[key]
 		if node.parent == nil {
@@ -352,8 +358,106 @@ func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*reso
 			node.parent.children = append(node.parent.children, node)
 		}
 	}
+	roots = withPages(roots)
 	nameParams(roots, nil)
+	nameExtensions(roots)
 	return roots, out
+}
+
+// withPages are the collections of nodes with a page of their own or
+// under their items, each with its children that have one: a collection
+// whose operations each lost their page has no place in the trail.
+func withPages(nodes []*resourceNode) []*resourceNode {
+	var out []*resourceNode
+	for _, node := range nodes {
+		node.children = withPages(node.children)
+		if node.isResource() || len(node.children) > 0 {
+			out = append(out, node)
+		}
+	}
+	return out
+}
+
+// nameExtensions records, for each collection whose path extends a
+// sibling's, `documents/drafts` beside `documents`, the words of the
+// longest such sibling.
+func nameExtensions(nodes []*resourceNode) {
+	for _, node := range nodes {
+		for _, other := range nodes {
+			if len(other.words) < len(node.words) && len(other.words) > len(node.extends) && slices.Equal(node.words[:len(other.words)], other.words) {
+				node.extends = other.words
+			}
+		}
+		nameExtensions(node.children)
+	}
+}
+
+// pageRoute is a route a collection's page serves, "GET projects/new",
+// below the prefix with `{}` for each parameter, and what serves it.
+type pageRoute struct {
+	route string
+	piece *classified
+	what  string
+}
+
+// routes are the routes of the collection's pages: its list, an item's
+// page, the new page, an item's edit and delete pages, and each action.
+func (n *resourceNode) routes() []pageRoute {
+	var out []pageRoute
+	add := func(c *classified, method, path, what string) {
+		if c != nil {
+			out = append(out, pageRoute{route: method + " " + path, piece: c, what: what})
+		}
+	}
+	item := n.key + "/{}"
+	add(n.list, "GET", n.key, "the list of "+n.key)
+	add(n.detail, "GET", item, "the page of an item of "+n.key)
+	add(n.create, "GET", n.key+"/new", "the new page of "+n.key)
+	add(n.create, "POST", n.key+"/new", "the new page of "+n.key)
+	add(n.update, "GET", item+"/edit", "the edit page of an item of "+n.key)
+	add(n.update, "POST", item+"/edit", "the edit page of an item of "+n.key)
+	add(n.del, "GET", item+"/delete", "the delete page of an item of "+n.key)
+	add(n.del, "POST", item+"/delete", "the delete page of an item of "+n.key)
+	for _, action := range n.actions {
+		add(action, "POST", item+"/"+action.verb, "the "+action.verb+" action of an item of "+n.key)
+	}
+	return out
+}
+
+// leaveCollisions leaves out the pages of each collection one of whose
+// routes a page of another already serves, which Topcoat's router would
+// refuse as a route registered twice: a list at C/new beside C's new page,
+// or a collection named edit or delete under an item that has an edit or
+// a delete page. The collections go in key order, so a collection's own
+// pages, which come before those of the collections that extend its path
+// or lie under its items, keep their routes.
+func leaveCollisions(nodes map[string]*resourceNode, leave func(d declared, reason string)) {
+	taken := map[string]string{}
+	for _, key := range sortedKeys(nodes) {
+		node := nodes[key]
+		routes := node.routes()
+		reason := ""
+		for _, r := range routes {
+			if owner, ok := taken[r.route]; ok {
+				reason = fmt.Sprintf("its collection, %s, has no pages, since %s would be served at %s, %s", key, r.what, r.route, owner)
+				break
+			}
+		}
+		if reason == "" {
+			for _, r := range routes {
+				taken[r.route] = r.what
+			}
+			continue
+		}
+		left := map[*classified]bool{}
+		for _, r := range routes {
+			if !left[r.piece] {
+				left[r.piece] = true
+				leave(r.piece.d, reason)
+			}
+		}
+		node.list, node.detail, node.create, node.update, node.del, node.actions = nil, nil, nil, nil, nil, nil
+	}
 }
 
 // name is the operation, namespace and name: project.getProject.
@@ -517,8 +621,10 @@ func snakeWord(word string) string {
 }
 
 // singular is a plural word made singular by the English rules a path's
-// words mostly follow, for a label and a parameter's name: projects is
-// project, categories category, addresses address.
+// words mostly follow, for a route parameter's name, an identifier rather
+// than a label: projects is project, categories category, addresses
+// address. A label never guesses one, since the rules get some words wrong
+// (shelves is no shelve).
 func singular(word string) string {
 	lower := strings.ToLower(word)
 	switch {

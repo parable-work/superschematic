@@ -424,6 +424,32 @@ pub async fn call_project_create_project(cx: &Cx, args: ProjectCreateProjectArgs
     Ok(ProjectRecord::from_wire(&json))
 }
 
+/// project.listArchivedProjects, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/project/list-archived-projects")]
+pub async fn project_list_archived_projects(cx: &Cx) -> topcoat::Result<Result<Vec<ProjectRecord>, ProblemRecord>> {
+    Ok(call_project_list_archived_projects(cx).await)
+}
+
+/// The body of the project_list_archived_projects procedure.
+pub async fn call_project_list_archived_projects(cx: &Cx) -> Result<Vec<ProjectRecord>, ProblemRecord> {
+    let value = operations::project_list_archived_projects(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ProjectRecord::from_wire))
+}
+
+/// project.listNewProjects, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/project/list-new-projects")]
+pub async fn project_list_new_projects(cx: &Cx) -> topcoat::Result<Result<Vec<ProjectRecord>, ProblemRecord>> {
+    Ok(call_project_list_new_projects(cx).await)
+}
+
+/// The body of the project_list_new_projects procedure.
+pub async fn call_project_list_new_projects(cx: &Cx) -> Result<Vec<ProjectRecord>, ProblemRecord> {
+    let value = operations::project_list_new_projects(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ProjectRecord::from_wire))
+}
+
 /// The arguments of project.deleteProject, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -552,6 +578,112 @@ pub async fn call_project_archive_project(cx: &Cx, args: ProjectArchiveProjectAr
     Ok(ProjectRecord::from_wire(&json))
 }
 
+/// The arguments of project.listProjectDeletions, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectListProjectDeletionsArgsRecord {
+    pub project_id: String,
+}
+
+impl ProjectListProjectDeletionsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::ProjectListProjectDeletionsArgs, ProblemRecord> {
+        Ok(crate::api::ProjectListProjectDeletionsArgs {
+            project_id: decode("projectId", wire::put_string(&self.project_id))?,
+        })
+    }
+}
+
+/// project.listProjectDeletions, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/project/list-project-deletions")]
+pub async fn project_list_project_deletions(cx: &Cx, args: ProjectListProjectDeletionsArgsRecord) -> topcoat::Result<Result<Vec<CommentRecord>, ProblemRecord>> {
+    Ok(call_project_list_project_deletions(cx, args).await)
+}
+
+/// The body of the project_list_project_deletions procedure.
+pub async fn call_project_list_project_deletions(cx: &Cx, args: ProjectListProjectDeletionsArgsRecord) -> Result<Vec<CommentRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::project_list_project_deletions(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, CommentRecord::from_wire))
+}
+
+/// The arguments of project.listProjectEdits, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectListProjectEditsArgsRecord {
+    pub project_id: String,
+}
+
+impl ProjectListProjectEditsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::ProjectListProjectEditsArgs, ProblemRecord> {
+        Ok(crate::api::ProjectListProjectEditsArgs {
+            project_id: decode("projectId", wire::put_string(&self.project_id))?,
+        })
+    }
+}
+
+/// project.listProjectEdits, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/project/list-project-edits")]
+pub async fn project_list_project_edits(cx: &Cx, args: ProjectListProjectEditsArgsRecord) -> topcoat::Result<Result<Vec<CommentRecord>, ProblemRecord>> {
+    Ok(call_project_list_project_edits(cx, args).await)
+}
+
+/// The body of the project_list_project_edits procedure.
+pub async fn call_project_list_project_edits(cx: &Cx, args: ProjectListProjectEditsArgsRecord) -> Result<Vec<CommentRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::project_list_project_edits(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, CommentRecord::from_wire))
+}
+
+/// shelf.listShelves, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/shelf/list-shelves")]
+pub async fn shelf_list_shelves(cx: &Cx) -> topcoat::Result<Result<Vec<ShelfRecord>, ProblemRecord>> {
+    Ok(call_shelf_list_shelves(cx).await)
+}
+
+/// The body of the shelf_list_shelves procedure.
+pub async fn call_shelf_list_shelves(cx: &Cx) -> Result<Vec<ShelfRecord>, ProblemRecord> {
+    let value = operations::shelf_list_shelves(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ShelfRecord::from_wire))
+}
+
+/// The arguments of shelf.getShelf, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShelfGetShelfArgsRecord {
+    pub id: String,
+}
+
+impl ShelfGetShelfArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::ShelfGetShelfArgs, ProblemRecord> {
+        Ok(crate::api::ShelfGetShelfArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// shelf.getShelf, called from the browser.
+#[procedure("/_superschematic/fixture-pages-api/shelf/get-shelf")]
+pub async fn shelf_get_shelf(cx: &Cx, args: ShelfGetShelfArgsRecord) -> topcoat::Result<Result<ShelfRecord, ProblemRecord>> {
+    Ok(call_shelf_get_shelf(cx, args).await)
+}
+
+/// The body of the shelf_get_shelf procedure.
+pub async fn call_shelf_get_shelf(cx: &Cx, args: ShelfGetShelfArgsRecord) -> Result<ShelfRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::shelf_get_shelf(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(ShelfRecord::from_wire(&json))
+}
+
 /// The arguments of task.listLabelledTasks, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -588,6 +720,7 @@ pub async fn call_task_list_labelled_tasks(cx: &Cx, args: TaskListLabelledTasksA
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskListTasksArgsRecord {
     pub project_id: String,
+    pub done: Option<bool>,
 }
 
 impl TaskListTasksArgsRecord {
@@ -596,6 +729,7 @@ impl TaskListTasksArgsRecord {
     pub fn to_args(&self) -> Result<crate::api::TaskListTasksArgs, ProblemRecord> {
         Ok(crate::api::TaskListTasksArgs {
             project_id: decode("projectId", wire::put_string(&self.project_id))?,
+            done: decode("done", self.done.as_ref().map_or(Value::Null, wire::put_boolean))?,
         })
     }
 }

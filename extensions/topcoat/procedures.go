@@ -28,25 +28,33 @@ type procedure struct {
 	// (`json`).
 	Output     string
 	ReadOutput string
-	// RateLimit, BodyLimit and Timeout are the route's @rateLimit requests
-	// per minute, @bodyLimit megabytes and @timeout seconds, 0 without the
-	// directive. The procedure meets them as the route does
-	// (ProcedureControls).
+	// The route's traffic controls, which the procedure meets as the route
+	// does (ProcedureControls).
+	routeControls
+}
+
+// routeControls are an operation's route's @rateLimit requests per minute,
+// @bodyLimit megabytes and @timeout seconds, 0 without the directive.
+type routeControls struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
 }
 
-// HasControls reports whether the procedure's route has a traffic
-// control, so a ProcedureControls layer goes on its path.
-func (p procedure) HasControls() bool {
+func controlsOf(e registry.RustEndpoint) routeControls {
+	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout}
+}
+
+// HasControls reports whether the route has a traffic control, so a layer
+// applies it to a procedure or a page that calls the operation.
+func (p routeControls) HasControls() bool {
 	return p.RateLimit > 0 || p.BodyLimit > 0 || p.Timeout > 0
 }
 
-// ControlCalls are the ProcedureControls builder calls of the procedure,
-// in the order a request meets them on the route: the rate limit, the
-// body limit, then the timeout.
-func (p procedure) ControlCalls() []string {
+// ControlCalls are the builder calls of the route's controls, in the
+// order a request meets them on the route: the rate limit, the body limit,
+// then the timeout.
+func (p routeControls) ControlCalls() []string {
 	var calls []string
 	if p.RateLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", p.RateLimit))
@@ -89,14 +97,12 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 	for _, d := range ops {
 		endpoint, op := d.endpoint, d.op
 		p := procedure{
-			Namespace: endpoint.Namespace,
-			Name:      endpoint.Name,
-			Route:     "/_superschematic/" + service + "/" + kebabCase(endpoint.Namespace) + "/" + kebabCase(endpoint.Name),
-			SnakeName: endpoint.SnakeName(),
-			Output:    "()",
-			RateLimit: endpoint.RateLimit,
-			BodyLimit: endpoint.BodyLimit,
-			Timeout:   endpoint.Timeout,
+			Namespace:     endpoint.Namespace,
+			Name:          endpoint.Name,
+			Route:         "/_superschematic/" + service + "/" + kebabCase(endpoint.Namespace) + "/" + kebabCase(endpoint.Name),
+			SnakeName:     endpoint.SnakeName(),
+			Output:        "()",
+			routeControls: controlsOf(endpoint),
 		}
 		var err error
 		if endpoint.HasArgs() {

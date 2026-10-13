@@ -20,6 +20,18 @@ use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
 use topcoat::context::{Cx, app_context};
 
+/// order.listOrders (`GET /api/orders`): The orders, of one status when the query names one: two a minute.
+pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
+    let caller = can_order_list_orders(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .order
+        .list_orders(operations::ORDER_LIST_ORDERS.context(caller), args)
+        .await
+}
+
 /// order.placeOrder (`POST /api/orders`): Places an order: two a minute, three megabytes, a second.
 pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
     let caller = can_order_place_order(cx).await?;
@@ -28,6 +40,30 @@ pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
         .implementations
         .order
         .place_order(operations::ORDER_PLACE_ORDER.context(caller))
+        .await
+}
+
+/// order.getOrder (`GET /api/orders/{id}`): One order.
+pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
+    let caller = can_order_get_order(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .order
+        .get_order(operations::ORDER_GET_ORDER.context(caller), args)
+        .await
+}
+
+/// order.holdOrder (`POST /api/orders/{id}/hold`): Holds an order, recording why: two a minute, a megabyte, a second.
+pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+    let caller = can_order_hold_order(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .order
+        .hold_order(operations::ORDER_HOLD_ORDER.context(caller), args)
         .await
 }
 
@@ -67,10 +103,28 @@ pub async fn can_hook_receive_payment(cx: &Cx) -> Result<Option<Principal>, ApiE
     crate::admit(cx, &operations::HOOK_RECEIVE_PAYMENT).await
 }
 
+/// Admits the caller of order.listOrders as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_list_orders(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ORDER_LIST_ORDERS).await
+}
+
 /// Admits the caller of order.placeOrder as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_order_place_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ORDER_PLACE_ORDER).await
+}
+
+/// Admits the caller of order.getOrder as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_get_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ORDER_GET_ORDER).await
+}
+
+/// Admits the caller of order.holdOrder as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_hold_order(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ORDER_HOLD_ORDER).await
 }
 
 /// Admits the caller of stock.reindexStock as its route does: it needs none, so

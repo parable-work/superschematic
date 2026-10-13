@@ -422,9 +422,17 @@ is nested: its pages live under the item's, and its list and its new link
 are a section of the item's page when the parent has one. Any other
 operation gets no page, and the build log says why: a PUT or DELETE of a
 whole collection among them, which no page does, and a DELETE of a word
-after an item, which an action's form would do without asking first. Each resource is
+after an item, which an action's form would do without asking first. So
+does a collection whose pages would be served at the console's own: a
+list at `orders/new`, beside the orders' new page, or one named `edit` or
+`delete` under an item that has an edit or a delete page, since
+Topcoat's router refuses a page registered twice. Each resource is
 named by its type's `@display` (`noun`, `plural`, `createLabel`,
-`titleField`) where it declares them, else by its path's words.
+`titleField`) where it declares them. Else the collection is titled by
+its path's last word as the path gives it, `shelves` Shelves, and an item
+by its type's name in words, `Shelf`, never by a singular guessed from
+the plural. A collection whose path extends another's, `orders/archived`
+beside `orders`, is titled by its own words, Archived.
 
 `shop-orders` gives the acme shop this console:
 
@@ -446,9 +454,14 @@ page of its own before its POST.
 
 Every page calls its operation in-process, so the route's caller rule and
 argument checks hold, and takes its input through the [forms](#forms).
-The route's rate limit, body limit and timeout do not: an in-process call
-applies none of them, so the console is limited as the app's own pages
-are. A
+Its request meets the route's rate limit, body limit and timeout too, in
+the route's order, through a layer `shop_orders` adds at the prefix: a
+post the controls of the operation it submits, a list's page or an
+item's those of the operation it shows. `placeOrder` allows a client 60
+a minute, so the console's new-order post does too, from a limiter of
+the console's own, keyed by the client's address, as a procedure's is. A
+refusal is the route's 429 with `Retry-After`, 413 or 504, as the pages'
+refusal section without the layout, since the page did not run. A
 route's values come from the page's path, never from the form's hidden
 inputs, and one its argument does not decode is no page (404). A post
 that succeeds redirects (303): to the item after a create, an edit or an
@@ -466,7 +479,8 @@ item by its title where its type declares one. A list whose path extends
 another's, `orders/archived` beside `orders/{id}`, is its own in both,
 never an order named archived. List rows link to their items through the
 `hrefs` prop each `<type>_table` takes, a row without a title by its noun
-and id. The markup has
+and id. A render asks the app's `PageAuthenticator` for its caller once,
+and the nav's guards are permission checks of that caller. The markup has
 the display components' `ss-` classes and no styles.
 
 The app's `.discover()` registers the pages, as it registers the
@@ -478,12 +492,61 @@ products, and adds a Console link to its own pages:
 
 <Snippet file="topcoat/src/lib.rs" symbol={['console_settings', 'product_choices']} />
 
+The choices are the app's for every resource. `choices_for` scopes some
+to one resource's pages, named by its path below the prefix as
+`pages::RESOURCES` lists it, `products/{product_id}/reviews` say, and a
+resource's choice for a field wins on its pages over the app's.
+
 The app's tests drive the console as they drive its own pages. A
 shopper's orders are listed with a link to each; an order's page cancels
 it through its form and goes back to it, and a second cancel is the
 operation's 409:
 
 <Snippet file="topcoat/tests/app.rs" symbol="the_console_lists_orders_and_cancels_one_from_its_page" />
+
+### Live lists
+
+With `live: true` beside `enabled` in `outputs.topcoat.pages`, or
+`pages_live = true` beside `pages_prefix` in the table, each list with a
+filter renders through a Topcoat shard at a path of its own,
+`/console/_live/orders`. Without Topcoat's runtime in the browser nothing
+changes: the filter is a GET form and its submit loads the page. With
+it, the submit sends the form's query to the shard, which renders the
+list again in place, and puts the query in the address bar. A shard's
+request meets no page's guard, so the shard reads the query as the page
+does and calls the list through the in-process call, which admits the
+caller and checks the filter, with the route's status for a refusal. The
+runtime applies only a 200, so a refusal leaves the table as it was
+until a reload. An action's form keeps its POST-redirect-GET.
+
+The acme app loads no runtime, so its console's lists are not live. An
+app that does gives the document its head in a root layout of its own,
+since the console's layout renders no `<html>`, and builds its router
+with the asset bundle and the runtime:
+
+```rust
+#[layout("/")]
+async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <!DOCTYPE html>
+        <html>
+            <head>topcoat::runtime::script()</head>
+            <body>(slot)</body>
+        </html>
+    })
+}
+
+Router::builder()
+    .discover()
+    .app_context(console_settings())
+    .shop_orders(implementations, authenticator)
+    .assets(AssetBundle::load()?)
+    .runtime()
+    .build()
+```
+
+`topcoat asset bundle` writes the bundle, which holds the runtime's
+script, beside the binary.
 
 ## Procedures
 
@@ -517,7 +580,8 @@ them on the procedure's path. Its limiter is its own, at the route's
 rate, and counts clients by the IP address Topcoat reads for them; the
 JSON API's route keeps its own, counting by the same address. A page's
 in-process call applies none of them: the page is a route of the app,
-under the controls the app gives it.
+under the controls the app gives it. The [generated
+pages](#generated-pages) apply them to their own requests.
 
 ## Keep the shop in SQLite
 
