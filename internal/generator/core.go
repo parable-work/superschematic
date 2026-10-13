@@ -88,6 +88,9 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:         "sql",
 			OutputKey:    "sql",
 			OutputSchema: sqlOutputSchema,
+			// An engine type, a DB type that composes a behavior, gets
+			// no table: the engine keeps its instances (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{SQLDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -98,6 +101,8 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			Name: ormGenerator,
+			// An engine type gets no repository (D58).
+			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
 			},

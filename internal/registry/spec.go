@@ -396,10 +396,12 @@ type GeneratorSpec struct {
 	// RendersBehaviors marks a generator whose output covers what a type's
 	// behaviors add (ir.TypeDef.Behaviors): their fields and operations,
 	// or nothing of a type at all. Run refuses to run a generator without
-	// it on a schema one of whose types composes a behavior, rather than
-	// generate the type without them (D16). Of the core's generators,
-	// types sets it: it writes each behavior's fields as <T>Behaviors
-	// (D58).
+	// it on a schema one of whose types composes a behavior, or that
+	// imports a DB service's type that does, rather than generate the type
+	// without them (D16). Of the core's generators, types sets it, since
+	// it writes each behavior's fields as <T>Behaviors, and so do sql and
+	// orm, which leave a DB schema's engine type to the engine (D58). An
+	// API's own type never composes one: behaviors compose on DB types.
 	RendersBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps

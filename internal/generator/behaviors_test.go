@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -156,11 +157,11 @@ func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 	}
 }
 
-// Every core generator but types still refuses a type that composes a
-// behavior, and the refusal names the first that would run: sql in a DB
-// pipeline, envConfig in a General one. An API's own type is refused
-// before any generator runs, whatever its outputs: behaviors compose on
-// DB types (D58).
+// Every core generator of the DB pipeline renders behaviors (D58): a DB
+// schema's type that composes one is an engine type, which sql and orm
+// leave out. envConfig still refuses a General schema's, naming itself.
+// An API's own type that composes one is refused before any generator
+// runs: behaviors compose on DB types.
 func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
 	goTypes := map[string]any{LangGo: enabled}
@@ -169,18 +170,39 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 		outputs map[string]any
 		want    string
 	}{
-		{ir.SchemaKindDB, map[string]any{"types": goTypes}, "generator: sql does not render behaviors yet: type Item composes behavior Comments"},
+		{ir.SchemaKindDB, map[string]any{"types": goTypes}, ""},
 		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, "generator: envConfig does not render behaviors yet: type Item composes behavior Comments"},
 		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled},
 			"generator: type Item of API items composes behavior Comments, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {
 			schema := ir.NewSchema("items", tc.kind)
-			schema.Types["Item"] = &ir.TypeDef{Name: "Item", Role: ir.RoleEmbeddedStruct, Behaviors: []ir.BehaviorRef{{Name: "Comments"}}}
+			role := ir.RoleEmbeddedStruct
+			if tc.kind == ir.SchemaKindDB {
+				role = ir.RoleDBTable
+			}
+			schema.Types["Item"] = &ir.TypeDef{Name: "Item", Role: role, Behaviors: []ir.BehaviorRef{{Name: "Comments"}},
+				Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
 			cfg := &schemaconfig.SchemaConfig{Name: "items", Kind: tc.kind, Outputs: tc.outputs}
-			_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default())})
-			if err == nil || err.Error() != tc.want {
-				t.Fatalf("Run: err = %v, want %q", err, tc.want)
+			root := t.TempDir()
+			result, err := Run(schema, cfg, Options{OutputRoot: root, Registry: CoreRegistry(naming.Default())})
+			if tc.want != "" {
+				if err == nil || err.Error() != tc.want {
+					t.Fatalf("Run: err = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			behaviorsGo := filepath.Join(TypesDir(root, LangGo, "items"), "behaviors.go")
+			if _, err := os.Stat(behaviorsGo); err != nil {
+				t.Errorf("the types write no behaviors.go: %v", err)
+			}
+			// Item is the schema's only type and an engine type: no table,
+			// no repository.
+			if !slices.Contains(result.Skipped, "sql") || !slices.Contains(result.Skipped, "orm") {
+				t.Errorf("Skipped = %v, want sql and orm", result.Skipped)
 			}
 		})
 	}
