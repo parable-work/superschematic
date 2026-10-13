@@ -5391,15 +5391,31 @@ veto codes and preconditions, validate, operations and schema-level
 operations through invoke, operate and invokeSchema, update and
 unchanged, the fields it adds, afterChange, reads, invokes and creates of
 other instances, references with their guards and hooks, and the relation
-over its columns), a panic in a hook a BehaviorError; and
+over its columns), a panic in a hook a BehaviorError; the runner
+(milestone 6), which runs reactions after the commit and schedules
+every everyMs, driven by its host (`run_due`, `next_wake`) or by a
+thread of its own that waits on the notifier, and on Postgres only in
+the process that holds its session advisory lock, another taking over
+when it stops, with retention pruning the event log; the describe and
+tools documents, the behavior catalog and a tool run by its MCP handle,
+under the invocation policy and vendor keys the engine's options give;
+the HTTP API as one request and one response any host mounts
+(`engine::api`): the 26 routes and the MCP endpoint, their parameters,
+media types, ETags and preconditions, envelope and problems, `Location`
+under the prefix, 401 with no caller and the D37 stand-in, the event
+stream's every byte, which the host pulls a frame at a time, and MCP's
+stateless JSON-RPC on the 2025 revisions and 2026-07-28, the host keeping
+authentication, request ids, body and rate limits, timeouts and CORS;
+the calls by name for all of it, an event stream held by an id; and a
+Postgres connect bounded by its connect timeout end to end; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts` against the API,
-and replays the scenario corpus, giving its recorded answers on SQLite
-and Postgres for every scenario whose behaviors it has. CI tests the
-workspace on both databases. The core's behaviors are milestones 8 to 12,
-and the runner (which runs reactions and schedules), retention, the tools
-and the routes are milestone 6's. Until the Rust engine passes the
-TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation and nothing uses the workspace.
+behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
+retention's and the tools' against the engine, and replays the scenario
+and HTTP corpora, giving their recorded answers on SQLite and Postgres
+for every case whose behaviors it has. CI tests the workspace on both
+databases. The Node-API addon is milestone 7 and the core's behaviors
+milestones 8 to 12. Until the Rust engine passes the TypeScript suite,
+`@superschematic/engine` is the TypeScript implementation and nothing
+uses the workspace.
 
 The rule is reversible until the first release.
