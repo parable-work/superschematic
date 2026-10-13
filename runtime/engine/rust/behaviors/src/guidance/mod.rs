@@ -5,6 +5,7 @@
 //! (`guidance/text.ts`), so every behavior lists names the same way. The
 //! text is plain ASCII and depends only on the config and the type.
 
+pub(crate) mod comments;
 pub(crate) mod workflow;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};

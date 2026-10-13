@@ -1,5 +1,5 @@
 //! The behavior plug-in API (D16, D58), the port of
-//! `src/behaviors/{behavior,declaration,registry,composition,execution,storage,publish}.ts`
+//! `src/behaviors/{behavior,declaration,registry,composition,execution,storage,publish,paging}.ts`
 //! and `src/values/behavior.ts`.
 //!
 //! A behavior is a Rust type that implements [`Behavior`]: its declaration
@@ -18,6 +18,7 @@ pub(crate) mod context;
 pub(crate) mod declaration;
 pub(crate) mod erased;
 pub(crate) mod execution;
+pub mod paging;
 pub(crate) mod publish;
 pub(crate) mod registry;
 
@@ -45,6 +46,8 @@ pub use declaration::{
     BehaviorDeclaration, FieldDeclaration, OperationDeclaration, OperationScope, VetoDeclaration,
     BEHAVIOR_NAME, BUILTIN_OPERATIONS, VETO_CODE,
 };
+/// Paging for a behavior's list operations (`page`, `pageRequest`).
+pub use paging::{page, page_request, Page, PageRequest};
 /// A behavior's own storage: its migrations, the column and table specs
 /// they take, and the SQL its hooks run (the storage crate's).
 pub use superschematic_engine_storage::behavior::{BehaviorMigration, RELATION_COLUMNS};
