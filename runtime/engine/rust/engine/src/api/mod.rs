@@ -113,7 +113,7 @@ impl Request {
 pub enum Body {
     Empty,
     Bytes(Vec<u8>),
-    Stream(EventStream),
+    Stream(Box<EventStream>),
 }
 
 impl std::fmt::Debug for Body {
