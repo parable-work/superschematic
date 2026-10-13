@@ -52,7 +52,7 @@ pub use checker::{
     sql_refusal, with_relation, SqlMode, POSTGRES_REFUSED_FUNCTIONS, POSTGRES_RESERVED_PREFIX,
     POSTGRES_SCHEMAS, RESERVED_PREFIXES,
 };
-pub use db::{Db, Lock, Tx, DEFAULT_BUSY_TIMEOUT};
+pub use db::{Db, Lease, Lock, Tx, DEFAULT_BUSY_TIMEOUT};
 pub use ddl::{is_column_name, ColumnSpec, ColumnType, IndexSpec, TableSpec, MAX_SAFE_INTEGER};
 pub use dialect::{Dialect, Sql};
 pub use engine_migrations::{engine_migrations, ENGINE_OWNER};

@@ -940,3 +940,128 @@ fn postgres_searches_the_engines_schema_alone() {
         format!("Postgres schema {}", target.schema().unwrap())
     );
 }
+
+// A server that takes the socket and never answers: a port a proxy
+// forwards to a database not up yet. Each connection it accepts is held
+// open, silent, until the test ends.
+#[cfg(feature = "postgres")]
+fn silent_server() -> (std::net::SocketAddr, mpsc::Sender<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a port");
+    let address = listener.local_addr().expect("the port's address");
+    listener
+        .set_nonblocking(true)
+        .expect("a listener that polls");
+    let (stop, stopped) = mpsc::channel::<()>();
+    thread::spawn(move || {
+        let mut held = Vec::new();
+        loop {
+            match listener.accept() {
+                Ok((socket, _)) => held.push(socket),
+                Err(_) => thread::sleep(Duration::from_millis(10)),
+            }
+            if stopped.try_recv().is_ok() {
+                return;
+            }
+        }
+    });
+    (address, stop)
+}
+
+#[cfg(feature = "postgres")]
+#[test]
+fn a_postgres_connect_is_bounded_by_the_connect_timeout_end_to_end() {
+    use superschematic_engine_storage::PostgresOptions;
+    let options = || PostgresOptions {
+        connect_timeout: Duration::from_millis(300),
+        listen: false,
+        ..PostgresOptions::default()
+    };
+    // A server that answers nothing: tokio-postgres bounds the socket
+    // alone, and the storage the whole connect.
+    let (address, stop) = silent_server();
+    let started = Instant::now();
+    let refused = Db::open_postgres(
+        &format!(
+            "postgres://postgres@{}:{}/postgres?sslmode=disable",
+            address.ip(),
+            address.port()
+        ),
+        options(),
+    )
+    .expect_err("a server that never answers is refused");
+    assert!(
+        matches!(refused, Error::Connection { ref message } if message.contains("connect timeout (300 ms)")),
+        "{refused:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the connect waited {:?}",
+        started.elapsed()
+    );
+    let _ = stop.send(());
+
+    // A port nothing listens on is refused at once.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind a port")
+        .local_addr()
+        .expect("the port's address");
+    let started = Instant::now();
+    let refused = Db::open_postgres(
+        &format!(
+            "postgres://postgres@127.0.0.1:{}/postgres?sslmode=disable",
+            closed.port()
+        ),
+        options(),
+    )
+    .expect_err("a closed port is refused");
+    assert!(matches!(refused, Error::Connection { .. }), "{refused:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+
+    // An address nothing routes to waits for the timeout, no longer. The
+    // URL's own connect_timeout (whole seconds) wins over the option.
+    let started = Instant::now();
+    let refused = Db::open_postgres(
+        "postgres://postgres@10.255.255.1:5432/postgres?sslmode=disable&connect_timeout=1",
+        options(),
+    )
+    .expect_err("an unroutable address is refused");
+    assert!(matches!(refused, Error::Connection { .. }), "{refused:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the connect waited {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_lease_is_one_processs_at_a_time_and_frees_when_it_drops() {
+    for target in targets("a_lease_is_one_processs") {
+        let first = target.open();
+        let second = target.open();
+        let mut held = first
+            .try_lease(&["runner"])
+            .unwrap()
+            .expect("the first process takes the lease");
+        assert!(held.held());
+        if target.dialect == Dialect::Sqlite {
+            // One process writes a SQLite file: its every engine holds it.
+            assert!(second.try_lease(&["runner"]).unwrap().is_some());
+            continue;
+        }
+        assert!(
+            second.try_lease(&["runner"]).unwrap().is_none(),
+            "a second process waits while the first holds it"
+        );
+        assert!(
+            second.try_lease(&["other"]).unwrap().is_some(),
+            "another lease is another lock"
+        );
+        drop(held);
+        let mut taken = second
+            .try_lease(&["runner"])
+            .unwrap()
+            .expect("once it drops, another process takes it");
+        assert!(taken.held());
+        assert!(first.try_lease(&["runner"]).unwrap().is_none());
+    }
+}

@@ -12,20 +12,28 @@
 //! not ported, [`behaviors`], or a core behavior not ported yet,
 //! milestones 9 to 11), one that writes the file with SQL of its own on
 //! Postgres (`dialect: sqlite`), and one that calls a method that changes
-//! the engine and is not built yet (the runner, the tools). It opens each
+//! the engine and JSON cannot carry ([`UNBUILT_WRITES`]). It opens each
 //! engine as the recording says, with a policy answering from the recorded
 //! answer table, seeded or fixed ids, a wall (strict) or fixed clock, the
-//! core's behaviors ported so far ([`superschematic_engine_behaviors`]) and
-//! the test behaviors it names, then makes each step's call through
-//! [`superschematic_engine::calls`] (`behaviors.register` through the kit's
-//! behaviors and the core's) and compares its
-//! result or its error (class, code, message and details), binding the
-//! symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`, `{{opaque:N}}`) at their
-//! first appearance in an answer. A read-only call not built yet (the tools
-//! document) is skipped and counted.
+//! runner, retention and tool options, the core's behaviors ported so far
+//! ([`superschematic_engine_behaviors`]) and the test behaviors it names,
+//! then makes each step's call through [`superschematic_engine::calls`]
+//! (`behaviors.register` through the kit's behaviors and the core's) and
+//! compares its result or its error (class, code, message and details),
+//! binding the symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`,
+//! `{{opaque:N}}`) at their first appearance in an answer. A read-only call
+//! that lists the core's behaviors ([`UNBUILT_READS`]) is skipped and
+//! counted.
+//!
+//! The HTTP corpus (`runtime/engine/testdata/http`) replays through the
+//! same runner: its cases are scenarios whose `app`, exchange and stream
+//! steps go through the engine's routes ([`HTTP_FILES`]).
 
 pub mod behaviors;
 pub mod core_fixtures;
+mod http;
+
+pub use http::HTTP_FILES;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -66,32 +74,22 @@ pub const CORE_BEHAVIORS: [&str; 15] = [
     "Numbering",
 ];
 
-/// Calls that change the engine and are not built yet: a scenario that
-/// makes one is skipped, since the steps after it depend on it.
-pub const UNBUILT_WRITES: [&str; 7] = [
-    "tools.call",
-    "runner.runDue",
-    "runner.start",
-    "runner.stop",
-    "storage.transaction",
-    "events.watch",
-    "search",
-];
+/// Calls that change the engine and are not built: a scenario that makes
+/// one is skipped, since the steps after it depend on it. A transaction of
+/// the file's own and a watch take functions; the search across schemas
+/// runs on the core's Search (milestone 10).
+pub const UNBUILT_WRITES: [&str; 3] = ["storage.transaction", "events.watch", "search"];
 
-/// Calls that only read and are not built yet (milestone 6): the step is
-/// skipped and counted. The registered behaviors' names and declarations
-/// (`behaviors.names`, `has`, `declaration`) are read, but list the core's
-/// behaviors, which this engine does not register yet, so they are skipped
-/// too until it does.
-pub const UNBUILT_READS: [&str; 8] = [
-    "tools.describe",
-    "tools.manifest",
-    "tools.listBehaviors",
-    "tools.describeBehavior",
-    "runner.status",
+/// Calls that only read but answer from what this engine does not have
+/// yet: the step is skipped and counted. The registered behaviors' names
+/// and declarations, and the behavior catalog, list every core behavior,
+/// which this engine registers only in part until milestone 11.
+pub const UNBUILT_READS: [&str; 5] = [
     "behaviors.has",
     "behaviors.names",
     "behaviors.declaration",
+    "tools.listBehaviors",
+    "tools.describeBehavior",
 ];
 
 /// A scenario file, its shared values resolved.
@@ -112,10 +110,17 @@ pub fn load(path: &Path) -> Result<ScenarioFile, String> {
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    // A scenario file holds scenarios; an HTTP file holds cases, a case's
+    // members a scenario's.
     let mut scenarios = file
         .get_mut("scenarios")
         .and_then(Value::as_array_mut)
         .map(std::mem::take)
+        .or_else(|| {
+            file.get_mut("cases")
+                .and_then(Value::as_array_mut)
+                .map(std::mem::take)
+        })
         .unwrap_or_default();
     for scenario in &mut scenarios {
         resolve_shared(scenario, &shared)?;
@@ -231,6 +236,9 @@ pub fn replay_file(file: &ScenarioFile, database: &Database, repository: &Path) 
         report.replayed += 1;
         let mut run = Run::new(database, repository, &file.name, scenario);
         for (index, step) in steps.iter().enumerate() {
+            run.http.tail = steps[index + 1..]
+                .iter()
+                .all(|later| later.get("stream").is_some() && later.get("end").is_some());
             match run.step(step) {
                 Ok(Outcome::Passed) => report.steps_passed += 1,
                 Ok(Outcome::Skipped) => report.steps_skipped += 1,
@@ -279,7 +287,34 @@ fn skip_reason(
     if !missing.is_empty() {
         return Some(format!("test behaviors not ported: {}", missing.join(", ")));
     }
-    let core: Vec<String> = names("behaviors")
+    // A schema an exchange defines over HTTP composes behaviors the
+    // recorder never saw, so its body is read for them too.
+    let mut composed = names("behaviors");
+    for step in steps {
+        if let Some(body) = step.get("request").and_then(|request| request.get("body")) {
+            for type_def in body
+                .get("types")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|types| types.values())
+            {
+                for behavior in type_def
+                    .get("behaviors")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(name) = behavior.get("name").and_then(Value::as_str) {
+                        if !composed.iter().any(|known| known == name) {
+                            composed.push(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    composed.sort();
+    let core: Vec<String> = composed
         .into_iter()
         .filter(|name| {
             CORE_BEHAVIORS.contains(&name.as_str())
@@ -300,15 +335,7 @@ fn skip_reason(
     for step in steps {
         let call = step.get("call").and_then(Value::as_str).unwrap_or_default();
         if UNBUILT_WRITES.contains(&call) {
-            return Some(format!("needs {call} (milestones 5 and 6)"));
-        }
-        if call == "open" {
-            let options = step.get("args").and_then(|args| args.get(0));
-            for key in ["runner", "retention"] {
-                if options.and_then(|options| options.get(key)).is_some() {
-                    return Some(format!("opens with {key} (milestone 6)"));
-                }
-            }
+            return Some(format!("needs {call}"));
         }
     }
     None
@@ -339,9 +366,11 @@ fn unique(prefix: &str) -> String {
     )
 }
 
-// An engine of a scenario, with how its clock and ids are driven.
+// An engine of a scenario, with how its clock and ids are driven. It is
+// shared, as a host keeps it, so an event stream and the runner's driver
+// can hold it.
 struct Opened {
-    engine: Option<Engine>,
+    engine: Option<Arc<Engine>>,
     fixed_clock: bool,
     ids: Option<IdQueue>,
 }
@@ -364,6 +393,8 @@ struct Run<'d> {
     bindings: HashMap<String, Bound>,
     counter: IdCounter,
     unknown_questions: Arc<Mutex<Vec<String>>>,
+    /// The apps a case serves, and its open streams (`http`).
+    http: http::Served,
 }
 
 impl<'d> Run<'d> {
@@ -382,10 +413,20 @@ impl<'d> Run<'d> {
             bindings: HashMap::new(),
             counter: IdCounter::new(),
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
+            http: http::Served::default(),
         }
     }
 
     fn step(&mut self, step: &Value) -> Result<Outcome, String> {
+        if step.get("app").is_some() && step.get("request").is_none() {
+            return http::app(self, step);
+        }
+        if step.get("request").is_some() {
+            return http::exchange(self, step);
+        }
+        if step.get("stream").is_some() {
+            return http::stream(self, step);
+        }
         let call = step.get("call").and_then(Value::as_str).unwrap_or_default();
         if step.get("js").is_some_and(|js| js == &Value::Bool(true)) {
             return Ok(Outcome::Skipped);
@@ -406,7 +447,9 @@ impl<'d> Run<'d> {
             "open" => self.open(step, &args).map(|()| None),
             "close" => {
                 let opened = self.engine_of(step)?;
-                opened.engine = None;
+                if let Some(engine) = opened.engine.take() {
+                    engine.shutdown();
+                }
                 Ok(None)
             }
             "behaviors.register" => {
@@ -650,6 +693,22 @@ impl<'d> Run<'d> {
                 options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
             }
         }
+        if let Some(runner) = given.get("runner") {
+            options.runner = Some(
+                superschematic_engine::RunnerOptions::from_json(runner)
+                    .map_err(|error| error_json(&error))?,
+            );
+        }
+        if let Some(retention) = given.get("retention") {
+            options.retention = Some(
+                superschematic_engine::RetentionOptions::from_json(retention)
+                    .map_err(|error| error_json(&error))?,
+            );
+        }
+        if let Some(tools) = given.get("tools") {
+            options.tools = superschematic_engine::ToolOptions::from_json(tools)
+                .map_err(|error| error_json(&error))?;
+        }
         if let Some(Value::Object(values)) = given.get("values") {
             options.values = ValueOptions {
                 threshold_bytes: values.get("thresholdBytes").and_then(Value::as_u64),
@@ -658,7 +717,7 @@ impl<'d> Run<'d> {
                 driver: None,
             };
         }
-        let engine = Engine::open(options).map_err(|error| error_json(&error))?;
+        let engine = Engine::open_shared(options).map_err(|error| error_json(&error))?;
         self.engines.push((
             name,
             Opened {
@@ -720,7 +779,12 @@ impl<'d> Run<'d> {
 
     // finish closes the engines and removes their places.
     fn finish(mut self) {
-        self.engines.clear();
+        self.http = http::Served::default();
+        for (_, opened) in self.engines.drain(..) {
+            if let Some(engine) = opened.engine {
+                engine.shutdown();
+            }
+        }
         for (_, place) in self.places.drain(..) {
             match place {
                 Place::Sqlite { dir } => {
@@ -945,13 +1009,20 @@ impl<'d> Run<'d> {
                         .map(|(_, bound)| bound.clone())
                 });
                 if let Some(known) = known {
-                    let text = match render(symbol, &known, false) {
+                    let mut forms = vec![match render(symbol, &known, false) {
                         Value::String(text) => text,
                         other => other.to_string(),
-                    };
-                    return actual
-                        .strip_prefix(text.as_str())
-                        .is_some_and(|after| self.match_segments(rest, after, found));
+                    }];
+                    // An instant in text is a date-time, or, in JSON a
+                    // string carries, its epoch milliseconds.
+                    if let (Bound::Time(ms), false) = (&known, symbol.micros) {
+                        forms.push(ms.to_string());
+                    }
+                    return forms.iter().any(|text| {
+                        actual
+                            .strip_prefix(text.as_str())
+                            .is_some_and(|after| self.match_segments(rest, after, found))
+                    });
                 }
                 // An unbound symbol takes the longest run its kind allows
                 // that lets the rest match.
@@ -1004,6 +1075,11 @@ impl Symbol {
                 .parse::<i64>()
                 .ok()
                 .map(|micros| Bound::Time(micros / 1000)),
+            // A date-time, or 13 digits of epoch milliseconds, as the
+            // recorder finds them in text.
+            "time" if text.len() == 13 && text.bytes().all(|b| b.is_ascii_digit()) => {
+                text.parse::<i64>().ok().map(Bound::Time)
+            }
             "time" => ms_of_iso(text).map(Bound::Time),
             "opaque" => (!text.is_empty()
                 && text
@@ -1236,6 +1312,11 @@ fn recorded_details(refusal: &EngineError) -> Option<Value> {
             if let Some(inner) = veto_details {
                 details.insert("vetoDetails".into(), Value::Object(inner.clone()));
             }
+            Some(Value::Object(details))
+        }
+        EngineErrorKind::UnknownTool { tool } => {
+            let mut details = Map::new();
+            details.insert("tool".into(), Value::from(tool.as_str()));
             Some(Value::Object(details))
         }
         _ => refusal.details(),

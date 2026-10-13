@@ -1,15 +1,36 @@
-//! The JSON type of a field's value, as the SDK generators write it for a
-//! tool's arguments: the part of `src/tools/schema.ts` (`FieldSchemas`)
-//! the registry reads, to know which of an instance type's fields hold a
-//! string, a number or a boolean (an index's keys). The rest of that file,
-//! the argument schemas and their digests, comes with the tools document
-//! (milestone 6).
+//! The JSON Schema of a schema's fields, as the SDK generators write it
+//! for tool arguments (`internal/generator/toolsutil` and the api
+//! generator's scalar table, `apigen/scalars_jsonschema.go`): the port of
+//! `src/tools/schema.ts`'s `FieldSchemas` (D58), which the registry reads to
+//! know which of an instance type's fields hold a string, a number or a
+//! boolean (an index's keys), a behavior's `parse_config` reads as
+//! `ConfigTarget::field_schemas`, and the describe and tools documents
+//! write (`crate::tools`).
 //!
-//! A builtin primitive is `string`, `number`, `boolean` or `integer`
-//! (`Int`); a scalar takes its type from its `json_schema` type mapping, or
-//! from its language primitive (an integer when its name or a mapping says
-//! so), `any` for every JSON type; a type of the document is an `object`;
-//! an enum or any other name is a `string`; a list is an `array`.
+//! - a builtin primitive is `string`, `number` or `boolean`, with the
+//!   generators' descriptions (`Int` an integer);
+//! - a scalar takes its type from its `json_schema` type mapping, or from
+//!   its primitive (an integer when its name or a mapping says so), its
+//!   format from its declaration or from its name and mappings, its
+//!   description, pattern, lengths and range, and names itself under the
+//!   scalar key (`x-superschematic-scalar` by default; `ConfigTarget`'s
+//!   field schemas leave the key out, as the TypeScript engine's do);
+//!   `Generic.JSON`'s mapping is `any`: every JSON type but null;
+//! - an enum is a string listing its serialized values;
+//! - a type of the document is a closed object of its fields, sorted
+//!   `required`; a type already being expanded is a plain reference, so
+//!   recursive types end;
+//! - a list is `items`, a list of lists `items` of `items`, with the
+//!   field's value rules on the innermost items and its list bounds on the
+//!   outer list;
+//! - a field that is not required is nullable.
+//!
+//! A [`Property`] renders two ways: as `tools/schema.json` writes it (keys
+//! sorted, `any` as the list of every JSON type but null, a nullable type
+//! with `"null"` last; [`render_property`]), and as the Go encoder writes
+//! it for `inputSchemaDigest` ([`encode_property`]: struct field order,
+//! the scalar key first, the type of a nullable or an `any` property and a
+//! nullable property's enum last, HTML characters escaped).
 
 use serde_json::{Map, Value};
 
@@ -132,30 +153,55 @@ fn integer_trait(name: &str, mappings: &[(String, String)]) -> bool {
             .any(|(_, mapped)| INTEGERS.contains(&mapped.trim().to_lowercase().as_str()))
 }
 
-// One property of a type's JSON Schema, as tools/schema.ts's Property holds
-// it: what FieldSchemas derives of a field.
-#[derive(Clone, Debug, Default)]
-struct Property {
-    // Written under the scalar key, which the tools document names
-    // (milestone 6); ConfigTarget's field schemas leave it out.
-    #[allow(dead_code)]
-    canonical_scalar: Option<String>,
-    nullable: bool,
-    closed: bool,
-    kind: Option<String>,
-    format: Option<String>,
-    description: Option<String>,
-    pattern: Option<String>,
-    values: Option<Vec<String>>,
-    min_length: Option<f64>,
-    max_length: Option<f64>,
-    minimum: Option<f64>,
-    maximum: Option<f64>,
-    min_items: Option<f64>,
-    max_items: Option<f64>,
-    items: Option<Box<Property>>,
-    properties: Option<Vec<(String, Property)>>,
-    required: Option<Vec<String>>,
+/// One property of an argument schema, as `tools/schema.ts`'s Property
+/// holds it (`toolsutil.JSONSchemaProperty`): what [`FieldSchemas`] derives
+/// of a field, or a JSON Schema the engine did not derive (`raw`, a
+/// behavior's parameters), written as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Property {
+    pub raw: Option<Value>,
+    /// The scalar's schema name, written under the scalar key.
+    pub canonical_scalar: Option<String>,
+    pub nullable: bool,
+    /// `additionalProperties: false`.
+    pub closed: bool,
+    /// A JSON Schema type; `any` for every JSON type.
+    pub kind: Option<String>,
+    pub format: Option<String>,
+    pub description: Option<String>,
+    pub pattern: Option<String>,
+    pub values: Option<Vec<String>>,
+    pub min_length: Option<f64>,
+    pub max_length: Option<f64>,
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+    pub min_items: Option<f64>,
+    pub max_items: Option<f64>,
+    pub items: Option<Box<Property>>,
+    pub properties: Option<Vec<(String, Property)>>,
+    pub required: Option<Vec<String>>,
+    /// JSON Schemas an object also satisfies, written as they are: what a
+    /// behavior's validate holds an instance's own fields to.
+    pub all_of: Option<Vec<Value>>,
+}
+
+impl Property {
+    /// A JSON Schema written as it is.
+    pub fn raw(schema: Value) -> Self {
+        Property {
+            raw: Some(schema),
+            ..Property::default()
+        }
+    }
+
+    /// A plain property of a type with a description.
+    pub fn of(kind: &str, description: &str) -> Self {
+        Property {
+            kind: Some(kind.to_owned()),
+            description: Some(description.to_owned()),
+            ..Property::default()
+        }
+    }
 }
 
 // A scalar's JSON Schema facts: apigen.ScalarJSONSchemaInfo.
@@ -180,8 +226,41 @@ pub(crate) fn field_schemas(document: &Value, type_name: &str) -> Map<String, Va
     let (properties, _) = object_fields(document, type_name, &[]);
     properties
         .iter()
-        .map(|(key, property)| (key.clone(), render_property(property)))
+        .map(|(key, property)| (key.clone(), render_property(property, "")))
         .collect()
+}
+
+/// The argument schemas of one document's types (`FieldSchemas`).
+pub(crate) struct FieldSchemas<'d> {
+    document: &'d Value,
+}
+
+impl<'d> FieldSchemas<'d> {
+    pub fn new(document: &'d Value) -> Self {
+        FieldSchemas { document }
+    }
+
+    /// The closed object schema of a type's fields, keyed by their JSON
+    /// keys, and its required keys, sorted.
+    pub fn object(&self, type_name: &str) -> (Vec<(String, Property)>, Vec<String>) {
+        object_fields(self.document, type_name, &[])
+    }
+
+    /// The schema of a value of one of the document's types: a closed
+    /// object of its fields, as a field of that type is written, not
+    /// nullable.
+    pub fn type_schema(&self, type_name: &str) -> Property {
+        let (properties, required) =
+            object_fields(self.document, type_name, &[type_name.to_owned()]);
+        Property {
+            kind: Some("object".to_owned()),
+            description: Some(format!("{type_name} object")),
+            closed: true,
+            properties: Some(properties),
+            required: Some(required),
+            ..Property::default()
+        }
+    }
 }
 
 // object_fields is FieldSchemas.fields: a type's fields by JSON key, and
@@ -464,18 +543,24 @@ fn js_number_value(value: f64) -> Value {
     serde_json::from_str(&crate::json::js_number(value)).unwrap_or(Value::Null)
 }
 
-// render_property is renderProperty(property, ''): keys sorted, `any` as
-// every JSON type but null, a nullable type, enum or list with null.
-fn render_property(property: &Property) -> Value {
-    let mut out: Vec<(&str, Value)> = Vec::new();
+/// A property as `tools/schema.json` writes it
+/// (`toolsutil.JSONSchemaPropertyLiteral`): keys sorted, the scalar name
+/// under `scalar_key` when it is not empty, `any` as every JSON type but
+/// null, and a nullable type, enum or list with null.
+pub(crate) fn render_property(property: &Property, scalar_key: &str) -> Value {
+    if let Some(raw) = &property.raw {
+        return raw.clone();
+    }
+    let mut out: Vec<(String, Value)> = Vec::new();
+    let mut put = |key: &str, value: Value| out.push((key.to_owned(), value));
     let any = property.kind.as_deref() == Some("any");
     let null = property.kind.as_deref() == Some("null");
     let nullable = property.nullable && !any && !null;
     if property.closed {
-        out.push(("additionalProperties", Value::Bool(false)));
+        put("additionalProperties", Value::Bool(false));
     }
     if let Some(description) = &property.description {
-        out.push(("description", Value::from(description.as_str())));
+        put("description", Value::from(description.as_str()));
     }
     if let Some(values) = property.values.as_ref().filter(|values| !values.is_empty()) {
         let mut listed: Vec<Value> = values
@@ -485,13 +570,13 @@ fn render_property(property: &Property) -> Value {
         if nullable {
             listed.push(Value::Null);
         }
-        out.push(("enum", Value::Array(listed)));
+        put("enum", Value::Array(listed));
     }
     if let Some(format) = &property.format {
-        out.push(("format", Value::from(format.as_str())));
+        put("format", Value::from(format.as_str()));
     }
     if let Some(items) = &property.items {
-        out.push(("items", render_property(items)));
+        put("items", render_property(items, scalar_key));
     }
     for (key, number) in [
         ("maxItems", property.max_items),
@@ -502,27 +587,17 @@ fn render_property(property: &Property) -> Value {
         ("minimum", property.minimum),
     ] {
         if let Some(number) = number {
-            out.push((key, js_number_value(number)));
+            put(key, js_number_value(number));
         }
     }
     if let Some(pattern) = &property.pattern {
-        out.push(("pattern", Value::from(pattern.as_str())));
+        put("pattern", Value::from(pattern.as_str()));
     }
     if let Some(properties) = property.properties.as_ref().filter(|p| !p.is_empty()) {
-        let mut sorted: Vec<&(String, Property)> = properties.iter().collect();
-        sorted.sort_by(|a, b| crate::json::compare_utf16(&a.0, &b.0));
-        out.push((
-            "properties",
-            Value::Object(
-                sorted
-                    .into_iter()
-                    .map(|(key, nested)| (key.clone(), render_property(nested)))
-                    .collect(),
-            ),
-        ));
+        put("properties", render_properties(properties, scalar_key));
     }
     if let Some(required) = property.required.as_ref().filter(|r| !r.is_empty()) {
-        out.push((
+        put(
             "required",
             Value::Array(
                 required
@@ -530,28 +605,192 @@ fn render_property(property: &Property) -> Value {
                     .map(|key| Value::from(key.as_str()))
                     .collect(),
             ),
-        ));
+        );
     }
+    if let Some(all_of) = property.all_of.as_ref().filter(|all| !all.is_empty()) {
+        put("allOf", Value::Array(all_of.clone()));
+    }
+    put("type", type_value(property));
+    if !scalar_key.is_empty() {
+        if let Some(canonical) = &property.canonical_scalar {
+            put(scalar_key, Value::from(canonical.as_str()));
+        }
+    }
+    out.sort_by(|a, b| crate::json::compare_utf16(&a.0, &b.0));
+    Value::Object(out.into_iter().collect())
+}
+
+/// Properties by key, sorted.
+pub(crate) fn render_properties(properties: &[(String, Property)], scalar_key: &str) -> Value {
+    let mut sorted: Vec<&(String, Property)> = properties.iter().collect();
+    sorted.sort_by(|a, b| crate::json::compare_utf16(&a.0, &b.0));
+    Value::Object(
+        sorted
+            .into_iter()
+            .map(|(key, nested)| (key.clone(), render_property(nested, scalar_key)))
+            .collect(),
+    )
+}
+
+// type_value is a property's JSON Schema type: `any` as every JSON type
+// but null, and a nullable type with null after it.
+fn type_value(property: &Property) -> Value {
     let kind = property.kind.clone().unwrap_or_default();
-    let type_nullable = property.nullable && !null;
-    let type_value = if any {
+    let nullable = property.nullable && kind != "null";
+    if kind == "any" {
         let mut kinds = vec!["object", "array", "string", "number", "boolean"];
-        if type_nullable {
+        if nullable {
             kinds.push("null");
         }
-        Value::Array(kinds.into_iter().map(Value::from).collect())
-    } else if type_nullable {
+        return Value::Array(kinds.into_iter().map(Value::from).collect());
+    }
+    if nullable {
         Value::Array(vec![Value::from(kind), Value::from("null")])
     } else {
         Value::from(kind)
+    }
+}
+
+/// A property as the Go encoder writes a `toolsutil.JSONSchemaProperty`
+/// (`MarshalJSON`): the text `inputSchemaDigest` hashes. A nullable
+/// property is a struct that embeds the plain one and redeclares type and
+/// enum, and an `any` one a struct that redeclares type, which Go writes
+/// after every embedded member.
+pub(crate) fn encode_property(property: &Property, scalar_key: &str) -> String {
+    use crate::json::{go_json, go_string};
+    if let Some(raw) = &property.raw {
+        return go_json(raw);
+    }
+    let mut members: Vec<String> = Vec::new();
+    if !scalar_key.is_empty() {
+        if let Some(canonical) = &property.canonical_scalar {
+            members.push(format!(
+                "{}:{}",
+                go_string(scalar_key),
+                go_string(canonical)
+            ));
+        }
+    }
+    let any = property.kind.as_deref() == Some("any");
+    let nullable = property.nullable && !any && property.kind.as_deref() != Some("null");
+    if property.closed {
+        members.push("\"additionalProperties\":false".to_owned());
+    }
+    if !nullable && !any {
+        members.push(format!(
+            "\"type\":{}",
+            go_string(property.kind.as_deref().unwrap_or_default())
+        ));
+    }
+    if let Some(format) = &property.format {
+        members.push(format!("\"format\":{}", go_string(format)));
+    }
+    if let Some(description) = &property.description {
+        members.push(format!("\"description\":{}", go_string(description)));
+    }
+    if let Some(pattern) = &property.pattern {
+        members.push(format!("\"pattern\":{}", go_string(pattern)));
+    }
+    let values = property.values.as_ref().filter(|values| !values.is_empty());
+    let listed = |values: &Vec<String>, null: bool| {
+        let mut items: Vec<Value> = values.iter().map(|v| Value::from(v.as_str())).collect();
+        if null {
+            items.push(Value::Null);
+        }
+        go_json(&Value::Array(items))
     };
-    out.push(("type", type_value));
-    out.sort_by(|a, b| crate::json::compare_utf16(a.0, b.0));
-    Value::Object(
-        out.into_iter()
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect(),
+    if !nullable {
+        if let Some(values) = values {
+            members.push(format!("\"enum\":{}", listed(values, false)));
+        }
+    }
+    for (key, number) in [
+        ("minLength", property.min_length),
+        ("maxLength", property.max_length),
+        ("minimum", property.minimum),
+        ("maximum", property.maximum),
+        ("minItems", property.min_items),
+        ("maxItems", property.max_items),
+    ] {
+        if let Some(number) = number {
+            members.push(format!("\"{key}\":{}", crate::json::js_number(number)));
+        }
+    }
+    if let Some(items) = &property.items {
+        members.push(format!("\"items\":{}", encode_property(items, scalar_key)));
+    }
+    if let Some(properties) = property.properties.as_ref().filter(|p| !p.is_empty()) {
+        members.push(format!(
+            "\"properties\":{}",
+            encode_properties(properties, scalar_key)
+        ));
+    }
+    if let Some(required) = property.required.as_ref().filter(|r| !r.is_empty()) {
+        members.push(format!(
+            "\"required\":{}",
+            go_json(&Value::Array(
+                required
+                    .iter()
+                    .map(|key| Value::from(key.as_str()))
+                    .collect()
+            ))
+        ));
+    }
+    if nullable || any {
+        members.push(format!("\"type\":{}", go_json(&type_value(property))));
+    }
+    if nullable {
+        if let Some(values) = values {
+            members.push(format!("\"enum\":{}", listed(values, true)));
+        }
+    }
+    if let Some(all_of) = property.all_of.as_ref().filter(|all| !all.is_empty()) {
+        members.push(format!(
+            "\"allOf\":{}",
+            go_json(&Value::Array(all_of.clone()))
+        ));
+    }
+    format!("{{{}}}", members.join(","))
+}
+
+/// Properties as the Go encoder writes them, by key, sorted.
+pub(crate) fn encode_properties(properties: &[(String, Property)], scalar_key: &str) -> String {
+    let mut sorted: Vec<&(String, Property)> = properties.iter().collect();
+    sorted.sort_by(|a, b| crate::json::compare_utf16(&a.0, &b.0));
+    format!(
+        "{{{}}}",
+        sorted
+            .into_iter()
+            .map(|(key, property)| format!(
+                "{}:{}",
+                crate::json::go_string(key),
+                encode_property(property, scalar_key)
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
     )
+}
+
+/// The schema of a merge patch of an object: its properties with none
+/// required, down through nested objects, which a patch merges. A list is
+/// replaced whole, so its items keep theirs.
+pub(crate) fn patch_of(property: &Property, description: Option<&str>) -> Property {
+    let Some(properties) = &property.properties else {
+        return property.clone();
+    };
+    let mut out = property.clone();
+    out.properties = Some(
+        properties
+            .iter()
+            .map(|(key, child)| (key.clone(), patch_of(child, None)))
+            .collect(),
+    );
+    out.all_of = None;
+    if let Some(description) = description {
+        out.description = Some(description.to_owned());
+    }
+    out.required = Some(Vec::new());
+    out
 }
 
 #[cfg(test)]

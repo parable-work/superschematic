@@ -8,8 +8,11 @@
 //! - `test/list-filters.test.ts`: [`Tag`];
 //! - `test/normalize.test.ts`: [`Mailer`];
 //! - `test/unique.test.ts`: [`Slugger`];
+//! - `test/reach-fixtures.ts`: [`Reader`] and [`Holder`];
+//! - `test/mcp.test.ts`: [`Broken`];
 //! - `test/runner-fixtures.ts`: [`Ledger`], whose reactions and schedule do
-//!   what a test puts in its [`Probe`];
+//!   what a test puts in its [`Probe`], and [`Pacer`], whose interval its
+//!   config or its [`PacerProbe`] gives;
 //! - `test/core-workflow.test.ts`: [`Dispatch`];
 //! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
@@ -22,8 +25,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::{json, Map, Value};
 
 use superschematic_engine::behaviors::{
-    BehaviorFilter, BehaviorMigration, ColumnSpec, Every, IndexSpec, ReactionCx, Reactions,
-    Schedule, ScheduleCx, TableSpec,
+    BehaviorFilter, BehaviorMigration, ColumnSpec, Every, Hears, IndexSpec, ReactionCx, Reactions,
+    Reference, Schedule, ScheduleCx, TableSpec,
 };
 use superschematic_engine::errors::Veto;
 use superschematic_engine::storage::SqlValue;
@@ -797,12 +800,41 @@ pub type ReactProbe =
     Arc<dyn Fn(&ReactionCx<'_, LedgerConfig>, &EngineEvent) -> Result<()> + Send + Sync>;
 /// What a test makes [`Ledger`]'s schedule do.
 pub type SweepProbe = Arc<dyn Fn(&ScheduleCx<'_, LedgerConfig>) -> Result<()> + Send + Sync>;
+/// What a test makes [`Ledger`]'s `watches` answer, in place of its config's.
+pub type WatchesProbe = Arc<dyn Fn(&LedgerConfig) -> Result<Option<Vec<String>>> + Send + Sync>;
 
 /// A test's hand in [`Ledger`]'s reactions and schedule.
 #[derive(Clone, Default)]
 pub struct Probe {
     pub react: Arc<Mutex<Option<ReactProbe>>>,
     pub sweep: Arc<Mutex<Option<SweepProbe>>>,
+    pub watches: Arc<Mutex<Option<WatchesProbe>>>,
+}
+
+impl Probe {
+    /// Has the reactions do `react`.
+    pub fn on_react(
+        &self,
+        react: impl Fn(&ReactionCx<'_, LedgerConfig>, &EngineEvent) -> Result<()>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        *self.react.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(react));
+    }
+
+    /// Has the schedule do `sweep`.
+    pub fn on_sweep(
+        &self,
+        sweep: impl Fn(&ScheduleCx<'_, LedgerConfig>) -> Result<()> + Send + Sync + 'static,
+    ) {
+        *self.sweep.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(sweep));
+    }
+
+    /// Has `watches` answer `watches`; `None` puts the config's back.
+    pub fn on_watches(&self, watches: Option<WatchesProbe>) {
+        *self.watches.lock().unwrap_or_else(PoisonError::into_inner) = watches;
+    }
 }
 
 /// The config of [`Ledger`].
@@ -949,7 +981,16 @@ impl Behavior for Ledger {
                 Ok(())
             }),
             reactions: Some(Reactions {
-                watches: Some(|_, config, _| {
+                watches: Some(|ledger, config, _| {
+                    let probe = ledger
+                        .probe
+                        .watches
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone();
+                    if let Some(probe) = probe {
+                        return probe(config);
+                    }
                     Ok(if config.off {
                         None
                     } else {
@@ -977,6 +1018,707 @@ impl Behavior for Ledger {
                         let probe = ledger
                             .probe
                             .sweep
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
+                        match probe {
+                            Some(probe) => probe(cx),
+                            None => Ok(()),
+                        }
+                    },
+                },
+            )],
+            ..Hooks::default()
+        }
+    }
+}
+
+// param is a string member of an operation's parameters, '' when absent.
+fn param<'v>(params: &'v Value, key: &str) -> &'v str {
+    params.get(key).and_then(Value::as_str).unwrap_or_default()
+}
+
+/// A reference as the TypeScript engine's object holds it.
+pub fn reference_json(reference: &Reference) -> Value {
+    let mut out = json!({"schema": reference.schema, "id": reference.id, "key": reference.key});
+    match &reference.hears {
+        None => {}
+        Some(Hears::Delete) => out["hears"] = json!("delete"),
+        Some(Hears::Path { path, crosses }) => {
+            let mut hears = json!({ "path": path });
+            if let Some(crosses) = crosses {
+                hears["crosses"] = if crosses.fract() == 0.0 && crosses.abs() < 9e15 {
+                    json!(*crosses as i64)
+                } else {
+                    json!(crosses)
+                };
+            }
+            out["hears"] = hears;
+        }
+    }
+    out
+}
+
+/// The config of [`Holder`].
+#[derive(Clone, Debug, Default)]
+pub struct HolderConfig {
+    /// The changes of a held instance its guard vetoes.
+    pub veto: Vec<String>,
+    /// Leave the reference behind when a held instance is deleted.
+    pub leave: bool,
+}
+
+/// test.Holder (`test/reach-fixtures.ts`): holds references to other
+/// instances and notes what happens to them.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Holder;
+
+static HOLDER: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let target = json!({"schema": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}});
+    let object = |required: Value, properties: Value| json!({"type": "object", "additionalProperties": false, "required": required, "properties": properties});
+    let with = |more: Value| {
+        let mut out = target.clone();
+        for (key, value) in more.as_object().unwrap() {
+            out[key] = value.clone();
+        }
+        out
+    };
+    let no_params = json!({"type": "object", "additionalProperties": false});
+    json!({
+        "name": "test.Holder",
+        "description": "Holds references to other instances and notes what happens to them.",
+        "configSchema": {"type": "object", "additionalProperties": false, "properties": {
+            "veto": {"type": "array", "items": {"enum": ["update", "delete", "operation"]}},
+            "leave": {"type": "boolean"}
+        }},
+        "fields": [{"name": "held", "description": "What the instance holds: schema/id/key."}],
+        "operations": [
+            {"name": "hold", "description": "Holds an instance, under a key, hearing what hears says of it: every change when absent.", "paramsSchema": object(json!(["schema", "id"]), with(json!({"key": {"type": "string"}, "hears": {}}))), "resultSchema": true, "writes": true},
+            {"name": "release", "paramsSchema": object(json!(["schema", "id"]), with(json!({"key": {"type": "string"}}))), "resultSchema": {"type": "boolean"}, "writes": true},
+            {"name": "note", "description": "Notes what happened to a held instance.", "paramsSchema": object(json!(["schema", "id", "kind"]), with(json!({"kind": {"type": "string"}}))), "resultSchema": true, "writes": true},
+            {"name": "notes", "paramsSchema": no_params, "resultSchema": {"type": "array", "items": {"type": "string"}}},
+            {"name": "holding", "description": "The references the engine holds for the instance.", "paramsSchema": no_params, "resultSchema": {"type": "array"}},
+            {"name": "holders", "description": "The instances of the schema that hold one.", "scope": "schema", "paramsSchema": object(json!(["schema", "id"]), target.clone()), "resultSchema": {"type": "array", "items": {"type": "string"}}},
+            {"name": "releaseAll", "description": "Releases one held instance from every holder, through release.", "scope": "schema", "paramsSchema": object(json!(["schema", "id"]), target.clone()), "resultSchema": {"type": "integer"}, "writes": true},
+            {"name": "scribble", "description": "Tries to write its table in a read.", "scope": "schema", "paramsSchema": no_params, "resultSchema": true},
+            {"name": "tidy", "description": "Clears every note of the schema's instances in its own table.", "scope": "schema", "paramsSchema": no_params, "resultSchema": {"type": "integer"}, "writes": true}
+        ]
+    })
+    .to_string()
+});
+
+/// What a hold's hears says. JSON has no number past the finite ones, so
+/// the string "Infinity" stands for one.
+pub fn hears_of(hears: Option<&Value>) -> Option<Hears> {
+    match hears? {
+        Value::String(word) if word == "delete" => Some(Hears::Delete),
+        given => Some(Hears::Path {
+            path: param(given, "path").to_owned(),
+            crosses: match given.get("crosses") {
+                Some(Value::String(word)) if word == "Infinity" => Some(f64::INFINITY),
+                other => other.and_then(Value::as_f64),
+            },
+        }),
+    }
+}
+
+impl Behavior for Holder {
+    type Config = HolderConfig;
+
+    fn declaration(&self) -> &str {
+        &HOLDER
+    }
+
+    fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<HolderConfig> {
+        Ok(HolderConfig {
+            veto: raw
+                .get("veto")
+                .and_then(Value::as_array)
+                .map(|kinds| {
+                    kinds
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            leave: raw.get("leave") == Some(&Value::Bool(true)),
+        })
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            migrations: vec![BehaviorMigration::new(1, "holds")
+                .table(
+                    TableSpec::new("holds")
+                        .column("namespace", ColumnSpec::text().not_null())
+                        .column("schema", ColumnSpec::text().not_null())
+                        .column("id", ColumnSpec::text().not_null())
+                        .column("target_schema", ColumnSpec::text().not_null())
+                        .column("target_id", ColumnSpec::text().not_null())
+                        .column("key", ColumnSpec::text().not_null())
+                        .primary_key(&[
+                            "namespace",
+                            "schema",
+                            "id",
+                            "target_schema",
+                            "target_id",
+                            "key",
+                        ]),
+                )
+                .table(
+                    TableSpec::new("notes")
+                        .row_id("position")
+                        .column("namespace", ColumnSpec::text().not_null())
+                        .column("schema", ColumnSpec::text().not_null())
+                        .column("id", ColumnSpec::text().not_null())
+                        .column("note", ColumnSpec::text().not_null()),
+                )],
+            operations: vec![
+                ("hold", |_, cx, params| {
+                    let key = params.get("key").and_then(Value::as_str).unwrap_or("");
+                    cx.references().add(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        key,
+                        hears_of(params.get("hears")),
+                    )?;
+                    let table = cx.sql().table("holds")?;
+                    let [namespace, schema, id] = instance_key(cx);
+                    cx.sql().run(
+                        format!("INSERT INTO {table} (namespace, schema, id, target_schema, target_id, key) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"),
+                        &[namespace, schema, id, param(params, "schema").into(), param(params, "id").into(), key.into()],
+                    )?;
+                    Ok(Value::Null)
+                }),
+                ("release", |_, cx, params| {
+                    let key = params.get("key").and_then(Value::as_str).unwrap_or("");
+                    let table = cx.sql().table("holds")?;
+                    let [namespace, schema, id] = instance_key(cx);
+                    cx.sql().run(
+                        format!("DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND target_schema = ? AND target_id = ? AND key = ?"),
+                        &[namespace, schema, id, param(params, "schema").into(), param(params, "id").into(), key.into()],
+                    )?;
+                    Ok(Value::Bool(cx.references().remove(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        key,
+                    )?))
+                }),
+                ("note", |_, cx, params| {
+                    let table = cx.sql().table("notes")?;
+                    let [namespace, schema, id] = instance_key(cx);
+                    let note = format!(
+                        "{} {} {}",
+                        param(params, "kind"),
+                        param(params, "schema"),
+                        param(params, "id")
+                    );
+                    cx.sql().run(
+                        format!(
+                            "INSERT INTO {table} (namespace, schema, id, note) VALUES (?, ?, ?, ?)"
+                        ),
+                        &[namespace, schema, id, note.into()],
+                    )?;
+                    Ok(Value::Null)
+                }),
+                ("notes", |_, cx, _| {
+                    let table = cx.sql().table("notes")?;
+                    let rows = cx.sql().all(
+                        format!("SELECT note FROM {table} WHERE namespace = ? AND schema = ? AND id = ? ORDER BY position"),
+                        &instance_key(cx),
+                    )?;
+                    rows.iter()
+                        .map(|row| Ok(Value::from(row.text("note")?)))
+                        .collect::<Result<Vec<_>>>()
+                        .map(Value::Array)
+                }),
+                ("holding", |_, cx, _| {
+                    Ok(Value::Array(
+                        cx.references().list()?.iter().map(reference_json).collect(),
+                    ))
+                }),
+            ],
+            schema_operations: vec![
+                ("holders", |_, cx, params| {
+                    let table = cx.sql().table("holds")?;
+                    let rows = cx.sql().all(
+                        format!("SELECT id FROM {table} WHERE namespace = ? AND schema = ? AND target_schema = ? AND target_id = ? ORDER BY id"),
+                        &[cx.namespace().into(), cx.schema().into(), param(params, "schema").into(), param(params, "id").into()],
+                    )?;
+                    rows.iter()
+                        .map(|row| Ok(Value::from(row.text("id")?)))
+                        .collect::<Result<Vec<_>>>()
+                        .map(Value::Array)
+                }),
+                ("releaseAll", |_, cx, params| {
+                    let table = cx.sql().table("holds")?;
+                    let rows = cx.sql().all(
+                        format!("SELECT id, key FROM {table} WHERE namespace = ? AND schema = ? AND target_schema = ? AND target_id = ? ORDER BY id"),
+                        &[cx.namespace().into(), cx.schema().into(), param(params, "schema").into(), param(params, "id").into()],
+                    )?;
+                    for row in &rows {
+                        cx.instances().invoke(
+                            cx.schema(),
+                            row.text("id")?,
+                            "release",
+                            &json!({"schema": param(params, "schema"), "id": param(params, "id"), "key": row.text("key")?}),
+                            None,
+                        )?;
+                    }
+                    Ok(Value::from(rows.len()))
+                }),
+                ("scribble", |_, cx, _| {
+                    let table = cx.sql().table("notes")?;
+                    cx.sql().run(format!("DELETE FROM {table}"), &[])?;
+                    Ok(Value::Null)
+                }),
+                ("tidy", |_, cx, _| {
+                    let table = cx.sql().table("notes")?;
+                    let ran = cx.sql().run(
+                        format!("DELETE FROM {table} WHERE namespace = ? AND schema = ?"),
+                        &[cx.namespace().into(), cx.schema().into()],
+                    )?;
+                    Ok(Value::from(ran.changes))
+                }),
+            ],
+            fields: vec![("held", |_, view| {
+                let held: Vec<Value> = view
+                    .references()
+                    .list()?
+                    .iter()
+                    .map(|reference| {
+                        Value::from(format!(
+                            "{}/{}/{}",
+                            reference.schema, reference.id, reference.key
+                        ))
+                    })
+                    .collect();
+                Ok((!held.is_empty()).then_some(Value::Array(held)))
+            })],
+            guard_reference: Some(|_, view, reference, request| {
+                let kind = match request {
+                    GuardRequest::Create { .. } => "create",
+                    GuardRequest::Update { .. } => "update",
+                    GuardRequest::Delete { .. } => "delete",
+                    GuardRequest::Operation { .. } => "operation",
+                };
+                if !view.config().veto.iter().any(|vetoed| vetoed == kind) {
+                    return Ok(None);
+                }
+                let key = if reference.key.is_empty() {
+                    "no key"
+                } else {
+                    reference.key.as_str()
+                };
+                Ok(Some(Veto::from(
+                    format!("{} {} holds it ({key})", view.schema(), view.id()).as_str(),
+                )))
+            }),
+            after_reference_change: Some(|_, cx, reference, change| {
+                // Its own write changed what it holds: noting it now would
+                // be a cycle.
+                if cx.writing() {
+                    return Ok(());
+                }
+                cx.instances().invoke(
+                    cx.schema(),
+                    cx.id(),
+                    "note",
+                    &json!({"schema": reference.schema, "id": reference.id, "kind": change.kind()}),
+                    None,
+                )?;
+                if matches!(change, InstanceChange::Delete) && !cx.config().leave {
+                    cx.instances().invoke(
+                        cx.schema(),
+                        cx.id(),
+                        "release",
+                        &json!({"schema": reference.schema, "id": reference.id, "key": reference.key}),
+                        None,
+                    )?;
+                }
+                Ok(())
+            }),
+            ..Hooks::default()
+        }
+    }
+}
+
+// passed is the params a call passes on, `{}` when it gives none.
+fn passed(params: &Value) -> Value {
+    params.get("params").cloned().unwrap_or_else(|| json!({}))
+}
+
+// record_json is a read's `{ data, behaviors }`.
+fn record_json(record: &superschematic_engine::InstanceRecord) -> Value {
+    json!({ "data": record.data, "behaviors": record.behaviors })
+}
+
+// error_name is the name a TypeScript caller's catch reads.
+fn error_name(error: &Error) -> &'static str {
+    match error {
+        Error::Engine(error) => error.name(),
+        Error::Behavior(_) => "BehaviorError",
+        Error::Config(_) => "BehaviorConfigError",
+        Error::Usage(_) => "TypeError",
+        _ => "Error",
+    }
+}
+
+/// The config of [`Reader`].
+#[derive(Clone, Debug, Default)]
+pub struct ReaderConfig {
+    /// The schema an instance's partner is of; its own when absent.
+    pub partner_schema: Option<String>,
+}
+
+/// test.Reader (`test/reach-fixtures.ts`): reads other instances and
+/// invokes their operations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Reader;
+
+static READER: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let target = json!({"schema": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}});
+    let mut call = target.clone();
+    call["operation"] = json!({"type": "string", "minLength": 1});
+    call["params"] = json!({"type": "object"});
+    let schema_call = json!({"schema": target["schema"], "operation": {"type": "string", "minLength": 1}, "params": {"type": "object"}});
+    let with = |base: &Value, more: Value| {
+        let mut out = base.clone();
+        for (key, value) in more.as_object().unwrap() {
+            out[key] = value.clone();
+        }
+        out
+    };
+    let object = |required: Value, properties: Value| json!({"type": "object", "additionalProperties": false, "required": required, "properties": properties});
+    let no_params = json!({"type": "object", "additionalProperties": false});
+    let fields = json!({"type": "array", "items": {"type": "string"}});
+    json!({
+        "name": "test.Reader",
+        "description": "Reads other instances and invokes their operations.",
+        "configSchema": {"type": "object", "additionalProperties": false, "properties": {"partnerSchema": {"type": "string"}}},
+        "fields": [
+            {"name": "pokes", "description": "How many times poke ran on the instance."},
+            {"name": "echo", "description": "The partner's title, read when the instance names one."}
+        ],
+        "operations": [
+            {"name": "peek", "paramsSchema": object(json!(["schema", "id"]), with(&target, json!({"fields": fields}))), "resultSchema": true},
+            {"name": "peekMany", "paramsSchema": object(json!(["schema", "ids"]), json!({"schema": target["schema"], "ids": {"type": "array", "items": {"type": "string"}}, "fields": fields})), "resultSchema": {"type": "object"}},
+            {"name": "configOf", "paramsSchema": object(json!(["schema", "behavior"]), json!({"schema": target["schema"], "behavior": {"type": "string"}})), "resultSchema": true},
+            {"name": "canRead", "paramsSchema": object(json!(["schema"]), json!({"schema": target["schema"]})), "resultSchema": {"type": "boolean"}},
+            {"name": "poke", "description": "Invokes an operation of another instance, then fails when asked to.", "paramsSchema": object(json!(["schema", "id", "operation"]), with(&call, json!({"fail": {"type": "boolean"}}))), "resultSchema": true, "writes": true},
+            {"name": "pokeCatch", "description": "Invokes an operation of another instance and returns the name of what it threw.", "paramsSchema": object(json!(["schema", "id", "operation"]), call.clone()), "resultSchema": true, "writes": true},
+            {"name": "pokeRead", "description": "Invokes an operation of another instance from a read-only operation.", "paramsSchema": object(json!(["schema", "id", "operation"]), call.clone()), "resultSchema": true},
+            {"name": "peekSchema", "description": "Invokes a schema-level operation from a read-only operation.", "paramsSchema": object(json!(["schema", "operation"]), schema_call.clone()), "resultSchema": true},
+            {"name": "pokeSchema", "description": "Counts a poke, then invokes a schema-level operation.", "paramsSchema": object(json!(["schema", "operation"]), schema_call), "resultSchema": true, "writes": true},
+            {"name": "guarded", "description": "Its guard invokes an operation of another instance before it runs.", "paramsSchema": object(json!(["schema", "id", "operation"]), call), "resultSchema": true, "writes": true},
+            {"name": "failAfterWrite", "description": "Counts a poke, then throws.", "paramsSchema": no_params, "resultSchema": true, "writes": true}
+        ]
+    })
+    .to_string()
+});
+
+// poked counts a poke on the instance.
+fn poked(cx: &OperationCx<'_, ReaderConfig>) -> Result<()> {
+    let pokes = cx.columns().get()?.i64("pokes")?;
+    cx.columns().set(&[("pokes", SqlValue::Integer(pokes + 1))])
+}
+
+// read_fields is a read's fields, when it names them.
+fn read_fields(params: &Value) -> Option<Vec<&str>> {
+    params
+        .get("fields")
+        .and_then(Value::as_array)
+        .map(|fields| fields.iter().filter_map(Value::as_str).collect())
+}
+
+impl Behavior for Reader {
+    type Config = ReaderConfig;
+
+    fn declaration(&self) -> &str {
+        &READER
+    }
+
+    fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<ReaderConfig> {
+        Ok(ReaderConfig {
+            partner_schema: raw
+                .get("partnerSchema")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            migrations: vec![BehaviorMigration::new(1, "pokes")
+                .column("pokes", ColumnSpec::integer().not_null().default(0))],
+            guard: Some(|_, view, request| {
+                if let GuardRequest::Operation {
+                    operation: "guarded",
+                    params,
+                    ..
+                } = request
+                {
+                    view.instances().invoke(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        param(params, "operation"),
+                        &passed(params),
+                        None,
+                    )?;
+                }
+                Ok(None)
+            }),
+            operations: vec![
+                ("peek", |_, cx, params| {
+                    let fields = read_fields(params);
+                    let found = cx.instances().get(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        fields.as_deref(),
+                    )?;
+                    Ok(found.as_ref().map_or(Value::Null, record_json))
+                }),
+                ("peekMany", |_, cx, params| {
+                    let fields = read_fields(params);
+                    let ids: Vec<&str> = params["ids"]
+                        .as_array()
+                        .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    let found = cx.instances().get_many(
+                        param(params, "schema"),
+                        &ids,
+                        fields.as_deref(),
+                    )?;
+                    Ok(Value::Object(
+                        found
+                            .iter()
+                            .map(|(id, record)| (id.clone(), record_json(record)))
+                            .collect(),
+                    ))
+                }),
+                ("configOf", |_, cx, params| {
+                    Ok(cx
+                        .schemas()
+                        .config(param(params, "schema"), param(params, "behavior"))?
+                        .unwrap_or(Value::Null))
+                }),
+                ("canRead", |_, cx, params| {
+                    Ok(Value::Bool(cx.schemas().readable(param(params, "schema"))?))
+                }),
+                ("poke", |_, cx, params| {
+                    poked(cx)?;
+                    let result = cx.instances().invoke(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        param(params, "operation"),
+                        &passed(params),
+                        None,
+                    )?;
+                    if params.get("fail") == Some(&Value::Bool(true)) {
+                        return Err(Error::Engine(
+                            superschematic_engine::EngineError::invalid_argument(
+                                "poke failed after its invoke, as asked",
+                            ),
+                        ));
+                    }
+                    Ok(result)
+                }),
+                ("pokeCatch", |_, cx, params| {
+                    poked(cx)?;
+                    Ok(
+                        match cx.instances().invoke(
+                            param(params, "schema"),
+                            param(params, "id"),
+                            param(params, "operation"),
+                            &passed(params),
+                            None,
+                        ) {
+                            Ok(result) => json!({ "result": result }),
+                            Err(error) => json!({ "threw": error_name(&error) }),
+                        },
+                    )
+                }),
+                ("pokeRead", |_, cx, params| {
+                    cx.instances().invoke(
+                        param(params, "schema"),
+                        param(params, "id"),
+                        param(params, "operation"),
+                        &passed(params),
+                        None,
+                    )
+                }),
+                ("peekSchema", |_, cx, params| {
+                    cx.instances().invoke_schema(
+                        param(params, "schema"),
+                        param(params, "operation"),
+                        &passed(params),
+                    )
+                }),
+                ("pokeSchema", |_, cx, params| {
+                    poked(cx)?;
+                    cx.instances().invoke_schema(
+                        param(params, "schema"),
+                        param(params, "operation"),
+                        &passed(params),
+                    )
+                }),
+                ("guarded", |_, _, _| Ok(json!("ran"))),
+                ("failAfterWrite", |_, cx, _| {
+                    poked(cx)?;
+                    Err(Error::Engine(
+                        superschematic_engine::EngineError::invalid_argument(
+                            "failAfterWrite fails after its write",
+                        ),
+                    ))
+                }),
+            ],
+            fields: vec![
+                ("pokes", |_, view| {
+                    Ok(Some(Value::from(view.columns().get()?.i64("pokes")?)))
+                }),
+                ("echo", |_, view| {
+                    let data = view.data()?;
+                    let Some(partner) = data.get("partner").and_then(Value::as_str) else {
+                        return Ok(None);
+                    };
+                    let schema = view
+                        .config()
+                        .partner_schema
+                        .as_deref()
+                        .unwrap_or(view.schema());
+                    let found =
+                        view.instances()
+                            .get(schema, partner, Some(&["test.Reader.echo"]))?;
+                    Ok(Some(
+                        found
+                            .and_then(|record| record.data.get("title").cloned())
+                            .unwrap_or(Value::Null),
+                    ))
+                }),
+            ],
+            ..Hooks::default()
+        }
+    }
+}
+
+/// test.Broken (`test/mcp.test.ts`): an operation that fails in its own
+/// code, a defect, not a refusal.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Broken;
+
+impl Behavior for Broken {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        r#"{"name": "test.Broken", "operations": [{"name": "explode", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true}]}"#
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            operations: vec![("explode", |_, _, _| {
+                Err(Error::behavior(
+                    "test.Broken",
+                    "the handler failed with a secret: 42",
+                ))
+            })],
+            ..Hooks::default()
+        }
+    }
+}
+
+/// The config of [`Pacer`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PacerConfig {
+    /// The interval of its schedule on the schema.
+    pub every_ms: Option<i64>,
+}
+
+/// What a test makes [`Pacer`]'s interval, in place of its config's.
+pub type EveryProbe = Arc<dyn Fn(&PacerConfig) -> Result<Option<i64>> + Send + Sync>;
+/// What a test makes [`Pacer`]'s schedule do.
+pub type TickProbe = Arc<dyn Fn(&ScheduleCx<'_, PacerConfig>) -> Result<()> + Send + Sync>;
+
+/// A test's hand in [`Pacer`]'s interval and schedule.
+#[derive(Clone, Default)]
+pub struct PacerProbe {
+    pub every: Arc<Mutex<Option<EveryProbe>>>,
+    pub tick: Arc<Mutex<Option<TickProbe>>>,
+}
+
+impl PacerProbe {
+    /// Has the interval be what `every` answers for a config.
+    pub fn on_every(
+        &self,
+        every: impl Fn(&PacerConfig) -> Result<Option<i64>> + Send + Sync + 'static,
+    ) {
+        *self.every.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(every));
+    }
+
+    /// Has the schedule do `tick`.
+    pub fn on_tick(
+        &self,
+        tick: impl Fn(&ScheduleCx<'_, PacerConfig>) -> Result<()> + Send + Sync + 'static,
+    ) {
+        *self.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(tick));
+    }
+}
+
+/// test.Pacer (`test/runner-fixtures.ts`): one schedule, whose interval
+/// follows the config of each schema that composes it.
+#[derive(Clone, Default)]
+pub struct Pacer {
+    pub probe: PacerProbe,
+}
+
+static PACER_DECLARATION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    json!({
+        "name": "test.Pacer",
+        "description": "Ticks on each schema at the interval its config gives.",
+        "configSchema": {"type": "object", "additionalProperties": false, "properties": {"everyMs": {"type": "integer"}}}
+    })
+    .to_string()
+});
+
+impl Behavior for Pacer {
+    type Config = PacerConfig;
+
+    fn declaration(&self) -> &str {
+        &PACER_DECLARATION
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<PacerConfig> {
+        Ok(PacerConfig {
+            every_ms: raw.get("everyMs").and_then(Value::as_i64),
+        })
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            config_change: Some(|_, _, _, _| Ok(None)),
+            schedules: vec![(
+                "tick",
+                Schedule {
+                    every: Every::Config(|pacer, config| {
+                        let probe = pacer
+                            .probe
+                            .every
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
+                        match probe {
+                            Some(probe) => probe(config),
+                            None => Ok(Some(config.every_ms.unwrap_or(60_000))),
+                        }
+                    }),
+                    run: |pacer, cx| {
+                        let probe = pacer
+                            .probe
+                            .tick
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
                             .clone();
@@ -1081,6 +1823,10 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Mailer") => set.with(Mailer),
         (_, "test.Slugger") => set.with(Slugger),
         (_, "test.Ledger") => set.with(Ledger::default()),
+        (_, "test.Pacer") => set.with(Pacer::default()),
+        (_, "test.Holder") => set.with(Holder),
+        (_, "test.Reader") => set.with(Reader),
+        (_, "test.Broken") => set.with(Broken),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
         _ => return None,
     })

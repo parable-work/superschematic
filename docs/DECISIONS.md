@@ -5392,25 +5392,41 @@ operations through invoke, operate and invokeSchema, update and
 unchanged, the fields it adds, afterChange, reads, invokes and creates of
 other instances, references with their guards and hooks, and the relation
 over its columns), a panic in a hook a BehaviorError, and the paging of
-a behavior's list operations; `superschematic-engine-behaviors`, the
+a behavior's list operations; the runner (milestone 6), which runs
+reactions after the commit and schedules every everyMs, driven by its
+host (`run_due`, `next_wake`) or by a thread of its own that waits on the
+notifier, and on Postgres only in the process that holds its session
+advisory lock, another taking over when it stops, with retention pruning
+the event log; the describe and tools documents, the behavior catalog
+and a tool run by its MCP handle, under the invocation policy and vendor
+keys the engine's options give; the HTTP API as one request and one
+response any host mounts (`engine::api`): the 26 routes and the MCP
+endpoint, their parameters, media types, ETags and preconditions,
+envelope and problems, `Location` under the prefix, 401 with no caller
+and the D37 stand-in, the event stream's every byte, which the host
+pulls a frame at a time, and MCP's stateless JSON-RPC on the 2025
+revisions and 2026-07-28, the host keeping authentication, request ids,
+body and rate limits, timeouts and CORS; the calls by name for all of
+it, an event stream held by an id; and a Postgres connect bounded by its
+connect timeout end to end; `superschematic-engine-behaviors`, the
 core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
 its options (`core()`) since the engine cannot depend on them: wave 1
 (milestone 8) has ported Workflow (with D56's enteredAt), Comments,
 Constants and Variants, and wave 2 (milestone 9) D56's StateRules,
-Approvals and Timers, whose fire schedule the tests run through a test
-entry point until the runner does, with their guidance, migrations on
-both databases, configs, guards, fields, operations, schedules and veto
-codes; and `superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts` and of the ported
-behaviors' `test/core-*.test.ts` against the API, and replays the
-scenario corpus, those behaviors' files included, giving its recorded
-answers on SQLite and Postgres for every scenario whose behaviors it has.
-CI tests the workspace on both databases. The other core behaviors are
-milestones 9 to 11 and the work queue's milestone 12, and the runner
-(which runs reactions and schedules), retention, the tools and the
-routes are milestone 6's. Until the Rust engine passes the
-TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation and nothing uses the workspace.
+Approvals and Timers, whose deadlines the runner fires, with their
+guidance, migrations on both databases, configs, guards, fields,
+operations, schedules and veto codes; and
+`superschematic-engine-testkit`, which ports the TypeScript tests'
+behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
+retention's and the tools', and those of the ported behaviors'
+`test/core-*.test.ts` against the engine, and replays the scenario and
+HTTP corpora, those behaviors' files included, giving their recorded
+answers on SQLite and Postgres for every case whose behaviors it has. CI
+tests the workspace on both databases. The Node-API addon is milestone
+7, the other core behaviors milestones 9 to 11 and the work queue's
+milestone 12. Until the Rust engine passes the TypeScript suite,
+`@superschematic/engine` is the TypeScript implementation and nothing
+uses the workspace.
 
 The rule is reversible until the first release.

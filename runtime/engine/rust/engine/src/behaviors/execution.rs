@@ -78,6 +78,15 @@ impl Chain {
         }
     }
 
+    /// The chain of the runner's work: a reaction to an event or a
+    /// schedule's run, whose events record `cause`.
+    pub fn caused(principal: &Principal, namespace: &str, now: i64, cause: EventCause) -> Self {
+        Chain {
+            cause: Some(cause),
+            ..Chain::new(principal, namespace, now)
+        }
+    }
+
     /// Runs `f` one level deeper, refusing past [`MAX_CALL_DEPTH`] with a
     /// BehaviorError of `behavior`.
     pub fn nest<T>(&self, behavior: &str, what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -508,9 +517,7 @@ impl<'t, 'db> Execution<'t, 'db> {
             })
     }
 
-    /// Hands one event to a behavior's reactions, as the runner's work
-    /// (milestone 6 runs them).
-    #[allow(dead_code)] // the runner (milestone 6) calls it
+    /// Hands one event to a behavior's reactions, as the runner's work.
     pub fn react(&self, index: usize, event: &EngineEvent) -> Result<()> {
         let bound = &self.behaviors()[index];
         self.reach.chain.nest(&bound.behavior.name, "react", || {
@@ -524,7 +531,6 @@ impl<'t, 'db> Execution<'t, 'db> {
     }
 
     /// Runs one schedule of a behavior once, as the runner's work.
-    #[allow(dead_code)] // the runner (milestone 6) calls it
     pub fn schedule(&self, index: usize, name: &str, previous: Option<i64>) -> Result<()> {
         let bound = &self.behaviors()[index];
         self.reach

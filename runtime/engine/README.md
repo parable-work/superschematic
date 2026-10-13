@@ -34,18 +34,30 @@ through `invoke`, `operate` and `invoke_schema`, update and unchanged, the
 fields it adds, afterChange, reads, invokes and creates of other
 instances, references with their guards and hooks, and the read-only
 relation over its own columns), and the paging of a behavior's list
-operations, with the runner and the describe and tools documents still to
-come; `superschematic-engine-behaviors` (`rust/behaviors`), the core's
-behaviors, each over the copy of its declaration `make behaviors` writes
-into `rust/behaviors/declarations`, which a host passes in its options
-(`core()`): so far Workflow, Comments, Constants and Variants, and D56's
-StateRules, Approvals and Timers, whose fire schedule the tests run
-through `Behaviors::run_schedule` until the runner does, with the rest to
-come; and `superschematic-engine-testkit` (`rust/testkit`), which
-ports this package's test behaviors, runs the cases of
-`test/behavior-*.test.ts` and of those behaviors' `test/core-*.test.ts`
-against the Rust engine, and replays the scenario corpus
-(`testdata/scenarios`), all on both databases.
+operations; the runner, which runs reactions after the commit and
+schedules every `everyMs`, driven by its host (`run_due`, `next_wake`) or
+by a thread of its own that waits on the notifier, and on Postgres only
+in the process that holds its advisory lock, with retention pruning the
+event log; the describe and tools documents, the behavior catalog and a
+tool run by its MCP handle, under the invocation policy and vendor keys
+the engine's options give; and the HTTP API as one request and one
+response any host mounts (`engine::api`): the 26 routes of `engineApp`
+and the MCP endpoint, with their parameters, media types, preconditions,
+envelope and problems, the caller rules of D37, the event stream's every
+byte, pulled a frame at a time, and MCP's JSON-RPC on the 2025 revisions
+and 2026-07-28, the host keeping authentication, request ids, body and
+rate limits, timeouts and CORS. `superschematic-engine-behaviors`
+(`rust/behaviors`) holds the core's behaviors, each over the copy of its
+declaration `make behaviors` writes into `rust/behaviors/declarations`,
+which a host passes in its options (`core()`): so far Workflow,
+Comments, Constants and Variants, and D56's StateRules, Approvals and
+Timers, whose deadlines the runner fires, with the rest to come.
+`superschematic-engine-testkit` (`rust/testkit`) ports this package's
+test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
+ported behaviors' `test/core-*.test.ts` against the Rust engine, and
+replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
+(`testdata/http`) through the engine's calls and routes, all on both
+databases.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -4794,9 +4806,10 @@ link and parameter to a compile error.
 The Rust workspace builds and tests with `make engine-rust`, under the
 toolchain `tools.env` pins (`RUSTUP_TOOLCHAIN`). Its tests run on SQLite,
 and on Postgres too when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names
-one, each test in a schema it creates and drops; the test kit's replay
-reads the corpus at `testdata/scenarios`, or the directory
-`ENGINE_CORPUS_DIR` names, and fails when there is none:
+one, each test in a schema it creates and drops; the test kit's replays
+read the corpora at `testdata/scenarios` and `testdata/http`, or the
+directories `ENGINE_CORPUS_DIR` and `ENGINE_HTTP_CORPUS_DIR` name, and
+fail when there is none:
 
 ```
 docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine

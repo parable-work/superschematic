@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -61,7 +62,12 @@ pub struct PostgresOptions {
     /// Whether to keep a listener connection that moves the notifier's
     /// epoch for commits in other processes.
     pub listen: bool,
-    /// How long opening a connection may take, unless the URL says.
+    /// How long opening a connection may take, unless the URL says
+    /// (`connect_timeout`): the socket, the startup handshake and the
+    /// login, end to end. A server that accepts the socket and never
+    /// answers (a port a proxy forwards to nothing yet) is refused once it
+    /// passes, as one that refuses the socket is at once; so is a pool's
+    /// wait for a new connection.
     pub connect_timeout: Duration,
     /// How long a migration at start waits for the lock its process holds
     /// while it migrates (another process migrating first) and for the
@@ -111,6 +117,14 @@ impl Db {
         if config.get_connect_timeout().is_none() {
             config.connect_timeout(options.connect_timeout);
         }
+        // The bound of a whole connect: tokio-postgres holds its
+        // connect_timeout to the socket alone, so a server that takes the
+        // socket and never answers the startup message would hold a
+        // connect, and the pool's wait behind it, for good.
+        let deadline = config
+            .get_connect_timeout()
+            .copied()
+            .unwrap_or(options.connect_timeout);
         let listen_config = config.clone();
         // Every execution is planned for its values: the engine's reads
         // are range reads whose plan turns on them (a partial index on one
@@ -124,7 +138,7 @@ impl Db {
             None => session,
         };
         config.options(&options_text);
-        let mut first = PgConn::connect(&config)?;
+        let mut first = PgConn::connect(&config, deadline)?;
         create_schema(&mut first.client, &schema)?;
         let schemas = first
             .client
@@ -133,10 +147,11 @@ impl Db {
             .iter()
             .map(|row| row.get::<_, String>(0).to_lowercase())
             .collect();
+        let lease_config = config.clone();
         let pool = Pool::new(
             options.pool_max,
             vec![first],
-            Box::new(move || PgConn::connect(&config)),
+            Box::new(move || PgConn::connect(&config, deadline)),
             <PgConn as RawConn>::healthy,
         );
         let notifier = Arc::new(Notifier::new());
@@ -145,6 +160,7 @@ impl Db {
         if options.listen {
             closers.push(listen(
                 listen_config,
+                deadline,
                 channel.clone(),
                 Arc::clone(&notifier),
             ));
@@ -156,6 +172,8 @@ impl Db {
                 schemas,
                 channel,
                 pool,
+                lease_config,
+                deadline,
             }),
             options.busy_timeout,
             options.migration_timeout,
@@ -208,7 +226,35 @@ struct PostgresBackend {
     schemas: Vec<String>,
     channel: String,
     pool: Pool<PgConn>,
+    /// What a lease's own connection opens with, and how long it may take.
+    lease_config: Config,
+    deadline: Duration,
 }
+
+// A lease's session: the connection that holds the advisory lock.
+struct PgLease {
+    client: Client,
+    key: i64,
+}
+
+impl crate::db::LeaseHolder for PgLease {
+    fn held(&mut self) -> bool {
+        !self.client.is_closed() && self.client.is_valid(LEASE_CHECK).is_ok()
+    }
+}
+
+impl Drop for PgLease {
+    fn drop(&mut self) {
+        // Closing the session lets go of the lock in any case; the unlock
+        // lets go of it at once on a connection that closes slowly.
+        let _ = self
+            .client
+            .batch_execute(&format!("SELECT pg_advisory_unlock({})", self.key));
+    }
+}
+
+/// How long a lease's check of its connection waits for an answer.
+const LEASE_CHECK: Duration = Duration::from_secs(5);
 
 impl Backend for PostgresBackend {
     fn dialect(&self) -> Dialect {
@@ -234,6 +280,15 @@ impl Backend for PostgresBackend {
     fn channel(&self) -> Option<&str> {
         Some(&self.channel)
     }
+
+    fn try_lease(&self, key: i64) -> Result<Option<crate::db::Lease>> {
+        let mut client = connect_within(&self.lease_config, self.deadline)?;
+        let taken: bool = client
+            .query_one("SELECT pg_try_advisory_lock($1)", &[&key])
+            .map_err(pg_error)?
+            .get(0);
+        Ok(taken.then(|| crate::db::Lease::of(Box::new(PgLease { client, key }))))
+    }
 }
 
 #[derive(Clone)]
@@ -253,8 +308,8 @@ struct PgConn {
 }
 
 impl PgConn {
-    fn connect(config: &Config) -> Result<PgConn> {
-        let client = config.connect(NoTls).map_err(pg_error)?;
+    fn connect(config: &Config, deadline: Duration) -> Result<PgConn> {
+        let client = connect_within(config, deadline)?;
         Ok(PgConn {
             client,
             statements: HashMap::new(),
@@ -634,6 +689,36 @@ fn numeric(raw: &[u8]) -> Result<SqlValue, String> {
 }
 
 /// A Postgres failure as the storage's error.
+/// Opens a connection, refusing one that has not opened within `deadline`
+/// as a connection failure. The connect runs on a thread of its own, since
+/// the synchronous client cannot be cancelled: past the deadline it is
+/// left to finish or fail, and a connection it opens then is closed as its
+/// result is dropped.
+fn connect_within(config: &Config, deadline: Duration) -> Result<Client> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let connecting = config.clone();
+    thread::Builder::new()
+        .name("engine-storage-connect".to_owned())
+        .spawn(move || {
+            let _ = sender.send(connecting.connect(NoTls));
+        })
+        .map_err(|error| Error::Connection {
+            message: format!("could not start a thread to connect to Postgres: {error}"),
+        })?;
+    match receiver.recv_timeout(deadline) {
+        Ok(connected) => connected.map_err(pg_error),
+        Err(RecvTimeoutError::Timeout) => Err(Error::Connection {
+            message: format!(
+                "connecting to Postgres took longer than the connect timeout ({} ms)",
+                deadline.as_millis()
+            ),
+        }),
+        Err(RecvTimeoutError::Disconnected) => Err(Error::Connection {
+            message: "the thread connecting to Postgres ended without a connection".to_owned(),
+        }),
+    }
+}
+
 fn pg_error(error: postgres::Error) -> Error {
     if let Some(db) = error.as_db_error() {
         let state = db.code().code().to_owned();
@@ -674,6 +759,7 @@ fn read_error(error: postgres::Error) -> Error {
 // listen starts the listener thread and returns what stops it.
 fn listen(
     config: Config,
+    deadline: Duration,
     channel: String,
     notifier: Arc<Notifier>,
 ) -> Box<dyn FnOnce() + Send + Sync> {
@@ -682,7 +768,7 @@ fn listen(
         let stop = Arc::clone(&stop);
         thread::Builder::new()
             .name("engine-storage-listen".to_owned())
-            .spawn(move || listen_loop(&config, &channel, &notifier, &stop))
+            .spawn(move || listen_loop(&config, deadline, &channel, &notifier, &stop))
             .expect("start the storage's listener thread")
     };
     Box::new(move || {
@@ -691,10 +777,16 @@ fn listen(
     })
 }
 
-fn listen_loop(config: &Config, channel: &str, notifier: &Notifier, stop: &AtomicBool) {
+fn listen_loop(
+    config: &Config,
+    deadline: Duration,
+    channel: &str,
+    notifier: &Notifier,
+    stop: &AtomicBool,
+) {
     let mut backoff = Duration::from_millis(50);
     while !stop.load(Ordering::SeqCst) {
-        let mut client = match config.connect(NoTls) {
+        let mut client = match connect_within(config, deadline) {
             Ok(client) => client,
             Err(_) => {
                 pause(backoff, stop);

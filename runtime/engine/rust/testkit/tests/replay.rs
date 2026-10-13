@@ -19,11 +19,18 @@ const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
 /// Steps whose answers differ for a reason outside this engine, by file,
 /// scenario and step, with the reason. The test reports them and passes; once one
 /// gives the recorded answer, the test fails until it leaves this list.
-const KNOWN: [(&str, &str, &str); 1] = [(
-    "core-approvals",
-    "Approvals (node) > from limits a gate to the moves from its states, and excludeCreator false lets the creator sign",
-    "the recording's fixed clock read 7, which the recorder wrote as {{time:1}} (a fixed clock's times are written as recorded, README), so the replayer cannot set its clock to it; the recorder also wrote the seq 7 as {{time:1}} and a veto's count 0 as {{time:2}}, a defect of milestone 1's recorder, not of the engine",
-)];
+const KNOWN: [(&str, &str, &str); 2] = [
+    (
+        "core-approvals",
+        "Approvals (node) > from limits a gate to the moves from its states, and excludeCreator false lets the creator sign",
+        "the recording's fixed clock read 7, which the recorder wrote as {{time:1}} (a fixed clock's times are written as recorded, README), so the replayer cannot set its clock to it; the recorder also wrote the seq 7 as {{time:1}} and a veto's count 0 as {{time:2}}, a defect of milestone 1's recorder, not of the engine",
+    ),
+    (
+        "namespaces",
+        "namespaces a create makes (node) > the runner runs nothing in an archived namespace, and picks up where it stopped once it is unarchived",
+        "test.Ledger's reaction is the function the TypeScript test put in its probe (mark the create), which the recording does not carry and the recorder does not mark js",
+    ),
+];
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")

@@ -7,10 +7,12 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 
 use superschematic_engine::calls::{call, principal_from_json, CALLS};
-use superschematic_engine::{EngineErrorCode, Error};
+use superschematic_engine::{Engine, EngineErrorCode, Error, Principal, RunnerOptions};
 use support::{alice, order_document, targets};
 
 fn refused(result: superschematic_engine::Result<Option<Value>>) -> (EngineErrorCode, String) {
@@ -92,10 +94,216 @@ fn a_call_takes_json_arguments_and_returns_what_the_typescript_method_returns() 
                 > 0
         );
         assert!(matches!(
-            call(&engine, "runner.runDue", principal, &[]),
+            call(&engine, "runner.nothing", principal, &[]),
             Err(Error::Usage(_))
         ));
         assert!(CALLS.contains(&"instances.lookup"));
+    }
+}
+
+// opened is an engine with a runner principal and Order published.
+fn opened(target: &support::Target) -> Arc<Engine> {
+    let mut options = target.options();
+    options.runner = Some(RunnerOptions::new(Principal::new(
+        "runner",
+        Vec::<String>::new(),
+    )));
+    let engine = Engine::open_shared(options).unwrap();
+    let alice = alice();
+    call(&engine, "schemas.define", Some(&alice), &[order_document()]).unwrap();
+    call(&engine, "schemas.publish", Some(&alice), &[json!("Order")]).unwrap();
+    engine
+}
+
+#[test]
+fn the_runner_and_the_tools_are_calls() {
+    for target in targets("the_runner_and_the_tools_are_calls") {
+        let engine = opened(&target);
+        let alice = alice();
+        let principal = Some(&alice);
+        // The runner's calls.
+        assert_eq!(
+            call(&engine, "runner.runDue", None, &[]).unwrap(),
+            Some(json!({"handled": 0, "skipped": 0, "failed": 0, "scheduled": 0}))
+        );
+        assert_eq!(
+            call(&engine, "runner.running", None, &[]).unwrap(),
+            Some(json!(false))
+        );
+        let status = call(&engine, "runner.status", None, &[]).unwrap().unwrap();
+        assert_eq!(status["principal"], "runner");
+
+        // The tools': the manifest and a call by handle.
+        let manifest = call(&engine, "tools.manifest", principal, &[json!({})])
+            .unwrap()
+            .unwrap();
+        assert!(manifest["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["mcp"]["handle"] == "order_create"));
+        let created = call(
+            &engine,
+            "tools.call",
+            principal,
+            &[
+                json!("order_create"),
+                json!({"id": "o1", "data": {"title": "Desk"}}),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(created["id"], "o1");
+        assert_eq!(
+            refused(call(
+                &engine,
+                "tools.call",
+                principal,
+                &[json!("order_nothing")]
+            ))
+            .0,
+            EngineErrorCode::NotFound
+        );
+    }
+}
+
+#[test]
+fn the_http_api_is_a_call_and_a_stream_is_pulled_by_its_id() {
+    for target in targets("the_http_api_is_a_call") {
+        let engine = opened(&target);
+        let alice = alice();
+        let principal = Some(&alice);
+        call(
+            &engine,
+            "instances.create",
+            principal,
+            &[
+                json!("Order"),
+                json!({"title": "Desk"}),
+                json!({"id": "o1"}),
+            ],
+        )
+        .unwrap();
+        // The HTTP API: routes, and a request's response as JSON.
+        assert_eq!(
+            call(&engine, "api.routes", None, &[])
+                .unwrap()
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            29
+        );
+        let caller = json!({"principal": {"subject": "alice", "permissions": []}});
+        let answered = call(
+            &engine,
+            "api.handle",
+            None,
+            &[json!({
+                "method": "GET",
+                "prefix": "/api",
+                "path": "/api/namespaces/default/schemas/Order/instances/o1",
+                "caller": caller,
+                "requestId": "r1",
+            })],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(answered["status"], 200);
+        assert!(answered["headers"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(["etag", "\"1\""])));
+        let body: Value = serde_json::from_str(answered["body"].as_str().unwrap()).unwrap();
+        assert_eq!(body["data"]["id"], "o1");
+        assert_eq!(answered["stream"], Value::Null);
+
+        // An event stream the API opens is pulled and closed by its id.
+        let streamed = call(
+            &engine,
+            "api.handle",
+            None,
+            &[
+                json!({
+                    "method": "GET",
+                    "path": "/namespaces/default/events",
+                    "headers": [["accept", "text/event-stream"]],
+                    "caller": caller,
+                }),
+                json!({"stream": {"heartbeatMs": 60000}}),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        let id = streamed["stream"].clone();
+        assert!(id.is_u64(), "{streamed}");
+        assert_eq!(
+            call(&engine, "stream.next", None, &[id.clone(), json!(100)]).unwrap(),
+            Some(json!({"data": ": open\n\n"}))
+        );
+        let replay = call(&engine, "stream.next", None, &[id.clone(), json!(100)])
+            .unwrap()
+            .unwrap();
+        assert!(
+            replay["data"].as_str().unwrap().contains("event: ready"),
+            "{replay}"
+        );
+        assert_eq!(
+            call(&engine, "stream.next", None, &[id.clone(), json!(1)]).unwrap(),
+            Some(json!({"pending": true}))
+        );
+        assert_eq!(
+            call(&engine, "stream.close", None, std::slice::from_ref(&id)).unwrap(),
+            None
+        );
+        assert_eq!(
+            refused(call(&engine, "stream.next", None, &[id, json!(1)])),
+            (
+                EngineErrorCode::InvalidArgument,
+                "no event stream 1 is open".to_owned()
+            )
+        );
+
+        // stream.open reads as its principal, its first page now: a read
+        // the engine refuses is the read's error.
+        let opened = call(
+            &engine,
+            "stream.open",
+            principal,
+            &[json!({"after": "head"}), json!({"pageSize": 10})],
+        )
+        .unwrap()
+        .unwrap();
+        let first = call(&engine, "stream.next", None, &[opened.clone(), json!(100)])
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, json!({"data": ": open\n\n"}));
+        assert_eq!(
+            refused(call(
+                &engine,
+                "stream.open",
+                principal,
+                &[json!({"namespace": "nowhere"})]
+            ))
+            .0,
+            EngineErrorCode::UnknownNamespace
+        );
+
+        // close shuts the engine: its streams end, and its calls are
+        // refused.
+        assert_eq!(call(&engine, "close", None, &[]).unwrap(), None);
+        let mut ended = None;
+        for _ in 0..50 {
+            let pulled = call(&engine, "stream.next", None, &[opened.clone(), json!(20)])
+                .unwrap()
+                .unwrap();
+            if pulled == json!({"end": true}) {
+                ended = Some(pulled);
+                break;
+            }
+        }
+        assert!(ended.is_some(), "the stream ended at the close");
+        assert!(call(&engine, "events.read", principal, &[json!({})]).is_err());
     }
 }
 

@@ -159,6 +159,10 @@ pub(crate) fn ref_hash(value: &Value) -> Option<&str> {
 }
 
 /// Whether a text is a value's hash: 64 lowercase hex digits.
+/// A value's hash, as a pattern: the hex SHA-256 of its canonical JSON.
+pub const VALUE_HASH: &str = "^[0-9a-f]{64}$";
+
+/// Whether a text is a value's hash.
 pub fn is_hash(hash: &str) -> bool {
     hash.len() == 64
         && hash
