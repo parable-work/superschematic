@@ -4,7 +4,9 @@
 //! `validation/` and `parse/`) so a schema defined while a program runs is
 //! checked as the TypeScript runtime checks it, with the same paths, codes
 //! and messages, and, behind the `schemafile` feature, the strict
-//! schema-file loader, the `schemafile` module. Every scalar's own checks
+//! schema-file loader, the `schemafile` module. Behind the `ajv` feature,
+//! which `schemafile` turns on, the `ajv` module checks a JSON Schema and
+//! writes its failures as ajv writes them. Every scalar's own checks
 //! are superscalar's core's (D3), which this crate links by path, so it is
 //! not published; the helpers it shares with the generated Rust validators
 //! come from `superschematic-schema-runtime`.
@@ -26,6 +28,8 @@
 //! assert_eq!(parsed.data["email"], "a@b.co");
 //! ```
 
+#[cfg(feature = "ajv")]
+pub mod ajv;
 mod errors;
 mod jsjson;
 mod jsnum;

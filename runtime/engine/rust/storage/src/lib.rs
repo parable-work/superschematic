@@ -64,8 +64,8 @@ pub use ident::{
     postgres_identifier, quote_identifier, sql_string, POSTGRES_IDENTIFIER_MAX,
 };
 pub use migrations::{
-    applied_migrations, AppliedMigration, Migration, MigrationResult, MigrationSet, MigrationUp,
-    OWNER_NAME,
+    applied_migrations, migrate_in, AppliedMigration, Migration, MigrationResult, MigrationSet,
+    MigrationUp, OWNER_NAME,
 };
 pub use notifier::Notifier;
 #[cfg(feature = "postgres")]

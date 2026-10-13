@@ -260,6 +260,62 @@ fn migrate_set(session: &mut Session<'_>, set: &MigrationSet, now: i64) -> Resul
     })
 }
 
+/// Brings the owner's storage up to the last migration of `set` inside a
+/// transaction the caller holds (a publish creating a behavior's storage),
+/// each migration in a savepoint of its own with its ledger row, so a
+/// failure leaves neither and the caller's transaction rolls back with
+/// what came before. The caller holds the catalog's lock; the ledger
+/// exists (the engine's migrations made it).
+pub fn migrate_in(tx: &Tx<'_>, set: &MigrationSet, now: i64) -> Result<MigrationResult> {
+    check_set(set)?;
+    let label = tx.label();
+    let holder = match tx.dialect() {
+        Dialect::Sqlite => "the file",
+        Dialect::Postgres => "the schema",
+    };
+    let recorded = applied_migrations(tx, &set.owner)?;
+    let latest = set.migrations.len();
+    if recorded.len() > latest {
+        return Err(Error::migration(format!(
+            "{label}: {} storage is at migration {}, newer than this build's {latest}; migrations do not run backwards",
+            set.owner,
+            recorded.len()
+        )));
+    }
+    for (row, known) in recorded.iter().zip(&set.migrations) {
+        if row.version != known.version || row.name != known.name {
+            return Err(Error::migration(format!(
+                "{label}: {} migration {} is \"{}\" in this build, but {holder} records migration {} \"{}\" in its place",
+                set.owner, known.version, known.name, row.version, row.name
+            )));
+        }
+    }
+    let from = recorded.len();
+    let mut applied = Vec::new();
+    for migration in &set.migrations[from..] {
+        tx.savepoint(|tx| {
+            migration.up(tx)?;
+            tx.run(
+                "INSERT INTO engine_migrations (owner, version, name, applied_at) VALUES (?, ?, ?, ?)",
+                &[
+                    SqlValue::from(set.owner.as_str()),
+                    SqlValue::from(migration.version),
+                    SqlValue::from(migration.name.as_ref()),
+                    SqlValue::Integer(now),
+                ],
+            )?;
+            Ok::<_, Error>(())
+        })?;
+        applied.push(migration.version);
+    }
+    Ok(MigrationResult {
+        owner: set.owner.clone(),
+        from: u32::try_from(from).unwrap_or(u32::MAX),
+        to: u32::try_from(latest).unwrap_or(u32::MAX),
+        applied,
+    })
+}
+
 /// The owner's ledger rows in version order, read on `tx`; none before
 /// the ledger exists.
 pub fn applied_migrations(tx: &Tx<'_>, owner: &str) -> Result<Vec<AppliedMigration>> {

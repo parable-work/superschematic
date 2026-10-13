@@ -16,17 +16,21 @@ publish = false
 [workspace]
 
 [features]
+# JSON Schema checked with the jsonschema crate and its failures written as
+# ajv writes them: what the schema-file loader and the behavior engine's
+# registry (a behavior's config, parameters and results) tell a client.
+ajv = ["dep:jsonschema"]
 # The strict schema-file loader: a schema file in the JSON data form,
 # checked against a meta-schema with the jsonschema crate and decoded as the
 # Go reader decodes it.
-schemafile = ["dep:jsonschema"]
+schemafile = ["ajv"]
 
 [dependencies]
 regex = "1.12"
 serde = "1.0.228"
 serde_json = "1.0.149"
-# The schemafile feature's JSON Schema validator (2020-12). Without its
-# default features it fetches nothing over the network or from files.
+# The ajv feature's JSON Schema validator (2020-12). Without its default
+# features it fetches nothing over the network or from files.
 jsonschema = { version = "0.55.1", default-features = false, optional = true }
 # What the generated Rust validators share: the error types, code-point
 # lengths and the pattern translation.

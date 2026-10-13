@@ -116,6 +116,19 @@ let loader = SchemaFileLoader::with_meta_schema(&deployment_meta_schema)?;
 let loaded = loader.load(&text, "orders.schema.json")?;
 ```
 
+## ajv's messages (the `ajv` feature)
+
+`ajv::AjvSchema` compiles a JSON Schema (2020-12, formats as annotations,
+unknown keywords ignored, nothing fetched) and lists a value's failures as
+ajv lists them with `allErrors`: each failure's instance path, ajv keyword
+and message, its `additionalProperty` and `allowedValues` parameters, and an
+`if` branch's own failure (`must match "then" schema`) after the errors
+inside it. The `schemafile` loader turns it on and words an unknown key and
+a value outside an enum its own way; the behavior engine's registry
+(`runtime/engine/rust`) words them as ajv's `describe` does, for a
+behavior's config, create parameters, preconditions, parameters and
+results (D58). Each sorts the list by pointer, keyword and message.
+
 ## serde_json features
 
 superscalar turns on serde_json's `preserve_order`, so every build of this

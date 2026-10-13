@@ -38,8 +38,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::LazyLock;
 
-use jsonschema::error::ValidationErrorKind;
-use jsonschema::{Draft, Validator};
+use jsonschema::Validator;
 use serde_json::{Map, Value};
 
 pub use json::{canonical_json, JsonSyntaxError};
@@ -48,7 +47,7 @@ pub use metaschema::MetaSchemaError;
 use json::{escape_pointer, format_float64, literal_value, write_canonical, Node};
 use metaschema::{read_meta_schema, FileForm, MetaSchemaRules};
 
-use crate::jsnum::js_number;
+use crate::ajv::{ajv_errors, json_string};
 
 /// The core registry's meta-schema, `superschematic json-schema` with no
 /// extension linked; internal/tools/schemafiletypes writes it, the same
@@ -188,13 +187,9 @@ impl SchemaFileLoader {
             }
             // The Go validator treats format as an annotation and ignores
             // unknown keywords, as ajv does without its strict mode.
-            let validator = jsonschema::options()
-                .with_draft(Draft::Draft202012)
-                .should_validate_formats(false)
-                .build(&schema)
-                .map_err(|error| {
-                    MetaSchemaError::new(format!("cannot compile $defs/{}: {error}", form.def))
-                })?;
+            let validator = crate::ajv::options().build(&schema).map_err(|error| {
+                MetaSchemaError::new(format!("cannot compile $defs/{}: {error}", form.def))
+            })?;
             validators.insert(form.def.clone(), validator);
         }
         Ok(Self { rules, validators })
@@ -561,68 +556,36 @@ fn find_non_finite(node: &Node, path: &str) -> Option<String> {
     }
 }
 
-/// A string as `JSON.stringify` writes one, for a message.
-fn json_string(text: &str) -> String {
-    serde_json::to_string(text).unwrap_or_else(|_| format!("\"{text}\""))
-}
-
-/// A schema value as a message names it: a number as JavaScript writes it.
-fn limit_text(value: &Value) -> String {
-    match value.as_f64() {
-        Some(number) => js_number(number),
-        None => value.to_string(),
-    }
-}
-
-/// The issues jsonschema's errors stand for, as ajv lists them: each
-/// error's own, and, for an error inside an `if`'s `then` (or `else`)
-/// branch, the branch's own failure at the value the `if` read; then sorted
-/// by pointer, ajv keyword and message, each by code point (the byte order
-/// of their UTF-8), as the TypeScript loader sorts ajv's errors.
+/// The issues jsonschema's errors stand for, as ajv lists them (the `ajv`
+/// module), in the TypeScript loader's words for an unknown key and a value
+/// outside an enum; then sorted by pointer, ajv keyword and message, each
+/// by code point (the byte order of their UTF-8), as the TypeScript loader
+/// sorts ajv's errors.
 fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Vec<SchemaFileIssue> {
-    let marks: Vec<Vec<BranchMark>> = errors.iter().map(branch_marks).collect();
-    let mut out: Vec<KeywordIssue> = Vec::new();
-    let mut closed: Option<(String, String)> = None;
-    for (i, error) in errors.iter().enumerate() {
-        match closed_object(error) {
-            // `additionalProperties: false` beside no `properties` fails
-            // once for each key the object holds, where ajv names each key.
-            Some(at) => {
-                if closed.as_ref() != Some(&at) {
-                    let keys: Vec<&String> = payload
-                        .pointer(&at.0)
-                        .and_then(Value::as_object)
-                        .map(|members| members.keys().collect())
-                        .unwrap_or_default();
-                    out.extend(keys.into_iter().map(|key| KeywordIssue {
-                        keyword: "additionalProperties".to_owned(),
-                        issue: SchemaFileIssue {
-                            path: at.0.clone(),
-                            message: format!("unknown key {}", json_string(key)),
-                        },
-                    }));
-                    closed = Some(at);
-                }
-            }
-            None => {
-                closed = None;
-                out.extend(issues_of(error));
-            }
-        }
-        let next = marks.get(i + 1);
-        for mark in marks[i].iter().rev() {
-            if next.is_some_and(|next| next.contains(mark)) {
-                continue;
-            }
-            out.push(KeywordIssue {
-                keyword: "if".to_owned(),
+    let mut out: Vec<KeywordIssue> = ajv_errors(errors, payload)
+        .into_iter()
+        .map(|error| {
+            let message = match (&error.additional_property, &error.allowed_values) {
+                (Some(key), _) => format!("unknown key {}", json_string(key)),
+                (_, Some(values)) => format!(
+                    "must be one of {}",
+                    values
+                        .iter()
+                        .map(Value::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                _ => error.message,
+            };
+            KeywordIssue {
+                keyword: error.keyword,
                 issue: SchemaFileIssue {
-                    path: mark.instance_path.clone(),
-                    message: format!("must match \"{}\" schema", mark.branch),
+                    path: error.instance_path,
+                    message,
                 },
-            });
-        }
-    }
+            }
+        })
+        .collect();
     out.sort_by(|a, b| {
         a.issue
             .path
@@ -637,248 +600,6 @@ fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Ve
 struct KeywordIssue {
     keyword: String,
     issue: SchemaFileIssue,
-}
-
-/// The object an `additionalProperties: false` beside no `properties`
-/// refuses, by its instance path and the keyword's schema path: jsonschema
-/// reports each member it holds as a false schema at the object.
-fn closed_object(error: &jsonschema::ValidationError<'_>) -> Option<(String, String)> {
-    let schema_path = error.schema_path().to_string();
-    (matches!(error.kind(), ValidationErrorKind::FalseSchema)
-        && schema_path.ends_with("/additionalProperties"))
-    .then(|| (error.instance_path().to_string(), schema_path))
-}
-
-/// An `if`'s branch an error sits inside: where the branch is in the
-/// schema, and the value the `if` read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BranchMark {
-    evaluation_path: String,
-    instance_path: String,
-    branch: &'static str,
-}
-
-/// The `then` and `else` branches on an error's evaluation path, outermost
-/// first. Each keyword that applies a subschema to a member or an item
-/// moves one step into the instance, which places the value each branch's
-/// `if` read on the error's instance path.
-fn branch_marks(error: &jsonschema::ValidationError<'_>) -> Vec<BranchMark> {
-    let evaluation = error.evaluation_path().to_string();
-    let instance = error.instance_path().to_string();
-    let segments: Vec<&str> = evaluation.split('/').skip(1).collect();
-    let steps: Vec<&str> = instance.split('/').skip(1).collect();
-    let mut marks = Vec::new();
-    let mut depth = 0;
-    let mut i = 0;
-    while i < segments.len() {
-        match segments[i] {
-            // A keyword whose next segment is a member's name or an index.
-            "properties" | "patternProperties" | "prefixItems" => {
-                depth += 1;
-                i += 1;
-            }
-            "$defs" | "definitions" | "dependentSchemas" | "allOf" | "anyOf" | "oneOf" => i += 1,
-            "additionalProperties"
-            | "items"
-            | "contains"
-            | "unevaluatedProperties"
-            | "unevaluatedItems"
-            | "additionalItems" => depth += 1,
-            branch @ ("then" | "else") => {
-                let prefix: Vec<&str> = steps.iter().take(depth).copied().collect();
-                marks.push(BranchMark {
-                    evaluation_path: segments[..=i].join("/"),
-                    instance_path: if prefix.is_empty() {
-                        String::new()
-                    } else {
-                        format!("/{}", prefix.join("/"))
-                    },
-                    branch: if branch == "then" { "then" } else { "else" },
-                });
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    marks
-}
-
-/// The issues one jsonschema error stands for, each with the message ajv
-/// writes for its keyword, and the TypeScript loader's own wording for an
-/// unknown key and a value outside an enum.
-fn issues_of(error: &jsonschema::ValidationError<'_>) -> Vec<KeywordIssue> {
-    let path = error.instance_path().to_string();
-    let issue = |keyword: &str, message: String| KeywordIssue {
-        keyword: keyword.to_owned(),
-        issue: SchemaFileIssue {
-            path: path.clone(),
-            message,
-        },
-    };
-    match error.kind() {
-        ValidationErrorKind::AdditionalProperties { unexpected } => unexpected
-            .iter()
-            .map(|key| {
-                issue(
-                    "additionalProperties",
-                    format!("unknown key {}", json_string(key)),
-                )
-            })
-            .collect(),
-        ValidationErrorKind::Enum { options } => {
-            let values: Vec<String> = options
-                .as_array()
-                .map(|values| values.iter().map(Value::to_string).collect())
-                .unwrap_or_default();
-            vec![issue(
-                "enum",
-                format!("must be one of {}", values.join(", ")),
-            )]
-        }
-        ValidationErrorKind::AnyOf { context } | ValidationErrorKind::OneOfNotValid { context } => {
-            let mut issues: Vec<KeywordIssue> = context
-                .iter()
-                .flatten()
-                .flat_map(|error| issues_of(error))
-                .collect();
-            if matches!(error.kind(), ValidationErrorKind::AnyOf { .. }) {
-                issues.push(issue("anyOf", "must match a schema in anyOf".to_owned()));
-            } else {
-                issues.push(issue(
-                    "oneOf",
-                    "must match exactly one schema in oneOf".to_owned(),
-                ));
-            }
-            issues
-        }
-        ValidationErrorKind::PropertyNames { error: inner } => {
-            let mut issues = issues_of(inner);
-            issues.push(issue(
-                "propertyNames",
-                "property name must be valid".to_owned(),
-            ));
-            issues
-        }
-        kind => vec![issue(&ajv_keyword(kind, error), ajv_message(kind, error))],
-    }
-}
-
-/// The keyword ajv names a failure by: the schema keyword, or `false
-/// schema` for a `false` subschema.
-fn ajv_keyword(kind: &ValidationErrorKind, error: &jsonschema::ValidationError<'_>) -> String {
-    match kind {
-        ValidationErrorKind::Type { .. } => "type",
-        ValidationErrorKind::Required { .. } => "required",
-        ValidationErrorKind::Constant { .. } => "const",
-        ValidationErrorKind::Minimum { .. } => "minimum",
-        ValidationErrorKind::Maximum { .. } => "maximum",
-        ValidationErrorKind::ExclusiveMinimum { .. } => "exclusiveMinimum",
-        ValidationErrorKind::ExclusiveMaximum { .. } => "exclusiveMaximum",
-        ValidationErrorKind::MinLength { .. } => "minLength",
-        ValidationErrorKind::MaxLength { .. } => "maxLength",
-        ValidationErrorKind::MinItems { .. } => "minItems",
-        ValidationErrorKind::MaxItems { .. } => "maxItems",
-        ValidationErrorKind::MinProperties { .. } => "minProperties",
-        ValidationErrorKind::MaxProperties { .. } => "maxProperties",
-        ValidationErrorKind::Pattern { .. } => "pattern",
-        ValidationErrorKind::UniqueItems => "uniqueItems",
-        ValidationErrorKind::MultipleOf { .. } => "multipleOf",
-        ValidationErrorKind::Not { .. } => "not",
-        ValidationErrorKind::FalseSchema => "false schema",
-        ValidationErrorKind::Format { .. } => "format",
-        ValidationErrorKind::Contains => "contains",
-        ValidationErrorKind::OneOfMultipleValid { .. } => "oneOf",
-        ValidationErrorKind::UnevaluatedProperties { .. } => "unevaluatedProperties",
-        ValidationErrorKind::UnevaluatedItems { .. } => "unevaluatedItems",
-        ValidationErrorKind::AdditionalItems { .. } => "additionalItems",
-        // Any other keyword ends its schema path.
-        _ => {
-            return error
-                .schema_path()
-                .to_string()
-                .rsplit('/')
-                .next()
-                .unwrap_or_default()
-                .to_owned()
-        }
-    }
-    .to_owned()
-}
-
-/// ajv's message for one keyword's failure.
-fn ajv_message(kind: &ValidationErrorKind, error: &jsonschema::ValidationError<'_>) -> String {
-    match kind {
-        ValidationErrorKind::Type { kind } => {
-            let names: Vec<&str> = match kind {
-                jsonschema::error::TypeKind::Single(single) => vec![single.as_str()],
-                jsonschema::error::TypeKind::Multiple(set) => {
-                    set.iter().map(|one| one.as_str()).collect()
-                }
-            };
-            format!("must be {}", names.join(","))
-        }
-        ValidationErrorKind::Required { property } => format!(
-            "must have required property '{}'",
-            property
-                .as_str()
-                .map_or_else(|| property.to_string(), str::to_owned)
-        ),
-        ValidationErrorKind::Constant { .. } => "must be equal to constant".to_owned(),
-        ValidationErrorKind::Minimum { limit } => format!("must be >= {}", limit_text(limit)),
-        ValidationErrorKind::Maximum { limit } => format!("must be <= {}", limit_text(limit)),
-        ValidationErrorKind::ExclusiveMinimum { limit } => {
-            format!("must be > {}", limit_text(limit))
-        }
-        ValidationErrorKind::ExclusiveMaximum { limit } => {
-            format!("must be < {}", limit_text(limit))
-        }
-        ValidationErrorKind::MinLength { limit } => {
-            format!("must NOT have fewer than {limit} characters")
-        }
-        ValidationErrorKind::MaxLength { limit } => {
-            format!("must NOT have more than {limit} characters")
-        }
-        ValidationErrorKind::MinItems { limit } => {
-            format!("must NOT have fewer than {limit} items")
-        }
-        ValidationErrorKind::MaxItems { limit } => format!("must NOT have more than {limit} items"),
-        ValidationErrorKind::MinProperties { limit } => {
-            format!("must NOT have fewer than {limit} properties")
-        }
-        ValidationErrorKind::MaxProperties { limit } => {
-            format!("must NOT have more than {limit} properties")
-        }
-        ValidationErrorKind::Pattern { pattern } => format!("must match pattern \"{pattern}\""),
-        ValidationErrorKind::UniqueItems => {
-            let (later, earlier) = duplicate_items(error.instance()).unwrap_or((1, 0));
-            format!("must NOT have duplicate items (items ## {later} and {earlier} are identical)")
-        }
-        ValidationErrorKind::MultipleOf { multiple_of } => {
-            format!("must be multiple of {multiple_of}")
-        }
-        ValidationErrorKind::Not { .. } => "must NOT be valid".to_owned(),
-        ValidationErrorKind::FalseSchema => "boolean schema is false".to_owned(),
-        ValidationErrorKind::Format { format } => format!("must match format \"{format}\""),
-        ValidationErrorKind::Contains => "must contain at least 1 valid item(s)".to_owned(),
-        ValidationErrorKind::OneOfMultipleValid { .. } => {
-            "must match exactly one schema in oneOf".to_owned()
-        }
-        ValidationErrorKind::UnevaluatedProperties { .. } => {
-            "must NOT have unevaluated properties".to_owned()
-        }
-        ValidationErrorKind::UnevaluatedItems { .. }
-        | ValidationErrorKind::AdditionalItems { .. } => "must NOT have more items".to_owned(),
-        _ => error.to_string(),
-    }
-}
-
-/// The indexes of the last item that repeats an earlier one, and of that
-/// earlier one, as ajv names them.
-fn duplicate_items(instance: &Value) -> Option<(usize, usize)> {
-    let items = instance.as_array()?;
-    (0..items.len())
-        .rev()
-        .find_map(|i| (0..i).rev().find(|j| items[*j] == items[i]).map(|j| (i, j)))
 }
 
 static CORE: LazyLock<SchemaFileLoader> = LazyLock::new(SchemaFileLoader::new);
@@ -1025,11 +746,5 @@ mod tests {
             .iter()
             .all(|message| *message == "must match \"then\" schema"));
         assert_eq!(issues.last(), Some(&("/strictJSON", "must be boolean")));
-    }
-
-    #[test]
-    fn duplicate_items_are_named_as_ajv_names_them() {
-        let items: Value = serde_json::from_str(r#"["a", "b", "a", "b"]"#).unwrap();
-        assert_eq!(duplicate_items(&items), Some((3, 1)));
     }
 }
