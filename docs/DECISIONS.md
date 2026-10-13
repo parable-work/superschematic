@@ -5353,10 +5353,36 @@ D51's twin for Rust.
 | The Rust servers are the members of a Cargo workspace at `<output-root>/Cargo.toml`, which the build writes and which excludes the generated `api`, `sdk` and `types` crates. Its lockfile, `<output-root>/Cargo.lock`, lives outside the emptied `server/`, so a project commits it, as D51's amendment has it commit `bun.lock`; each build runs `cargo update --workspace`, which writes or prunes it without moving a pin. The image, `stack dev` and the generated CI build with `--locked`, and CI's `check` refuses a lockfile git does not track or the build changed, then runs `cargo check --locked` on each server. The image builds with the Rust toolchain `tools.env` pins, from the build context that holds the superscalar and runtime checkouts its crates name by path, and runs as `distroless/cc` non-root; it fails, rather than resolve afresh, without the lockfile. | A lockfile per server, which every build would empty. Building on the host and copying the binary, which ties the image to the host's architecture and libc. |
 | acme-shop proves it with `shop-stock`, the API the auth guide's service callers section sketches (D37): a Rust API over `shop-db`'s `StockLevel`, whose stock anyone may list, whose levels staff with `stock.write` set, and whose reservations only `shop-orders`' server may make (`@requireService`). `shop-orders` reserves stock through it when an order is placed, so a Go server calls a Rust one with a service credential and forwards the shopper. `shop-stack` deploys it on a Rust server, and `TestStackDevRunsTheShop` calls it. | Moving `shop-orders` to Rust, which the Topcoat app and the Go tests are built on. A fixture alone, which nothing would run end to end. |
 
-Status: not built.
+Status: built.
+- The Rust HTTP runtime gains `stackconfig`, the `postgres`, `logging`
+  and site `cors` pieces and `identity::PostgresPool`. The stack config,
+  CORS and identity vectors hold it to Go's, and its Cloud SQL path is
+  tested through a socket relay and a fake metadata server.
+- `rustrestgen` and `envgen` write `deps.rs` and `EnvConfig`, and the
+  scaffold writes the implementation crate at `[implementation_paths]
+  rust`.
+- The `local` target builds and runs a Rust server, and gcp's sql edge
+  serves one; both refuse its bucket edge.
+- servergen writes each Rust server's crate, the workspace and its
+  lockfile, and the image, and cigen's `check` refuses a stale lockfile
+  and compiles each server. A fixture stack (`rs-stock`, `rs-pricing`,
+  `rs-orders`, `rs-web`) builds, serves and runs in Docker, with identity
+  over Postgres, Rust and Go callers and a site. `stack dev` runs a Rust
+  server over Postgres (`TestStackDevRunsARustServer`).
+- acme-shop's `shop-stock` is a Rust API on a Rust server in
+  `shop-stack`, whose stock `shop-orders` reserves in each order's
+  transaction with a service credential, and `TestStackDevRunsTheShop`
+  calls it. The shop commits `schemas/dist/Cargo.lock`, and `check.sh`
+  refuses a build that changes it.
 
-Not built, and out of this entry: Rust jobs and workers; buckets from a
-Rust server, which gcp's bucket connector keeps refusing; and
-OpenTelemetry export.
+No Rust server has run on Cloud Run.
+
+Not built:
+- an implementation crate that builds with the API crate somewhere other
+  than the output root its `Cargo.toml` names by path, so `stack dev
+  --out` elsewhere collides in Cargo's lockfile;
+- Rust jobs and workers;
+- buckets from a Rust server;
+- OpenTelemetry export.
 
 The rule is reversible until the first release.
