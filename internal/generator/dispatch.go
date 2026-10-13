@@ -279,6 +279,7 @@ func (r run) generateTSTypes() error {
 			Dependencies:       deps,
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
+			Registry:           r.Registry,
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -1299,6 +1300,7 @@ func (r run) generateTypeScriptSDK() error {
 			Dependencies:       deps,
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
+			Registry:           r.Registry,
 			Clock:              r.Options.Clock,
 		})
 		return err

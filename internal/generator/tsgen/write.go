@@ -139,6 +139,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: hasEnums, Template: "types_enums.tmpl", Filename: "enums.ts"},
 		{Condition: hasTypes, Template: "types_types.tmpl", Filename: "types.ts"},
 		{Condition: hasUnions, Template: "types_unions.tmpl", Filename: "unions.ts"},
+		{Condition: len(output.Behaviors) > 0, Template: "types_behaviors.tmpl", Filename: "behaviors.ts"},
 		{Condition: true, Template: "types_index.tmpl", Filename: "index.ts"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(typesFiles, typesDir, func(templateName, outputPath string) error {

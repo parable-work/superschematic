@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -25,11 +27,15 @@ func requireOrSkipTSTooling(t *testing.T, reason string) {
 }
 
 // tsPackageCase is one generated types package: a schema and the loaded
-// dependency schemas it imports from.
+// dependency schemas it imports from, the registry that declares the
+// behaviors its types compose, and files to add to the package before it
+// is type-checked, by path within it.
 type tsPackageCase struct {
-	name   string
-	schema *ir.Schema
-	deps   map[string]*ir.Schema
+	name     string
+	schema   *ir.Schema
+	deps     map[string]*ir.Schema
+	registry *registry.Registry
+	extra    map[string]string
 }
 
 // buildTSPackages writes each case's TypeScript types package, wired
@@ -63,6 +69,7 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 		output, err := Generate(tc.schema, Options{
 			SchemaName:   tc.name,
 			Dependencies: tc.deps,
+			Registry:     tc.registry,
 			Clock:        fixedClock,
 		})
 		if err != nil {
@@ -83,6 +90,11 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 		}
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
+		}
+		for rel, text := range tc.extra {
+			if err := os.WriteFile(filepath.Join(outDir, rel), []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	// The output root is the Bun workspace root, so a sibling's
@@ -149,8 +161,31 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-version-graph-db", schema: load("fixture-version-graph-db")},
 		{name: "fixture-optimistic-db", schema: load("fixture-optimistic-db")},
 		{name: "fixture-user-model-db", schema: load("fixture-user-model-db")},
+		behaviorsPackage(t),
 	}
 	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
+}
+
+// behaviorsPackage is the behavior types fixture's package (D58), with a
+// file that holds a read's behaviors as a TicketBehaviors: tsc checks each
+// behavior's exact name and every field's type, and refuses a state
+// Ticket's Workflow does not have.
+func behaviorsPackage(t *testing.T) tsPackageCase {
+	t.Helper()
+	reg := behaviortypestest.Registry(t)
+	check := "import type { TicketBehaviors, TicketState } from './types';\n\n" +
+		"export const read: TicketBehaviors = " + behaviortypestest.TicketBehaviors + ";\n\n" +
+		"export const status: TicketState = read.Workflow.status;\n" +
+		"export const average: unknown = read['acme.Rating'].ratingAverage;\n" +
+		"export const reviewers: number = read.Links.targets.reviewers?.length ?? 0;\n" +
+		"// @ts-expect-error Ticket's Workflow has no state closed.\n" +
+		"export const closed: TicketState = 'closed';\n"
+	return tsPackageCase{
+		name:     behaviortypestest.Service,
+		schema:   behaviortypestest.Schema(t, reg),
+		registry: reg,
+		extra:    map[string]string{"behaviors.check.ts": check},
+	}
 }
 
 // TestNullableObjectMapParserCompiles type-checks a generated package with
