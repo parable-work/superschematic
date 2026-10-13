@@ -5238,7 +5238,7 @@ Storage:
 |----------|------------------------|
 | The engine keeps its data in Postgres or SQLite. In a stack it uses the database of the DB service its types belong to, its tables in a Postgres schema of their own (`engine` unless configured). SQLite is a file one process writes: a test, a local run, a Topcoat app (D44). | SQLite alone, which two instances of a server cannot share; Postgres alone, which takes the engine out of a Topcoat app and puts a database server under every test |
 | Behaviors keep writing SQL text with `?` placeholders, which the engine numbers for Postgres. A statement the two databases word differently is written once for each, as JSON access and a parameter whose type Postgres cannot infer need, a few dozen of some 165. A behavior declares its tables as specs the engine writes for each database, `STRICT` and SQLite's types or Postgres's, and keeps `up()` for the rest. Full-text search is the engine's own: FTS5 on SQLite, a `tsvector` with a GIN index on Postgres. Search ranks differently on each, and its documentation says so. | A dialect layer every statement passes through, which D16 turned down; a query builder, which rewrites every statement and has neither JSON nor full-text search |
-| Postgres keeps D16's one writer per namespace. A write transaction runs at READ COMMITTED and takes an advisory lock on its namespace and a shared one on the catalog; a define, a publish, a change of namespaces and a migration take the catalog's alone; a lock that waits past the busy timeout is the `busy` error SQLite gives. Migrations at start hold a lock of the session, so instances that start together migrate once. | SERIALIZABLE with retries, which runs a behavior's code twice; a row lock per instance, which every behavior that reads another instance would have to take |
+| Postgres keeps D16's one writer per namespace. A write transaction runs at READ COMMITTED and takes an advisory lock on its namespace and a shared one on the catalog; a define, a publish, a change of namespaces and a migration take the catalog's alone; a lock that waits past the busy timeout is the engine's refusal `busy` (503, and the call may be tried again) on both databases, as SQLite's `SQLITE_BUSY` is, a code the TypeScript engine lacked: it let `SQLITE_BUSY` through as an internal error. Migrations at start hold a lock of the session, so instances that start together migrate once. | SERIALIZABLE with retries, which runs a behavior's code twice; a row lock per instance, which every behavior that reads another instance would have to take |
 | Postgres aborts a transaction at any error, so a statement whose error the engine handles runs in a savepoint, a behavior handles one through `try_run`, and a unique conflict is `ON CONFLICT DO NOTHING` and a count. `unchanged()` reads a count of the rows the call wrote, which never goes down, as SQLite's `total_changes()` never does. An instance's data stays JSON text in both, its keys and numbers as written, and a Postgres filter casts the member it reads. | Catching errors as SQLite allows, which leaves a Postgres transaction refusing every later statement |
 | On Postgres a commit notifies (`pg_notify`) and each process listens, so an event stream, `watch` and the runner wake on every instance; a cache holds only what never changes; the runner runs while its process holds a lock of the session. The engine keeps its migration ledger, and a file the TypeScript engine wrote opens and migrates. | A notifier inside the process, which one process writing the file allowed |
 
@@ -5280,13 +5280,19 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: not built. `runtime/engine/rust` holds the workspace, an
-empty `superschematic-engine`, and `superschematic-engine-storage`: both
-databases' transactions, savepoints and writer locks, the write counter,
-the migration ledger with the engine's migrations for each, a behavior's
-storage and SQL checker, and the commit notifier, which CI tests on
-SQLite and Postgres. Until the Rust engine passes the TypeScript suite,
-`@superschematic/engine` is the TypeScript implementation and nothing
-uses the workspace.
+Status: not built. `runtime/engine/rust` holds the workspace;
+`superschematic-engine-storage`: both databases' transactions, savepoints
+and writer locks, the write counter, the migration ledger with the
+engine's migrations for each, a behavior's storage and SQL checker, and
+the commit notifier; and in `superschematic-engine`, opening an engine
+on its storage and migrating it, the namespaces, the schema registry with
+its validator over `superschematic-schema-ir`, the compatibility rule and
+the display and index checks, the engine's refusals with their codes, the
+principal and the engine's own `system` principal, and JSON written and
+hashed as JavaScript writes it, which CI tests on SQLite and Postgres.
+Every engine still allows every call (milestone 4b reads the access
+policy), and no behavior is registered (milestone 5). Until the Rust
+engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
 
 The rule is reversible until the first release.

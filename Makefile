@@ -215,9 +215,11 @@ rust:
 		&& cargo test --features rusqlite && cargo test --features rusqlite,serde_json/preserve_order
 
 # The Rust engine's workspace (D58): every crate's format, its lints on
-# every feature combination of the storage crate (both databases, neither,
-# and each alone), and its tests, under the toolchain RUSTUP_TOOLCHAIN
-# names. The storage tests run on SQLite, and on Postgres as well when
+# every feature combination of the databases (both, neither, and each
+# alone), and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The
+# engine reads schemas through runtime/schema/rust-ir, which needs the
+# superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
+# and the storage's tests run on SQLite, and on Postgres as well when
 # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
 # own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
 # each in a schema it creates and drops; without it they skip that pass.
@@ -226,8 +228,8 @@ engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
 		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
-		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/sqlite -- -D warnings \
-		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/postgres -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
 		&& cargo test --workspace --all-features
 
 # The version-graph core's static archive, staged where the Go binding links

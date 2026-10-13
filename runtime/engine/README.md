@@ -12,7 +12,13 @@ the engine. Built there so far: `superschematic-engine-storage`
 (`rust/storage`), the storage over SQLite and Postgres, with transactions
 and savepoints, one writer per namespace, the write counter, the migration
 ledger and the engine's migrations for both databases, a behavior's own
-storage and the checker its SQL passes, and the notifier a commit wakes.
+storage and the checker its SQL passes, and the notifier a commit wakes;
+and `superschematic-engine` (`rust/engine`): opening an engine and
+migrating its storage, the namespaces, configured or made while it runs
+and archived, the schema registry with its validator, compatibility rule
+and display and index checks, the refusals with this package's codes (and
+`busy`, a lock held past the busy timeout), and JSON written and hashed
+as JavaScript writes it, with every call allowed and no behavior yet.
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry

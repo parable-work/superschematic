@@ -848,11 +848,25 @@ jobs:
         with:
           workspaces: runtime/engine/rust
 
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Check out the superscalar sources
+        # The engine reads schemas through runtime/schema/rust-ir, which
+        # depends on superscalar's core by path ([paths] scalar_rust).
+        # Nothing of superscalar is built here but that crate.
+        run: scripts/superscalar-dep.sh --checkout
+
       - name: Start Postgres
-        # The storage crate's tests run on SQLite, and on this Postgres too
-        # through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each test in a
-        # schema of its own; without the variable they skip the Postgres
-        # pass.
+        # The engine's and the storage's tests run on SQLite, and on this
+        # Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each
+        # test in a schema of its own; without the variable they skip the
+        # Postgres pass.
         run: |
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
@@ -875,8 +889,8 @@ jobs:
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/sqlite -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine-storage/postgres -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
 
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
