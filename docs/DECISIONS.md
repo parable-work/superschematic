@@ -4578,7 +4578,6 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- TypeScript jobs;
 - passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule.
@@ -4634,10 +4633,10 @@ Cloud Run starts an execution on every firing, even while the last one
 runs, where `stack dev` skips that firing.
 
 Not built:
-- TypeScript jobs;
 - a job that runs on every deploy (Cloud Run's `runExecutionToken`).
 
-Workers came with queues in D53, built in #336 and #339.
+Workers came with queues in D53, built in #336 and #339, and TypeScript
+jobs and workers in #348.
 
 The rule is reversible until the first release.
 
@@ -5617,5 +5616,66 @@ other core behaviors (Rollups, Search and Reactions, then Branches)
 milestones 10 and 11, and the work queue's milestone 12. Until the Rust
 engine passes the TypeScript suite, `@superschematic/engine` is the
 TypeScript implementation and nothing uses the workspace.
+
+The rule is reversible until the first release.
+
+### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
+
+D52 built jobs for Go APIs: a TypeScript API's job resolved, on gcp, but
+got no `Jobs`, no scaffold and no entrypoint, and the local job platform
+took Go alone. A TypeScript job is the twin of a Go one, written as D51
+writes a TypeScript server.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The API package's `deps.ts` declares `Jobs`, a method per job in camel case, `shipOrders(signal: AbortSignal): Promise<void>`, and `JobsConstructor`, `(deps: Deps) => Jobs \| Promise<Jobs>`. The signal is Go's context: SIGTERM aborts it. The scaffold exports `createJobs`, each method throwing the runtime's `notImplemented()`. | A method with no argument, which SIGTERM could not reach. An optional signal, which an implementation could not rely on. |
+| A job's entrypoint is a package at `<output-root>/server/<stack>/<job>/`, as a TypeScript server's is (D51): `package.json`, `tsconfig.json`, a Dockerfile that sets no `PORT` and exposes nothing, and `main.ts`. `main.ts` takes the server's wiring from the templates they share (`wiring.ts.tmpl`): the API's config, a pool per database, a client per API called and a handle per bucket, in the `Deps` literal the server builds. It builds no identity service and reads no callers or CORS field, since a job serves no request. It calls `createJobs`, runs the method once, logs `job started`, then `job done` or `job failed` with how long the run took, ends its pools and exits 1 on a failure. A second signal exits at once, as a server's does. | A subcommand of the server's `main.ts`, which D52 refused for Go: it ties a job's image to a server's. Its own copy of the wiring, which would drift from the server's. |
+| An implementation that exists and exports no `createJobs` fails the stack's build, saying what to add, as a Go one without `NewJobs` does. The build reads the exports from the package's sources: a declaration, an export list, or a re-export of a whole module, which may export it. | Leaving it to `tsc`, which the generated CI runs on servers alone, or to Bun, which fails only when the job runs. |
+| `local.job` takes TypeScript: the provisioner installs the output root's workspace once, as for a TypeScript server, and runs `bun main.ts` in the job's package for each run, `stack run`'s included, with nothing to build. The program's job node records its language. `gcp.cloudrunjob` already took TypeScript, since it runs the image. | A binary from `bun build --compile`, a build step D51 avoids. |
+
+Status: built in #348. `TestTypeScriptJobAndWorkerRunOnPostgres` runs
+ts-shop's job under Bun against Postgres: it enqueues in a transaction
+that commits and one that rolls back, logs its start and end, and exits 1
+with `job failed` when it fails.
+`TestStackDevRunsTypeScriptJobsAndWorkers` runs `stack run` on a
+TypeScript job against `stack dev`. `TestTypeScriptJobAndWorkerRunOnBun`
+checks the local provisioner's commands,
+`TestATypeScriptImplementationThatPredatesItsJobsFails` the build's
+refusal, and the servergen goldens the packages. No TypeScript job has run
+on Cloud Run.
+
+### D53, amended: a TypeScript worker claims through the HTTP runtime, over queue definitions the DB's TypeScript types export, with the Go ORM's statements
+
+D53 built queues and workers for Go: the Go ORM enqueues and claims, and
+there is no TypeScript ORM. A TypeScript API needs both, with the Go
+ORM's semantics, since one queue may have Go and TypeScript callers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One function, `sqlutil.PostgresQueueStatements`, writes a queue's statements on Postgres: the start of an enqueue, the expiry of a last attempt's claim, the claim with `FOR UPDATE SKIP LOCKED`, and complete, fail, extend and release under a claim token. The Go ORM's `queues.go` carries them per queue, and so does the TypeScript `queues.ts`, so the two cannot drift. A test holds `queues.ts` to the Go ORM's statements, columns and encodings, and another runs both against one Postgres, each claiming, failing, releasing and completing what the other enqueued and claimed. | SQL written by hand in the runtime, held to Go's by shared vectors, a copy that only a failing test would bring back in step. SQL the runtime builds from a table's name and columns, a second writer of the same statements. |
+| The queue client's typed half is data in the DB's TypeScript types package: `queues.ts`, exported as `./queues`, with a `QueueDefinition<OrderPlaced>` per queue, `orderPlacedQueue`, holding its table, arguments, the column each field writes, and its statements. It imports nothing but the messages' types, as the identity descriptor the package exports (D50). The HTTP runtime's `./postgres` entry runs a definition: `enqueue(client, orderPlacedQueue, msg)` in the transaction `client` runs, and `postgresQueue(pool, orderPlacedQueue)`'s claims, typed by the definition's message, with `ClaimLostError`. | The API package, where each API on a database would carry a copy and the API generator would need the database's schema. The runtime alone, which knows no queue's columns, encodings or message. Waiting for a TypeScript ORM. |
+| A field writes its column as the Go ORM writes it, classified alike: a JSON field its JSON text, an unset optional field or list nothing, so the column's default, and an unset enum its schema default. A claim reads each column as the TypeScript types hold it, through type parsers of its own: a 64-bit integer a number, a date its text, and a list of a type pg does not know, such as `citext[]`, from its text. A queue whose message holds a `POINT` or an `INTERVAL` column, which the client cannot read back as its type yet, is left out of `queues.ts`, which says why, and a TypeScript worker of it is refused. | Refusing the DB's TypeScript types for such a queue, which would break a build whose workers are Go's. Returning the message as JSON from Postgres, which would make the claim's statement other than the Go ORM's. |
+| The API package's `deps.ts` declares `Workers`, a method per worker, `fulfilOrders(message: OrderPlaced, signal: AbortSignal): Promise<void>`, and `WorkersConstructor`, importing the message from the database's TypeScript types, which an API with workers must generate. The scaffold exports `createWorkers`, whose package depends on those types, and an implementation without it fails the build, as one without `createJobs` does. | A message typed `unknown`, which would leave the implementation to check what the schema says. |
+| The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
+| `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
+
+Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
+Go ORM and the TypeScript client against one Postgres, and
+`TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
+`TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
+it handles a message, retries one that fails once after the backoff, marks
+dead one that fails past its retries, and on SIGTERM gives the handler
+still running its grace, then releases its message and exits 0.
+`TestStackDevRunsTypeScriptJobsAndWorkers` runs a TypeScript worker under
+`stack dev`, and the runtime's tests run `runWorker` and the client, the
+latter against Postgres when
+`SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
+worker has run on Cloud Run.
+
+Not built:
+- a `POINT` or `INTERVAL` column in a TypeScript queue's message;
+- type-checking a TypeScript job's or worker's package in the generated
+  CI, which checks the servers';
+- a Rust worker.
 
 The rule is reversible until the first release.

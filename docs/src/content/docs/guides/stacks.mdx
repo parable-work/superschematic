@@ -12,7 +12,7 @@ servers and databases, and the environments they run in. Its build wires
 each server to its database and to the APIs it calls, checks the result
 offline, and writes three things: each environment as `environment.json`,
 an entrypoint and Dockerfile for each Go, TypeScript and Rust server and
-each Go job and worker, and a
+each Go and TypeScript job and worker, and a
 scaffold of each API implementation that is missing. Wiring the schemas already say,
 such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
@@ -37,9 +37,9 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server or job; a bucket on another provider |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a TypeScript API's jobs; a job that runs on every deploy |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | a TypeScript or Rust worker; claims on SQLite and D1 |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | a Rust worker; claims on SQLite and D1 |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -451,11 +451,23 @@ type Jobs interface {
 type JobsConstructor func(deps Deps) (Jobs, error)
 ```
 
-The scaffold writes `NewJobs`, and each method returns the
-not-implemented error until you write it. Your `NewJobs` takes the same
-`Deps` as `New`. Since the build never writes into a package that exists,
-an API whose implementation predates its jobs fails the stack's build,
-which says what to add.
+A TypeScript API's `deps.ts` declares the same, with a signal for Go's
+context, which SIGTERM aborts:
+
+```ts
+export interface Jobs {
+  shipOrders(signal: AbortSignal): Promise<void>;
+}
+
+export type JobsConstructor = (deps: Deps) => Jobs | Promise<Jobs>;
+```
+
+The scaffold writes `NewJobs`, or exports `createJobs` in TypeScript, and
+each method returns the not-implemented error, or throws it, until you
+write it. Your `NewJobs` takes the same `Deps` as `New`, and your
+`createJobs` as `create`. Since the build never writes into a package
+that exists, an API whose implementation predates its jobs fails the
+stack's build, which says what to add.
 
 In a stack each job is a deployable of its own, named after its API and
 its class in kebab case: `shop-orders-ship-orders`. Its edges are its
@@ -491,9 +503,11 @@ timeout and retries.
 The build writes each job an entrypoint module beside the servers',
 `server/shop-stack/shop-orders-ship-orders/`, whose `main` builds the
 API's `Deps`, calls your `NewJobs`, runs the job's method once with a
-context that SIGTERM cancels, and exits 1 when it returns an error. Its
-Dockerfile builds an image as a server's does, and `stack build` and
-`stack deploy` build and pin it beside the servers'.
+context that SIGTERM cancels, and exits 1 when it returns an error. A
+TypeScript job's is a package with a `main.ts` that does the same on Bun
+with your `createJobs`. Its Dockerfile builds an image as a server's
+does, and `stack build` and `stack deploy` build and pin it beside the
+servers'.
 
 `stack dev` builds each job with the servers and runs it on its schedule
 while the environment runs, never two runs at once, each line of a run's
@@ -516,8 +530,9 @@ superschematic stack run Dev shop-orders-ship-orders
 ```
 
 Locally it runs against the environment `stack dev` runs, with its
-values, secrets and keys. It builds no schema, but builds the job's
-binary again, so a change to your job's code is in the run. It exits
+values, secrets and keys. It builds no schema, but builds a Go job's
+binary again, or runs a TypeScript job's `main.ts` after an install, so
+a change to your job's code is in the run. It exits
 non-zero when the run's last try fails, refuses an environment that is
 not running, and waits for no schedule: while its run goes on, the
 schedule skips the job's runs, and while a scheduled run goes on, it
@@ -547,7 +562,10 @@ export abstract class FulfilOrders {}
 Your code enqueues a message in the transaction that writes what caused
 it, `orm.EnqueueOrderPlaced(ctx, tx, msg)`, and implements the worker's
 method of the API's generated `Workers`, `FulfilOrders(ctx, msg)`, beside
-`NewWorkers(deps)`. In a stack each worker is a deployable of its own,
+`NewWorkers(deps)`. In TypeScript it enqueues with the HTTP runtime's
+`enqueue(client, orderPlacedQueue, msg)`, over the definition the
+database's TypeScript types export from `./queues`, and implements
+`fulfilOrders(message, signal)` beside `createWorkers(deps)`. In a stack each worker is a deployable of its own,
 named as a job is, `shop-orders-fulfil-orders`, with its API's edges,
 config and identity. It rolls out after its callees, and an environment
 sets how many instances run and how many messages each handles at a time:
@@ -597,12 +615,12 @@ Under the output root, `schemas/dist` by default, the build writes:
 - `server/shop-stack/<server>/`, a Go module for each Go server, holding
   `main.go`, `go.mod`, a `Dockerfile` and `Dockerfile.dockerignore`, one
   the same for each job and each worker of a Go API, under its name, and a package
-  for each TypeScript server, holding `main.ts`, `package.json`,
-  `tsconfig.json`, a `Dockerfile` and `Dockerfile.dockerignore`, a member
-  of the output root's Bun workspace, and a crate for each Rust server,
-  holding `Cargo.toml`, `src/main.rs`, a `Dockerfile` and
-  `Dockerfile.dockerignore`, a member of the output root's Cargo
-  workspace, `Cargo.toml` beside `schemas/dist/Cargo.lock`
+  for each TypeScript server, job and worker, holding `main.ts`,
+  `package.json`, `tsconfig.json`, a `Dockerfile` and
+  `Dockerfile.dockerignore`, a member of the output root's Bun workspace,
+  and a crate for each Rust server, holding `Cargo.toml`, `src/main.rs`, a
+  `Dockerfile` and `Dockerfile.dockerignore`, a member of the output
+  root's Cargo workspace, `Cargo.toml` beside `schemas/dist/Cargo.lock`
   ([Rust servers](#rust-servers)).
 
 The build also scaffolds each implementation a TypeScript server serves
@@ -768,10 +786,12 @@ says how to install it). It then:
    resolved config and `PORT`, callees first, a TypeScript one as `bun
    main.ts`, and waits until it answers `/readyz`. Each line a server
    prints carries its name;
-5. builds each worker's entrypoint module the same way and starts it with
-   the servers of its wave, a process with no port;
-6. builds each job's entrypoint module the same way, and runs each job
-   with a schedule on it until Ctrl-C ([Run a job](#run-a-job)).
+5. builds each worker's entrypoint module the same way, or runs a
+   TypeScript one as `bun main.ts`, and starts it with the servers of its
+   wave, a process with no port;
+6. builds each job's entrypoint module the same way, a TypeScript one
+   with nothing to build, and runs each job with a schedule on it until
+   Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the containers, which keep
 their data for the next run; `--remove-data` removes them instead.
@@ -779,8 +799,8 @@ their data for the next run; `--remove-data` removes them instead.
 | Stack concept | On `local` |
 | --- | --- |
 | server | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo |
-| job | a Go process per run, built from its entrypoint module, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
-| worker | a Go process, built from its entrypoint module, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
+| job | a Go process per run, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
+| worker | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
 | database | a database on the environment's one Postgres container, `postgres:16-alpine` unless `postgresImage` names another |
 | bucket | a bucket on the environment's one fake-gcs-server container, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
 | bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |

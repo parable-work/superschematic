@@ -191,9 +191,9 @@ func Register(r *registry.Registry) error {
 		{
 			Name: JobPlatform,
 			Kind: ir.DeployableJob,
-			// Go alone: no TypeScript or Rust job has an entrypoint (D52,
+			// Go and TypeScript: no Rust job has an entrypoint yet (D52,
 			// D57).
-			Languages: []string{registry.APILanguageGo},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerJob,
@@ -201,8 +201,8 @@ func Register(r *registry.Registry) error {
 		{
 			Name: WorkerPlatform,
 			Kind: ir.DeployableWorker,
-			// Go alone, as for a job (D53, D57).
-			Languages: []string{registry.APILanguageGo},
+			// Go and TypeScript, as for a job (D53, D57).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerWorker,
@@ -417,7 +417,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go"]},
+	    "language": {"enum": ["go", "typescript"]},
 	    "api": {"type": "string", "minLength": 1},
 	    "job": {"type": "string", "minLength": 1},
 	    "schedule": {"type": "string", "minLength": 1},

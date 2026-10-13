@@ -391,8 +391,8 @@ func TestRefusals(t *testing.T) {
 		// shop-orders' server is a Rust process; its job and its worker
 		// are left out of D57.
 		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-orders"), "Dev")
-		wantFailure(t, errs, stack.CodeUnrealizable, "job "+stacktest.ShipOrdersJob+" is a RUST job, and platform local.job runs only GO; Rust jobs and workers are not built (D57)")
-		wantFailure(t, errs, stack.CodeUnrealizable, "worker "+stacktest.FulfilOrdersWorker+" is a RUST worker, and platform local.worker runs only GO; Rust jobs and workers are not built (D57)")
+		wantFailure(t, errs, stack.CodeUnrealizable, "job "+stacktest.ShipOrdersJob+" is a RUST job, and platform local.job runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
+		wantFailure(t, errs, stack.CodeUnrealizable, "worker "+stacktest.FulfilOrdersWorker+" is a RUST worker, and platform local.worker runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
 		for _, e := range errs.List {
 			if strings.Contains(e.Message, "local.process") {
 				t.Errorf("the Rust server Orders was refused: %s", e.Message)

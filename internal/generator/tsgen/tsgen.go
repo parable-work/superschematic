@@ -226,6 +226,12 @@ type ModuleOutput struct {
 	// composes a behavior.
 	EngineDocument string
 
+	// Queues are the schema's queues (D53), which queues.ts writes as data
+	// the HTTP runtime's queue client reads, and package.json exports as
+	// "./queues". A queue whose message the client cannot hold yet is
+	// left out, with why.
+	Queues []QueueInfo
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -397,6 +403,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if len(output.Behaviors) > 0 {
 		output.BehaviorsSource = renderBehaviors(output.Behaviors)
+	}
+	if output.Queues, err = TypeScriptQueues(schema); err != nil {
+		return nil, err
 	}
 
 	return output, nil

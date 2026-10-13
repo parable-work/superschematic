@@ -3,6 +3,12 @@
 // superschematic wrote this package once, as a scaffold, because it was
 // missing. It never writes it again: the package is yours. Each method
 // answers 501 Not Implemented until you implement it.
+{{- if .HasJobs }}
+// Each job fails until you implement it.
+{{- end }}
+{{- if .HasWorkers }}
+// Each worker fails every message until you implement it.
+{{- end }}
 
 import { notImplemented{{ if .WebhookProviders }}, unauthorized{{ end }} } from '{{ .RuntimePackage }}';
 import type {
@@ -11,6 +17,12 @@ import type {
 {{- end }}
   Constructor,
   Deps,
+{{- if .HasJobs }}
+  JobsConstructor,
+{{- end }}
+{{- if .HasWorkers }}
+  WorkersConstructor,
+{{- end }}
 {{- range .Namespaces }}
   {{ .InterfaceName }},
 {{- end }}
@@ -42,6 +54,38 @@ export const create: Constructor = deps => ({
  * header) with your identity provider and return its Principal.
  */
 export const authenticate: AuthenticatorFactory = () => async () => null;
+{{- end }}
+{{- if .HasJobs }}
+
+/**
+ * Builds the jobs of {{ .SchemaName }} from its dependencies. Its type is the
+ * generated JobsConstructor. A job's entrypoint calls one method per run,
+ * with a signal that SIGTERM aborts; the run fails when it rejects.
+ */
+export const createJobs: JobsConstructor = deps => ({
+{{- range .Jobs }}
+  async {{ .Method }}() {
+    throw notImplemented('job {{ .Name }}');
+  },
+{{- end }}
+});
+{{- end }}
+{{- if .HasWorkers }}
+
+/**
+ * Builds the workers of {{ .SchemaName }} from its dependencies. Its type is the
+ * generated WorkersConstructor. A worker's entrypoint calls one method per
+ * message it claims; the message is done when it resolves, and fails, to be
+ * retried, when it rejects. A message may come again, so a method is
+ * idempotent.
+ */
+export const createWorkers: WorkersConstructor = deps => ({
+{{- range .Workers }}
+  async {{ .Method }}(message) {
+    throw notImplemented('worker {{ .Name }}');
+  },
+{{- end }}
+});
 {{- end }}
 {{- range .Namespaces }}
 

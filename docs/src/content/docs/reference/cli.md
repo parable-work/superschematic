@@ -557,14 +557,16 @@ design is section 8.3 of
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
    run locally yet, and the environment does not resolve.
 6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
-   the same way, and start it with the servers of its wave: a process with
+   the same way, a TypeScript worker's package needing no build, and start
+   it with the servers of its wave, a TypeScript one as `bun main.ts`: a process with
    no port, ready once it starts, with `WORKER_CONCURRENCY` set to the
    concurrency the environment gives it, each line it prints with its name
    in front. One process runs whatever the worker's `instances`, and none
    for a worker the environment turns off.
 7. Build each job's entrypoint module at `<out>/server/<stack>/<job>` the
-   same way, and run each job that has a schedule in the environment on
-   it, in its time zone: never two runs of one job at once, a run stopped
+   same way, a TypeScript job's package needing no build, and run each job
+   that has a schedule in the environment on it, a TypeScript one as `bun
+   main.ts`, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
    prints with its name in front. A job's run never stops the environment.
 7. Build each site once, `bun run <build>` in its package after the same
@@ -629,9 +631,9 @@ API service's name and its class in kebab case,
 
 On the `local` target, run it from another terminal while `stack dev`
 runs the environment. It builds no schema: it reads the environment the
-last build resolved and the program `stack dev` rendered, builds the job's
-binary from its entrypoint module, so a change to the job's code is in
-the run, and runs it with the environment's values, secrets and keys, its
+last build resolved and the program `stack dev` rendered, builds a Go
+job's binary from its entrypoint module, or installs the workspace for a
+TypeScript job's `main.ts`, so a change to the job's code is in the run, and runs it with the environment's values, secrets and keys, its
 timeout and its retries, each line it prints with the job's name in front.
 It refuses an environment whose Postgres container or servers do not
 answer, and a job whose scheduled run goes on; `stack dev`'s schedule
@@ -753,7 +755,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 
 Build the image of each server and job whose build context changed since
 the image the deploy manifest records, as `stack deploy` would, and deploy
-nothing. A Go or TypeScript server, or a Go job, builds from the Dockerfile
+nothing. A Go or TypeScript server, job or worker builds from the Dockerfile
 `superschematic build-all` writes at
 `<output-root>/server/<stack>/<deployable>/`, with the repository root as its
 context, cut down by the `Dockerfile.dockerignore` beside it; on gcp the

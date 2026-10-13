@@ -216,6 +216,7 @@
       "deployable": "shop-orders-ship-orders",
       "name": "shop-orders-ship-orders",
       "wave": 2,
+      "language": "go",
       "module": "server/rust-stack/shop-orders-ship-orders",
       "binary": "bin/shop-orders-ship-orders",
       "api": "shop-orders",

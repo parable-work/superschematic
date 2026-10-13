@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
@@ -30,18 +31,19 @@ const serverGenerator = "server"
 
 // generateServers writes the entrypoint of each Go, TypeScript and Rust
 // server of the stack the schema declares under servergen.StackDir
-// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go job
-// beside them (section 8.7, D52), and scaffolds each served API's
-// implementation that is missing, a Go server's in Go, a TypeScript
-// server's in TypeScript and a Rust server's in Rust (sections 8.5 and
-// 8.6). The Rust servers' crates are the members of the output root's
-// Cargo workspace, whose root and lockfile it writes (D57). No environment
-// changes the servers or the jobs, but the entrypoint of a Go or
-// TypeScript one that some environment connects to a database on Cloud
-// SQL links the Cloud SQL connector, or depends on the Node one; a Rust
-// one reaches Cloud SQL through its runtime alone. It plans every
-// entrypoint before it writes anything, so one it refuses leaves the last
-// build's entrypoints and every implementation as they were. A build
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go and
+// TypeScript job and worker beside them (sections 8.7 and 8.8, D52, D53),
+// and scaffolds each served API's implementation that is missing, a Go
+// server's in Go, a TypeScript server's in TypeScript and a Rust server's
+// in Rust (sections 8.5 and 8.6). The Rust servers' crates are the members
+// of the output root's Cargo workspace, whose root and lockfile it writes
+// (D57). No environment changes the servers, the jobs or the workers, but
+// the entrypoint of a Go or TypeScript one that some environment connects
+// to a database on Cloud SQL links the Cloud SQL connector, or depends on
+// the Node one; a Rust one reaches Cloud SQL through its runtime alone. It
+// plans every entrypoint before it writes anything, so one it refuses
+// leaves the last build's entrypoints and every implementation as they
+// were. A build
 // without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
@@ -83,6 +85,7 @@ func (r run) generateServers() error {
 	var tsPlans []*servergen.TypeScriptServer
 	var rustPlans []*servergen.RustServer
 	scaffolding := map[string]bool{}
+	tsScaffolding := map[string]bool{}
 	var tsScaffolds []*tsrestgen.APIOutput
 	var rustScaffolds []*rustrestgen.APIOutput
 	for _, s := range servers {
@@ -103,6 +106,9 @@ func (r run) generateServers() error {
 			}
 			tsPlans = append(tsPlans, server)
 			tsScaffolds = append(tsScaffolds, scaffolds...)
+			for _, sc := range scaffolds {
+				tsScaffolding[sc.SchemaName] = true
+			}
 		case APILanguageRust:
 			server, scaffolds, err := r.planRustServer(st.Name, s, cors)
 			if err != nil {
@@ -118,40 +124,56 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
-	if err := r.checkJobs(st.Name, jobs, services, scaffolding); err != nil {
+	if err := r.checkJobs(st.Name, jobs, services, scaffolding, tsScaffolding); err != nil {
 		return err
 	}
+	// The servers' plans scaffold the API of each job and worker, which a
+	// server serves.
 	for _, j := range jobs {
-		if j.Language != APILanguageGo {
+		switch j.Language {
+		case APILanguageGo:
+			job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name], nil)
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server: job})
+		case APILanguageTypeScript:
+			job, _, err := r.planTypeScriptServer(st.Name, j, cloudSQL[j.Name], nil)
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, job)
+		default:
 			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
-			continue
 		}
-		// The servers' plans scaffold the job's API, which a server serves.
-		job, _, err := r.planEntrypoint(st.Name, j, cloudSQL[j.Name], nil)
-		if err != nil {
-			return err
-		}
-		plans = append(plans, planned{server: job})
 	}
 	workers, err := stack.Workers(stack.Input{Stack: st, Services: services})
 	if err != nil {
 		return err
 	}
-	if err := r.checkWorkers(st.Name, workers, services, scaffolding); err != nil {
+	if err := r.checkWorkers(st.Name, workers, services, scaffolding, tsScaffolding); err != nil {
 		return err
 	}
 	for _, w := range workers {
-		if w.Language != APILanguageGo {
+		switch w.Language {
+		case APILanguageGo:
+			worker, _, err := r.planEntrypoint(st.Name, w, cloudSQL[w.Name], nil)
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server: worker})
+		case APILanguageTypeScript:
+			if err := r.checkTypeScriptQueue(st.Name, w, services); err != nil {
+				return err
+			}
+			worker, _, err := r.planTypeScriptServer(st.Name, w, cloudSQL[w.Name], nil)
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, worker)
+		default:
 			r.Logf("  - worker %s: a %s worker, which gets no generated entrypoint yet\n", w.Name, w.Language)
-			continue
 		}
-		// The servers' plans scaffold the worker's API, which a server
-		// serves (D53).
-		worker, _, err := r.planEntrypoint(st.Name, w, cloudSQL[w.Name], nil)
-		if err != nil {
-			return err
-		}
-		plans = append(plans, planned{server: worker})
 	}
 
 	for _, p := range plans {
@@ -205,7 +227,7 @@ func (r run) generateServers() error {
 			return err
 		}
 		if server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", server.Kind, server.Name, server.NoDocker)
 		}
 	}
 	for _, server := range rustPlans {
@@ -297,19 +319,41 @@ func (r run) noteIgnoredLockfile() {
 }
 
 // checkJobs refuses a stack one of whose Go APIs declares jobs while its
-// implementation declares no NewJobs (D52). The implementation exists, so
-// it is the engineer's, and the build writes into it no more: an API that
-// predates its jobs fails here, saying what to add, rather than in the
-// compile of a job's entrypoint. An API whose scaffold this build writes,
-// scaffolding, gets NewJobs from it.
-func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding map[string]bool) error {
+// implementation declares no NewJobs (D52), or one of whose TypeScript APIs
+// does while its implementation exports no createJobs. The implementation
+// exists, so it is the engineer's, and the build writes into it no more: an
+// API that predates its jobs fails here, saying what to add, rather than in
+// the compile of a job's entrypoint, or when Bun runs it. An API whose
+// scaffold this build writes, scaffolding in Go and tsScaffolding in
+// TypeScript, gets them from it.
+func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, job := range jobs {
 		api := job.Job.API
-		if checked[api] || scaffolding[api] || job.Language != APILanguageGo {
+		if checked[api] {
 			continue
 		}
 		checked[api] = true
+		if job.Language == APILanguageTypeScript {
+			if tsScaffolding[api] {
+				continue
+			}
+			var methods []string
+			for _, svc := range services {
+				if svc.Name == api {
+					for _, j := range svc.Jobs {
+						methods = append(methods, fmt.Sprintf("    async %s(signal) {\n      // ...\n    },", tsutil.ToCamelCase(j.Name)))
+					}
+				}
+			}
+			if err := r.checkTypeScriptExport(stackName, api, "jobs", tsrestgen.JobsFunc, "JobsConstructor", methods, "8.7"); err != nil {
+				return err
+			}
+			continue
+		}
+		if scaffolding[api] || job.Language != APILanguageGo {
+			continue
+		}
 		impl, _, err := r.implementation(api)
 		if err != nil {
 			return err
@@ -341,17 +385,38 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 }
 
 // checkWorkers refuses a stack one of whose Go APIs declares workers while
-// its implementation declares no NewWorkers (D53), as checkJobs refuses one
-// without NewJobs: the implementation is the engineer's, and the build
-// writes into it no more.
-func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding map[string]bool) error {
+// its implementation declares no NewWorkers (D53), or one of whose
+// TypeScript APIs does while its implementation exports no createWorkers,
+// as checkJobs refuses one without its jobs: the implementation is the
+// engineer's, and the build writes into it no more.
+func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, w := range workers {
 		api := w.Worker.API
-		if checked[api] || scaffolding[api] || w.Language != APILanguageGo {
+		if checked[api] {
 			continue
 		}
 		checked[api] = true
+		if w.Language == APILanguageTypeScript {
+			if tsScaffolding[api] {
+				continue
+			}
+			var methods []string
+			for _, svc := range services {
+				if svc.Name == api {
+					for _, worker := range svc.Workers {
+						methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
+					}
+				}
+			}
+			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
+				return err
+			}
+			continue
+		}
+		if scaffolding[api] || w.Language != APILanguageGo {
+			continue
+		}
 		impl, _, err := r.implementation(api)
 		if err != nil {
 			return err
@@ -388,6 +453,66 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			"where api is %s, whose api.WorkersConstructor is %s's signature, and %s is %s, the Go types of the database that declares each queue (docs/stack-model.md, section 8.8)",
 			stackName, api, impl.Dir, apigen.WorkersFunc, apigen.WorkersFunc, strings.Join(methods, "\n"), r.Options.Naming.GoAPIModule(api), apigen.WorkersFunc,
 			toGoPackageName(db), r.Options.Naming.GoTypesModule(db))
+	}
+	return nil
+}
+
+// checkTypeScriptExport refuses a TypeScript API whose implementation
+// exists and exports no fn, of the API package's type typ, while the API
+// declares what, its jobs or its workers, each a method of methods: the
+// build no longer writes into the implementation, and Bun would fail only
+// when the job or the worker runs.
+func (r run) checkTypeScriptExport(stackName, api, what, fn, typ string, methods []string, section string) error {
+	dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, api)
+	exists, err := tsrestgen.ImplementationExists(dir)
+	if err != nil || !exists {
+		return err
+	}
+	exports, err := tsrestgen.ExportsName(dir, fn)
+	if err != nil || exports {
+		return err
+	}
+	return fmt.Errorf("stack %s: %s declares %s, and its implementation at %s, which the build no longer writes into, exports no %s; add\n\n"+
+		"  export const %s: %s = deps => ({\n%s\n  });\n\n"+
+		"importing %s from %s, the type the entrypoint calls it as (docs/stack-model.md, section %s)",
+		stackName, api, what, dir, fn, fn, typ, strings.Join(methods, "\n"), typ, r.Options.Naming.NpmAPIPackage(api), section)
+}
+
+// checkTypeScriptQueue refuses a TypeScript worker whose queue the
+// TypeScript types of its database leave out of their ./queues entry, as
+// they leave out a queue whose message the TypeScript queue client cannot
+// hold yet (D53).
+func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
+	db := w.Worker.Database
+	for _, svc := range services {
+		if svc.Name != w.Worker.API || db != "" {
+			continue
+		}
+		// The API's database: its authDb, or its one DB dependency.
+		if svc.AuthDB != nil {
+			db = svc.AuthDB.Name
+		}
+		for _, dep := range svc.Dependencies {
+			if db == "" && dep.Kind == ir.SchemaKindDB {
+				db = dep.Name
+			}
+		}
+	}
+	if db == "" || r.Options.LoadDependency == nil {
+		return nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
+	}
+	queues, err := tsgen.TypeScriptQueues(schema)
+	if err != nil {
+		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
+	}
+	for _, q := range queues {
+		if q.Name == w.Worker.Queue && q.Unsupported != "" {
+			return fmt.Errorf("stack %s: TypeScript worker %s claims queue %s of %s, which the TypeScript queue client cannot hold yet: its %s; hold the value in a @jsonField type, or write the worker in Go (D53)", stackName, w.Name, q.Name, db, q.Unsupported)
+		}
 	}
 	return nil
 }
@@ -503,6 +628,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		Paths:              r.Options.Paths,
 		CloudSQL:           cloudSQL,
 	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
+	}
+	if s.Worker != nil {
+		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
+	}
 	var scaffolds []*tsrestgen.APIOutput
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
@@ -548,6 +679,11 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		in.PackageDirs[pkg] = dir
 		for _, call := range output.Deps.Calls {
 			in.PackageDirs[call.Package] = SDKDir(out, LangTypeScript, call.Service)
+		}
+		if s.Worker != nil && output.Deps.DatabaseTypesPackage != "" {
+			// The worker imports its queue's definition from the database's
+			// TypeScript types (D53).
+			in.PackageDirs[output.Deps.DatabaseTypesPackage] = TypesDir(out, LangTypeScript, output.Deps.Database)
 		}
 	}
 	server, err := servergen.PlanTypeScript(in)

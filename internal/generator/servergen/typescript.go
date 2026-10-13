@@ -13,9 +13,9 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -143,15 +143,34 @@ type TypeScriptInput struct {
 	// depends on the Cloud SQL Node connector when one of them is a
 	// database it connects to.
 	CloudSQL []string
+
+	// Job, when set, plans the entrypoint of a job of the one API in APIs
+	// rather than a server's (D52): Server is then the job's deployable.
+	Job *JobInput
+
+	// Worker, when set, plans the entrypoint of a worker of the one API in
+	// APIs (D53): Server is then the worker's deployable.
+	Worker *WorkerInput
 }
 
 // TypeScriptServer is a planned TypeScript entrypoint, what the templates
-// read.
+// read: a server's, a job's when Job is set, or a worker's when Worker is.
 type TypeScriptServer struct {
 	Stack   string
 	Name    string
 	Package string
 	Naming  naming.Naming
+
+	// Kind is "server", "job" or "worker".
+	Kind string
+
+	// Job is what a job's entrypoint runs, nil for a server and a worker
+	// (D52).
+	Job *Job
+
+	// Worker is what a worker's entrypoint runs, nil for a server and a
+	// job (D53).
+	Worker *TypeScriptWorker
 
 	// RustVersion and BunVersion are the toolchain pins.
 	RustVersion string
@@ -179,6 +198,32 @@ type TypeScriptServer struct {
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
 	NoDocker string
+}
+
+// TypeScriptWorker is the worker a TypeScript worker's entrypoint runs
+// (D53): its @worker class, the method of the API's Workers that handles a
+// message, the queue it claims from, a class of Database, the API's
+// database, its concurrency unless the environment sets one, and its grace.
+// Definition is the name the database's TypeScript types export the
+// queue's definition as, from Module, their ./queues entry, of Package.
+type TypeScriptWorker struct {
+	Name         string
+	Method       string
+	Queue        string
+	Database     *TypeScriptDatabase
+	Concurrency  int
+	GraceSeconds int
+
+	Definition string
+	Module     string
+	Package    string
+}
+
+// Background reports whether the entrypoint is a job's or a worker's,
+// which serves no request: it mounts no routes, listens on no port, and
+// verifies no end user or caller.
+func (s *TypeScriptServer) Background() bool {
+	return s.Job != nil || s.Worker != nil
 }
 
 // NpmDependency is a package.json dependency.
@@ -339,34 +384,84 @@ var tsReserved = []string{
 	"server", "stopping", "shutdown", "port", "process", "openBucket",
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
+	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
+	"postgresQueue", "runWorker", "workerConcurrency",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
 // a server whose APIs register one method and path between them, since one
 // app answers each once, and an API whose config holds no field for a
-// database or a callee its Deps needs.
+// database or a callee its Deps needs. With in.Job it plans a job's
+// entrypoint instead (D52), and with in.Worker a worker's (D53): one API,
+// whose Deps it builds as a server does, and no routes.
 func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
-	if len(in.APIs) == 0 {
-		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
-	}
-	// A TypeScript router mounts every operation, a manually routed one
-	// included, whose handler the implementation hands it.
-	routes := Input{Stack: in.Stack, Server: in.Server, manualRoutes: true}
-	for _, a := range in.APIs {
-		routes.APIs = append(routes.APIs, APIInput{Output: a.Routes})
-	}
-	if err := checkRoutes(routes); err != nil {
-		return nil, err
-	}
 	n := in.Naming.OrDefault()
 	s := &TypeScriptServer{
 		Stack:       in.Stack,
 		Name:        in.Server,
 		Package:     n.NpmServerPackage(in.Stack, in.Server),
 		Naming:      n,
+		Kind:        "server",
 		RustVersion: RustVersion,
 		BunVersion:  BunVersion,
 	}
+	switch {
+	case in.Job != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: job %s runs a job of %d APIs; a job belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		i := slices.IndexFunc(o.Jobs, func(j tsrestgen.JobInfo) bool { return j.Name == in.Job.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("stack %s: job %s runs %s of %s, which declares no such job", in.Stack, in.Server, in.Job.Name, o.SchemaName)
+		}
+		s.Kind = "job"
+		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method}
+	case in.Worker != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: worker %s runs a worker of %d APIs; a worker belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		i := slices.IndexFunc(o.Workers, func(w tsrestgen.WorkerInfo) bool { return w.Name == in.Worker.Name })
+		if i < 0 {
+			return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, which declares no such worker", in.Stack, in.Server, in.Worker.Name, o.SchemaName)
+		}
+		w := o.Workers[i]
+		if o.Deps.Database == "" {
+			return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s, and %s connects to no database", in.Stack, in.Server, o.SchemaName, w.Queue, o.SchemaName)
+		}
+		if o.Deps.DatabaseTypesPackage == "" {
+			return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s of %s, whose TypeScript types export no queue definitions", in.Stack, in.Server, o.SchemaName, w.Queue, o.Deps.Database)
+		}
+		grace := in.Worker.GraceSeconds
+		if grace <= 0 {
+			grace = ir.DefaultWorkerGraceSeconds
+		}
+		s.Kind = "worker"
+		s.Worker = &TypeScriptWorker{
+			Name:         w.Name,
+			Method:       w.Method,
+			Queue:        w.Queue,
+			Concurrency:  w.Concurrency,
+			GraceSeconds: grace,
+			Definition:   tsgen.QueueConst(w.Queue),
+			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
+			Package:      o.Deps.DatabaseTypesPackage,
+		}
+	case len(in.APIs) == 0:
+		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
+	default:
+		// A TypeScript router mounts every operation, a manually routed one
+		// included, whose handler the implementation hands it.
+		routes := Input{Stack: in.Stack, Server: in.Server, manualRoutes: true}
+		for _, a := range in.APIs {
+			routes.APIs = append(routes.APIs, APIInput{Output: a.Routes})
+		}
+		if err := checkRoutes(routes); err != nil {
+			return nil, err
+		}
+	}
+	background := s.Background()
 	taken := names{}
 	for _, name := range tsReserved {
 		taken[name] = true
@@ -396,23 +491,27 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			for _, f := range a.Config.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.Key
 			}
-			api.Callers = a.Config.CallersField
+			if !background {
+				api.Callers = a.Config.CallersField
+			}
 		}
 		if o.HasEnvConfig {
 			api.Config = taken.take(stem + "Config")
 		}
-		if a.CORS {
+		// A job or a worker serves no request: it answers no CORS,
+		// establishes no end user, and verifies no caller (D52, D50).
+		if a.CORS && !background {
 			api.CORS = taken.take(stem + "Origins")
 			api.CORSField = ir.CORSField(o.SchemaName)
 		}
-		if o.ChecksEndUsers() {
+		if o.ChecksEndUsers() && !background {
 			api.Authenticate = taken.take(stem + "Authenticate")
 		}
-		if o.Identity != nil {
+		if o.Identity != nil && !background {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
-		if o.HasServiceCallers && (api.Callers == "" || api.Config == "") {
+		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
 		if db := o.Deps.Database; db != "" {
@@ -420,7 +519,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if d == nil {
 				key, ok := derived[string(ir.EdgeSQL)+" "+db]
 				if !ok || api.Config == "" {
-					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for its database %s", in.Stack, in.Server, o.SchemaName, db)
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for its database %s", in.Stack, s.Kind, in.Server, o.SchemaName, db)
 				}
 				d = &TypeScriptDatabase{
 					Service: db,
@@ -436,7 +535,13 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			}
 			api.Database = d
 		}
-		if o.Identity != nil {
+		if s.Worker != nil {
+			if api.Database == nil {
+				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
+			}
+			s.Worker.Database = api.Database
+		}
+		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, and opens no pool on it to build its identity store over", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
@@ -454,7 +559,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if c == nil {
 				key, ok := derived[string(ir.EdgeHTTP)+" "+call.Service]
 				if !ok || api.Config == "" {
-					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for %s, which it calls", in.Stack, in.Server, o.SchemaName, call.Service)
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for %s, which it calls", in.Stack, s.Kind, in.Server, o.SchemaName, call.Service)
 				}
 				callee := varStem(call.Service)
 				c = &TypeScriptClient{
@@ -476,7 +581,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if h == nil {
 				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
 				if !ok || api.Config == "" {
-					return nil, fmt.Errorf("stack %s: server %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, in.Server, o.SchemaName, b.Service)
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, b.Service)
 				}
 				h = &TypeScriptBucket{
 					Service: b.Service,
@@ -556,7 +661,8 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 
 // planPackage plans package.json's dependencies: each served API package,
 // its implementation, each callee's SDK and the TypeScript types of each
-// database an identity store reads from the workspace; the HTTP
+// database an identity store reads, or a worker's queue is of, from the
+// workspace; the HTTP
 // runtime, which the workspace's root overrides with a checkout or the
 // registry serves; and the third-party packages main.ts imports.
 func (s *TypeScriptServer) planPackage() {
@@ -576,6 +682,10 @@ func (s *TypeScriptServer) planPackage() {
 			// main.ts imports the database's identity descriptor.
 			deps[d.DescriptorPackage] = "workspace:*"
 		}
+	}
+	if s.Worker != nil {
+		// main.ts imports the queue's definition from the database's types.
+		deps[s.Worker.Package] = "workspace:*"
 	}
 	dev := map[string]string{
 		"@types/node": tsrestgen.NodeTypesVersion,
@@ -748,14 +858,22 @@ func ImplementationPackage(n naming.Naming, service, dir string) (string, error)
 
 // WriteTypeScript writes the entrypoint package into dir: main.ts,
 // package.json and tsconfig.json, and the Dockerfile with its ignore file
-// when s.Docker is planned.
+// when s.Docker is planned. A job's main.ts runs the job
+// (job.ts.tmpl), and a worker's its claim loop (worker.ts.tmpl); every
+// main.ts template takes the wiring they share from wiring.ts.tmpl.
 func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
 	}
-	gen := codegen.NewFileGenerator(templatesFS, templateFuncs())
+	main := "main.ts.tmpl"
+	switch {
+	case s.Job != nil:
+		main = "job.ts.tmpl"
+	case s.Worker != nil:
+		main = "worker.ts.tmpl"
+	}
 	files := []struct{ template, name string }{
-		{"main.ts.tmpl", TypeScriptMainFile},
+		{main, TypeScriptMainFile},
 		{"package.json.tmpl", TypeScriptPackageFile},
 		{"tsconfig.json.tmpl", TypeScriptConfigFile},
 	}
@@ -763,8 +881,8 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		files = append(files, struct{ template, name string }{"Dockerfile.ts.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.ts.tmpl", DockerIgnoreFile})
 	}
 	for _, f := range files {
-		if err := gen.GenerateFile(codegen.NewFileConfig(templatesFS, f.template, filepath.Join(dir, f.name), s, nil)); err != nil {
-			return fmt.Errorf("servergen: server %s: %w", s.Name, err)
+		if err := render(f.template, filepath.Join(dir, f.name), s); err != nil {
+			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 		}
 	}
 	return nil

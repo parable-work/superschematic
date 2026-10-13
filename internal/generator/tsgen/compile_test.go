@@ -162,6 +162,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-optimistic-db", schema: load("fixture-optimistic-db")},
 		{name: "fixture-user-model-db", schema: load("fixture-user-model-db")},
 		behaviorsPackage(t),
+		{name: "fixture-queue-db", schema: load("fixture-queue-db")},
 	}
 	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
 }

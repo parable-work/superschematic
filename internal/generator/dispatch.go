@@ -702,6 +702,13 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db
+		pkg, err := r.typeScriptQueuesPackage(db)
+		if err != nil {
+			return deps, err
+		}
+		deps.DatabaseTypesPackage = pkg
+	} else if len(r.Schema.Workers) > 0 {
+		return deps, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
 	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {
@@ -726,6 +733,38 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
 	}
 	return deps, nil
+}
+
+// typeScriptQueuesPackage is the TypeScript types package of db, the
+// database of the TypeScript API, when the API declares a worker (D53): it
+// declares the queues' messages, which the API's Workers take, and their
+// definitions, which the worker claims with and the implementation
+// enqueues with. Each worker must handle a queue of db, whose TypeScript
+// types must be generated. An API with no worker loads no database here,
+// and its implementation adds the types' dependency itself to enqueue.
+func (r run) typeScriptQueuesPackage(db string) (string, error) {
+	if len(r.Schema.Workers) == 0 {
+		return "", nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return "", fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle: %w", db, r.Config.Name, err)
+	}
+	if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
+		return "", err
+	}
+	if r.Options.DependencyConfig != nil {
+		if cfg, ok := r.Options.DependencyConfig(db); ok {
+			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+			if err != nil {
+				return "", fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangTypeScript) {
+				return "", fmt.Errorf("generator: the TypeScript workers of %s handle the queues of %s, whose TypeScript types declare the messages and the queues' definitions, and %s generates none; enable outputs.types.%s in %s's config (D53)", r.Config.Name, db, db, LangTypeScript, db)
+			}
+		}
+	}
+	return r.Options.Naming.NpmTypesPackage(db), nil
 }
 
 // scaffoldTypeScriptImplementation writes the scaffold of the API's

@@ -42,6 +42,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-nested-arrays-api"},
 		// Types that compose behaviors: types/behaviors.ts (D58).
 		{service: behaviortypestest.Service},
+		// A DB with queues (D53): queues.ts holds each as the HTTP runtime's
+		// queue client reads it.
+		{service: "fixture-queue-db"},
 	}
 
 	for _, tc := range cases {
