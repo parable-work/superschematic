@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -278,6 +279,10 @@ type RustDocker struct {
 	Include []string
 }
 
+// rustBinaryName is the shape of a binary's name cargo builds, which the
+// local target holds a Rust server's crate to too.
+var rustBinaryName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // rustReserved are the names main.rs declares or uses beside the served
 // APIs' own: an API, database or client never takes one. The crates main.rs
 // names by their own names are among them.
@@ -326,6 +331,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	}
 	if err := checkRoutes(routes); err != nil {
 		return nil, err
+	}
+	if !rustBinaryName.MatchString(in.Server) {
+		return nil, fmt.Errorf("stack %s: server %s is a Rust server, whose binary is its name, and cargo names a binary with letters, digits, '-' and '_' alone; rename the server", in.Stack, in.Server)
 	}
 	n := in.Naming.OrDefault()
 	s := &RustServer{

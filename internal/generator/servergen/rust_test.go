@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustapigen"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -728,5 +731,36 @@ func TestTheRustWorkspaceNamesEveryStacksServers(t *testing.T) {
 	crate("a-stack", "stock")
 	if _, err := servergen.WriteRustWorkspace(out); err == nil || !strings.Contains(err.Error(), "is not the Cargo workspace a build writes") {
 		t.Errorf("WriteRustWorkspace over a project's Cargo.toml = %v", err)
+	}
+}
+
+// TestRustRoutesAcrossAPIs: two APIs a Rust server serves cannot register
+// one method and path, path parameters matched whatever their names, and
+// a server whose name no binary of cargo's takes is refused.
+func TestRustRoutesAcrossAPIs(t *testing.T) {
+	api := func(name, path string) servergen.RustAPIInput {
+		return servergen.RustAPIInput{
+			Output: &rustrestgen.APIOutput{APIOutputBase: rustapigen.APIOutputBase{SchemaName: name, CrateName: "schemas-" + name + "-api"}, Deps: &rustrestgen.DepsInfo{}},
+			Routes: &apigen.APIOutput{SchemaName: name, Endpoints: []apigen.EndpointInfo{{Method: http.MethodGet, Path: path}}},
+		}
+	}
+	in := servergen.RustInput{
+		Stack:  "stock-stack",
+		Server: "Warehouse",
+		Dir:    t.TempDir(),
+		APIs:   []servergen.RustAPIInput{api("catalog", "/api/items/{sku}"), api("pricing", "/api/items/{id}")},
+		Paths:  naming.LocalPaths{HTTPRuntimeRust: t.TempDir()},
+	}
+	if _, err := servergen.PlanRust(in); err == nil || !strings.Contains(err.Error(), "catalog registers GET /api/items/{sku} and pricing registers GET /api/items/{id}") {
+		t.Errorf("PlanRust = %v, want the routes refused", err)
+	}
+	in.APIs = in.APIs[:1]
+	in.Server = "Ware.house"
+	if _, err := servergen.PlanRust(in); err == nil || !strings.Contains(err.Error(), "cargo names a binary with letters, digits") {
+		t.Errorf("PlanRust = %v, want the server's name refused", err)
+	}
+	in.Server = "Warehouse"
+	if s, err := servergen.PlanRust(in); err != nil || s.Binary != "Warehouse" || s.Package != "schemas-stock-stack-warehouse-server" {
+		t.Errorf("PlanRust = %+v, %v", s, err)
 	}
 }
