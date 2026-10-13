@@ -557,6 +557,29 @@ let router = build_router(Implementations {
 An operation added to the schema later is a method the scaffold's impl
 lacks; the compiler names it, and you add it with its file.
 
+### Rust servers
+
+In a [stack](/superschematic/guides/stacks/#rust-servers), a server that
+serves Rust APIs needs no `main` of yours: the stack's build writes its
+crate, `schemas/dist/server/<stack>/<server>/`, whose `src/main.rs`
+loads each API's `EnvConfig`, opens a Postgres pool per database, builds
+each `Deps` with its SDK clients and calls the implementation's `create`,
+builds the identity and service authenticators and passes them to
+`Implementations::new`, and serves the routers with `/healthz`,
+`/readyz`, JSON logs and a drain on SIGTERM. The build scaffolds a
+missing implementation crate at the `rust` template, and the server's
+`Cargo.toml` depends on it by the package name its `Cargo.toml` gives it,
+so you may rename it.
+
+The server crates are the members of the Cargo workspace whose root is
+`schemas/dist/Cargo.toml`; the generated crates and the implementations
+are path dependencies. Commit `schemas/dist/Cargo.lock`, which each
+build of the stack brings up to date with `cargo update --workspace`:
+`stack dev`, the image and the generated CI build with `--locked` from
+it. The naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust`
+and `scalar_rust` name the checkouts the crates depend on, and the image
+builds from a context that holds them.
+
 ### Users and sessions
 
 When the API's `authDb` has a `User` table, the core user model (D50),
