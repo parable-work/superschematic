@@ -15,7 +15,7 @@ this API with promises (milestone 7b).
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 
-import type { Principal } from '../access.js';
+import type { AccessRequest, Principal } from '../access.js';
 import type { SchemaSearchHit } from '../behaviors/core/index.js';
 import type { BehaviorDeclaration } from '../behaviors/declaration.js';
 import type { Page } from '../behaviors/paging.js';
@@ -36,21 +36,73 @@ import type {
 import type { NamespaceRecord } from '../namespaces.js';
 import type { PublishResult, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
 import type { ComposedBehavior, DefineOptions, SchemaCapabilities, SchemaTarget, ValidateOptions } from '../registry/registry.js';
-import type { ValidationIssue } from '../errors.js';
+import { EngineError, type ValidationIssue } from '../errors.js';
+import { DEFAULT_NAMESPACE } from '../namespaces.js';
 import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../runner/runner.js';
 import type { BehaviorDocument, BehaviorSummary } from '../tools/behaviors.js';
 import type { DescribeDocument, ToolManifest, ToolTarget } from '../tools/catalog.js';
+import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
 import type { StoredValue } from '../values/store.js';
 import type { ValueTarget } from '../values/values.js';
 import { loadAddon, type AddonEngine } from './addon.js';
 import { NativeUnsupportedError, restoreError } from './errors.js';
-import { nativeOptions, type NativeEngineOptions } from './options.js';
+import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './options.js';
+
+// Hosts answers what the options leave to TypeScript (a policy, a
+// permission matcher), which the addon asks on this thread during a
+// synchronous call: host(kind, json) -> json. It never throws into the
+// addon: it keeps the first error the TypeScript code threw, and the call
+// rethrows it once the addon returns, as the TypeScript engine would have
+// thrown it from inside the call. A policy's answer is checked as the
+// TypeScript engine's Access checks it.
+class Hosts {
+  private parked: { error: unknown } | undefined;
+
+  constructor(private readonly hosted: HostedOptions) {}
+
+  readonly answer = (kind: string, payload: string): string => {
+    try {
+      switch (kind) {
+        case 'policy': {
+          const answer: unknown = this.hosted.policy?.(JSON.parse(payload) as AccessRequest);
+          if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+            throw new TypeError('an access policy is synchronous: it returned a promise');
+          }
+          return answer === true ? 'true' : 'false';
+        }
+        case 'permissionMatcher': {
+          const [held, required] = JSON.parse(payload) as [string[], string[]];
+          const answer: unknown = this.hosted.permissionMatcher?.(held, required);
+          if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+            throw new TypeError('a permission matcher is synchronous: it returned a promise');
+          }
+          return answer === true ? 'true' : 'false';
+        }
+        default:
+          throw new Error(`the Rust engine asked the facade an unknown question: ${kind}`);
+      }
+    } catch (error) {
+      this.parked ??= { error };
+      return 'false';
+    }
+  };
+
+  /** rethrow throws what the TypeScript code threw during the call, if it threw. */
+  rethrow(): void {
+    const parked = this.parked;
+    this.parked = undefined;
+    if (parked !== undefined) {
+      throw parked.error;
+    }
+  }
+}
 
 // Calls makes the engine's calls by name: { op, principal, args, now }.
 class Calls {
   constructor(
     private readonly addon: AddonEngine,
-    private readonly clock: (() => number) | undefined
+    private readonly clock: (() => number) | undefined,
+    private readonly hosts: Hosts
   ) {}
 
   sync(op: string, principal: Principal | undefined, args: readonly unknown[] = []): unknown {
@@ -58,8 +110,10 @@ class Calls {
     try {
       text = this.addon.callSync(this.request(op, principal, args));
     } catch (error) {
+      this.hosts.rethrow();
       throw restoreError(error);
     }
+    this.hosts.rethrow();
     return text === '' ? undefined : JSON.parse(text);
   }
 
@@ -97,6 +151,17 @@ class NativeNamespaces {
 
   get names(): readonly string[] {
     return this.calls.sync('namespaces.names', undefined) as string[];
+  }
+
+  /** resolve returns the namespace a call names, `default` when it names none. */
+  resolve(namespace: string | undefined): string {
+    if (namespace === undefined) {
+      return DEFAULT_NAMESPACE;
+    }
+    if (!this.names.includes(namespace)) {
+      throw new EngineError('unknown_namespace', `unknown namespace "${String(namespace)}"`);
+    }
+    return namespace;
   }
 
   list(principal: Principal): NamespaceRecord[] {
@@ -231,7 +296,11 @@ class NativeEvents {
 }
 
 class NativeTools {
-  constructor(private readonly calls: Calls) {}
+  constructor(
+    private readonly calls: Calls,
+    /** The invocation policy and vendor keys the documents are written with, the defaults filled in. */
+    readonly options: ResolvedToolOptions
+  ) {}
 
   listBehaviors(principal: Principal): BehaviorSummary[] {
     return this.calls.sync('tools.listBehaviors', principal) as BehaviorSummary[];
@@ -297,6 +366,10 @@ class NativeValues {
     return this.calls.sync('values.get', principal, [hash, target]) as StoredValue;
   }
 
+  sweep(): { removed: number } {
+    return this.calls.sync('values.sweep', undefined) as { removed: number };
+  }
+
   get thresholdBytes(): number {
     return this.calls.sync('values.thresholdBytes', undefined) as number;
   }
@@ -340,36 +413,54 @@ export class NativeEngine {
   readonly tools: NativeTools;
   readonly runner: NativeRunner;
   readonly values: NativeValues;
-  readonly permissionMatcher: PermissionMatcher = hasAnyPermission;
+  /** Decides whether a principal holds a permission, as the options gave it; hasAnyPermission by default. */
+  readonly permissionMatcher: PermissionMatcher;
   /** `sqlite`, or `postgres`, whose engine is called through callAsync. */
   readonly dialect: 'sqlite' | 'postgres';
   private readonly addon: AddonEngine;
   private readonly calls: Calls;
 
-  private constructor(addon: AddonEngine, clock: (() => number) | undefined) {
+  private constructor(addon: AddonEngine, clock: (() => number) | undefined, hosts: Hosts, permissionMatcher: PermissionMatcher, tools: ResolvedToolOptions) {
     this.addon = addon;
     this.dialect = addon.dialect;
-    this.calls = new Calls(addon, clock);
+    this.permissionMatcher = permissionMatcher;
+    this.calls = new Calls(addon, clock, hosts);
     this.namespaces = new NativeNamespaces(this.calls);
     this.behaviors = new NativeBehaviors(this.calls);
     this.schemas = new NativeSchemas(this.calls);
     this.instances = new NativeInstances(this.calls);
     this.events = new NativeEvents(this.calls);
-    this.tools = new NativeTools(this.calls);
+    this.tools = new NativeTools(this.calls, tools);
     this.runner = new NativeRunner(this.calls);
     this.values = new NativeValues(this.calls);
   }
 
   /** open opens the Rust engine on the options, as Engine.open opens the TypeScript one. */
   static open(options: NativeEngineOptions): NativeEngine {
-    const { json, clock } = nativeOptions(options);
+    if (options.policy === undefined || options.policy === null) {
+      throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
+    }
+    const { json, clock, hosted } = nativeOptions(options);
+    // The tool options with their defaults filled in, as the HTTP and MCP
+    // adapters read them (engine.tools.options), resolved before the file
+    // opens as the TypeScript engine resolves them: the Rust engine checks
+    // the same, but a value JSON cannot carry (NaN) reaches it as another.
+    const tools = resolveToolOptions(options.tools);
+    const hosts = new Hosts(hosted);
     let addon: AddonEngine;
     try {
-      addon = loadAddon().NativeEngine.open(JSON.stringify(json));
+      addon = loadAddon().NativeEngine.open(JSON.stringify(json), hosts.answer);
     } catch (error) {
+      hosts.rethrow();
       throw restoreError(error);
     }
-    return new NativeEngine(addon, clock);
+    try {
+      hosts.rethrow();
+    } catch (error) {
+      addon.close();
+      throw error;
+    }
+    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools);
   }
 
   /** The TypeScript engine's storage, which the Rust engine does not expose (milestone 7b decides how). */

@@ -49,10 +49,18 @@ export interface AddonEngine {
   close(): void;
 }
 
+/**
+ * What the facade answers for the engine in TypeScript (a policy, a
+ * permission matcher), asked on this thread during a synchronous call:
+ * the question's kind and JSON, answered as JSON. It must not throw.
+ */
+export type AddonHost = (kind: string, payload: string) => string;
+
 /** What the addon exports. */
 export interface Addon {
   abiVersion(): number;
-  NativeEngine: { open(options: string): AddonEngine };
+  /** Opens an engine; host answers what the options' `hosted` lists. */
+  NativeEngine: { open(options: string, host?: AddonHost): AddonEngine };
 }
 
 /** The platform triple of this host, or a throw naming the host. */

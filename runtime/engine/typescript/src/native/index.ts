@@ -7,9 +7,9 @@ against this one with ENGINE_IMPL=rust (test/rust-pending.txt).
 */
 
 export { NATIVE_ABI_VERSION, NATIVE_BINARY_NAME, loadAddon, nativePackageName, nativeTriple } from './addon.js';
-export type { Addon, AddonEngine } from './addon.js';
+export type { Addon, AddonEngine, AddonHost } from './addon.js';
 export { NativeEngine, openNativeEngine } from './engine.js';
 export { NativeUnsupportedError, restoreError } from './errors.js';
 export type { NativeGap } from './errors.js';
 export { nativeOptions } from './options.js';
-export type { NativeEngineOptions, NativePostgresOptions, ResolvedNativeOptions } from './options.js';
+export type { HostedOptions, NativeEngineOptions, NativePostgresOptions, ResolvedNativeOptions } from './options.js';
