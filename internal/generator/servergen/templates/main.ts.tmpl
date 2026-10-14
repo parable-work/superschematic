@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   const port = listenPort();
 {{- range .APIs }}
 {{- if .Config }}
-  const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.loadEnvConfig());
+  const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}());
 {{- end }}
 {{- if .CORS }}
   // The origins of the sites that call {{ .Service }}, which its CORS field lists (section 8.10).

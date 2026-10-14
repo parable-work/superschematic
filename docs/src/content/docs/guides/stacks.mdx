@@ -613,9 +613,12 @@ context that SIGTERM cancels, and exits 1 when it returns an error. A
 TypeScript job's is a package with a `main.ts` that does the same on Bun
 with your `createJobs`, and a Rust job's a crate whose `main.rs` does it
 on tokio with your `create_jobs` and a `Shutdown` that SIGTERM cancels
-([Rust servers](#rust-servers)). Its Dockerfile builds an image as a server's
-does, and `stack build` and `stack deploy` build and pin it beside the
-servers'.
+([Rust servers](#rust-servers)). A job serves no request, so it is given
+no callers field: where its API has one, the TypeScript job loads the
+API's config with `loadBackgroundEnvConfig()`, and the Rust job with
+`load_background_env_config()`, which leave the field without issuers.
+Its Dockerfile builds an image as a server's does, and `stack build` and
+`stack deploy` build and pin it beside the servers'.
 
 `stack dev` builds each job with the servers and runs it on its schedule
 while the environment runs, never two runs at once, each line of a run's
