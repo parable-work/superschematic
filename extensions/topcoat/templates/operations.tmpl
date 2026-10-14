@@ -8,6 +8,13 @@
 //! shows or hides what the operation does. An operation without a call
 //! still has its guard, whose doc says why.
 //!
+{{- if .Paged }}
+//! A paged operation's call (D60) takes the page asked for in its `Args`,
+//! `page`, which `PageRequest::first(limit)` or `PageRequest::after(next,
+//! limit)` builds and `check` holds to the route's limits, and returns the
+//! page, its items and the cursor of the next.
+//!
+{{- end }}
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
 //! under the controls the app gives it.
@@ -16,6 +23,9 @@
 
 use crate::Setup;
 use crate::api::operations;
+{{- if .Paged }}
+use crate::api::runtime;
+{{- end }}
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
 use topcoat::context::{Cx, app_context};

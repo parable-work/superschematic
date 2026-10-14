@@ -84,6 +84,27 @@ impl Choices {
     }
 {{- end }}
 
+{{- if .References }}
+
+    /// These choices over `base`'s: each field these name answers from
+    /// these, and any other from `base`. The app's choices over those a
+    /// reference gives (D61, `references`), which then apply only where the
+    /// app names nothing.
+    #[must_use]
+    pub fn or(self, base: Choices) -> Self {
+        let mut fields: Vec<(String, Vec<Choice>)> = base
+            .fields
+            .iter()
+            .filter_map(|(name, options)| {
+                let field = name.strip_prefix(base.at.as_str())?;
+                Some((format!("{}{field}", self.at), options.clone()))
+            })
+            .collect();
+        fields.extend(self.fields.iter().cloned());
+        Self { fields: Arc::new(fields), at: self.at }
+    }
+{{- end }}
+
     /// The choices of the object or the rows at `field`, by their own
     /// fields' names: `productId` under `lines` is `lines.productId`.
     pub fn under(&self, field: &str) -> Self {

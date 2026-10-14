@@ -81,11 +81,17 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 // writing the build's log to log when it is not nil.
 func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
 	t.Helper()
+	return buildDir(t, names, serviceDir(name), outputRoot, outputs, log)
+}
+
+// buildDir is buildWithNaming of the service in dir, a fixture's or a
+// test's own copy of one.
+func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
+	t.Helper()
 	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	service := serviceDir(name)
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
@@ -211,10 +217,12 @@ func skipped(result *registry.Result, reason string) bool {
 // traffic controls, fixture-views-api, whose result's fields are of every
 // kind a display component renders, fixture-user-routes-api, whose users
 // are the core user model's (D50), fixture-args-api, whose arguments make
-// argument forms, and fixture-pages-api, whose resources make pages, with
-// testdata/golden/<service>; -update rewrites them.
+// argument forms, fixture-pages-api, whose resources make pages, and
+// fixture-console-api, whose lists page, whose ids refer to products and
+// whose lists search, with testdata/golden/<service>; -update rewrites
+// them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -575,9 +583,10 @@ type crateOptions struct {
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
 // alike: rustOutputs, with the pages on, their lists live, for
-// fixture-pages-api, the one fixture whose crate has them.
+// fixture-pages-api and fixture-console-api, the fixtures whose crates
+// have them.
 func outputsOf(service string) map[string]any {
-	if service == pagesService {
+	if service == pagesService || service == consoleService {
 		return livePagesOutputs()
 	}
 	return rustOutputs()

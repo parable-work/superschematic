@@ -33,6 +33,10 @@ type argForm struct {
 	// Input is the input's form, which the argument form embeds; nil for an
 	// operation without an input.
 	Input *argInput
+	// Paged marks a @paginated operation's form (D60): it holds the page
+	// asked for, `cursor` and `limit`, as the query sends them, renders no
+	// control for either, and reads them by the route's rules.
+	Paged bool
 	// Choosable reports whether a control takes the app's choices,
 	// UsesForm whether the component's view reads the form, and Body is
 	// the view.
@@ -61,6 +65,9 @@ type argField struct {
 	// whether it has one.
 	Default    string
 	HasDefault bool
+	// Search marks the operation's search text (D62): a search box, the
+	// form's first control.
+	Search bool
 }
 
 // The kinds of argument besides an input form's (kindValue, kindGroup).
@@ -74,6 +81,36 @@ const (
 
 // IsGet reports whether the form is a filter, sent by GET.
 func (f argForm) IsGet() bool { return f.Method == "get" }
+
+// Shown reports whether the component renders a control: an argument's
+// that its path does not carry, or the input's fields. A paged list's
+// form without a filter holds its page alone, and a page renders no form
+// for it.
+func (f argForm) Shown() bool { return f.ShownArgs() || f.Input != nil }
+
+// HasSearch reports whether an argument is the operation's search text
+// (D62), which a page's filter form marks as a search.
+func (f argForm) HasSearch() bool {
+	for _, field := range f.Fields {
+		if field.Search {
+			return true
+		}
+	}
+	return false
+}
+
+// QueryFields are the arguments a filter's query carries, in control
+// order: every argument its path does not carry. A paged list's links
+// carry them (query_pairs).
+func (f argForm) QueryFields() []*argField {
+	var out []*argField
+	for _, field := range f.Fields {
+		if field.Kind != kindPath {
+			out = append(out, field)
+		}
+	}
+	return out
+}
 
 // IsPath and IsRepeated are kind tests for the template.
 func (f *argField) IsPath() bool     { return f.Kind == kindPath }
@@ -121,19 +158,20 @@ func (c *crate) FormsUseTypes() bool {
 // argFormsOf is an argument form per operation of inProcess that a form
 // submits, sorted by name: a GET operation with a query argument, whose
 // form is a filter (a GET whose arguments its path carries alone is a
-// link), and any other operation with an argument beside its input (one
-// with only a path argument is a button). inputs are the input forms'
-// structs by type: an operation whose input has none gets no argument
-// form, nor does one with an argument named as one of its input's fields,
-// and log says why.
+// link), a paged one (D60), whose page its query carries, and any other
+// operation with an argument beside its input (one with only a path
+// argument is a button). inputs are the input forms' structs by type: an
+// operation whose input has none gets no argument form, nor does one with
+// an argument named as one of its input's fields, and log says why.
 func argFormsOf(schemas schemaSet, inProcess []declared, inputs map[string]*formStruct, log func(format string, args ...any)) ([]argForm, error) {
 	var forms []argForm
 	for _, d := range inProcess {
 		e := d.endpoint
-		if len(e.PathArgs)+len(e.QueryArgs)+len(e.BodyArgs) == 0 {
+		paged := e.Page != nil
+		if len(e.PathArgs)+len(e.QueryArgs)+len(e.BodyArgs) == 0 && !paged {
 			continue
 		}
-		if strings.EqualFold(e.Method, "GET") && len(e.QueryArgs) == 0 {
+		if strings.EqualFold(e.Method, "GET") && len(e.QueryArgs) == 0 && !paged {
 			log("  - topcoat: no argument form for %s.%s: a GET whose arguments its path carries is a link\n", e.Namespace, e.Name)
 			continue
 		}
@@ -169,6 +207,7 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		Output:    o.Output,
 		Method:    method,
 		IDBase:    kebabCase(e.Namespace) + "-" + kebabCase(e.Name),
+		Paged:     e.Page != nil,
 	}
 	// The input's fields and the arguments share the form's names.
 	names := map[string]string{}
@@ -214,6 +253,8 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 			f.Fields = append(f.Fields, s.argField(arg, param, place.location, method == "get"))
 		}
 	}
+	// The search text is the form's first control (D62).
+	sort.SliceStable(f.Fields, func(i, j int) bool { return f.Fields[i].Search && !f.Fields[j].Search })
 	r := newFormRenderer()
 	r.arguments(f, 2)
 	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
@@ -290,6 +331,11 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 		}
 	case boolean && filter:
 		af.booleanSelect()
+	case arg.Search && f.Kind == kindValue && f.Read == "text":
+		// The search text is a search box labeled Search, with its rules'
+		// attributes, which no choices make a select (D62).
+		af.Search = true
+		f.Control, f.Label, f.Choosable = "search", "Search", false
 	}
 	return af
 }

@@ -22,7 +22,11 @@
 // titles and its types' @display. When outputs.topcoat.pages asks for
 // them, pages under a prefix list, show, create, edit, delete and act on
 // each resource the operations' REST paths describe, through those calls,
-// forms and components, with a layout, a nav and an index.
+// forms and components, with a layout, a nav and an index. A paged
+// operation's call, form, procedure and list take and return its page
+// (D60); a value that refers to an item is a select of the items in a form
+// and its item's label in a component, from the operation that lists them
+// (D61); and a search argument is a form's search box (D62).
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.

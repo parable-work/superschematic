@@ -192,6 +192,14 @@ type pageResource struct {
 	RowRecord string
 	RowTable  string
 	LinkExpr  string
+	// RowLabels and DetailLabels are the references' functions that name
+	// what the rows' and the item's records refer to (D61), empty when
+	// they refer to nothing.
+	RowLabels    string
+	DetailLabels string
+	// BaseExpr is the list's path, which a paged list's links carry its
+	// query after (D60).
+	BaseExpr string
 	// DetailRecord and DetailView render an item; HeadingExpr is its
 	// heading, from `record`, and TitleExpr its title for the trail, an
 	// Option<String> from `item`, the detail's result, empty when its type
@@ -212,7 +220,14 @@ type pageResource struct {
 
 // NeedsHref reports whether pages.rs writes <ident>_href.
 func (r *pageResource) NeedsHref() bool {
-	return r.Detail != nil || r.Create != nil || r.Delete != nil || r.IsSection
+	return r.Detail != nil || r.Create != nil || r.Delete != nil || r.IsSection || r.List != nil && r.List.Paged
+}
+
+// Filters reports whether the list's page renders a filter form: its
+// argument form shows a control. A paged list without a filter has an
+// argument form for its page alone, and renders none.
+func (r *pageResource) Filters() bool {
+	return r.List != nil && r.List.ArgForm != nil && r.List.ArgForm.Shown()
 }
 
 // Linked reports whether the list's rows link to their items' pages.
@@ -259,6 +274,24 @@ type pageOp struct {
 	Label     string
 	Field     string
 	PrefillFn string
+	// Paged marks a @paginated list (D60): its call returns a page, whose
+	// items, Items, are the rows.
+	Paged bool
+	Items string
+	// ChoicesFn is the references' function that gives the form the page
+	// renders its options (D61), empty when it refers to nothing.
+	ChoicesFn string
+}
+
+// ChoicesExpr is the Rust of the choices the operation's form takes on
+// the pages of resource: the app's, and each reference's options under
+// them.
+func (o *pageOp) ChoicesExpr(resource string) string {
+	app := "choices_of(cx, " + rustString(resource) + ")"
+	if o.ChoicesFn == "" {
+		return app
+	}
+	return "references::" + o.ChoicesFn + "(cx, " + app + ").await"
 }
 
 // routeField is a path argument of an operation: the page route's
@@ -377,6 +410,7 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 	}
 	b := &pageBuilder{
 		m:        m,
+		refs:     c.References,
 		schemas:  schemas,
 		forms:    forms,
 		records:  map[string]record{},
@@ -483,6 +517,7 @@ func (b *pageBuilder) controls() {
 // pageBuilder builds each resource's pages.
 type pageBuilder struct {
 	m        *pagesModel
+	refs     *referencesModel
 	schemas  schemaSet
 	forms    pageForms
 	records  map[string]record
@@ -715,6 +750,10 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if r.Detail != nil && rowType == itemType {
 			r.LinkExpr = b.linkExpr(r, rec)
 		}
+		r.RowLabels = b.refs.RecordLabels(rec.Name)
+		if r.List.Paged {
+			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
+		}
 	}
 	if r.Detail != nil {
 		rec, ok := b.records[itemType]
@@ -723,6 +762,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 			return fmt.Errorf("topcoat: pages: the detail of %s returns %s, which has no record or no detail", r.Words, itemType)
 		}
 		r.DetailRecord, r.DetailView = rec.Name, v.Detail
+		r.DetailLabels = b.refs.RecordLabels(rec.Name)
 		b.m.importName("records", rec.Name)
 		b.m.importName("views", v.Detail)
 		r.HeadingExpr = rustString(r.Noun) + ".to_owned()"
@@ -790,11 +830,22 @@ func (b *pageBuilder) linkExpr(r *pageResource, rec record) string {
 }
 
 // idField is the record field the detail's path parameter names, by its
-// JSON name, when it holds a text or a whole number; else nil.
+// JSON name, when it holds a text or a whole number; else nil. A parameter
+// whose argument refers to the detail's own result type (RefersTo, D61)
+// names the reference's value field, `id` unsaid: `products/{productId}`
+// and `id`.
 func idField(detail *classified, rec record) *recordField {
-	last := detail.segs[len(detail.segs)-1]
+	name := detail.segs[len(detail.segs)-1].param
+	for _, arg := range detail.d.op.Arguments {
+		if arg.Name == name && arg.References != nil && arg.References.Type == detail.d.op.TypeRef.Name {
+			name = arg.References.Value
+			if name == "" {
+				name = ir.DefaultReferenceValue
+			}
+		}
+	}
 	for i, field := range rec.Fields {
-		if field.JSONName != last.param {
+		if field.JSONName != name {
 			continue
 		}
 		switch field.Type {
@@ -837,7 +888,12 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		Snake:    info.SnakeName,
 		ArgsName: info.ArgsName,
 		Output:   info.Output,
+		Items:    info.Output,
 		Verb:     c.verb,
+		Paged:    e.Page != nil,
+	}
+	if o.Paged {
+		o.Items = "Vec<" + e.Page.ItemRustType + ">"
 	}
 	if strings.Contains(o.Output, "types::") {
 		b.m.use("types")
@@ -903,9 +959,11 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		o.PrefillFn = b.prefill(input.Struct, r.node.detail.d.op.TypeRef.Name)
 	}
 	// A page renders the form of every operation it submits; an item's
-	// page only submits its detail's, through call_<op>, and renders none.
-	if o.FormName() != "" && c.kind != pageDetail {
+	// page only submits its detail's, through call_<op>, and renders none,
+	// and a paged list without a filter renders none for its page.
+	if o.FormName() != "" && c.kind != pageDetail && (o.ArgForm == nil || o.ArgForm.Shown() || c.kind != pageList) {
 		b.m.importName("forms", o.FormComponent())
+		o.ChoicesFn = b.refs.FormChoices(o.FormName())
 	}
 	b.m.Ops = append(b.m.Ops, o)
 	return o, nil
@@ -1088,8 +1146,14 @@ func (b *pageBuilder) finish() {
 	m := b.m
 	m.importName("forms", "Refusal")
 	for _, o := range m.Ops {
+		if o.ChoicesFn != "" {
+			m.use("references")
+		}
 		if !o.Call {
 			continue
+		}
+		if o.Paged {
+			m.use("runtime")
 		}
 		if o.Memoized {
 			m.use("memoize")
@@ -1106,7 +1170,19 @@ func (b *pageBuilder) finish() {
 			m.use("seg")
 		}
 		if r.List != nil && r.List.ArgForm != nil {
-			m.use("form", "alone", "pageRefusal")
+			m.use("form", "pageRefusal")
+			if r.Filters() {
+				m.use("alone")
+			}
+		}
+		if r.RowLabels != "" || r.DetailLabels != "" {
+			m.use("references")
+		}
+		if r.List != nil && r.List.Paged {
+			m.use("pageQuery")
+			if !r.Live || r.IsSection {
+				m.use("pager")
+			}
 		}
 		posts := append([]*pageOp{r.Create, r.Update, r.Delete}, r.Actions...)
 		for _, o := range posts {

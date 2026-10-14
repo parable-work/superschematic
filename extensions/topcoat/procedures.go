@@ -23,6 +23,10 @@ type procedure struct {
 	ArgsName   string
 	ArgsRecord string
 	Args       []procedureArg
+	// Paged marks a @paginated operation (D60): its arguments record takes
+	// the page asked for, `cursor` and `limit`, and its result is its page
+	// record.
+	Paged bool
 	// Output is the result's record type, "()" without a result, and
 	// ReadOutput the expression that reads it from the result's JSON
 	// (`json`).
@@ -111,7 +115,15 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)
 			}
 		}
-		if endpoint.OutputRustType != "()" {
+		switch {
+		case endpoint.Page != nil:
+			page, err := records.pageOf(d)
+			if err != nil {
+				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)
+			}
+			p.Paged = true
+			p.Output, p.ReadOutput = page.Name, page.Name+"::from_wire(&json)"
+		case endpoint.OutputRustType != "()":
 			s, err := records.fieldShape(op.TypeRef, false)
 			if err != nil {
 				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)

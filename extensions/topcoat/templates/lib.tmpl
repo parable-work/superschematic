@@ -4,7 +4,7 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
-{{- if .Records }}
+{{- if .HasRecords }}
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
@@ -28,6 +28,11 @@
 {{- end }}
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
+{{- end }}
+{{- if .References }}
+//! `references` names what a value that refers to an item holds (D61): a
+//! form's options and a display component's labels, from the operation
+//! that lists the items.
 {{- end }}
 {{- if .HasChoices }}
 //! `choices` holds the values the app names for a field, which a form
@@ -56,8 +61,13 @@ pub mod pages;
 {{- if .Procedures }}
 pub mod procedures;
 {{- end }}
-{{- if .Records }}
+{{- if .HasRecords }}
 pub mod records;
+{{- end }}
+{{- if .References }}
+pub mod references;
+{{- end }}
+{{- if .HasRecords }}
 mod wire;
 {{- end }}
 {{- if .Views }}

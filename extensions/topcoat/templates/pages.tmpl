@@ -45,6 +45,9 @@ use std::fmt::Write as _;
 use std::time::Duration;
 {{- end }}
 
+{{- if .Pages.Uses "runtime" }}
+use crate::api::runtime;
+{{- end }}
 {{- if .Pages.Uses "controls" }}
 use crate::api::runtime::{ApiError, RateLimiter};
 {{- end }}
@@ -55,6 +58,9 @@ use crate::choices::Choices;
 use crate::forms::{ {{- .Pages.Imports "forms" -}} };
 use crate::operations;
 use crate::records::{ {{- .Pages.Imports "records" -}} };
+{{- if .Pages.Uses "references" }}
+use crate::references;
+{{- end }}
 use crate::views::{ {{- .Pages.Imports "views" -}} };
 {{- if .Pages.Uses "routeValue" }}
 use serde::de::DeserializeOwned;
@@ -267,6 +273,52 @@ fn decode(segment: &str) -> String {
 /// empty.
 fn title_or(title: &str, noun: &str) -> String {
     if title.trim().is_empty() { noun.to_owned() } else { title.to_owned() }
+}
+{{- end }}
+{{- if .Pages.Uses "pageQuery" }}
+
+/// A list's query for one of its pages (D60): `pairs`, the filter's and
+/// the limit, then `cursor` when given, each name and value
+/// percent-encoded.
+fn page_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
+    let cursor = cursor.map(|cursor| ("cursor", cursor));
+    let mut query = String::new();
+    for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(cursor) {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(&encode(name));
+        query.push('=');
+        query.push_str(&encode(value));
+    }
+    query
+}
+
+/// A list's page: its path, then its query unless that is empty.
+fn page_href(base: &str, query: &str) -> String {
+    if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
+}
+{{- end }}
+{{- if .Pages.Uses "pager" }}
+
+/// The links of a paged list (D60), after its table: the first page's while
+/// the page is a later one, and the next page's while one follows, each
+/// `base` with its query. Nothing when neither applies: a list has no
+/// previous page, nor a page's number, which a cursor cannot give.
+#[component]
+async fn pager(base: String, first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        if first.is_some() || next.is_some() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first {
+                    <a rel="first" href=(page_href(&base, &first))>"First page"</a>
+                }
+                if let Some(later) = next {
+                    <a rel="next" href=(page_href(&base, &later))>"Next page"</a>
+                }
+            </nav>
+        }
+    })
 }
 {{- end }}
 {{- if .Pages.Uses "pageRefusal" }}
@@ -735,7 +787,7 @@ fn {{ .Ident }}_item_href({{ declare .ItemParams "&str" }}) -> Option<String> {
 {{- end }}
 {{- with .List }}
 
-{{ doc (printf "The list of %s%s, when the caller may list them." $r.PluralLower (or (and .ArgForm ", filtered by the query") "")) }}
+{{ doc (printf "The list of %s%s, when the caller may list them." $r.PluralLower (or (and $r.Filters ", filtered by the query") (and .Paged ", a page at a time") "")) }}
 #[page({{ rustString $r.Path }})]
 pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if and .ArgForm (not $r.Live) }}, Form(filter): Form<{{ .ArgForm.Name }}>{{ end }}) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
@@ -748,11 +800,18 @@ pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if and .ArgForm (not $r.Live) }}
     })
 }
 
-{{ doc (printf "The %s%s%s.%s" $r.PluralLower (or (and .ArgForm " the filter finds, after the filter, which answers with its refusal's status") "") (or (and $r.Create ", and a link to the new page when the caller may create one") "") (or (and $r.Live (printf " A shard at `%s`: when the app loads Topcoat's runtime, the filter's submit sends the query it holds, and the list renders again in place. The shard reads the query as the page reads its own, and its request, which meets no page's guard, is admitted and checked by the list's call." $r.LivePath)) "")) }}
+{{ doc (printf "The %s%s%s%s.%s" $r.PluralLower (or (and $r.Filters " the filter finds, after the filter, which answers with its refusal's status") "") (or (and .Paged (printf ", a page at a time (D60): the query's cursor and limit ask for the page, and after the table the links to the next page and, on a later one, to the first carry %s" (or (and $r.Filters "the filter and the limit") "the limit"))) "") (or (and $r.Create ", and a link to the new page when the caller may create one") "") (or (and $r.Live (printf " A shard at `%s`: when the app loads Topcoat's runtime, %s, and the list renders again in place. The shard reads the query as the page reads its own, and its request, which meets no page's guard, is admitted and checked by the list's call." $r.LivePath (or (and $r.Filters .Paged "the filter's submit sends the query it holds, and a page's link its own") (and $r.Filters "the filter's submit sends the query it holds") "a page's link sends its query"))) "")) }}
 {{- if $r.Live }}
 #[shard({{ rustString $r.LivePath }})]
 async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}, query: String, next: String) -> topcoat::Result<impl View> {
+{{- if and .Paged (not $r.Filters) }}
+    // The page's query: the request's at first, then what a link sets.
+{{- else if .Paged }}
+    // The filter's query: the page's at first, then what its submit or a
+    // link sets.
+{{- else }}
     // The filter's query: the page's at first, then what its submit sets.
+{{- end }}
     let query = signal(cx, move || query);
     let filter = Form::<{{ .ArgForm.Name }}>::from_bytes(query.get().as_bytes())?.0;
 {{- else }}
@@ -770,11 +829,27 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
     };
 {{- end }}
     let listed = filter.submit(cx).await;
+{{- if $r.Filters }}
     let errors = match &listed {
         Err(refusal) if !alone(refusal, &[{{ .RouteNames }}]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = choices_of(cx, {{ rustString $r.Name }});
+    let choices = {{ .ChoicesExpr $r.Name }};
+{{- end }}
+{{- if .Paged }}
+    // The links of the page: the first page's while a cursor was sent, and
+    // the next page's while one follows, each with the query's {{ if $r.Filters }}filter and {{ end }}limit.
+    let base = {{ $r.BaseExpr }};
+    let pairs = filter.query_pairs();
+    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let (listed, next_page) = match listed {
+        Ok(page) => {
+            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            (Ok(page.items), next_page)
+        }
+        Err(refusal) => (Err(refusal), None),
+    };
+{{- end }}
 {{- else }}
     let listed = call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await;
 {{- end }}
@@ -789,15 +864,15 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
             <p class="ss-actions"><a class="ss-new" href=(new_href)>{{ rustString $r.CreateLabel }}</a></p>
         }
 {{- end }}
-{{- if .ArgForm }}
+{{- if $r.Filters }}
 {{- if $r.Live }}
-        <form method="get" class="ss-filter" data-ss-live={{ rustString $r.Ident }} @submit=$(|e: Event| {
+        <form method="get" class="ss-filter"{{ if .ArgForm.HasSearch }} role="search"{{ end }} data-ss-live={{ rustString $r.Ident }} @submit=$(|e: Event| {
             e.prevent_default();
             raw!({{ rustString $r.LiveSubmit }}, ())
         })>
             <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
 {{- else }}
-        <form method="get" class="ss-filter">
+        <form method="get" class="ss-filter"{{ if .ArgForm.HasSearch }} role="search"{{ end }}>
 {{- end }}
             {{ .ArgForm.Component }}(form: filter, errors: errors, choices: choices)
             <button type="submit">"Filter"</button>
@@ -807,23 +882,59 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
             Err(refusal) if alone(&refusal, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
             Err(refusal) => (refusal.status),
         }
+{{- else if .ArgForm }}
+        match listed {
+            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
+            Err(refusal) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
+        }
 {{- else }}
         match listed {
             Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
             Err(refusal) => refused(refusal: refusal, next: next),
         }
 {{- end }}
+{{- if and .Paged $r.Live }}
+        // Each link sets the shard's query, which renders the list again in
+        // place, and puts it in the address bar; without the runtime it is
+        // a link to the page.
+        if first_page.is_some() || next_page.is_some() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first_page {
+                    let href = page_href(&base, &first);
+                    <a rel="first" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(first.to_owned())
+                    })>"First page"</a>
+                }
+                if let Some(later) = next_page {
+                    let href = page_href(&base, &later);
+                    <a rel="next" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(later.to_owned())
+                    })>"Next page"</a>
+                }
+            </nav>
+        }
+{{- else if .Paged }}
+        pager(base: base, first: first_page, next: next_page)
+{{- end }}
     })
 }
 
-{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s." $r.Plural $r.RowTable (or (and $r.Linked ", each row linked to its page") "")) }}
+{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s%s." $r.Plural $r.RowTable (or (and $r.RowLabels ", over the labels of what they refer to") "") (or (and $r.Linked ", each row linked to its page") "")) }}
 #[component]
-async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Output }}) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Items }}) -> topcoat::Result<impl View> {
     let rows: Vec<{{ $r.RowRecord }}> = items.iter().map({{ $r.RowRecord }}::from).collect();
 {{- if $r.Linked }}
     let hrefs: Vec<String> = rows.iter().map(|row| {{ $r.LinkExpr }}).collect();
 {{- end }}
+{{- if $r.RowLabels }}
+    let choices = references::{{ $r.RowLabels }}(cx, &rows, choices_of(cx, {{ rustString $r.Name }})).await;
+{{- else }}
     let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- end }}
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">{{ rustString (printf "There are no %s." $r.PluralLower) }}</p>
@@ -835,7 +946,7 @@ async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColPara
 {{- end }}
 {{- if .IsSection }}
 
-{{ doc (printf "The %s of an item, on the item's page: %s%s%s." .PluralLower (or (and .List "the list, when the caller may list them") "") (or (and .List .Create ", and ") "") (or (and .Create "a link to the new page, when the caller may create one") "")) }}
+{{ doc (printf "The %s of an item, on the item's page: %s%s%s." .PluralLower (or (and .List (or (and .List.Paged "the list's first page, when the caller may list them, and a link to the next") "the list, when the caller may list them")) "") (or (and .List .Create ", and ") "") (or (and .Create "a link to the new page, when the caller may create one") "")) }}
 #[component]
 async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> topcoat::Result<impl View> {
 {{- with .List }}
@@ -843,6 +954,13 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
         Ok(_) => Some(call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await),
         Err(_) => None,
     };
+{{- if .Paged }}
+    let next_page = match &listed {
+        Some(Ok(page)) => page.next.as_ref().map(|next| page_query(&[], Some(next.as_str()))),
+        _ => None,
+    };
+    let listed = listed.map(|listed| listed.map(|page| page.items));
+{{- end }}
 {{- end }}
 {{- with .Create }}
     let creates = operations::can_{{ .Snake }}(cx).await.is_ok();
@@ -867,6 +985,9 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
                     Some(Err(refusal)) => <p class="ss-refused">(messages(&refusal).join(" "))</p>,
                     None => "",
                 }
+{{- if .List.Paged }}
+                pager(base: href.clone(), first: None, next: next_page)
+{{- end }}
 {{- end }}
             </section>
         }
@@ -901,6 +1022,12 @@ async fn {{ $r.Ident }}_item(
         })
         .map_err(Refusal::clone);
     let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- if $r.DetailLabels }}
+    let labels = match &found {
+        Ok((_, record)) => references::{{ $r.DetailLabels }}(cx, std::slice::from_ref(record), choices.clone()).await,
+        Err(_) => choices.clone(),
+    };
+{{- end }}
 {{- with $r.Update }}
     let edits = operations::can_{{ .Snake }}(cx).await.is_ok();
 {{- end }}
@@ -912,13 +1039,19 @@ async fn {{ $r.Ident }}_item(
         Some(sent) => Some(sent),
         None => operations::can_{{ .Snake }}(cx).await.is_ok().then(|| ({{ .NewFormOwned }}, FormErrors::default())),
     };
+{{- if .ChoicesFn }}
+    let {{ .Field }}_choices = match &{{ .Field }} {
+        Some(_) => references::{{ .ChoicesFn }}(cx, choices.clone()).await,
+        None => choices.clone(),
+    };
+{{- end }}
 {{- end }}
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
             Ok((heading, record)) => {
                 <h1>(heading)</h1>
-                {{ $r.DetailView }}(record: record, choices: choices.clone())
+                {{ $r.DetailView }}(record: record, choices: {{ if $r.DetailLabels }}labels{{ else }}choices.clone(){{ end }})
 {{- if or $r.Update $r.Delete }}
                 if {{ if and $r.Update $r.Delete }}edits || deletes{{ else if $r.Update }}edits{{ else }}deletes{{ end }} {
                     <p class="ss-actions">
@@ -938,7 +1071,7 @@ async fn {{ $r.Ident }}_item(
 {{- range $r.Actions }}
                 if let Some((form, errors)) = {{ .Field }} {
                     <form method="post" action=(format!("{href}/{{ .Verb }}")) class="ss-action" data-action={{ rustString .Verb }}>
-                        {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices.clone())
+                        {{ .ArgForm.Component }}(form: form, errors: errors, choices: {{ if .ChoicesFn }}{{ .Field }}_choices{{ else }}choices.clone(){{ end }})
                         <button type="submit">{{ rustString .Label }}</button>
                     </form>
                 }
@@ -986,7 +1119,7 @@ pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx, {{ rustString $r.Name }});
+    let choices = {{ .ChoicesExpr $r.Name }};
     Ok(view! {
         <h1>{{ rustString $r.CreateLabel }}</h1>
         <form method="post" class="ss-form">
@@ -1039,7 +1172,7 @@ pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Na
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx, {{ rustString $r.Name }});
+    let choices = {{ .ChoicesExpr $r.Name }};
     Ok(view! {
         <h1>{{ rustString (printf "Edit the %s" $r.NounLower) }}</h1>
         <form method="post" class="ss-form">
@@ -1087,14 +1220,31 @@ pub async fn {{ $r.Ident }}_destroy_page(cx: &Cx, Form(form): Form<{{ .ArgForm.N
 async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }}, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
     let href = {{ $r.ItemExpr }};
     let found = call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }}).await.map({{ $r.DetailRecord }}::from).map_err(Refusal::clone);
+{{- if or $r.DetailLabels .ChoicesFn }}
+    let app = choices_of(cx, {{ rustString $r.Name }});
+{{- if $r.DetailLabels }}
+    let labels = match &found {
+        Ok(record) => references::{{ $r.DetailLabels }}(cx, std::slice::from_ref(record), app.clone()).await,
+        Err(_) => app.clone(),
+    };
+{{- else }}
+    let labels = app.clone();
+{{- end }}
+{{- if .ChoicesFn }}
+    let choices = references::{{ .ChoicesFn }}(cx, app).await;
+{{- else }}
+    let choices = app;
+{{- end }}
+{{- else }}
     let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- end }}
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
             Ok(record) => {
                 <h1>{{ rustString (printf "Delete the %s" $r.NounLower) }}</h1>
                 <p class="ss-confirm">{{ rustString (printf "Delete this %s? It cannot be undone." $r.NounLower) }}</p>
-                {{ $r.DetailView }}(record: record, choices: choices.clone())
+                {{ $r.DetailView }}(record: record, choices: {{ if or $r.DetailLabels .ChoicesFn }}labels{{ else }}choices.clone(){{ end }})
                 <form method="post" class="ss-form" data-action="delete">
                     {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices)
                     <button type="submit">{{ rustString (printf "Delete the %s" $r.NounLower) }}</button>
