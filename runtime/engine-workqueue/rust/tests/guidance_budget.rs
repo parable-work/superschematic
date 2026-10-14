@@ -1,0 +1,502 @@
+//! Budget's guidance, held to the TypeScript package's text for the same
+//! configs (`typescript/src/guidance/budget.ts`, as `dist/guidance/budget.js`
+//! returns it): each meter's limit, reservation, scope and day, what a
+//! reservation needs, what usage over a limit does, and the refusals its
+//! guard adds to a scope link's moves, a limit field's updates and a claim.
+
+mod common;
+
+use serde_json::Value;
+
+use superschematic_engine::Behavior;
+use superschematic_engine_workqueue::{Budget, BudgetConfig, BudgetMeter, BudgetTransition};
+
+use common::{as_json, operation, target};
+
+/// The TypeScript guidance for the configs below.
+const EXPECTED: &str = r#"{
+  "fixture": {
+    "summary": "Meters: cpuSeconds (limit 3600; reserving 600 at a claim; counted per UTC day). A reservation fits while used plus reserved plus the amount is within the limit, here and in each enclosing scope; it is made under the active lease and settled when the lease ends.",
+    "operations": {
+      "claim": {
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          }
+        ]
+      },
+      "reserve": {
+        "useWhen": "Use to reserve budget before work: with no meter, every meter's configured amount (cpuSeconds). It needs the active lease; a claim reserves for you.",
+        "doNotUseWhen": "Do not use to ask whether it would fit; call checkReserve.",
+        "success": "Returns what it reserved, by meter.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          },
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease, or claim the instance, then reserve."
+          }
+        ]
+      },
+      "checkReserve": {
+        "useWhen": "Use to ask whether reserve would fit now, here and in every scope, without reserving.",
+        "success": "Returns fits, until (the next UTC day when that alone makes it fit, else null) and the scopes it read."
+      },
+      "recordUsage": {
+        "useWhen": "Use to record what the work used, by meter; it is never refused for its amount, and releases the reservation it covers.",
+        "success": "Returns used, what it released, and the overruns: each instance up the chain now over its limit."
+      },
+      "settle": {
+        "useWhen": "Use to release what the instance's own reservations hold; the end of a lease settles them too.",
+        "success": "Returns what it released, by meter."
+      },
+      "setLimit": {
+        "useWhen": "Use to raise or lower a meter's limit; it needs permission jobs.budget, and never goes below what is used and reserved.",
+        "success": "Returns the meter, its limit and the one before.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          }
+        ]
+      },
+      "reserveFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          }
+        ]
+      },
+      "settleFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      },
+      "recordUsageFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      }
+    }
+  },
+  "scoped": {
+    "summary": "Meters: cpu (no limit; reserving the instance's timeLimitMs at a claim; drawn from the scope its pool link points at). A reservation fits while used plus reserved plus the amount is within the limit, here and in each enclosing scope; it lasts until settle.",
+    "operations": {
+      "link": {
+        "doNotUseWhen": "Do not move pool while a reservation is held through it.",
+        "errors": [
+          {
+            "code": "scope_reserved",
+            "commonCorrection": "Settle the reservation held through the link first."
+          }
+        ]
+      },
+      "unlink": {
+        "doNotUseWhen": "Do not move pool while a reservation is held through it.",
+        "errors": [
+          {
+            "code": "scope_reserved",
+            "commonCorrection": "Settle the reservation held through the link first."
+          }
+        ]
+      },
+      "reserve": {
+        "useWhen": "Use to reserve budget before work: with no meter, every meter's configured amount (cpu).",
+        "doNotUseWhen": "Do not use to ask whether it would fit; call checkReserve.",
+        "success": "Returns what it reserved, by meter.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          }
+        ]
+      },
+      "checkReserve": {
+        "useWhen": "Use to ask whether reserve would fit now, here and in every scope, without reserving.",
+        "success": "Returns fits, until (the next UTC day when that alone makes it fit, else null) and the scopes it read."
+      },
+      "recordUsage": {
+        "useWhen": "Use to record what the work used, by meter; it is never refused for its amount, and releases the reservation it covers.",
+        "success": "Returns used, what it released, and the overruns: each instance up the chain now over its limit."
+      },
+      "settle": {
+        "useWhen": "Use to release what the instance's own reservations hold.",
+        "success": "Returns what it released, by meter."
+      },
+      "setLimit": {
+        "doNotUseWhen": "Do not use: the config names no limitPermission, so limits do not change.",
+        "success": "Returns the meter, its limit and the one before.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the config names no limitPermission, so limits do not change."
+          }
+        ]
+      },
+      "reserveFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          }
+        ]
+      },
+      "settleFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      },
+      "recordUsageFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      }
+    }
+  },
+  "full": {
+    "summary": "Meters: cpu (limit the instance's cap, else 80; reserving the instance's estimate, else 60 at a claim; drawn from the scope its run link points at; counted per UTC day); calls (no limit); gpu (limit 10; drawn from the scope its pool link points at); disk (limit the instance's quota; drawn from the scope its run link points at). A reservation fits while used plus reserved plus the amount is within the limit, here and in each enclosing scope; it is made under the active lease and settled when the lease ends. Usage over a limit sends directive meterExceeded to the lease holder and moves status from running or queued to failed.",
+    "operations": {
+      "link": {
+        "doNotUseWhen": "Do not move run or pool while a reservation is held through it.",
+        "errors": [
+          {
+            "code": "scope_reserved",
+            "commonCorrection": "Settle the reservation held through the link first."
+          }
+        ]
+      },
+      "unlink": {
+        "doNotUseWhen": "Do not move run or pool while a reservation is held through it.",
+        "errors": [
+          {
+            "code": "scope_reserved",
+            "commonCorrection": "Settle the reservation held through the link first."
+          }
+        ]
+      },
+      "update": {
+        "doNotUseWhen": "Do not change cap or quota without permission budget.limit or below what is used and reserved.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          }
+        ]
+      },
+      "claim": {
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          }
+        ]
+      },
+      "reserve": {
+        "useWhen": "Use to reserve budget before work: with no meter, every meter's configured amount (cpu, calls, gpu and disk). It needs the active lease; a claim reserves for you.",
+        "doNotUseWhen": "Do not use to ask whether it would fit; call checkReserve.",
+        "success": "Returns what it reserved, by meter.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          },
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease, or claim the instance, then reserve."
+          }
+        ]
+      },
+      "checkReserve": {
+        "useWhen": "Use to ask whether reserve would fit now, here and in every scope, without reserving.",
+        "success": "Returns fits, until (the next UTC day when that alone makes it fit, else null) and the scopes it read."
+      },
+      "recordUsage": {
+        "useWhen": "Use to record what the work used, by meter; it is never refused for its amount, and releases the reservation it covers.",
+        "success": "Returns used, what it released, and the overruns: each instance up the chain now over its limit."
+      },
+      "settle": {
+        "useWhen": "Use to release what the instance's own reservations hold; the end of a lease settles them too.",
+        "success": "Returns what it released, by meter."
+      },
+      "setLimit": {
+        "useWhen": "Use to raise or lower a meter's limit; it needs permission budget.limit, and never goes below what is used and reserved.",
+        "success": "Returns the meter, its limit and the one before.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          }
+        ]
+      },
+      "reserveFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          }
+        ]
+      },
+      "settleFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      },
+      "recordUsageFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      }
+    }
+  },
+  "unnamed": {
+    "summary": "Meters: cpu (limit the instance's cap). A reservation fits while used plus reserved plus the amount is within the limit, here and in each enclosing scope; it lasts until settle. Usage over a limit moves status from open to paused.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "Do not change cap or below what is used and reserved.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the config names no limitPermission, so limits do not change."
+          }
+        ]
+      },
+      "reserve": {
+        "useWhen": "Use to reserve budget before work: with no meter, every meter's configured amount (cpu).",
+        "doNotUseWhen": "Do not use to ask whether it would fit; call checkReserve.",
+        "success": "Returns what it reserved, by meter.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          },
+          {
+            "code": "scope_moved",
+            "commonCorrection": "Settle the reservation held through the old scope first."
+          }
+        ]
+      },
+      "checkReserve": {
+        "useWhen": "Use to ask whether reserve would fit now, here and in every scope, without reserving.",
+        "success": "Returns fits, until (the next UTC day when that alone makes it fit, else null) and the scopes it read."
+      },
+      "recordUsage": {
+        "useWhen": "Use to record what the work used, by meter; it is never refused for its amount, and releases the reservation it covers.",
+        "success": "Returns used, what it released, and the overruns: each instance up the chain now over its limit."
+      },
+      "settle": {
+        "useWhen": "Use to release what the instance's own reservations hold.",
+        "success": "Returns what it released, by meter."
+      },
+      "setLimit": {
+        "doNotUseWhen": "Do not use: the config names no limitPermission, so limits do not change.",
+        "success": "Returns the meter, its limit and the one before.",
+        "errors": [
+          {
+            "code": "below_committed",
+            "commonCorrection": "Name a limit at or above what is used and reserved; details.committed says how much."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the config names no limitPermission, so limits do not change."
+          }
+        ]
+      },
+      "reserveFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "over_limit",
+            "commonCorrection": "Wait for reservations to settle or the day to pass, raise the limit with setLimit, or take other work; details.scope names where it did not fit."
+          }
+        ]
+      },
+      "settleFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      },
+      "recordUsageFor": {
+        "doNotUseWhen": "Do not call it yourself: an instance inside this scope calls it on its scope, as its reserve, settle and recordUsage run.",
+        "errors": [
+          {
+            "code": "exceeds_reservation",
+            "commonCorrection": "Settle or record no more than the instance reserved through this scope."
+          }
+        ]
+      }
+    }
+  }
+}"#;
+
+fn meter(name: &str, spec: BudgetMeter) -> (String, BudgetMeter) {
+    (name.to_owned(), spec)
+}
+
+fn guidance(config: &BudgetConfig, operations: &[&str]) -> Value {
+    let mut on = target(&["Budget"], serde_json::json!({}));
+    on.operations = operations
+        .iter()
+        .map(|name| operation(name, None, true))
+        .collect();
+    let guidance = Budget.hooks().guidance.expect("guidance");
+    as_json(&guidance(&Budget, config, &on))
+}
+
+#[test]
+fn budget_guidance_is_the_typescript_packages_text() {
+    let fixture = BudgetConfig {
+        meters: vec![meter(
+            "cpuSeconds",
+            BudgetMeter {
+                limit: Some(3600),
+                reserve: Some(600),
+                daily: true,
+                ..BudgetMeter::default()
+            },
+        )],
+        limit_permission: Some("jobs.budget".to_owned()),
+        leased: true,
+        ..BudgetConfig::default()
+    };
+    let scoped = BudgetConfig {
+        meters: vec![meter(
+            "cpu",
+            BudgetMeter {
+                reserve_field: Some("timeLimitMs".to_owned()),
+                scope: Some("pool".to_owned()),
+                ..BudgetMeter::default()
+            },
+        )],
+        ..BudgetConfig::default()
+    };
+    let full = BudgetConfig {
+        meters: vec![
+            meter(
+                "cpu",
+                BudgetMeter {
+                    limit: Some(80),
+                    limit_field: Some("cap".to_owned()),
+                    reserve: Some(60),
+                    reserve_field: Some("estimate".to_owned()),
+                    scope: Some("run".to_owned()),
+                    daily: true,
+                },
+            ),
+            meter("calls", BudgetMeter::default()),
+            meter(
+                "gpu",
+                BudgetMeter {
+                    limit: Some(10),
+                    scope: Some("pool".to_owned()),
+                    ..BudgetMeter::default()
+                },
+            ),
+            meter(
+                "disk",
+                BudgetMeter {
+                    limit_field: Some("quota".to_owned()),
+                    scope: Some("run".to_owned()),
+                    ..BudgetMeter::default()
+                },
+            ),
+        ],
+        limit_permission: Some("budget.limit".to_owned()),
+        on_exceeded: Some("meterExceeded".to_owned()),
+        escalate: Some(BudgetTransition {
+            transition: "failed".to_owned(),
+            from: vec!["running".to_owned(), "queued".to_owned()],
+        }),
+        leased: true,
+    };
+    let unnamed = BudgetConfig {
+        meters: vec![meter(
+            "cpu",
+            BudgetMeter {
+                limit_field: Some("cap".to_owned()),
+                ..BudgetMeter::default()
+            },
+        )],
+        escalate: Some(BudgetTransition {
+            transition: "paused".to_owned(),
+            from: vec!["open".to_owned()],
+        }),
+        ..BudgetConfig::default()
+    };
+    let expected: Value = serde_json::from_str(EXPECTED).expect("the expected guidance");
+    for (name, config, operations) in [
+        ("fixture", &fixture, &["claim", "reserve", "acquire"][..]),
+        ("scoped", &scoped, &["link", "unlink", "update"][..]),
+        ("full", &full, &["link", "unlink", "update", "claim"][..]),
+        ("unnamed", &unnamed, &["update"][..]),
+    ] {
+        // Compared as text, so the operations' order counts.
+        assert_eq!(
+            serde_json::to_string_pretty(&guidance(config, operations)).expect("JSON"),
+            serde_json::to_string_pretty(&expected[name]).expect("JSON"),
+            "{name}"
+        );
+    }
+}

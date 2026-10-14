@@ -40,6 +40,10 @@ mod guidance;
 // Milestone 12a: Lease, Assignment, Presence and Retries.
 
 // Milestone 12b: Queue, Budget and Blueprint.
+pub mod budget;
+pub use budget::{
+    Budget, BudgetConfig, BudgetMeter, BudgetTransition, ReserveCheck, ScopeRead, ScopeValue,
+};
 
 use superschematic_engine::BehaviorSet;
 
@@ -64,6 +68,7 @@ const PORTED: &[(&str, Register)] = &[
     // Milestone 12a.
 
     // Milestone 12b.
+    ("Budget", |set| set.with(Budget)),
 ];
 
 /// One work-queue behavior by name, for a host that registers only some
