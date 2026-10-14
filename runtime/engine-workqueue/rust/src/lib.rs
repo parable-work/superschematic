@@ -36,8 +36,14 @@
 //! order.
 
 mod guidance;
+mod moves;
+mod time;
 
 // Milestone 12a: Lease, Assignment, Presence and Retries.
+pub mod lease;
+
+pub use lease::{Lease, LeaseConfig, LeaseDirectOn, LeaseTransition};
+pub use moves::StatusMove;
 
 // Milestone 12b: Queue, Budget and Blueprint.
 
@@ -62,7 +68,7 @@ type Register = fn(BehaviorSet) -> BehaviorSet;
 /// registers them in [`NAMES`]' order.
 const PORTED: &[(&str, Register)] = &[
     // Milestone 12a.
-
+    ("Lease", |set| set.with(Lease)),
     // Milestone 12b.
 ];
 
