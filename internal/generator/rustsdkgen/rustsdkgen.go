@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 //go:embed templates/*.tmpl
@@ -48,6 +49,10 @@ type SDKOutput struct {
 	// validated (ScalarArg.ValueSchema); src/runtime.rs then carries
 	// validate_map_values.
 	ValidatesMapValues bool
+	// HasPagedEndpoints reports whether an operation pages its list (D60);
+	// src/runtime.rs then carries Page and Pager, and src/lib.rs exports
+	// them.
+	HasPagedEndpoints bool
 }
 
 // NamespaceInfo represents a namespace with its endpoints.
@@ -99,6 +104,17 @@ type EndpointInfo struct {
 	// ValidatesMapValues reports whether a map argument's values are
 	// validated (ScalarArg.ValueSchema), every failure reported at once.
 	ValidatesMapValues bool
+	// Page is a paged operation's @paginated (D60), nil for every other.
+	// Its method takes cursor and limit, the last fields of its query
+	// struct, and returns runtime::Page<PageItemRustType>, OutputRustType;
+	// AllMethodName, <method>_all, returns a runtime::Pager that yields
+	// every item, asking for each page with the last one's next. The query
+	// struct derives Default when no field of it is required
+	// (QueryDerivesDefault).
+	Page                *apigen.PageInfo
+	PageItemRustType    string
+	AllMethodName       string
+	QueryDerivesDefault bool
 }
 
 // PathParam represents a path parameter.
@@ -264,12 +280,6 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
-	// Until this generator renders @paginated, it refuses a paged operation
-	// rather than read a list where the servers answer a page (D60).
-	if err := apigen.RefusePages("the Rust SDK (rustsdkgen)", apiOutput); err != nil {
-		return nil, err
-	}
-
 	names := apiOutput.Naming.OrDefault()
 	if crateName == "" {
 		crateName = names.RustSDKCrate(apiOutput.SchemaName)
@@ -334,6 +344,9 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		}
 		if len(converted.PathArgs) > 0 {
 			output.HasPathParams = true
+		}
+		if converted.Page != nil {
+			output.HasPagedEndpoints = true
 		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}
@@ -614,6 +627,9 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			hasRequiredQueryParams = true
 		}
 	}
+	if ep.Page != nil {
+		queryParams = append(queryParams, pageQueryParams(ep.Page)...)
+	}
 
 	// A map argument is a HashMap of its values, each a Vec for a map of
 	// lists, as the route takes it (bodyargs.Map, bodyargs.MapOfLists).
@@ -668,7 +684,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	hasEncryptedBody := ep.Encrypted && apigen.EncryptedBodyMethod(methodHTTP)
 	supportsListAll, listAllPageSize := listAllPagination(ep, pathParams, pathQueryBindings, queryParams, scalarArgs, hasRequiredQueryParams)
 
-	return EndpointInfo{
+	converted := EndpointInfo{
 		MethodName:             toRustMethodName(ep.Name),
 		HTTPMethod:             methodHTTP,
 		PathFormat:             pathFormat,
@@ -699,6 +715,40 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		SupportsListAll:        supportsListAll,
 		ListAllPageSize:        listAllPageSize,
 	}
+	if ep.Page != nil {
+		converted.Page = ep.Page
+		converted.PageItemRustType = outputType(ep.OutputType, ep.OutputArrayDepth()-1)
+		converted.OutputRustType = "runtime::Page<" + converted.PageItemRustType + ">"
+		converted.AllMethodName = converted.MethodName + "_all"
+		converted.QueryDerivesDefault = !hasRequiredQueryParams
+	}
+	return converted
+}
+
+// pageQueryParams are a paged operation's two query parameters (D60),
+// after its own and as optional as they are: cursor, the next of the page
+// before, and limit, the most items the page holds. Each is checked before
+// the request by the bounds the route reads it with.
+func pageQueryParams(page *apigen.PageInfo) []QueryParam {
+	minLength, maxLength := 1, ir.PageCursorMaxLength
+	minLimit, maxLimit := 1.0, float64(page.MaxLimit)
+	return []QueryParam{
+		{
+			Name:              apigen.PageCursorParam,
+			RustName:          toRustFieldName(apigen.PageCursorParam),
+			RustType:          "String",
+			ValidateMinLength: &minLength,
+			ValidateMaxLength: &maxLength,
+			ValidatePattern:   ir.PageCursorPattern,
+		},
+		{
+			Name:        apigen.PageLimitParam,
+			RustName:    toRustFieldName(apigen.PageLimitParam),
+			RustType:    "i64",
+			ValidateMin: &minLimit,
+			ValidateMax: &maxLimit,
+		},
+	}
 }
 
 // listAllPagination decides whether an endpoint gets an auto-paginating
@@ -706,7 +756,8 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 // endpoints are plain GET-style lists: array output, optional-only query
 // params including f64 `limit`/`offset`, and a schema-declared max on
 // `limit` (the server's page-size clamp). Anything with a body, path
-// params, filters, or encryption keeps only the single-page method.
+// params, filters, or encryption keeps only the single-page method, and a
+// @paginated operation gets the cursor-following `{method}_all` instead.
 func listAllPagination(
 	ep apigen.EndpointInfo,
 	pathParams []PathParam,
@@ -715,6 +766,11 @@ func listAllPagination(
 	scalarArgs []ScalarArg,
 	hasRequiredQueryParams bool,
 ) (bool, int) {
+	// A paged operation (D60) has its own <method>_all, which follows the
+	// page's next, and its limit is the page's, not an offset's.
+	if ep.Page != nil {
+		return false, 0
+	}
 	if !ep.OutputIsArray || ep.HasInput || ep.HasFileUpload || ep.Filterable || ep.Encrypted {
 		return false, 0
 	}

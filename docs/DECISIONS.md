@@ -6045,43 +6045,45 @@ and `offset` arguments it finds by name (`<method>_all`).
 | A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
 | `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
 
-Status: designed, the core built. This batch builds all of it: the IR,
-the decorator, the readers, the JSON Schema and `format`; the OpenAPI
-document and the tool documents; the Go, TypeScript and Rust servers and
-the in-process call; the four SDKs and the vectors; and the Topcoat
-records, procedures and pager. acme's `listOrders`, `listReviews` and a new
-`listProducts` page. Built so far, the core: `ir.OperationPage` on
-`FieldDef.Page`, with `ir.ValidateOperationPage`; `@paginated` and its
-argument schema, which the schema-file JSON Schema takes; the merge that
-fills a data form's unsaid limits, so TypeScript, JSON and YAML read to one
-IR (`fixture-paged-api` and its JSON and YAML twins); `format`; the
-loader's checks (`internal/loader/verify/page.go`); `apigen.EndpointInfo.Page`,
-the OpenAPI document's parameters and page, and the tool documents'
-parameters, page and sentence (`toolsutil`); Go's `paging`, TypeScript's
-`readPage` and Rust's `page` module, held to `page_parity.json`; each
-reads a parameter's first value and an empty one as absent. Every server
-and SDK generator refuses a paged operation until it renders it
-(`apigen.RefusePages`), and `internal/generator/page_refusal_test.go`
-holds each to it.
-The Rust server renders it: a paged operation's `Args` carry `page`, which
-the router reads by `<Args>::PAGE` and `check` holds to it, its method and
-its in-process call return `runtime::page::Page<T>`
-(`rustrestgen/page_test.go`).
-The Go server renders it: a paged method takes `page paging.Request` last
-and returns `paging.Page[T]`, its route reads the page with `paging.Read`
-after its own parameters and answers the page as `data`, and
+Status: designed; the core, the servers and the SDKs built. This batch
+builds all of it: the IR, the decorator, the readers, the JSON Schema and
+`format`; the OpenAPI document and the tool documents; the Go, TypeScript
+and Rust servers and the in-process call; the four SDKs and the vectors;
+and the Topcoat records, procedures and pager. acme's `listOrders`,
+`listReviews` and a new `listProducts` page. Built so far, the core:
+`ir.OperationPage` on `FieldDef.Page`, with `ir.ValidateOperationPage`;
+`@paginated` and its argument schema, which the schema-file JSON Schema
+takes; the merge that fills a data form's unsaid limits, so TypeScript,
+JSON and YAML read to one IR (`fixture-paged-api` and its JSON and YAML
+twins); `format`; the loader's checks (`internal/loader/verify/page.go`);
+`apigen.EndpointInfo.Page`, the OpenAPI document's parameters and page,
+and the tool documents' parameters, page and sentence (`toolsutil`); Go's
+`paging`, TypeScript's `readPage` and Rust's `page` module, held to
+`page_parity.json`; each reads a parameter's first value and an empty one
+as absent. Each server and SDK generator refused a paged operation until
+it rendered it (`apigen.RefusePages`), and every one renders it now. The
+Go server's paged method takes `page paging.Request` last and returns
+`paging.Page[T]`, its route reads the page with `paging.Read` after its
+own parameters and answers the page as `data`, and
 `TestPagedRoutesServePages` pages `fixture-paged-api` over httptest, its
-filters on each page and every refusal as `page_parity.json` words it.
-The TypeScript server renders it: a paged route reads `cursor` and `limit`
-with `readPage` after the operation's own query parameters, the method
-takes `args.page` and returns a `Page`, and `fixture-paged-api`'s router
-answers `page_parity.json`'s reads and refused cursors over HTTP
-(`tsrestgen`'s `TestGeneratedPagedRouter`).
-The Go and TypeScript SDKs render it: a paged method takes the page
-request and returns `runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an
-`iter.Seq2`) and `listItemsAll` (an `AsyncIterable`) ask for each page as
-the loop reaches it, and their tools take `cursor` and `limit` in the
-query and return the page.
+filters on each page and every refusal as `page_parity.json` words it. The
+TypeScript server's paged route reads `cursor` and `limit` with `readPage`
+after the operation's own query parameters, the method takes `args.page`
+and returns a `Page`, and `fixture-paged-api`'s router answers
+`page_parity.json`'s reads and refused cursors over HTTP (`tsrestgen`'s
+`TestGeneratedPagedRouter`). The Rust server's paged operation has `Args`
+that carry `page`, which the router reads by `<Args>::PAGE` and `check`
+holds to it, and its method and its in-process call return
+`runtime::page::Page<T>` (`rustrestgen/page_test.go`). The Go and
+TypeScript SDKs' paged method takes the page request and returns
+`runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an `iter.Seq2`) and
+`listItemsAll` (an `AsyncIterable`) ask for each page as the loop reaches
+it, and their tools take `cursor` and `limit` in the query and return the
+page. The Python and Rust SDKs' paged method takes `cursor` and `limit`
+and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
+every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
+`fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
+`rustsdkgen`.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,

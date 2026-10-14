@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import importlib
 import re
+{{- if .Namespace.HasPagedEndpoints}}
+from collections.abc import Iterator
+{{- end}}
 {{- if .Namespace.HasQueryLists}}
 from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
 from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
-from ..errors import ValidationError
+from ..errors import {{if .Namespace.HasPagedEndpoints}}SDKError, {{end}}ValidationError
+{{- if .Namespace.HasPagedEndpoints}}
+from ..page import Page
+{{- end}}
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
     "str": str,
@@ -270,6 +276,19 @@ class {{.Namespace.ClassName}}:
         if not isinstance(raw, dict):
             return raw
         return from_dict_non_strict(raw)
+{{- if .Namespace.HasPagedEndpoints}}
+
+    def _coerce_page(self, raw: Any, item_type_name: str) -> Page[Any]:
+        """Read the page a paged operation answers (D60): its items, each
+        coerced as _coerce_response coerces a list's, and next, the cursor
+        of the next page or None after the last."""
+        if not isinstance(raw, dict) or not isinstance(raw.get("items"), list) or "next" not in raw:
+            raise SDKError("expected a page of items and next in the response data")
+        next_cursor = raw["next"]
+        if next_cursor is not None and not isinstance(next_cursor, str):
+            raise SDKError("expected the page's next to be a cursor or null")
+        return Page(items=self._coerce_response(raw["items"], item_type_name, True), next=next_cursor)
+{{- end}}
 
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
         """Validate one value of an argument and return it as it is sent.
@@ -691,7 +710,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+        return {{template "coerceResponse" .}}
 {{- else if .HasEncryptedBody}}
 {{- if .HasInput}}
         payload: Any = self._client.to_dict(validated_input_data)
@@ -713,7 +732,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+        return {{template "coerceResponse" .}}
 {{- else}}
 {{- if .HasRequestBody}}
 {{- if .HasInput}}
@@ -732,7 +751,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+        return {{template "coerceResponse" .}}
 {{- else}}
 {{- if .HasScalarArgs}}
 {{- range .ScalarArgs}}
@@ -786,7 +805,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+        return {{template "coerceResponse" .}}
 {{- else}}
         response = self._client.request(
             method="{{.HTTPMethod}}",
@@ -797,11 +816,38 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+        return {{template "coerceResponse" .}}
 {{- end}}
 {{- end}}
+{{- end}}
+{{- if .Paged}}
+    def {{.AllMethodName}}(self{{- range .MethodParams}}, {{.Declaration}}{{- end}}) -> Iterator[{{.ItemTypeHint}}]:
+        """Yield every item of {{.MethodName}}, page after page (D60).
+
+        The first page is the one cursor names, the first of the list when
+        it is None, and each page holds up to limit items. A page is asked
+        for, with the last one's next, only when the items before it are
+        taken; an error raises there, and so does a page whose next is the
+        cursor it was asked with, after its items.
+        """
+        while True:
+            page = self.{{.MethodName}}({{range $i, $param := .MethodParams}}{{if $i}}, {{end}}{{$param.Name}}={{$param.Name}}{{end}})
+            yield from page.items
+            if page.next is None:
+                return
+            if page.next == cursor:
+                raise SDKError("{{.MethodName}} returned the cursor it was sent")
+            cursor = page.next
 {{- end}}
 
+{{- end}}
+{{- /*
+coerceResponse is the value a method returns from the response data: a
+paged operation's page (D60), a list of lists of models row by row, and
+any other response as _coerce_response reads it.
+*/ -}}
+{{- define "coerceResponse" -}}
+{{if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- end}}
 {{- /*
 scalarArgsPayload builds the JSON body of an endpoint's scalar arguments.
