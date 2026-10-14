@@ -13,7 +13,15 @@
 //! The server does not start until each @hmacVerified provider has a
 //! verifier in `webhook_verifiers`.
 {{- end }}
-{{- $async := or .Namespaces .ChecksEndUsers }}
+{{- if .HasJobs }}
+//!
+//! Each job fails until you implement it.
+{{- end }}
+{{- if .HasWorkers }}
+//!
+//! Each worker fails every message until you implement it.
+{{- end }}
+{{- $async := .Async }}
 {{ if or .WebhookProviders $async }}
 {{- if .WebhookProviders }}
 use std::collections::HashMap;
@@ -105,5 +113,62 @@ impl Authenticator for NoCaller {
     async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
         Ok(None)
     }
+}
+{{- end }}
+{{- if .HasJobs }}
+
+/// Builds the jobs of {{ .SchemaName }} from its dependencies. A job's entrypoint
+/// calls one method per run, with a `Shutdown` that SIGTERM triggers; the run
+/// fails when the method returns an error.
+pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
+    Ok(Arc::new({{ .JobsStruct }} {
+        deps: Arc::new(deps),
+    }))
+}
+
+/// Implements Jobs.
+pub struct {{ .JobsStruct }} {
+    pub deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl Jobs for {{ .JobsStruct }} {
+{{- range $i, $job := .Jobs }}
+{{- if $i }}
+{{ end }}
+    /// Runs the job {{ .Name }}.
+{{ $.JobMethodSignature . }}
+        Err("job {{ .Name }} is not implemented".into())
+    }
+{{- end }}
+}
+{{- end }}
+{{- if .HasWorkers }}
+
+/// Builds the workers of {{ .SchemaName }} from its dependencies. A worker's
+/// entrypoint calls one method per message it claims; the message is done
+/// when the method returns `Ok`, and fails, to be retried, when it returns
+/// an error. A message may come again, so a method is idempotent.
+pub async fn create_workers(deps: Deps) -> Result<Arc<dyn Workers>, BoxError> {
+    Ok(Arc::new({{ .WorkersStruct }} {
+        deps: Arc::new(deps),
+    }))
+}
+
+/// Implements Workers.
+pub struct {{ .WorkersStruct }} {
+    pub deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl Workers for {{ .WorkersStruct }} {
+{{- range $i, $worker := .Workers }}
+{{- if $i }}
+{{ end }}
+    /// Handles a message of the queue {{ .Queue }}.
+{{ $.WorkerMethodSignature . }}
+        Err("worker {{ .Name }} is not implemented".into())
+    }
+{{- end }}
 }
 {{- end }}

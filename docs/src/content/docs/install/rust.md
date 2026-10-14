@@ -580,6 +580,53 @@ it. The naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust`
 and `scalar_rust` name the checkouts the crates depend on, and the image
 builds from a context that holds them.
 
+### Jobs and workers
+
+An API's `@job` and `@worker` classes (D52, D53, D65) add two traits to
+its crate's `deps` module, a method per class in snake case:
+
+```rust
+#[async_trait]
+pub trait Jobs: Send + Sync {
+    async fn place_restock_orders(&self, shutdown: Shutdown) -> Result<(), BoxError>;
+}
+
+#[async_trait]
+pub trait Workers: Send + Sync {
+    async fn reorder_stock(&self, message: schemas_shop_db_types::StockLow) -> Result<(), BoxError>;
+}
+```
+
+`Shutdown` and `BoxError` are the HTTP runtime's. A job's run fails when
+its method returns an error; SIGTERM cancels `shutdown`. A worker's
+message is done when its method returns `Ok`, and an error or a panic
+fails it, to be retried after the queue's backoff. When the worker stops
+and its grace is over, a method still running is dropped and its message
+given back, so a method must be safe to run twice for one message.
+
+The message is a type of the database's Rust types, which the database
+must generate (`outputs.types` for Rust), and which the API crate
+re-exports as `database_types`. Their `queues` module holds each queue's
+descriptor as JSON, `STOCK_LOW_QUEUE`, which the runtime's
+`queue::QueueDefinition::parse` reads: an implementation enqueues with it
+in the transaction whose writes caused the message (`queue::enqueue`),
+and a worker claims with it. A queue whose message holds a `POINT` or
+`INTERVAL` column is left out, saying why, and the build refuses a Rust
+worker of it.
+
+The scaffold writes `create_jobs` and `create_workers` beside `create`,
+each method failing until you implement it:
+
+```rust
+pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
+    Ok(Arc::new(ShopStockJobs { deps: Arc::new(deps) }))
+}
+```
+
+An implementation crate is written once, so one that predates its API's
+jobs or workers lacks them. The stack's build reads its `src/lib.rs` and
+refuses it, naming the function to add and its methods.
+
 ### Users and sessions
 
 When the API's `authDb` has a `User` table, the core user model (D50),

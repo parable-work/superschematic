@@ -198,7 +198,7 @@ func (r *resolver) runWorkers() {
 		}
 		run.Database = db
 		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" && host.res.Dialect != registry.SQLDialectPostgres {
-			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect of the Go ORM that claims (D53)",
+			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)",
 				name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
 		}
 		run.Concurrency = registry.WorkerConcurrency(d.worker)

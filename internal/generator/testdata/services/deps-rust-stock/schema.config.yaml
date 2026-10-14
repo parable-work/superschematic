@@ -1,0 +1,12 @@
+# A Rust API with jobs and workers (D65): its database is its one DB-kind
+# dependency, deps-stock-db, whose queues its two workers handle; one of its
+# jobs runs on a schedule, the other on demand. The Rust jobs and workers
+# tests in internal/generator build it.
+name: deps-rust-stock
+kind: API
+dependencies:
+  - { name: deps-stock-db, kind: DB }
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
