@@ -110,7 +110,7 @@ A method's arguments say where each value comes from:
 
 - **Path**: an argument named in the path, such as `id` in `orders/{id}`.
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
-  implementation receives a pointer (`limit *float64`) or a nil slice. A
+  implementation receives a pointer (`minRating *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
   (`?statuses=placed,shipped`), and each item is checked at
   `statuses[i]`.
@@ -200,6 +200,21 @@ every item, asking for each page with the last one's `next`. A Topcoat
 crate's call, procedure and argument form take the page too, and its
 console links a list's next and first pages
 ([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
+
+`shop-orders` pages its orders, a product's reviews and its catalog. Its Go
+implementation reads a page of orders in two steps: the keys of up to
+`limit + 1` orders after the cursor's, `placedAt` then `id`, with a query
+that compares the pair, which the ORM's filters cannot say, then the
+orders the page keeps, with their lines, through the ORM:
+
+<Snippet file="go/shop-orders/orders.go" symbol={['orderKey', 'Orders.ListOrders']} />
+
+`listReviews` also takes a search, `q`, a `SearchQuery`
+([References and search](/superschematic/reference/references-and-search/)),
+which keeps the reviews whose
+[`search_text`](/superschematic/guides/database-tables/#text-search) holds
+each of its words: one `ILIKE` per word, with the pattern the runtime's
+`search.LikePattern` escapes.
 
 ## Errors
 
@@ -387,7 +402,7 @@ namespace's trait, and the authenticator that says who the caller is.
 `shop-orders`' users are the core user model's, so that is the identity
 runtime's `IdentityAuthenticator`, over the API's identity service
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-rust)).
-One shop serves both namespaces here, and the users are in a SQLite
+One shop serves every namespace here, and the users are in a SQLite
 database of `shop-db`'s identity tables:
 
 <Snippet file="rust-server/src/lib.rs" symbol={['users', 'implementations']} />

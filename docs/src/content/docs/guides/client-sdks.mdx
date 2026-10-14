@@ -48,9 +48,12 @@ the route's path, query and body arguments, in the language's own style:
 Go and Rust take a context or options, TypeScript returns a promise,
 Python is synchronous, and Rust is async on the runtime you choose.
 
-These four programs make the same four calls against the Go server. They
-list a product's reviews with no token, write a review with no token, place
-an order for a product that does not exist, and fetch a missing order:
+These four programs make the same calls against the Go server. With no
+token, they read the catalog a page at a time and every product, fetch a
+missing product, search a product's reviews and write one; as the shopper,
+they place an order for a product that does not exist, read the orders a
+page at a time and every order, ask for the orders after a cursor the
+server never returned, and fetch a missing order:
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -70,9 +73,15 @@ an order for a product that does not exist, and fetch a missing order:
 Each prints:
 
 ```
-reviews: 0
+products: 0, the last page
+every product: 0
+get a missing product: 404
+reviews that say smoky: 0, the last page
 write a review without a token: 401
 order a product that does not exist: 400
+orders: 0, the last page
+every order: 0
+orders after a cursor the server never returned: 400
 get a missing order: 404
 ```
 
@@ -82,6 +91,27 @@ get a missing order: 404
 and fails if any prints something else:
 
 <Snippet file="go/clients_test.go" symbol={['TestEverySDKCallsTheGoServer', 'TestEverySDKCallsTheRustServer']} />
+
+## Pages
+
+A `@paginated` list operation
+([Pages](/superschematic/guides/api-routes/#pages)) answers one page: its
+items and `next`, the cursor of the page after it, null after the last.
+Each SDK's method takes `cursor` and `limit` and returns the page, and
+`<operation>All` yields every item, asking for each page with the `next` of
+the one before only once the loop has taken its items:
+
+| Language | One page | Every item |
+| --- | --- | --- |
+| Go | `ListOrders(ctx, query, runtime.PageRequest{Cursor, Limit})` returns a `runtime.Page[T]`, `Items` and `Next` | `ListOrdersAll(ctx, query, page)`, an `iter.Seq2[T, error]` |
+| TypeScript | `listOrders({ ...query, cursor, limit })` returns a `Page<T>`, `items` and `next` | `listOrdersAll(params)`, an `AsyncIterable<T>` |
+| Python | `list_orders(..., cursor=..., limit=...)` returns a `Page[T]`, `.items` and `.next` | `list_orders_all(...)`, an `Iterator[T]` |
+| Rust | `list_orders(Some(&ListOrdersQueryParams { cursor, limit, .. }), options)` returns a `Page<T>`, `items` and `next` | `list_orders_all(query, options)`, a `Pager<T>` whose `next().await` yields each item |
+
+An SDK refuses a `limit` past the operation's most before it sends, and an
+iterator ends with an error, not a loop, on a page whose `next` is the
+cursor it was asked with. The server refuses a cursor it never returned
+with 400, and the caller starts again from the first page.
 
 ## Errors
 

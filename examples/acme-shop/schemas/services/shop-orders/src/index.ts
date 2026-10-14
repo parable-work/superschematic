@@ -5,7 +5,9 @@ export {
   OrderView,
   PlaceOrderInput,
   PlaceOrderLine,
+  ProductCatalog,
   ProductReviews,
+  ProductView,
   ReviewView,
   WriteReviewInput
 } from "./orders.schema";

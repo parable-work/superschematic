@@ -6,7 +6,11 @@
 //! migrates. The shop keeps the rows as shop-db declares them, as the Go
 //! server keeps them in Postgres: an id is a UUID as hyphenated text, a time
 //! RFC 3339 UTC text and a shipping address its JSON. The tables' defaults
-//! give a new row its id and its times.
+//! give a new row its id and its times. A list reads up to one row past
+//! its page's limit after the cursor's key, the columns it orders by as
+//! the table holds them, its id last, with a row-value comparison (D60);
+//! the reviews' search is a `LIKE` per word over the review's
+//! `search_text`, which SQLite computes as it reads each row (D62).
 //!
 //! One connection serves every request, behind a mutex, and a statement
 //! blocks the executor while it runs, as the version graph's rusqlite
@@ -18,16 +22,19 @@ use std::sync::{Mutex, MutexGuard};
 
 use acme_shop_orders_api::{
     types, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
-    OrderPlaceOrderArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
+    OrderPlaceOrderArgs, ProductCatalogGetProductArgs, ProductCatalogImplementation,
+    ProductCatalogListProductsArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
     ProductReviewsWriteReviewArgs,
 };
 use async_trait::async_trait;
-use rusqlite::{ffi, params, Connection, OpenFlags, OptionalExtension, Row};
-use superschematic_http_runtime::{ApiError, RequestContext};
+use rusqlite::types::Value;
+use rusqlite::{ffi, params, params_from_iter, Connection, OpenFlags, OptionalExtension, Row};
+use superschematic_http_runtime::page::{Cursor, Page, PageRequest};
+use superschematic_http_runtime::{search, ApiError, RequestContext};
 
 use crate::{caller, now};
 
-/// The shop's orders and reviews, and its catalog, in a SQLite file.
+/// The shop's catalog, orders and reviews in a SQLite file.
 pub struct SqliteShop {
     conn: Mutex<Connection>,
 }
@@ -305,6 +312,71 @@ fn read_order(conn: &Connection, id: &str) -> Result<types::OrderView, ApiError>
     with_lines(conn, order).map_err(internal)
 }
 
+/// A row's place in a list's order: the columns the list orders by, as
+/// the table holds them, the row's id last.
+type RowKey = (String, String);
+
+/// The query of a page of a list: the conditions its rows meet, each with
+/// a `?` for each of its values, in turn.
+#[derive(Default)]
+struct ListQuery {
+    conditions: Vec<String>,
+    values: Vec<Value>,
+}
+
+impl ListQuery {
+    fn condition(&mut self, condition: &str, values: impl IntoIterator<Item = Value>) {
+        self.conditions.push(condition.to_owned());
+        self.values.extend(values);
+    }
+
+    /// The rows after the key a page's cursor names, in the order of the
+    /// key's columns, `key`, a pair such as `placed_at, id`. A cursor that
+    /// does not decode to two texts is the 400 of one this list never
+    /// returned.
+    fn after(&mut self, cursor: Option<&Cursor>, key: &str) -> Result<(), ApiError> {
+        if let Some(cursor) = cursor {
+            let (first, id): RowKey = cursor.decode()?;
+            self.condition(
+                &format!("({key}) > (?, ?)"),
+                [Value::Text(first), Value::Text(id)],
+            );
+        }
+        Ok(())
+    }
+
+    /// Reads up to one row past the page's limit, `columns`, which `read`
+    /// reads, then the key's, ordered by the key, and keeps the page with
+    /// `Page::from_rows`, whose next page's cursor is its last row's key.
+    fn page<T>(
+        mut self,
+        conn: &Connection,
+        columns: &str,
+        table: &str,
+        key: &str,
+        page: &PageRequest,
+        read: impl Fn(&Row) -> rusqlite::Result<T>,
+    ) -> Result<Page<T>, ApiError> {
+        let mut sql = format!("SELECT {columns}, {key} FROM {table}");
+        if !self.conditions.is_empty() {
+            sql = format!("{sql} WHERE {}", self.conditions.join(" AND "));
+        }
+        sql = format!("{sql} ORDER BY {key} LIMIT ?");
+        self.values
+            .push(Value::Integer(page.limit.max(1).saturating_add(1)));
+        let mut stmt = conn.prepare(&sql).map_err(internal)?;
+        let rows = stmt
+            .query_map(params_from_iter(&self.values), |row| {
+                let last = row.as_ref().column_count() - 1;
+                let key: RowKey = (row.get(last - 1)?, row.get(last)?);
+                Ok((key, read(row)?))
+            })
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(internal)?;
+        Ok(Page::from_rows(rows, page.limit, |(key, _)| key.clone()).map(|(_, row)| row))
+    }
+}
+
 fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
     Ok(types::ReviewView {
         id: parsed(row, 0, str::parse)?,
@@ -317,41 +389,43 @@ fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
 
 #[async_trait]
 impl OrderImplementation for SqliteShop {
+    /// The orders, oldest first, with the given statuses, or of every
+    /// status when there are none.
     async fn list_orders(
         &self,
         _ctx: RequestContext,
         args: OrderListOrdersArgs,
-    ) -> Result<Vec<types::OrderView>, ApiError> {
-        // The statuses go in as one JSON array, which json_each reads.
-        let statuses = args
-            .statuses
-            .map(|statuses| {
-                serde_json::to_string(
-                    &statuses
-                        .iter()
-                        .map(|status| status.as_str())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .transpose()
-            .map_err(internal)?;
-        let limit = args.limit.map_or(20, |limit| limit as i64);
+    ) -> Result<Page<types::OrderView>, ApiError> {
+        let mut query = ListQuery::default();
+        if let Some(statuses) = args.statuses.filter(|statuses| !statuses.is_empty()) {
+            // The statuses go in as one JSON array, which json_each reads.
+            let statuses: Vec<&str> = statuses.iter().map(|status| status.as_str()).collect();
+            let statuses = serde_json::to_string(&statuses).map_err(internal)?;
+            query.condition(
+                "status IN (SELECT value FROM json_each(?))",
+                [Value::Text(statuses)],
+            );
+        }
+        query.after(args.page.cursor.as_ref(), "placed_at, id")?;
         let conn = self.conn();
-        let mut stmt = conn
-            .prepare(&format!(
-                r#"SELECT {ORDER_COLUMNS} FROM "order"
-                WHERE ?1 IS NULL OR status IN (SELECT value FROM json_each(?1))
-                ORDER BY placed_at, rowid LIMIT ?2"#
-            ))
-            .map_err(internal)?;
-        let orders = stmt
-            .query_map(params![statuses, limit], order_row)
-            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-            .map_err(internal)?;
-        orders
+        let orders = query.page(
+            &conn,
+            ORDER_COLUMNS,
+            r#""order""#,
+            "placed_at, id",
+            &args.page,
+            order_row,
+        )?;
+        let next = orders.next.clone();
+        let orders = orders
+            .items
             .into_iter()
             .map(|order| with_lines(&conn, order).map_err(internal))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page {
+            items: orders,
+            next,
+        })
     }
 
     async fn place_order(
@@ -444,27 +518,95 @@ impl OrderImplementation for SqliteShop {
     }
 }
 
+const PRODUCT_COLUMNS: &str = "id, sku, name, price_cents, in_stock";
+
+fn product_row(row: &Row) -> rusqlite::Result<types::ProductView> {
+    Ok(types::ProductView {
+        id: parsed(row, 0, str::parse)?,
+        sku: row.get(1)?,
+        name: row.get(2)?,
+        price_cents: row.get(3)?,
+        in_stock: row.get(4)?,
+    })
+}
+
+#[async_trait]
+impl ProductCatalogImplementation for SqliteShop {
+    /// The products by name, those with the given ids when there are any:
+    /// the lookup a page that holds products' ids names them through
+    /// (D61).
+    async fn list_products(
+        &self,
+        _ctx: RequestContext,
+        args: ProductCatalogListProductsArgs,
+    ) -> Result<Page<types::ProductView>, ApiError> {
+        let mut query = ListQuery::default();
+        if let Some(ids) = args.ids.filter(|ids| !ids.is_empty()) {
+            let ids: Vec<String> = ids.iter().map(uuid_text).collect();
+            let ids = serde_json::to_string(&ids).map_err(internal)?;
+            query.condition("id IN (SELECT value FROM json_each(?))", [Value::Text(ids)]);
+        }
+        query.after(args.page.cursor.as_ref(), "name, id")?;
+        query.page(
+            &self.conn(),
+            PRODUCT_COLUMNS,
+            "product",
+            "name, id",
+            &args.page,
+            product_row,
+        )
+    }
+
+    async fn get_product(
+        &self,
+        _ctx: RequestContext,
+        args: ProductCatalogGetProductArgs,
+    ) -> Result<types::ProductView, ApiError> {
+        self.conn()
+            .query_row(
+                &format!("SELECT {PRODUCT_COLUMNS} FROM product WHERE id = ?1"),
+                [uuid_text(&args.product_id)],
+                product_row,
+            )
+            .optional()
+            .map_err(internal)?
+            .ok_or_else(|| ApiError::not_found("product not found"))
+    }
+}
+
 #[async_trait]
 impl ProductReviewsImplementation for SqliteShop {
+    /// A product's reviews, oldest first, those rated `min_rating` or more
+    /// when it is given. A search, `q`, keeps the reviews whose
+    /// `search_text`, the title and body shop-db's `@searchField`s join,
+    /// holds each of its words: SQLite's `LIKE` folds ASCII letters alone,
+    /// and reads every review of the product, as D62 says.
     async fn list_reviews(
         &self,
         _ctx: RequestContext,
         args: ProductReviewsListReviewsArgs,
-    ) -> Result<Vec<types::ReviewView>, ApiError> {
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, rating, title, body, created_at FROM review
-                WHERE product_id = ?1 AND deleted_at IS NULL AND (?2 IS NULL OR rating >= ?2)
-                ORDER BY created_at, rowid",
-            )
-            .map_err(internal)?;
-        stmt.query_map(
-            params![uuid_text(&args.product_id), args.min_rating],
+    ) -> Result<Page<types::ReviewView>, ApiError> {
+        let mut query = ListQuery::default();
+        query.condition("product_id = ?", [Value::Text(uuid_text(&args.product_id))]);
+        query.condition("deleted_at IS NULL", []);
+        if let Some(min) = args.min_rating {
+            query.condition("rating >= ?", [Value::Real(min)]);
+        }
+        for term in args.q.as_deref().map(search::terms).unwrap_or_default() {
+            query.condition(
+                r"search_text LIKE ? ESCAPE '\'",
+                [Value::Text(search::like_pattern(&term))],
+            );
+        }
+        query.after(args.page.cursor.as_ref(), "created_at, id")?;
+        query.page(
+            &self.conn(),
+            "id, rating, title, body, created_at",
+            "review",
+            "created_at, id",
+            &args.page,
             review_row,
         )
-        .and_then(|rows| rows.collect())
-        .map_err(internal)
     }
 
     async fn write_review(
