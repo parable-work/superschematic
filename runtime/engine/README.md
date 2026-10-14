@@ -53,8 +53,9 @@ which a host passes in its options (`core()`): so far Workflow,
 Comments, Constants and Variants (wave 1), and Revisions, Dependencies,
 Links (with what a move of a link's target moves on), Numbering and
 D56's StateRules, Approvals and Timers, whose deadlines the runner fires
-(wave 2), and Rollups and Reactions, with D56's changes trigger (wave
-3), with Search and Branches to come.
+(wave 2), Rollups and Reactions, with D56's changes trigger (wave 3),
+and Branches (milestone 11), the version graph's Rust engine over its
+fixed layout in the call's transaction, with Search to come.
 `superschematic-engine-testkit` (`rust/testkit`) ports this package's
 test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
@@ -3498,7 +3499,13 @@ times as UTC date-times; a tree is rows by kind.
 - **The core.** `@superschematic/engine` depends on
   `@superschematic/versiongraph`, whose `SyncEngine` and SQLite adapter
   run each operation, and instantiates the wasm core with `initSync` the
-  first time a schema that composes `Branches` is composed.
+  first time a schema that composes `Branches` is composed. The Rust
+  engine's `Branches` (D58) runs the version graph's Rust engine instead,
+  over its fixed layout in the database's dialect, each statement through
+  the call's `sql`: on SQLite the TypeScript adapter's layout byte for
+  byte, so a file either engine wrote serves the other, and on Postgres
+  the same tables without a trigger. Its ids come from the engine's own
+  source, so a seeded engine draws them as the TypeScript one does.
 - **Lease.** The operation that points the release pointer is
   `releaseCommit`, not `release`, because `Lease` has `release`.
 - **The release field.** `release` reads the release pointer's version

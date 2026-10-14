@@ -25,11 +25,13 @@
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
 
+mod core_branches;
 mod core_dependencies;
 mod core_numbering;
 mod core_reactions;
 mod core_revisions;
 
+pub use core_branches::Keep;
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
 pub use core_reactions::{Score, WorkflowTally};
@@ -1805,8 +1807,8 @@ impl Behavior for Dispatch {
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
-        Rollups, StateRules, Timers, Variants, Workflow,
+        Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,
+        Revisions, Rollups, StateRules, Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
@@ -1819,6 +1821,7 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Reactions" => set.with(Reactions),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
+        "Branches" => set.with(Branches),
         "StateRules" => set.with(StateRules),
         "Approvals" => set.with(Approvals),
         "Numbering" => set.with(Numbering),
@@ -1839,6 +1842,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
         ("core-revisions", "test.Hold") => set.with(RevisionHold),
         ("core-dependencies", "test.Finisher") => set.with(Finisher),
+        ("core-branches-sweep", "test.Keep") => set.with(Keep::default()),
         ("core-numbering", "test.Refuser") => set.with(Refuser),
         ("core-reactions-changes", "test.Score") => set.with(Score),
         ("core-reactions-changes", "Workflow.Tally") => set.with(WorkflowTally),

@@ -5,10 +5,11 @@
 //! documents one, with Workflow, Comments and Revisions on one type; the
 //! tasks, projects and numbered invoices documents, whose projects compose
 //! Rollups; the project tree document, whose projects Reactions starts,
-//! finishes and fails), on SQLite and, with the variable set, on Postgres.
-//! The notes and recipes documents compose Search and Branches, of later
-//! waves; the expenses, requests and invoices documents run in the
-//! Approvals, Timers and StateRules files.
+//! finishes and fails; and the recipes one, whose recipes are version
+//! graphs of Branches), on SQLite and, with the variable set, on Postgres.
+//! The notes document composes Search, of a later wave; the expenses,
+//! requests and invoices documents run in the Approvals, Timers and
+//! StateRules files.
 
 mod support;
 
@@ -1149,5 +1150,132 @@ fn it_runs_the_invoices_document_beside_the_projects_one_an_invoice_is_numbered_
                 json!(["c", {"project": {"schema": "projects", "id": "site"}}])
             ]
         );
+    }
+}
+
+/// The recipes document the core binary builds (`fixture-branches-json`):
+/// each recipe a version graph's root.
+fn recipes() -> Value {
+    fixture("fixture-branches-json", "recipe.schema.json")
+}
+
+#[test]
+fn it_runs_the_recipes_document_whose_drafts_merge_into_the_primary_line_and_a_tagged_commit_is_released(
+) {
+    use superschematic_engine::RunnerOptions;
+
+    for target in targets("core_recipes") {
+        let engine = target.open_core_with(|options| {
+            options.behaviors = BehaviorSet::new().with(superschematic_engine_behaviors::Branches);
+            options.runner = Some(RunnerOptions::new(Principal::new(
+                "runner",
+                Vec::<String>::new(),
+            )));
+        });
+        engine
+            .schemas()
+            .define(&alice(), recipes(), DefineOptions::default())
+            .expect("define");
+        engine
+            .schemas()
+            .publish(&alice(), "Recipe", SchemaTarget::default())
+            .expect("publish");
+        engine
+            .instances()
+            .create(
+                &writer(),
+                "Recipe",
+                &json!({"title": "Soup"}),
+                CreateOptions {
+                    id: Some("soup"),
+                    ..Default::default()
+                },
+            )
+            .expect("create");
+        let invoke = |operation: &str, params: Value| {
+            engine
+                .instances()
+                .invoke(
+                    &writer(),
+                    "Recipe",
+                    "soup",
+                    operation,
+                    &params,
+                    WriteOptions::default(),
+                )
+                .unwrap_or_else(|error| panic!("{operation}: {error}"))
+        };
+        let main = invoke("refs", json!({}))["items"][0].clone();
+        let draft = invoke("branch", json!({"fromRef": main["id"], "name": "first"}));
+        let saved = invoke(
+            "save",
+            json!({
+                "ref": draft["id"],
+                "version": draft["version"],
+                "edits": {"step": {"upsert": [{"instruction": "Boil", "position": 1}]}, "cover": {"upsert": [{"photoUrl": "soup.jpg"}]}}
+            }),
+        );
+        let version = saved["ref"]["version"].as_i64().expect("a version");
+        invoke(
+            "save",
+            json!({
+                "ref": draft["id"],
+                "version": version,
+                "edits": {"ingredient": {"upsert": [{"stepKey": saved["saved"]["step"][0]["entity_key"], "quantity": "1 l"}]}}
+            }),
+        );
+        let committed = invoke(
+            "commit",
+            json!({"ref": draft["id"], "version": version + 1}),
+        );
+        let merged = invoke(
+            "merge",
+            json!({"source": draft["id"], "target": main["id"], "targetVersion": main["version"], "tag": true}),
+        );
+        assert_eq!(merged["commit"]["sequence"], 1);
+        assert_eq!(
+            invoke(
+                "releaseCommit",
+                json!({"commit": merged["commit"]["id"], "version": 0})
+            ),
+            json!({"commit": merged["commit"]["id"], "version": 1})
+        );
+        let released = invoke("released", json!({}));
+        let counts: Vec<(String, usize)> = released["tree"]
+            .as_object()
+            .expect("a tree")
+            .iter()
+            .map(|(kind, rows)| (kind.clone(), rows.as_array().map_or(0, Vec::len)))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("cover".to_owned(), 1),
+                ("ingredient".to_owned(), 1),
+                ("step".to_owned(), 1)
+            ]
+        );
+        assert_eq!(committed["ref"]["parent"], main["id"]);
+        // The sweep is on for the schema, at the interval its config gives.
+        engine.runner().run_due().expect("run");
+        let schedules: Vec<(String, Option<i64>)> = engine
+            .runner()
+            .status()
+            .expect("status")
+            .schedules
+            .into_iter()
+            .filter(|schedule| schedule.behavior == "Branches")
+            .map(|schedule| {
+                (
+                    serde_json::to_value(schedule.state)
+                        .expect("a state")
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    schedule.every_ms,
+                )
+            })
+            .collect();
+        assert_eq!(schedules, [("active".to_owned(), Some(3_600_000))]);
     }
 }

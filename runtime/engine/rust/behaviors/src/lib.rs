@@ -31,13 +31,17 @@
 //! [`revised`], what a move of a link's target moves on), [`Numbering`],
 //! and D56's [`StateRules`], [`Approvals`] and [`Timers`]; wave 3
 //! (milestone 10a), [`Rollups`] and [`Reactions`] (with D56's changes
-//! trigger). The other core behaviors come in the waves after ([`NAMES`]
-//! lists the ones [`core`] registers).
+//! trigger); and milestone 11, [`Branches`], the version graph's Rust
+//! engine over its fixed layout in the call's transaction ([`graph`]). The
+//! other core behaviors come in the waves after ([`NAMES`] lists the ones
+//! [`core`] registers).
 
 pub mod approvals;
+pub mod branches;
 pub mod comments;
 pub mod constants;
 pub mod dependencies;
+pub mod graph;
 mod guidance;
 pub mod links;
 pub mod numbering;
@@ -51,6 +55,10 @@ pub mod variants;
 pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
+pub use branches::{
+    uuid_v5, Branches, BranchesConfig, BranchesKind, BranchesParent, BranchesSweep, BranchesUnit,
+    ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROOT_NAMESPACE,
+};
 pub use comments::{CommentRecord, Comments};
 pub use constants::{Constants, ConstantsConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
@@ -76,7 +84,7 @@ use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
 /// engine's order (`coreBehaviors`), without the ones not ported yet.
-pub const NAMES: [&str; 13] = [
+pub const NAMES: [&str; 14] = [
     "Workflow",
     "Comments",
     "Revisions",
@@ -86,6 +94,7 @@ pub const NAMES: [&str; 13] = [
     "Reactions",
     "Constants",
     "Variants",
+    "Branches",
     "StateRules",
     "Approvals",
     "Numbering",
@@ -106,6 +115,7 @@ pub fn core() -> BehaviorSet {
         .with(Reactions)
         .with(Constants)
         .with(Variants)
+        .with(Branches)
         .with(StateRules)
         .with(Approvals)
         .with(Numbering)
