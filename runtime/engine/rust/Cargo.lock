@@ -1387,6 +1387,7 @@ dependencies = [
  "superschematic-engine",
  "superschematic-schema-ir",
  "superschematic-versiongraph-engine",
+ "unicode-general-category",
  "uuid",
 ]
 

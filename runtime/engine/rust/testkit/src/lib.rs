@@ -80,9 +80,8 @@ pub const CORE_BEHAVIORS: [&str; 15] = [
 
 /// Calls that change the engine and are not built: a scenario that makes
 /// one is skipped, since the steps after it depend on it. A transaction of
-/// the file's own and a watch take functions; the search across schemas
-/// runs on the core's Search (milestone 10).
-pub const UNBUILT_WRITES: [&str; 3] = ["storage.transaction", "events.watch", "search"];
+/// the file's own and a watch take functions.
+pub const UNBUILT_WRITES: [&str; 2] = ["storage.transaction", "events.watch"];
 
 /// Calls that read the registered behaviors, which answer from what this
 /// engine does not have yet where they list every core behavior (the names
@@ -1615,7 +1614,7 @@ impl AccessPolicy for AnswerPolicy {
 /// test files, whose scenarios need no behavior or few, and the core
 /// behaviors' files whose behaviors this engine has (a scenario that also
 /// composes one not ported yet is skipped).
-pub const ENGINE_FILES: [&str; 28] = [
+pub const ENGINE_FILES: [&str; 30] = [
     "access",
     "compat",
     "core-approvals",
@@ -1633,6 +1632,8 @@ pub const ENGINE_FILES: [&str; 28] = [
     "core-reactions-holds-revised",
     "core-revisions",
     "core-rollups",
+    "core-search",
+    "core-search-vectors",
     "core-staterules",
     "core-timers",
     "core-variants",

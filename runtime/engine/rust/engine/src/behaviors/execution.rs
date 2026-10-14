@@ -31,6 +31,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value};
 
 use superschematic_engine_storage::behavior::{instance_column, BehaviorSql, InstanceRelation};
+use superschematic_engine_storage::fulltext::{FullTextMatches, FullTextQuery};
 use superschematic_engine_storage::{
     quote_identifier, Dialect, Row, RunResult, Sql, SqlMode, SqlValue,
 };
@@ -1213,6 +1214,10 @@ impl Core for Ctx<'_, '_, '_> {
                 handle.run(sql, params)
             }
         })
+    }
+
+    fn sql_fulltext(&self, query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
+        self.with_sql(|handle| handle.fulltext(query))
     }
 
     fn references_list(&self) -> Result<Vec<Reference>> {

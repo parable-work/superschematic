@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
+use superschematic_engine_storage::fulltext::{FullTextMatches, FullTextQuery};
 use superschematic_engine_storage::{Dialect, Row, RunResult, Sql, SqlValue};
 
 use super::behavior::{InstanceFields, StoredInstance, StowedObject};
@@ -128,6 +129,9 @@ pub(crate) trait Core {
     fn sql_get(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Option<Row>>;
     fn sql_all(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Vec<Row>>;
     fn sql_run(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<RunResult>;
+    fn sql_fulltext(&self, _query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
+        Err(unreachable_here("sql.fulltext"))
+    }
 
     fn references_list(&self) -> Result<Vec<Reference>> {
         Err(unreachable_here("references"))
@@ -503,6 +507,19 @@ impl SqlReader<'_> {
     /// [`SqlReader::all`] in a savepoint of its own.
     pub fn try_all<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<Vec<Row>> {
         self.core.sql_all(&sql.into(), params, true)
+    }
+
+    /// Matches an FTS5 expression over one of the behavior's full-text
+    /// indexes, which a migration of its own created with
+    /// `create_fulltext` (D58: full-text search is the engine's own, FTS5
+    /// on SQLite and a `tsvector` with a GIN index on Postgres): the rows
+    /// of its keys table the index rows match, best first, each with a
+    /// snippet per column asked for. A caller's expression the index does
+    /// not take comes back as the inner error, and the call goes on; the
+    /// order and the snippets differ between the databases
+    /// (`superschematic_engine_storage::fulltext`).
+    pub fn fulltext(&self, query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
+        self.core.sql_fulltext(query)
     }
 
     /// Which database the statements run on.

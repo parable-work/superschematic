@@ -3334,3 +3334,131 @@ fn branches_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// Search's TypeScript guidance (`searchGuidance`) for a Note: one field
+/// and no vectors; three fields weighed 3, 1 and 0.5 with vectors; two
+/// fields, the second weighed 2.25.
+const SEARCH: &str = r#"{
+  "plain": {
+    "summary": "Full-text search over title. It keeps no vectors.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so listing stale embeddings is refused."
+      },
+      "settleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so a settle is refused."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  },
+  "weighed": {
+    "summary": "Full-text search over title (weight 3), body and summary (weight 0.5). With vectors of 384 dimensions from model minilm-l6, which an outside embedder with permission notes.embed settles.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title, body or summary: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression. A vector of 384 numbers from model minilm-l6 ranks by similarity, alone or fused with a query.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title, body and summary, joined by a blank line. With text, a vector of 384 numbers from model minilm-l6 computed from the same text ranks by similarity too.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "useWhen": "Use as an embedder: it lists the instances whose vector from minilm-l6 is missing or stale, with the text to embed and its hash.",
+        "success": "Returns the model, the dimensions and the items. Pass next as cursor for the page after, until it is null."
+      },
+      "settleEmbeddings": {
+        "useWhen": "Use as an embedder with permission notes.embed: it stores at most 100 vectors of 384 numbers, each with the hash staleEmbeddings gave.",
+        "doNotUseWhen": "Do not settle a vector computed from other text or another model: its hash no longer matches and it is skipped.",
+        "success": "Returns how many it settled and each skipped item with its reason, moved or not_found."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  },
+  "two": {
+    "summary": "Full-text search over title and body (weight 2.25). It keeps no vectors.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title or body: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title and body, joined by a blank line.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so listing stale embeddings is refused."
+      },
+      "settleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so a settle is refused."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn search_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{Search, SearchConfig, SearchVectors};
+
+    let expected: Value = serde_json::from_str(SEARCH).expect("the expected guidance");
+    let mut note = target();
+    note.schema = "Note".to_owned();
+    note.type_name = "Note".to_owned();
+    let guidance = Search.hooks().guidance.expect("guidance");
+    for (name, config) in [
+        (
+            "plain",
+            SearchConfig {
+                fields: names(&["title"]),
+                weights: vec![1.0],
+                vectors: None,
+            },
+        ),
+        (
+            "weighed",
+            SearchConfig {
+                fields: names(&["title", "body", "summary"]),
+                weights: vec![3.0, 1.0, 0.5],
+                vectors: Some(SearchVectors {
+                    dimensions: 384,
+                    model: "minilm-l6".to_owned(),
+                    permission: "notes.embed".to_owned(),
+                }),
+            },
+        ),
+        (
+            "two",
+            SearchConfig {
+                fields: names(&["title", "body"]),
+                weights: vec![1.0, 2.25],
+                vectors: None,
+            },
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&Search, &config, &note)),
+            expected[name],
+            "{name}"
+        );
+    }
+}

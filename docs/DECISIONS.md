@@ -5658,11 +5658,23 @@ Constants and Variants, and wave 2 (milestone 9) Revisions,
 Dependencies, Links (with D56's many-valued links, and what a move of a
 link's target moves on, which Reactions and Lease hear), and D56's
 Numbering, StateRules, Approvals and Timers, whose deadlines the runner
-fires, wave 3 (milestone 10a) Rollups and Reactions (with D56's changes
-trigger), whose rules the runner runs, and milestone 11 Branches, the
-version graph's Rust engine over its fixed layout in the call's
-transaction on either database, its ids drawn from the engine's own
-source (a behavior's `uuids()`), all with their guidance, migrations on
+fires, wave 3 (milestone 10) Rollups and Reactions (with D56's changes
+trigger), whose rules the runner runs, and Search, with its vectors,
+similar and the search across a namespace's schemas (`engine.search`,
+its route and its MCP tool), over full-text search the storage owns: on
+SQLite the FTS5 table the TypeScript engine creates; on Postgres a table
+of the fields with a generated `tsvector` each and one of them all under
+a GIN index, through a configuration of `unaccent` (the database's, or
+one the engine creates in `superschematic_extensions`) and `simple`,
+ranked by `ts_rank_cd` over the four classes the config's weights fall
+into (the distinct weights, highest first, A to D, the lower ones
+sharing D), with `ts_headline`'s snippets, an FTS5 expression translated
+before it runs and its NEAR groups and `^` refused, and an email
+address, a URL, a host, a path and a number with a point found whole
+rather than by their words, and milestone 11 Branches, the version
+graph's Rust engine over its fixed layout in the call's transaction on
+either database, its ids drawn from the engine's own source (a
+behavior's `uuids()`): all fifteen, with their guidance, migrations on
 both databases, configs, guards, fields, operations, reactions,
 schedules and veto codes; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
@@ -5675,11 +5687,10 @@ an event cursor on Postgres held to the recorded order rather than its
 number (a write a rollback undid leaves a gap in a Postgres identity
 column), but for a step it lists with what explains it (a change the
 recording does not see). CI tests the
-workspace on both databases. The Node-API addon is milestone 7, the
-other core behavior (Search) milestone 10b, and the work queue's
-milestone 12. Until the Rust engine passes the TypeScript suite,
-`@superschematic/engine` is the TypeScript implementation and nothing
-uses the workspace.
+workspace on both databases. The Node-API addon is milestone 7, and the
+work queue's milestone 12. Until the Rust engine passes the TypeScript
+suite, `@superschematic/engine` is the TypeScript implementation and
+nothing uses the workspace.
 
 The rule is reversible until the first release.
 

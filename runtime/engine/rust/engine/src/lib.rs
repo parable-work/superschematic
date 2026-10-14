@@ -58,6 +58,7 @@ mod principal;
 mod registry;
 mod retention;
 mod runner;
+pub mod search;
 pub mod tools;
 mod values;
 

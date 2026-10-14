@@ -873,7 +873,8 @@ jobs:
         # The engine's and the storage's tests run on SQLite, and on this
         # Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each
         # test in a schema of its own; without the variable they skip the
-        # Postgres pass.
+        # Postgres pass. The image ships contrib's unaccent, which Search's
+        # full-text index uses and the engine creates as the superuser.
         run: |
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \

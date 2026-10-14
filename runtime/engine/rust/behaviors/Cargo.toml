@@ -30,6 +30,9 @@ superschematic-schema-ir = { path = "../../../schema/rust-ir" }
 superschematic-versiongraph-engine = { path = "../../../versiongraph/rust-engine", default-features = false }
 # The version-5 UUIDs (RFC 9562) Branches names a root and an actor by.
 uuid = { version = "1.28.0", features = ["v5"] }
+# Search's similar picks an instance's words as the TypeScript engine's
+# /[\p{L}\p{N}]+/u does: runs of letters and numbers by general category.
+unicode-general-category = "1.1.0"
 
 [lints]
 workspace = true

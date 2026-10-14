@@ -15,6 +15,7 @@ pub(crate) mod numbering;
 pub(crate) mod reactions;
 pub(crate) mod revisions;
 pub(crate) mod rollups;
+pub(crate) mod search;
 pub(crate) mod staterules;
 pub(crate) mod timers;
 pub(crate) mod variants;

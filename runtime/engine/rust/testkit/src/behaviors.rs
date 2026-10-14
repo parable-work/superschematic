@@ -1808,7 +1808,7 @@ impl Behavior for Dispatch {
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
         Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,
-        Revisions, Rollups, StateRules, Timers, Variants, Workflow,
+        Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
@@ -1818,6 +1818,7 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Dependencies" => set.with(Dependencies),
         "Links" => set.with(Links),
         "Rollups" => set.with(Rollups),
+        "Search" => set.with(Search),
         "Reactions" => set.with(Reactions),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
@@ -1840,6 +1841,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-staterules", "test.Recorder") => set.with(crate::core_fixtures::Recorder),
         ("core-timers", "test.Bounce") => set.with(crate::core_fixtures::Bounce),
         ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
+        ("core-search", "test.Tripwire") => set.with(crate::core_fixtures::Tripwire),
         ("core-revisions", "test.Hold") => set.with(RevisionHold),
         ("core-dependencies", "test.Finisher") => set.with(Finisher),
         ("core-branches-sweep", "test.Keep") => set.with(Keep::default()),

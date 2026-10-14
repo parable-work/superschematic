@@ -53,9 +53,12 @@ which a host passes in its options (`core()`): so far Workflow,
 Comments, Constants and Variants (wave 1), and Revisions, Dependencies,
 Links (with what a move of a link's target moves on), Numbering and
 D56's StateRules, Approvals and Timers, whose deadlines the runner fires
-(wave 2), Rollups and Reactions, with D56's changes trigger (wave 3),
-and Branches (milestone 11), the version graph's Rust engine over its
-fixed layout in the call's transaction, with Search to come.
+(wave 2), Rollups and Reactions, with D56's changes trigger, and Search
+with its vectors and the search across a namespace's schemas, over
+full-text search that is the engine's own (`rust/storage/src/fulltext.rs`):
+FTS5 on SQLite, a `tsvector` with a GIN index on Postgres ("Search on
+Postgres") (wave 3), and Branches (milestone 11), the version graph's
+Rust engine over its fixed layout in the call's transaction: all fifteen.
 `superschematic-engine-testkit` (`rust/testkit`) ports this package's
 test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
@@ -3070,6 +3073,68 @@ engine.search(me, { query: 'walnut', vector: queryVector, model: 'minilm-l6' }, 
 - The parameters are `search`'s, `query` or `vector` required;
   `SEARCH_SCHEMAS_PARAMS` is their JSON Schema. The MCP tool is listed
   where a schema the caller may read composes Search.
+
+##### Search on Postgres
+
+The Rust engine (D58) runs Search on both databases, its full-text index
+the engine's own rather than SQL of the behavior's. On SQLite it is the
+FTS5 table above, created and queried as this package does, so a file
+this package wrote keeps working and a search answers as it does here,
+order and snippets included. On Postgres a search finds the same
+instances, but for the tokens below; it ranks and writes snippets
+another way. Vectors, `similar`'s choice of words and the fusion are
+Rust over the stored bytes, the same on both.
+
+- **The index** is a table `bhv_search__text` of the same columns and a
+  `rowid`, with a generated `tsvector` per column and one of every
+  column (`all_tsv`) under a GIN index, through a text search
+  configuration of its own (`bhv_search__text_config`): Postgres's
+  default parser, then `unaccent` and `simple`, so case and diacritics
+  fold as `remove_diacritics 2` folds them and nothing is stemmed or
+  dropped, as in FTS5. A hyphenated word is indexed as its parts, a
+  phrase of them, as FTS5 splits it.
+- **Tokens the parser keeps whole.** Postgres's parser reads an email
+  address, a URL, a host, a file path and a number with a point
+  (`ann@example.com`, `example.com/a`, `3.14`) as one token where FTS5
+  reads words, so on Postgres a search finds them by the whole token and
+  not by a part (`ann`). And the columns' text runs together in
+  `all_tsv`, so an FTS5 phrase can match across two fields there.
+- **`unaccent`** is the database's extension where it has one, in any
+  schema; otherwise the engine creates it, in a schema of its own,
+  `superschematic_extensions`, shared by every engine of the database (a
+  database holds an extension once, and an engine's schema may be
+  dropped with all it holds). It is a trusted extension from Postgres 13,
+  so a role with `CREATE` on the database may; where the role may not, a
+  publish that adds Search fails and says so, and an administrator runs
+  `CREATE EXTENSION unaccent` once. The official image and Cloud SQL ship
+  it.
+- **The query** is an FTS5 expression on both, plain words quoted as
+  above. Postgres takes FTS5's common forms, translated to a `tsquery`
+  before the statement runs, since an error inside it would end the
+  call's transaction: phrases (`"walnut desk"`, `walnut + desk`), a
+  prefix (`wal*`, the last word of a phrase), `AND`, implicit `AND`,
+  `OR`, `NOT` and parentheses, with FTS5's precedence. `NEAR` groups and
+  `^` are refused as `invalid_argument` at `/query` ("is not an FTS5
+  expression this index takes: NEAR groups are SQLite's alone ..."), as
+  is what FTS5 cannot parse, in FTS5's words where it has them (`fts5:
+  syntax error near ...`, `unterminated string`).
+- **The order** is `ts_rank_cd`'s, the cover density of the matches,
+  over the fields' vectors each labelled with its weight's class, then
+  the instance's first indexing. Postgres has four weight classes: the
+  config's distinct weights, highest first, are A, B, C and D, and past
+  four every lower weight shares D, weighed as the highest of them; each
+  class weighs its weight over the highest (A is 1), since `ts_rank_cd`
+  takes weights from 0 to 1. Weights `{ title: 3 }` over `title` and
+  `body` are A at 1 and B at 1/3. The labels are given when a search
+  runs, so a change of weights rebuilds nothing on Postgres either. The
+  places differ from bm25's, which also counts how rare a term is and
+  how long a field is; where the two agree (more matches first, a
+  heavier field first, then the row) the scenario corpus compares them,
+  and its other search steps are SQLite's alone (`dialect: sqlite`).
+- **The snippet** is `ts_headline`'s, at most 12 words around the
+  matches, between the same marks, so its parts read back the same way;
+  `...` stands where it leaves out text of the field before or after, as
+  FTS5's does. Its words are Postgres's choice and differ from FTS5's.
 
 #### Reactions
 

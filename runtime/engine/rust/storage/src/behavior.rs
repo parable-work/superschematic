@@ -48,6 +48,7 @@ use crate::db::Tx;
 use crate::ddl::{is_column_name, ColumnSpec, TableSpec};
 use crate::dialect::{Dialect, Sql};
 use crate::error::{Error, Result};
+use crate::fulltext::{self, FullTextMatches, FullTextQuery};
 use crate::ident::{identifier, quote_identifier, sql_string};
 use crate::migrations::{Migration, MigrationSet};
 use crate::value::{Row, RunResult, SqlValue};
@@ -490,6 +491,125 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
             self.run(statement, &[])?;
         }
         Ok(())
+    }
+
+    /// Creates a full-text index of the behavior's own in a migration
+    /// (D58, [`crate::fulltext`]): `columns` of text keyed by an integer
+    /// `rowid`, which the behavior writes and deletes with plain SQL on
+    /// both databases (`INSERT INTO <index> (rowid, <columns>) ...`) and
+    /// matches with [`BehaviorSql::fulltext`]. On SQLite it is the FTS5
+    /// table the TypeScript engine creates, through the checker; on
+    /// Postgres the engine writes its table, its generated vectors, their
+    /// GIN index and its text search configuration itself, creating the
+    /// `unaccent` extension when the database lacks it.
+    pub fn create_fulltext(&self, name: &str, columns: &[&str]) -> Result<()> {
+        if self.mode != SqlMode::Migrate {
+            return Err(Error::behavior(
+                self.behavior,
+                "a full-text index is created in a migration",
+            ));
+        }
+        let table = self.table(name)?;
+        let problems = fulltext::column_problems(columns);
+        if !problems.is_empty() {
+            return Err(Error::behavior(self.behavior, problems.join("; ")));
+        }
+        match self.dialect() {
+            Dialect::Sqlite => {
+                self.run(fulltext::sqlite_create(&table, columns), &[])?;
+            }
+            Dialect::Postgres => {
+                let extension = self.unaccent_schema()?;
+                let config = fulltext::config_name(self.prefix, name);
+                for statement in fulltext::postgres_create(&table, &config, &extension, columns) {
+                    self.tx.exec(statement)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Matches an FTS5 expression over one of the behavior's full-text
+    /// indexes (D58, [`crate::fulltext`]): the rows of its `keys` table the
+    /// index rows match, best first, each with its snippets. A caller's
+    /// expression the index does not take comes back as a
+    /// [`fulltext::QueryRefusal`], checked before it runs on Postgres and
+    /// run in a savepoint on SQLite, so the call goes on either way.
+    pub fn fulltext(&self, query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
+        let problems = fulltext::query_problems(query);
+        if !problems.is_empty() {
+            return Err(Error::behavior(self.behavior, problems.join("; ")));
+        }
+        let dialect = self.dialect();
+        let index = self.table(query.index)?;
+        let keys = self.table(query.keys)?;
+        let config = fulltext::config_name(self.prefix, query.index);
+        let names = fulltext::Names {
+            index: &index,
+            keys: &keys,
+            config: &config,
+        };
+        let expression = match dialect {
+            Dialect::Sqlite => query.expression.to_owned(),
+            Dialect::Postgres => match fulltext::tsquery(query.expression) {
+                Ok(translated) => translated,
+                Err(refusal) if query.caller => return Ok(Err(refusal)),
+                Err(refusal) => {
+                    return Err(fulltext::own_expression_refused(self.behavior, &refusal))
+                }
+            },
+        };
+        let (sql, params) = fulltext::match_statement(dialect, &names, query, &expression);
+        let rows = if dialect == Dialect::Sqlite && query.caller {
+            match self.try_all(sql, &params) {
+                Ok(rows) => rows,
+                Err(Error::Database { message, .. })
+                    if fulltext::is_sqlite_query_error(&message) =>
+                {
+                    return Ok(Err(fulltext::QueryRefusal { message }));
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            self.all(sql, &params)?
+        };
+        Ok(Ok(fulltext::hits(dialect, query, rows)))
+    }
+
+    // unaccent_schema is the schema the database's unaccent extension lives
+    // in, created in fulltext::EXTENSION_SCHEMA when it has none. Each
+    // create runs in a savepoint: another engine creating it at the same
+    // moment fails it as a duplicate, and leaves it there.
+    fn unaccent_schema(&self) -> Result<String> {
+        let found = |tx: &Tx<'_>| -> Result<Option<String>> {
+            tx.get(fulltext::UNACCENT_SCHEMA, &[])?
+                .map(|row| row.text("schema").map(str::to_owned))
+                .transpose()
+        };
+        if let Some(schema) = found(self.tx)? {
+            return Ok(schema);
+        }
+        let mut failure = None;
+        for statement in fulltext::unaccent_create() {
+            if let Err(error) = self.tx.savepoint(|tx| tx.exec(statement.as_str())) {
+                let duplicate = matches!(error.sqlstate(), Some("23505" | "42P06" | "42710"));
+                if !duplicate {
+                    failure = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+        match (found(self.tx)?, failure) {
+            (Some(schema), _) => Ok(schema),
+            (None, failure) => Err(Error::behavior(
+                self.behavior,
+                format!(
+                    "full-text search on Postgres needs the unaccent extension, which the database does not have and the engine could not create in schema {} ({}); have an administrator run CREATE EXTENSION unaccent",
+                    fulltext::EXTENSION_SCHEMA,
+                    failure.unwrap_or_else(|| "it is still missing".to_owned())
+                ),
+            )),
+        }
     }
 
     fn writable(&self) -> Result<()> {
