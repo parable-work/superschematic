@@ -226,11 +226,15 @@ type ToolSchemaProperty struct {
 	OneOf                []ToolSchemaProperty            `json:"oneOf,omitempty"`
 }
 
-// ToolReturnSchema is the return shape of one tool.
+// ToolReturnSchema is the return shape of one tool. Properties and
+// Required are a page's (D60), {items, next}; every other return leaves
+// them out.
 type ToolReturnSchema struct {
-	Type        ToolSchemaType   `json:"type"`
-	Description string           `json:"description,omitempty"`
-	Items       *ToolReturnItems `json:"items,omitempty"`
+	Type        ToolSchemaType                `json:"type"`
+	Description string                        `json:"description,omitempty"`
+	Items       *ToolReturnItems              `json:"items,omitempty"`
+	Properties  map[string]ToolSchemaProperty `json:"properties,omitempty"`
+	Required    []string                      `json:"required,omitempty"`
 }
 
 // ToolReturnItems is the item schema of an array-valued ToolReturnSchema.

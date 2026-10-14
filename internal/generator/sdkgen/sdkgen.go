@@ -40,6 +40,13 @@ type NamespaceInfo struct {
 	// for a map of an object type (ScalarArg.ValueIsObject).
 	HasMapArgs       bool
 	HasObjectMapArgs bool
+	// HasPagedEndpoints reports whether an endpoint pages its list (D60);
+	// the namespace then imports the SDK's Page, as PageType, and
+	// pageItems.
+	HasPagedEndpoints bool
+	// PageType is the name the namespace gives the SDK's Page: Page, or
+	// SDKPage when the namespace imports a schema type named Page.
+	PageType string
 }
 
 // EndpointInfo represents a single API endpoint for the SDK
@@ -67,6 +74,7 @@ type EndpointInfo struct {
 	Encrypted      bool              // Whether endpoint payload must be encrypted
 	Filterable     bool              // Whether endpoint accepts bracket-notation filter query params
 	Page           *apigen.PageInfo  // @paginated (D60); nil when the endpoint does not page
+	PageType       string            // the namespace's name for the SDK's Page; set with Page
 
 	// File upload configuration
 	HasFileUpload    bool              // True if any input field is a file-type scalar
@@ -187,6 +195,7 @@ type SDKOutput struct {
 	Namespaces             []NamespaceInfo // All namespaces
 	HasAuth                bool            // Whether any endpoint requires auth
 	HasFilterableEndpoints bool            // Whether any endpoint is @filterable (gates FilterParam in types.ts)
+	HasPagedEndpoints      bool            // Whether any endpoint is @paginated (gates Page and pageItems, D60)
 	Timestamp              string          // Generation timestamp
 	Version                string          // Package version
 
@@ -212,12 +221,6 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
-	// Until this generator renders @paginated, it refuses a paged operation
-	// rather than read a list where the servers answer a page (D60).
-	if err := apigen.RefusePages("the TypeScript SDK (sdkgen)", apiOutput); err != nil {
-		return nil, err
-	}
-
 	// The client sends credentials when any operation needs a caller, public
 	// API or not: the TypeScript router enforces @auth on every API, and the
 	// OpenAPI document marks such operations bearerAuth either way.
@@ -357,6 +360,10 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if sdkEndpoint.HasFileUpload {
 			namespaceMap[ns].HasFileUpload = true
 		}
+		if sdkEndpoint.Page != nil {
+			namespaceMap[ns].HasPagedEndpoints = true
+			output.HasPagedEndpoints = true
+		}
 	}
 
 	// Build sorted import lists for each namespace
@@ -367,6 +374,9 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		}
 		sort.Strings(importList)
 		namespaceMap[ns].Imports = importList
+		if namespaceMap[ns].HasPagedEndpoints {
+			setPageType(namespaceMap[ns], imports)
+		}
 	}
 
 	// Convert map to sorted slice
@@ -485,14 +495,53 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 	}
 }
 
+// setPageType names the SDK's Page in a namespace with a paged endpoint:
+// Page, unless the namespace imports a schema type of that name.
+func setPageType(ns *NamespaceInfo, imports map[string]bool) {
+	ns.PageType = "Page"
+	if imports["Page"] {
+		ns.PageType = "SDKPage"
+	}
+	for i := range ns.Endpoints {
+		if ns.Endpoints[i].Page != nil {
+			ns.Endpoints[i].PageType = ns.PageType
+		}
+	}
+}
+
+// HasQuery reports whether the method takes a query object: its query
+// parameters, or a paged endpoint's cursor and limit (D60).
+func (e EndpointInfo) HasQuery() bool {
+	return len(e.QueryParams) > 0 || e.Page != nil
+}
+
+// TSItemType is the TypeScript type of one item of a paged endpoint's list
+// (D60), which its <name>All yields.
+func (e EndpointInfo) TSItemType() string {
+	return normalizeTSTypeIdentifier(e.OutputType)
+}
+
+// AllName is the name of a paged endpoint's iterator, <name>All (D60).
+func (e EndpointInfo) AllName() string {
+	return e.Name + "All"
+}
+
 // OutputArrayDepth is 0 for a T response, 1 for T[] and 2 for T[][].
 func (e EndpointInfo) OutputArrayDepth() int {
 	return ir.TypeRef{IsArray: e.OutputIsArray, IsArrayOfArrays: e.OutputIsArrayOfArrays}.ArrayDepth()
 }
 
 // TSOutputType is the TypeScript type of the response: the output type
-// with one "[]" per list level ("GridView", "GridView[]", "string[][]").
+// with one "[]" per list level ("GridView", "GridView[]", "string[][]"),
+// or a paged endpoint's page of its items ("Page<ItemView>", D60).
 func (e EndpointInfo) TSOutputType() string {
+	if e.Page != nil {
+		pageType := e.PageType
+		if pageType == "" {
+			pageType = "Page"
+		}
+		return pageType + "<" + e.TSItemType() + ">"
+	}
 	return codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
 		return inner + "[]"
 	})
@@ -861,8 +910,9 @@ func toolsTemplateFuncs() template.FuncMap {
 // SDK method, in the order the method declares its parameters: the path
 // parameters (a scoped namespace takes its scope in the factory); the input
 // type's fields under their names in the types package, or the body
-// arguments as one object; the query parameters as one object; and the
-// options of an encrypted operation.
+// arguments as one object; the query parameters, with a paged endpoint's
+// cursor and limit, as one object; and the options of an encrypted
+// operation.
 //
 // The SDK method takes body arguments as positional parameters, or all of
 // them as one object in the first (the object call, which also works when
@@ -883,10 +933,16 @@ func buildInvocationArgs(tool ToolDefinition, ns ToolsNamespace) string {
 	bodyStart := len(args)
 
 	var query string
-	if len(tool.QueryArgs) > 0 {
-		fields := make([]string, 0, len(tool.QueryArgs))
+	if len(tool.QueryArgs) > 0 || tool.Page != nil {
+		fields := make([]string, 0, len(tool.QueryArgs)+2)
 		for _, arg := range tool.QueryArgs {
 			fields = append(fields, fmt.Sprintf("%s: %s.%s", arg.TSName, params, arg.TSName))
+		}
+		// A paged endpoint's cursor and limit (D60) travel in the query.
+		if tool.Page != nil {
+			for _, name := range []string{apigen.PageCursorParam, apigen.PageLimitParam} {
+				fields = append(fields, fmt.Sprintf("%s: %s.%s", name, params, name))
+			}
 		}
 		query = "{ " + strings.Join(fields, ", ") + " }"
 	}

@@ -35,6 +35,19 @@ export interface FilterParam {
   [field: string]: string | { op: 'eq' | 'in' | 'contains' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; value: string };
 }
 {{- end}}
+{{- if .HasPagedEndpoints}}
+
+/**
+ * One page of a paged operation's list (D60): its items, which may be
+ * fewer than the limit asked for, even none, and next, the cursor of the
+ * next page, null after the last. Ask for the next page by passing next
+ * back as the cursor query parameter.
+ */
+export interface Page<T> {
+  items: T[];
+  next: string | null;
+}
+{{- end}}
 
 /** fetch signature used by the generated HTTP client. */
 export type FetchLike = (

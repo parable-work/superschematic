@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixturePagedApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-paged-api API",
+  "tools": [
+    {
+      "name": "catalog.placeBasket",
+      "operationId": "CatalogPlaceBasketHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Place a basket.",
+      "namespace": "catalog",
+      "methodName": "placeBasket",
+      "httpMethod": "POST",
+      "httpPath": "/api/baskets",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:b43a0ad1753d0e4cd6809b9dec8923d2c7c5c7d99882966d30d0cf546009d935",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lines": {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"}
+        },
+        "required": ["lines"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "BasketView object"
+      }
+    },
+    {
+      "name": "catalog.listItems",
+      "operationId": "CatalogListItemsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock. Pages: pass the result's `next` back as `cursor` for the next page; `next` is null after the last.",
+      "namespace": "catalog",
+      "methodName": "listItems",
+      "httpMethod": "GET",
+      "httpPath": "/api/items",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:083fbe6911e32676d7a73662fbbd63a2f56da9d98cb03b6441967ba090d1f885",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {"description":"The `next` of the previous page; absent for the first page.","maxLength":1024,"minLength":1,"pattern":"^[A-Za-z0-9_-]+$","type":"string"},
+          "ids": {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array"},
+          "inStock": {"description":"A boolean value (true or false)","type":"boolean"},
+          "limit": {"description":"The most items the page holds: 1 to 5, 2 when absent.","maximum":5,"minimum":1,"type":"integer"}
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "A page of ItemView",
+        "properties": {
+          "items": {"description":"Array of ItemView","items":{"description":"ItemView object","type":"object"},"type":"array"},
+          "next": {"description":"The cursor of the next page, to send as cursor; null after the last page.","type":["string","null"]}
+        },
+        "required": ["items", "next"]
+      }
+    },
+    {
+      "name": "catalog.getItem",
+      "operationId": "CatalogGetItemHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "One item.",
+      "namespace": "catalog",
+      "methodName": "getItem",
+      "httpMethod": "GET",
+      "httpPath": "/api/items/{itemId}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:3c03d84160ba062838a2852c74200637f02f9a45c95af4d94f5190da4c574c67",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "itemId": {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["itemId"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ItemView object"
+      }
+    },
+    {
+      "name": "catalog.listTags",
+      "operationId": "CatalogListTagsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "The tags items carry: a page of a primitive, with the default limits. Pages: pass the result's `next` back as `cursor` for the next page; `next` is null after the last.",
+      "namespace": "catalog",
+      "methodName": "listTags",
+      "httpMethod": "GET",
+      "httpPath": "/api/tags",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7be6a39feedb23746db251d17a6c178dbc1160380bfdc536f6e97cce52827cf8",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {"description":"The `next` of the previous page; absent for the first page.","maxLength":1024,"minLength":1,"pattern":"^[A-Za-z0-9_-]+$","type":"string"},
+          "limit": {"description":"The most items the page holds: 1 to 100, 20 when absent.","maximum":100,"minimum":1,"type":"integer"}
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "A page of string",
+        "properties": {
+          "items": {"description":"Array of string","items":{"description":"A string value","type":"string"},"type":"array"},
+          "next": {"description":"The cursor of the next page, to send as cursor; null after the last page.","type":["string","null"]}
+        },
+        "required": ["items", "next"]
+      }
+    }
+  ]
+}

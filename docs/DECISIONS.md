@@ -6077,6 +6077,11 @@ with `readPage` after the operation's own query parameters, the method
 takes `args.page` and returns a `Page`, and `fixture-paged-api`'s router
 answers `page_parity.json`'s reads and refused cursors over HTTP
 (`tsrestgen`'s `TestGeneratedPagedRouter`).
+The Go and TypeScript SDKs render it: a paged method takes the page
+request and returns `runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an
+`iter.Seq2`) and `listItemsAll` (an `AsyncIterable`) ask for each page as
+the loop reaches it, and their tools take `cursor` and `limit` in the
+query and return the page.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,

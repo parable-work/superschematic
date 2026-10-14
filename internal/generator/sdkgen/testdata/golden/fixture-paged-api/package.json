@@ -1,0 +1,51 @@
+{
+  "name": "@schemas/fixture-paged-api-sdk",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for fixture-paged-api API",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    },
+    "./client": {
+      "types": "./client.ts",
+      "import": "./client.ts"
+    },
+    "./types": {
+      "types": "./types.ts",
+      "import": "./types.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "format": "prettier --write \"**/*.ts\"",
+    "prepublishOnly": "bun run clean && bun run build"
+  },
+  "keywords": [
+    "api",
+    "sdk",
+    "typescript",
+    "fixture-paged-api"
+  ],
+  "author": "superschematic",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {},
+  "peerDependencies": {
+    "@schemas/fixture-paged-api-types": "*"
+  },
+  "peerDependenciesMeta": {
+    "@schemas/fixture-paged-api-types": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "20.0.0",
+    "prettier": "3.8.0",
+    "typescript": "5.9.3"
+  }
+}
