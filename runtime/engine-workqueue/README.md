@@ -101,13 +101,19 @@ options.behaviors = superschematic_engine_behaviors::core()
 ```
 
 `workqueue()` is every behavior ported, in `workQueueBehaviors`' order
-(`NAMES`), and `behavior(name)` one alone. Milestone 12 ports them;
-until it is done the others are the TypeScript package's alone. The
-guidance tests are `rust/tests/guidance_<behavior>.rs`; the behaviors'
-own tests, ports of `typescript/test/*.test.ts` on SQLite and on Postgres
+(`NAMES`), and `behavior(name)` one alone. Milestone 12 ports them in
+two parts: 12a has ported Lease (with directOn), Assignment, Presence
+and Retries, which keep this package's table and column names; Queue,
+Budget and Blueprint are 12b's, and until then the TypeScript package's
+alone. The guidance tests are `rust/tests/guidance_<behavior>.rs`, each
+held to the text this package's built guidance returned under node,
+recorded in `rust/tests/guidance/<behavior>.json`; the behaviors' own
+tests, ports of `typescript/test/*.test.ts` on SQLite and on Postgres
 when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, are the engine
 test kit's `tests/workqueue_<behavior>.rs`, with the test behaviors of
-`typescript/test/fixtures.ts` in its `workqueue_fixtures`.
+`typescript/test/fixtures.ts` in its `workqueue_fixtures`. A case that
+needs a behavior the Rust engine lacks (Branches, Queue) is ignored,
+naming it.
 
 ## Lease
 

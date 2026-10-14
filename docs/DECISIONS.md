@@ -5674,7 +5674,11 @@ column), but for a step it lists with what explains it (a change the
 recording does not see). CI tests the
 workspace on both databases. The Node-API addon is milestone 7, the
 other core behaviors (Search, then Branches) milestones 10 and 11, and
-the work queue's milestone 12. Until the Rust engine passes the
+the work queue's milestone 12, whose first part (12a) has ported Lease
+(with directOn), Assignment, Presence and Retries into
+`superschematic-engine-workqueue`, with their guidance, migrations on
+both databases and the cases of their TypeScript tests; Queue, Budget
+and Blueprint are its second (12b). Until the Rust engine passes the
 TypeScript suite, `@superschematic/engine` is the TypeScript
 implementation and nothing uses the workspace.
 
