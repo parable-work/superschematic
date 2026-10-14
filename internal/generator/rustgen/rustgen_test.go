@@ -40,6 +40,8 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-optimistic-db"},
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
+		// A DB's queues: src/queues.rs (D65).
+		{service: "fixture-queue-db"},
 		// Types that compose behaviors: src/behaviors.rs (D58).
 		{service: behaviortypestest.Service},
 	}

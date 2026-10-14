@@ -247,6 +247,11 @@ type ModuleOutput struct {
 	// Empty when no type of the DB schema composes a behavior.
 	EngineDocument string
 
+	// Queues are the schema's @queue classes, sorted by name, each with
+	// the descriptor src/queues.rs holds or why it leaves the queue out
+	// (D65). Nil writes no src/queues.rs.
+	Queues []QueueInfo
+
 	// VersionGraphDepPath is the Cargo.toml path entry for the version
 	// graph's Rust engine crate (Naming.VersionGraphRustCrate), relative to
 	// the output directory, set by SetVersionGraphPath. Empty names the
@@ -423,6 +428,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if opts.EngineDocument != nil {
 		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
+	}
+	if output.Queues, err = RustQueues(schema); err != nil {
+		return nil, err
 	}
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
 		return nil, err
