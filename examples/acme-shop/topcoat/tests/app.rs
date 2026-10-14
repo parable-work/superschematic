@@ -3,25 +3,42 @@
 //! posted signed out, or one that breaks a rule, renders again with 422;
 //! a shopper signs in with their password, their review is listed, and the
 //! JSON API at `/api` serves the same reviews and admits the same session.
-//! An order is placed through the form with its lines as rows, filtered by
-//! the GET form on `/orders` and cancelled from its page, each refusal
-//! rendered at its control with the route's status; an order's page names
-//! its lines' products; a post of far more lines than an order holds
-//! renders a form of 51. The console the crate generates at `/console`
-//! lists what the shopper may list, their orders with a link to each,
-//! cancels an order from its page, places one with each line's product a
-//! select of the catalog's, and lists and writes a product's reviews; a
-//! signed-out shopper gets 401 and a sign-in link that comes back. Over a
-//! SQLite file of shop-db's tables, the reviews, orders and sessions
-//! outlive the app, and the console lists the orders.
+//! An order is placed through the form with its lines as rows, each line's
+//! product a select of the products `listProducts` lists, filtered by the
+//! GET form on `/orders`, paged through its links to the next page and the
+//! first, and cancelled from its page, each refusal rendered at its control
+//! with the route's status, and a forged cursor or a limit out of range as
+//! the form's own message with the route's 400; an order's page names its
+//! lines' products through the catalog's lookup; a post of far more lines
+//! than an order holds renders a form of 51. The console the crate
+//! generates at `/console` lists what the shopper may list, the catalog to
+//! anyone: their orders with a link to each, which it cancels from its
+//! page, places one, and lists the products, each linked to its page, which
+//! shows the first page of its reviews, and searches and writes a product's
+//! reviews, each list a page at a time; a signed-out shopper gets 401 and a
+//! sign-in link that comes back. The orders' procedure answers a page
+//! record. The pages, the search and the refusals of a forged cursor are
+//! the same over the shop in memory and over a SQLite file of shop-db's
+//! tables, where the reviews, orders and sessions outlive the app, and the
+//! console lists the orders.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{add_shopper, users_at, users_in_memory};
-use acme_shop_topcoat::{PRODUCT, app, product, shop_in_memory, stock_sqlite};
-use topcoat::router::{Body, Router, StatusCode, header, to_bytes};
+use acme_shop_orders_server::{Shop, add_shopper, users_at, users_in_memory};
+use acme_shop_orders_topcoat::api::runtime::identity::Service;
+use acme_shop_orders_topcoat::api::runtime::{Principal, RequestContext};
+use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviewsWriteReviewArgs, types};
+use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, call_order_list_orders};
+use acme_shop_orders_topcoat::records::OrderViewPageRecord;
+use acme_shop_topcoat::{CATALOG, PRODUCT, Product, app, product, shop_in_memory, stock_sqlite};
+use topcoat::context::Cx;
+use topcoat::router::request::parts;
+use topcoat::router::{Body, Router, StatusCode, header, page, to_bytes};
+use topcoat::view::{View, view};
 
 /// The app's identity config at a low password cost, so a test hashes
 /// fast.
@@ -65,10 +82,16 @@ fn temp_path(name: &str) -> PathBuf {
     path
 }
 
-/// The app over the SQLite shop at `path`, its users the file's, with the
-/// demo's shopper and the catalog's products, as src/main.rs opens it: the
-/// shopper is added unless an earlier app over the file added them.
+/// The app over the SQLite shop at `path`, as src/main.rs opens it.
 async fn sqlite_shop(path: &Path) -> Router {
+    let (shop, users) = open_sqlite(path).await;
+    app(Arc::new(shop), users)
+}
+
+/// The SQLite shop at `path` and its users, the file's, with the demo's
+/// shopper and the catalog's products: the shopper is added unless an
+/// earlier app over the file added them.
+async fn open_sqlite(path: &Path) -> (SqliteShop, Arc<Service>) {
     let url = format!("sqlite:{}", path.display());
     let shop = SqliteShop::open(&url).unwrap();
     let users = users_at(&url, CONFIG).unwrap();
@@ -76,7 +99,62 @@ async fn sqlite_shop(path: &Path) -> Router {
         add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
     }
     stock_sqlite(&shop).unwrap();
-    app(Arc::new(shop), users)
+    (shop, users)
+}
+
+/// Products beside the app's catalog, so that a page of one product, or
+/// of two, has a next: the catalog lists them by name, after the anvil.
+const MORE: [Product; 2] = [
+    Product { id: "00000000-0000-4000-8000-0000000000b2", sku: "bellows", name: "Bellows", price_cents: 2500 },
+    Product { id: "00000000-0000-4000-8000-0000000000c3", sku: "chisel", name: "Chisel", price_cents: 450 },
+];
+
+/// Reviews of the anvil for the search to find: a title and a body each.
+const REVIEWS: [(&str, &str); 3] = [
+    ("Sturdy and heavy", "Survived three coyotes."),
+    ("Too heavy", "100% iron, and it shows."),
+    ("Rings true", "A STURDY anvil, heavy enough."),
+];
+
+/// The `n`th reviewer's id: each review has a shopper of its own, since
+/// shop-db's one_per_author index lets a shopper review a product once.
+fn reviewer(n: usize) -> String {
+    format!("00000000-0000-4000-8000-{:012x}", 0xe00 + n)
+}
+
+/// Writes a review of the anvil for each title and body, the `n`th as the
+/// `n`th reviewer, a few milliseconds apart, so the reviews list, oldest
+/// first, in the order written.
+async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&str, &str)]) {
+    for (n, (title, body)) in reviews.iter().enumerate() {
+        let caller = RequestContext { principal: Some(Principal::new(reviewer(n), ["orders"])), ..RequestContext::default() };
+        let input = types::WriteReviewInput { rating: 4.0, title: (*title).to_owned(), body: (*body).to_owned() };
+        shop.write_review(caller, ProductReviewsWriteReviewArgs { product_id: product(), input }).await.unwrap();
+        sleep(Duration::from_millis(3));
+    }
+}
+
+/// The app over each kind of shop, by its name: in memory, and over a new
+/// SQLite file of shop-db's tables (`file`, as `sqlite_file` makes it).
+/// Each holds the app's catalog and `MORE`, the demo's shopper, and
+/// `reviews` of the anvil, each by a reviewer of its own.
+async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Router); 2] {
+    let memory = Shop::with_products(CATALOG.iter().chain(&MORE).map(Product::view));
+    write_reviews(&memory, reviews).await;
+    let users = users_in_memory(CONFIG).unwrap();
+    add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    let in_memory = app(Arc::new(memory), users);
+
+    let (sqlite, users) = open_sqlite(&sqlite_file(file)).await;
+    for product in &MORE {
+        sqlite.add_product(&product.id(), product.sku, product.name, product.price_cents).unwrap();
+    }
+    for n in 0..reviews.len() {
+        let id = reviewer(n).parse().unwrap();
+        sqlite.add_user(&id, &format!("reviewer{n}@example.com"), "A reviewer").unwrap();
+    }
+    write_reviews(&sqlite, reviews).await;
+    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users))]
 }
 
 struct Response {
@@ -147,6 +225,51 @@ async fn place_order(router: &Router, cookie: &str) -> String {
     let placed = send(router, "POST", "/orders/new", Some(cookie), Some(&order_form("2"))).await;
     assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.body);
     placed.location.expect("the order's page")
+}
+
+/// Places `count` orders through the form, a few milliseconds apart, so the
+/// orders list, oldest first, in the order placed: their pages.
+async fn place_orders(router: &Router, cookie: &str, count: usize) -> Vec<String> {
+    let mut placed = Vec::new();
+    for _ in 0..count {
+        placed.push(place_order(router, cookie).await);
+        sleep(Duration::from_millis(3));
+    }
+    placed
+}
+
+/// Each text of `body` between `start` and the next `end`.
+fn each_between<'a>(body: &'a str, start: &str, end: &str) -> Vec<&'a str> {
+    body.split(start).skip(1).filter_map(|rest| rest.split_once(end).map(|(text, _)| text)).collect()
+}
+
+/// The page's link to another of the list's pages, `rel` `next` or
+/// `first`, as the browser follows it.
+fn link(body: &str, rel: &str) -> Option<String> {
+    each_between(body, &format!(r#"<a rel="{rel}" href=""#), "\"").first().map(|href| href.replace("&amp;", "&"))
+}
+
+/// The orders the shop's orders page links to, by their pages.
+fn order_links(body: &str) -> Vec<&str> {
+    each_between(body, r#"<li><a href=""#, "\"").into_iter().filter(|href| href.starts_with("/orders/")).collect()
+}
+
+/// The ids of the orders a console table lists.
+fn console_orders(body: &str) -> Vec<&str> {
+    each_between(body, r#"<td data-field="id"><a href="/console/orders/"#, "\"")
+}
+
+/// The names of the products a console table lists.
+fn product_names(body: &str) -> Vec<&str> {
+    each_between(body, r#"<th scope="row" data-field="name"><a href=""#, "</a>")
+        .into_iter()
+        .filter_map(|cell| cell.split_once("\">").map(|(_, name)| name))
+        .collect()
+}
+
+/// The titles of the reviews a console table lists.
+fn review_titles(body: &str) -> Vec<&str> {
+    each_between(body, r#"<th scope="row" data-field="title">"#, "</th>")
 }
 
 #[tokio::test]
@@ -229,7 +352,7 @@ async fn orders_need_their_permission() {
     // The JSON API admits the session the page signed in.
     let api = send(&router, "GET", "/api/orders", Some(&cookie), None).await;
     assert_eq!(api.status, StatusCode::OK, "{}", api.body);
-    assert!(api.body.contains(r#""data":[]"#), "{}", api.body);
+    assert!(api.body.contains(r#""data":{"items":[],"next":null}"#), "{}", api.body);
 
     // `next` names a page of the app, never another host.
     for next in ["%2F%2Fevil.example", "https%3A%2F%2Fevil.example", "%2F%5Cevil.example"] {
@@ -264,7 +387,9 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     let cookie = sign_in(&router).await;
     let anvil = product().to_string();
 
-    // A new form: one line, its product a select of the catalog's.
+    // A new form: one line, its product a select of the products
+    // `listProducts` lists, each by its name, its value the id as the API
+    // sends it.
     let form = send(&router, "GET", "/orders/new", Some(&cookie), None).await;
     assert_eq!(form.status, StatusCode::OK);
     for want in [
@@ -315,7 +440,7 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains(r#"<div data-field="status"><dt>Status</dt><dd><data value="placed">Placed</data></dd></div>"#), "{}", page.body);
     assert!(page.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd>3998</dd></div>"#), "{}", page.body);
-    // Each line's product by its name, the catalog's choices.
+    // Each line's product by its name, which the catalog's lookup gives.
     assert!(page.body.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", page.body);
     assert!(!page.body.contains(&format!(">{anvil}<")), "{}", page.body);
     // When it was placed, in UTC to the minute, the value as sent kept.
@@ -408,15 +533,8 @@ async fn orders_are_filtered_by_the_get_form() {
     assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="placed">"#), "{}", page.body);
     assert!(page.body.contains(&format!(r#"<a href="{cancelled}">"#)), "{}", page.body);
     assert!(!page.body.contains(&placed), "{}", page.body);
-    let none = send(&router, "GET", "/orders?statuses=shipped&limit=", Some(&cookie), None).await;
+    let none = send(&router, "GET", "/orders?statuses=shipped", Some(&cookie), None).await;
     assert!(none.body.contains("No orders match the filter."), "{}", none.body);
-
-    // A limit out of its range: 422, the route's message at the control.
-    let refused = send(&router, "GET", "/orders?limit=500", Some(&cookie), None).await;
-    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
-    let limit = r#"name="limit" type="number" step="any" min="1" max="100" value="500" aria-invalid="true"><p class="field-error">must be at most 100</p>"#;
-    assert!(refused.body.contains(limit), "{}", refused.body);
-    assert!(!refused.body.contains("<table"), "{}", refused.body);
 }
 
 #[tokio::test]
@@ -477,13 +595,14 @@ async fn the_console_shows_what_the_shopper_may_list() {
     let reviews = send(&router, "GET", "/reviews", None, None).await;
     assert!(reviews.body.contains(r#"<a href="/console">Console</a>"#), "{}", reviews.body);
 
-    // Signed out, the console lists nothing and offers to sign in, and the
-    // orders answer 401 with a sign-in link that comes back to them.
+    // Signed out, the console lists the products, which anyone may list,
+    // and offers to sign in, and the orders answer 401 with a sign-in link
+    // that comes back to them.
     let index = send(&router, "GET", "/console", None, None).await;
     assert_eq!(index.status, StatusCode::OK);
     assert!(index.body.contains(r#"<header class="ss-header"><a href="/console">Acme shop console</a></header>"#), "{}", index.body);
-    assert!(index.body.contains("There is nothing here you may list."), "{}", index.body);
-    assert!(!index.body.contains("ss-nav"), "{}", index.body);
+    assert!(index.body.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/products">Products</a></li></ul></nav>"#), "{}", index.body);
+    assert!(index.body.contains(r#"<ul class="ss-index"><li><a href="/console/products">Products</a></li></ul>"#), "{}", index.body);
     assert!(index.body.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole">Sign in</a>"#), "{}", index.body);
     let orders = send(&router, "GET", "/console/orders", None, None).await;
     assert_eq!(orders.status, StatusCode::UNAUTHORIZED);
@@ -491,11 +610,12 @@ async fn the_console_shows_what_the_shopper_may_list() {
     let signed_in = send(&router, "POST", "/sign-in", None, Some(&format!("{SHOPPER}&next=%2Fconsole%2Forders"))).await;
     assert_eq!((signed_in.status, signed_in.location.as_deref()), (StatusCode::SEE_OTHER, Some("/console/orders")));
 
-    // Signed in, the nav and the index list the orders.
+    // Signed in, the nav and the index list the orders too.
     let cookie = signed_in.cookie.expect("the session cookie");
     let index = send(&router, "GET", "/console", Some(&cookie), None).await;
-    assert!(index.body.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/orders">Orders</a></li></ul></nav>"#), "{}", index.body);
-    assert!(index.body.contains(r#"<ul class="ss-index"><li><a href="/console/orders">Orders</a></li></ul>"#), "{}", index.body);
+    let links = r#"<li><a href="/console/orders">Orders</a></li><li><a href="/console/products">Products</a></li>"#;
+    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{links}</ul></nav>"#)), "{}", index.body);
+    assert!(index.body.contains(&format!(r#"<ul class="ss-index">{links}</ul>"#)), "{}", index.body);
     assert!(!index.body.contains("ss-sign-in"), "{}", index.body);
 }
 
@@ -549,6 +669,8 @@ async fn the_console_lists_orders_and_cancels_one_from_its_page() {
 async fn the_console_places_an_order_with_the_catalogs_products() {
     let router = shop().await;
     let cookie = sign_in(&router).await;
+    // Each line's product is a select of the products `listProducts`
+    // lists, which the console names with no choices of the app's.
     let new = send(&router, "GET", "/console/orders/new", Some(&cookie), None).await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.body);
     let select = format!(
@@ -589,8 +711,9 @@ async fn the_console_lists_and_writes_a_products_reviews() {
     assert_eq!(empty.status, StatusCode::OK, "{}", empty.body);
     assert!(empty.body.contains(r#"<p class="ss-empty">There are no reviews.</p>"#), "{}", empty.body);
     assert!(!empty.body.contains("ss-new"), "{}", empty.body);
+    // The trail names the product by its title, through getProduct.
     assert!(empty.body.contains(&format!(
-        r#"<li><span>Products</span></li><li><span>{PRODUCT}</span></li><li><span aria-current="page">Reviews</span></li>"#
+        r#"<li><a href="/console/products">Products</a></li><li><a href="/console/products/{PRODUCT}">Anvil</a></li><li><span aria-current="page">Reviews</span></li>"#
     )), "{}", empty.body);
 
     let cookie = sign_in(&router).await;
@@ -606,6 +729,245 @@ async fn the_console_lists_and_writes_a_products_reviews() {
     assert_eq!((written.status, written.location.as_deref()), (StatusCode::SEE_OTHER, Some(reviews.as_str())), "{}", written.body);
     let list = send(&router, "GET", &reviews, None, None).await;
     assert!(list.body.contains(r#"<th scope="row" data-field="title">Heavy</th>"#), "{}", list.body);
+}
+
+#[tokio::test]
+async fn the_orders_page_links_its_next_page_and_its_first() {
+    for (shop, router) in each_shop("orders-pages.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 3).await;
+
+        // Two a page, oldest first: the first page links the next, which
+        // links back to the first, each with the limit.
+        let first = send(&router, "GET", "/orders?limit=2", Some(&cookie), None).await;
+        assert_eq!(first.status, StatusCode::OK, "{shop}: {}", first.body);
+        assert_eq!(order_links(&first.body), placed[..2], "{shop}");
+        assert_eq!(link(&first.body, "first"), None, "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        assert!(next.starts_with("/orders?limit=2&cursor="), "{shop}: {next}");
+        let second = send(&router, "GET", &next, Some(&cookie), None).await;
+        assert_eq!(second.status, StatusCode::OK, "{shop}: {}", second.body);
+        assert_eq!(order_links(&second.body), placed[2..], "{shop}");
+        assert_eq!(link(&second.body, "next"), None, "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/orders?limit=2"), "{shop}");
+
+        // The filter holds on every page, and the links carry it.
+        let cancelled = send(&router, "POST", &format!("{}/cancel", placed[1]), Some(&cookie), Some("reason=")).await;
+        assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
+        let first = send(&router, "GET", "/orders?statuses=placed&limit=1", Some(&cookie), None).await;
+        assert_eq!(order_links(&first.body), [placed[0].as_str()], "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        assert!(next.starts_with("/orders?statuses=placed&limit=1&cursor="), "{shop}: {next}");
+        let second = send(&router, "GET", &next, Some(&cookie), None).await;
+        assert_eq!(order_links(&second.body), [placed[2].as_str()], "{shop}");
+        assert!(second.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{shop}: {}", second.body);
+        assert_eq!(link(&second.body, "next"), None, "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/orders?statuses=placed&limit=1"), "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn a_forged_cursor_or_a_limit_out_of_range_is_the_routes_400() {
+    for (shop, router) in each_shop("forged.db", &REVIEWS).await {
+        let cookie = sign_in(&router).await;
+        place_order(&router, &cookie).await;
+
+        // A cursor no list returned, `{}` encoded: the route's 400, its
+        // message the form's own, no orders, and the link to the first page.
+        let forged = send(&router, "GET", "/orders?cursor=e30", Some(&cookie), None).await;
+        assert_eq!(forged.status, StatusCode::BAD_REQUEST, "{shop}: {}", forged.body);
+        assert!(forged.body.contains(r#"<p class="form-error">cursor: not a cursor this operation returned</p>"#), "{shop}: {}", forged.body);
+        assert!(!forged.body.contains("<table"), "{shop}: {}", forged.body);
+        assert_eq!(link(&forged.body, "first").as_deref(), Some("/orders"), "{shop}");
+        // One outside the base64url alphabet, and a limit past the route's
+        // 100, the same.
+        let alphabet = send(&router, "GET", "/orders?cursor=e30%3D", Some(&cookie), None).await;
+        assert_eq!(alphabet.status, StatusCode::BAD_REQUEST, "{shop}: {}", alphabet.body);
+        assert!(alphabet.body.contains(r#"<p class="form-error">cursor: does not match the required pattern</p>"#), "{shop}: {}", alphabet.body);
+        let limit = send(&router, "GET", "/orders?limit=500", Some(&cookie), None).await;
+        assert_eq!(limit.status, StatusCode::BAD_REQUEST, "{shop}: {}", limit.body);
+        assert!(limit.body.contains(r#"<p class="form-error">limit: must be at most 100</p>"#), "{shop}: {}", limit.body);
+        assert!(!limit.body.contains("<table"), "{shop}: {}", limit.body);
+        // A signed-out shopper is refused first, with no pages to link.
+        let signed_out = send(&router, "GET", "/orders?cursor=e30", None, None).await;
+        assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{shop}: {}", signed_out.body);
+        assert_eq!(link(&signed_out.body, "first"), None, "{shop}");
+
+        // The console's lists answer a forged cursor alike.
+        let reviews = format!("/console/products/{PRODUCT}/reviews");
+        for list in ["/console/orders", "/console/products", reviews.as_str()] {
+            let forged = send(&router, "GET", &format!("{list}?cursor=e30"), Some(&cookie), None).await;
+            assert_eq!(forged.status, StatusCode::BAD_REQUEST, "{shop} {list}: {}", forged.body);
+            assert!(forged.body.contains(r#"<p class="form-error">cursor: not a cursor this operation returned</p>"#), "{shop} {list}: {}", forged.body);
+            assert_eq!(link(&forged.body, "first").as_deref(), Some(list), "{shop}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_console_pages_the_products_and_the_orders() {
+    for (shop, router) in each_shop("console-pages.db", &[]).await {
+        // Anyone may list the products, by name, two a page here.
+        let first = send(&router, "GET", "/console/products?limit=2", None, None).await;
+        assert_eq!(first.status, StatusCode::OK, "{shop}: {}", first.body);
+        assert_eq!(product_names(&first.body), ["Anvil", "Bellows"], "{shop}");
+        assert_eq!(link(&first.body, "first"), None, "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        assert!(next.starts_with("/console/products?limit=2&cursor="), "{shop}: {next}");
+        let second = send(&router, "GET", &next, None, None).await;
+        assert_eq!(product_names(&second.body), ["Chisel"], "{shop}");
+        assert_eq!(link(&second.body, "next"), None, "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/products?limit=2"), "{shop}");
+        let again = send(&router, "GET", "/console/products?limit=2", None, None).await;
+        assert_eq!(product_names(&again.body), ["Anvil", "Bellows"], "{shop}");
+
+        // Each row links to its product's page, by its id as the API sends
+        // it, compact, which getProduct's argument refers to.
+        let anvil = product().to_string();
+        let row = format!(r#"<th scope="row" data-field="name"><a href="/console/products/{anvil}">Anvil</a></th>"#);
+        assert!(first.body.contains(&row), "{shop}: {}", first.body);
+        assert!(!first.body.contains(PRODUCT), "{shop}: {}", first.body);
+
+        // The lookup, `ids`, is a select of the products for each id, and
+        // lists those given.
+        let bellows = MORE[0].id().to_string();
+        let looked_up = send(&router, "GET", &format!("/console/products?ids={bellows}"), None, None).await;
+        assert_eq!(looked_up.status, StatusCode::OK, "{shop}: {}", looked_up.body);
+        assert_eq!(product_names(&looked_up.body), ["Bellows"], "{shop}");
+        let select = format!(
+            r#"<select id="product-catalog-list-products-ids-0" name="ids"><option value=""></option><option value="{anvil}">Anvil</option><option value="{bellows}" selected="">Bellows</option><option value="{}">Chisel</option></select>"#,
+            MORE[1].id()
+        );
+        assert!(looked_up.body.contains(&select), "{shop}: {}", looked_up.body);
+
+        // The shopper's orders, one a page.
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 2).await;
+        let ids: Vec<&str> = placed.iter().map(|order| order.trim_start_matches("/orders/")).collect();
+        let first = send(&router, "GET", "/console/orders?limit=1", Some(&cookie), None).await;
+        assert_eq!(console_orders(&first.body), ids[..1], "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        assert!(next.starts_with("/console/orders?limit=1&cursor="), "{shop}: {next}");
+        let second = send(&router, "GET", &next, Some(&cookie), None).await;
+        assert_eq!(console_orders(&second.body), ids[1..], "{shop}");
+        assert_eq!(link(&second.body, "next"), None, "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=1"), "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn a_products_page_shows_the_first_page_of_its_reviews() {
+    let titles: Vec<String> = (1..=21).map(|n| format!("Review {n}")).collect();
+    let reviews: Vec<(&str, &str)> = titles.iter().map(|title| (title.as_str(), "Heavy.")).collect();
+    for (shop, router) in each_shop("product-page.db", &reviews).await {
+        let page = send(&router, "GET", &format!("/console/products/{PRODUCT}"), None, None).await;
+        assert_eq!(page.status, StatusCode::OK, "{shop}: {}", page.body);
+        assert!(page.body.contains(r#"<li><a href="/console/products">Products</a></li><li><span aria-current="page">Anvil</span></li>"#), "{shop}: {}", page.body);
+        assert!(page.body.contains(r#"<h1>Anvil</h1><div class="ss-detail" data-type="ProductView" role="group" aria-label="Anvil">"#), "{shop}: {}", page.body);
+
+        // Its reviews' first page, of the route's default 20, oldest first,
+        // and the link to the next, the list's own page.
+        let (_, section) = page.body.split_once(r#"<section class="ss-section" data-resource="reviews">"#).expect("the reviews");
+        assert_eq!(review_titles(section), titles[..20], "{shop}");
+        let reviews = format!("/console/products/{PRODUCT}/reviews");
+        let next = link(section, "next").expect("a next page");
+        assert!(next.starts_with(&format!("{reviews}?cursor=")), "{shop}: {next}");
+        let rest = send(&router, "GET", &next, None, None).await;
+        assert_eq!(rest.status, StatusCode::OK, "{shop}: {}", rest.body);
+        assert_eq!(review_titles(&rest.body), ["Review 21"], "{shop}");
+        assert_eq!(link(&rest.body, "first"), Some(reviews), "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn the_console_searches_a_products_reviews() {
+    for (shop, router) in each_shop("search.db", &REVIEWS).await {
+        let reviews = format!("/console/products/{PRODUCT}/reviews");
+        let titles = |path: String| {
+            let router = &router;
+            async move {
+                let page = send(router, "GET", &path, None, None).await;
+                assert_eq!(page.status, StatusCode::OK, "{shop} {path}: {}", page.body);
+                review_titles(&page.body).join(" | ")
+            }
+        };
+
+        // The search box comes first, in a form that is a search.
+        let all = send(&router, "GET", &reviews, None, None).await;
+        let search = r#"<form method="get" class="ss-filter" role="search"><div class="field"><label for="product-reviews-list-reviews-q">Search</label><input id="product-reviews-list-reviews-q" name="q" type="search" maxlength="100"></div>"#;
+        assert!(all.body.contains(search), "{shop}: {}", all.body);
+        assert_eq!(review_titles(&all.body), ["Sturdy and heavy", "Too heavy", "Rings true"], "{shop}");
+
+        // Every word, in any case, in the title or the body; the box holds
+        // the search sent, and a % matches itself.
+        assert_eq!(titles(format!("{reviews}?q=sturdy")).await, "Sturdy and heavy | Rings true", "{shop}");
+        assert_eq!(titles(format!("{reviews}?q=COYOTES+sturdy")).await, "Sturdy and heavy", "{shop}");
+        assert_eq!(titles(format!("{reviews}?q=100%25")).await, "Too heavy", "{shop}");
+        assert_eq!(titles(format!("{reviews}?q=1%250")).await, "", "{shop}");
+        let held = send(&router, "GET", &format!("{reviews}?q=sturdy"), None, None).await;
+        assert!(held.body.contains(r#"name="q" type="search" maxlength="100" value="sturdy">"#), "{shop}: {}", held.body);
+
+        // A search pages as the list does, its links carrying it.
+        let mut page = send(&router, "GET", &format!("{reviews}?q=heavy&limit=1"), None, None).await;
+        let mut seen = review_titles(&page.body).join(" | ");
+        while let Some(next) = link(&page.body, "next") {
+            assert!(next.starts_with(&format!("{reviews}?q=heavy&limit=1&cursor=")), "{shop}: {next}");
+            page = send(&router, "GET", &next, None, None).await;
+            for title in review_titles(&page.body) {
+                seen.push_str(" | ");
+                seen.push_str(title);
+            }
+        }
+        assert_eq!(seen, "Sturdy and heavy | Too heavy | Rings true", "{shop}");
+        assert_eq!(link(&page.body, "first"), Some(format!("{reviews}?q=heavy&limit=1")), "{shop}");
+    }
+}
+
+/// The orders' procedure, called from a page the test adds, which the app's
+/// `.discover()` registers as it registers the app's own: with the query's
+/// `cursor` and `limit`, it says the ids of the page record's orders and
+/// its `next`, or the problem's status and detail.
+#[page("/test/orders-procedure")]
+async fn orders_procedure(cx: &Cx) -> topcoat::Result<impl View> {
+    let query = parts(cx).uri.query().unwrap_or_default().to_owned();
+    let value = |name: &str| form_urlencoded::parse(query.as_bytes()).find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
+    let args = OrderListOrdersArgsRecord { statuses: None, cursor: value("cursor"), limit: value("limit").and_then(|limit| limit.parse().ok()) };
+    let said = match call_order_list_orders(cx, args).await {
+        Ok(OrderViewPageRecord { items, next }) => {
+            let ids: Vec<String> = items.into_iter().map(|order| order.id).collect();
+            format!("{} next={}", ids.join(","), next.unwrap_or_default())
+        }
+        Err(problem) => format!("{} {}", problem.status, problem.detail),
+    };
+    Ok(view! { <p id="said">(said)</p> })
+}
+
+#[tokio::test]
+async fn the_orders_procedure_answers_a_page_record() {
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    let placed = place_orders(&router, &cookie, 3).await;
+    let ids: Vec<&str> = placed.iter().map(|order| order.trim_start_matches("/orders/")).collect();
+    let said = |uri: String, cookie: Option<String>| {
+        let router = &router;
+        async move {
+            let page = send(router, "GET", &uri, cookie.as_deref(), None).await;
+            each_between(&page.body, r#"<p id="said">"#, "</p>").first().map(|said| (*said).to_owned()).unwrap_or(page.body)
+        }
+    };
+    let first = said("/test/orders-procedure?limit=2".to_owned(), Some(cookie.clone())).await;
+    let (orders, next) = first.split_once(" next=").expect("a page record");
+    assert_eq!(orders, ids[..2].join(","));
+    assert!(!next.is_empty(), "{first}");
+    let second = said(format!("/test/orders-procedure?limit=2&cursor={next}"), Some(cookie.clone())).await;
+    assert_eq!(second, format!("{} next=", ids[2]));
+    // The page asked for meets the route's rules, and its caller the route's.
+    let forged = said("/test/orders-procedure?cursor=e30".to_owned(), Some(cookie.clone())).await;
+    assert_eq!(forged, "400 cursor is not one this operation returned");
+    let past = said("/test/orders-procedure?limit=101".to_owned(), Some(cookie)).await;
+    assert_eq!(past, "400 Invalid query parameter limit: must be at most 100");
+    let signed_out = said("/test/orders-procedure".to_owned(), None).await;
+    assert_eq!(signed_out, "401 Authentication required");
 }
 
 #[test]

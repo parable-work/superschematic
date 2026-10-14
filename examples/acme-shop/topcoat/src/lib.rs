@@ -6,9 +6,12 @@
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
 //! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
-//! the display components the crate builds from their types. The crate's
-//! generated pages serve a console of shop-orders' resources at `/console`,
-//! the catalog's products named in its forms and tables. The JSON API
+//! the display components the crate builds from their types, and the orders
+//! a page at a time, with links to the next page and back to the first.
+//! An order line's product is a select of the catalog's products, and an
+//! order's lines name theirs, both from `listProducts`, which the crate's
+//! `references` call (D61). The crate's generated pages serve a console of
+//! shop-orders' resources at `/console`, the catalog among them. The JSON API
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
 //! and the shop's users are the core user model's (D50): one session
@@ -17,12 +20,11 @@
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, implementations};
+use acme_shop_orders_server::{Shop, ShopImplementation, implementations};
 use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
-    OrderGetOrderArgs, OrderImplementation, OrderPlaceOrderArgs, ProductReviewsImplementation,
-    ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
+    OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{
     Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm, PlaceOrderInputForm, Refusal,
@@ -31,7 +33,7 @@ use acme_shop_orders_topcoat::forms::{
 };
 use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
-use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages};
+use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references};
 use serde::Deserialize;
 use topcoat::context::{Cx, app_context};
 use topcoat::router::content::Form;
@@ -62,16 +64,28 @@ impl Product {
     pub fn id(&self) -> types::IdentityUUID {
         self.id.parse().expect("a UUID")
     }
+
+    /// The product as `listProducts` lists it, in stock.
+    pub fn view(&self) -> types::ProductView {
+        types::ProductView {
+            id: self.id(),
+            sku: self.sku.to_owned(),
+            name: self.name.to_owned(),
+            price_cents: self.price_cents,
+            in_stock: true,
+        }
+    }
 }
 
-/// The shop's catalog, which the place-order form offers. The shop holds
-/// it too, in memory (`shop_in_memory`) or in SQLite (`stock_sqlite`), and
+/// The shop's catalog, which stocks the shop, in memory (`shop_in_memory`)
+/// or in SQLite (`stock_sqlite`). The shop lists it (`listProducts`), which
+/// the place-order form offers and an order's lines are named from, and
 /// prices an order's lines from it.
 pub const CATALOG: &[Product] = &[Product { id: PRODUCT, sku: "anvil", name: "Anvil", price_cents: 1999 }];
 
 /// The shop in memory, its catalog the app's.
 pub fn shop_in_memory() -> Shop {
-    Shop::with_prices(CATALOG.iter().map(|product| (product.id(), product.price_cents)))
+    Shop::with_products(CATALOG.iter().map(Product::view))
 }
 
 /// Adds the catalog's products to a SQLite shop, unless an earlier run
@@ -96,9 +110,9 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// origin policy runs before that check, so an origin the identity config
 /// trusts must be one the router's `OriginPolicy` trusts too; this app
 /// trusts none. `.discover()` registers the console the crate generates
-/// under `/console`, whose `pages::Settings` name its title, the sign-in
-/// page a refused shopper comes back from and the catalog's products.
-pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
+/// under `/console`, whose `pages::Settings` name its title and the sign-in
+/// page a refused shopper comes back from.
+pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let authenticator = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
@@ -109,12 +123,11 @@ pub fn app<S: OrderImplementation + ProductReviewsImplementation>(shop: Arc<S>, 
         .build()
 }
 
-/// The console's settings: its title, the sign-in page, which comes back
-/// to the console page it is given as `next`, and the catalog's products,
-/// which the new-order page offers for each line and every order's lines
-/// show by name.
+/// The console's settings: its title, and the sign-in page, which comes
+/// back to the console page it is given as `next`. The console names the
+/// products an order's lines refer to itself, from `listProducts`.
 fn console_settings() -> pages::Settings {
-    pages::Settings::new().title("Acme shop console").sign_in("/sign-in").choices(product_choices())
+    pages::Settings::new().title("Acme shop console").sign_in("/sign-in")
 }
 
 /// The sign-in form, as the browser sends it: the shopper's email and
@@ -262,18 +275,24 @@ async fn review_card(review: ReviewViewRecord) -> topcoat::Result<impl View> {
     })
 }
 
-/// The product's reviews and the form to write one, with the form as sent
-/// and its errors after a refused post, and the sign-in button for a
-/// shopper the operation would refuse.
+/// The product's reviews, the first page of them, oldest first, and the
+/// form to write one, with the form as sent and its errors after a refused
+/// post, and the sign-in button for a shopper the operation would refuse.
 #[component]
 async fn reviews_page(
     cx: &Cx,
     #[default] form: WriteReviewInputForm,
     #[default] errors: FormErrors,
 ) -> topcoat::Result<impl View> {
-    let args = ProductReviewsListReviewsArgs { product_id: product(), min_rating: None };
+    let args = ProductReviewsListReviewsArgs {
+        product_id: product(),
+        min_rating: None,
+        q: None,
+        page: ProductReviewsListReviewsArgs::PAGE.first(),
+    };
     let reviews: Vec<ReviewViewRecord> = operations::product_reviews_list_reviews(cx, args)
         .await?
+        .items
         .iter()
         .map(ReviewViewRecord::from)
         .collect();
@@ -326,19 +345,28 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`, filtered by the GET form
-/// `OrderListOrdersArgsForm` reads from the query, its controls showing the
-/// filters in effect. `submit` keeps the route's status: a refused filter is
-/// 422 with the message at its control, and a refused caller the route's
-/// 401, with the sign-in button, or 403, the message the form's own.
+/// The shopper's orders, which need `orders.read`, a page at a time,
+/// filtered by the GET form `OrderListOrdersArgsForm` reads from the query,
+/// its controls showing the filters in effect. The query's `cursor` and
+/// `limit` ask for the page, and no control holds them, so a submitted
+/// filter starts at the first page. After the orders, "Next page" links
+/// the page after this one, while one follows, and "First page" the first,
+/// on a later one, each with the filter and the limit (`orders_href`).
+/// `submit` keeps the route's status: a refused filter is 422 with the
+/// message at its control, a cursor or a limit the route refuses its 400,
+/// the message the form's own, and a refused caller the route's 401, with
+/// the sign-in button, or 403, with no links, since no page is theirs.
 #[page("/orders")]
 async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
-    let unfiltered = filter == OrderListOrdersArgsForm::new();
-    let (status, orders, errors) = match filter.submit(cx).await {
-        Ok(orders) => (StatusCode::OK, Some(orders), FormErrors::default()),
+    let unfiltered = filter.statuses.is_empty();
+    let (status, page, errors) = match filter.submit(cx).await {
+        Ok(page) => (StatusCode::OK, Some(page), FormErrors::default()),
         Err(refused) => (refused.status, None, refused.errors),
     };
     let signed_out = status == StatusCode::UNAUTHORIZED;
+    let admitted = !signed_out && status != StatusCode::FORBIDDEN;
+    let first = (admitted && filter.cursor.is_some()).then(|| orders_href(&filter, None));
+    let next = page.as_ref().and_then(|page| page.next.as_ref()).map(|next| orders_href(&filter, Some(next.as_str())));
     Ok(view! {
         (status)
         shop_page(
@@ -350,10 +378,44 @@ async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> to
                 order_list_orders_args_fields(form: filter, errors: errors)
                 <button type="submit">"Filter"</button>
             </form>
-            if let Some(orders) = orders {
-                order_list(orders: orders, unfiltered: unfiltered)
+            if let Some(page) = page {
+                order_list(orders: page.items, unfiltered: unfiltered)
             }
+            pager(first: first, next: next)
         )
+    })
+}
+
+/// The orders page's address for one of its pages: the query the filter
+/// holds (`query_pairs`), its statuses and its limit, then, for a page
+/// after the first, `cursor`, the `next` of the page before, each name and
+/// value percent-encoded.
+fn orders_href(filter: &OrderListOrdersArgsForm, cursor: Option<&str>) -> String {
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.extend_pairs(filter.query_pairs());
+    if let Some(cursor) = cursor {
+        query.append_pair("cursor", cursor);
+    }
+    let query = query.finish();
+    if query.is_empty() { "/orders".to_owned() } else { format!("/orders?{query}") }
+}
+
+/// The links between a list's pages: "First page" while the page is a
+/// later one, and "Next page" while another follows. A cursor names no
+/// page before it, so there is no previous page.
+#[component]
+async fn pager(first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        if first.is_some() || next.is_some() {
+            <nav class="pager" aria-label="Pages">
+                if let Some(href) = first {
+                    <a rel="first" href=(href)>"First page"</a>
+                }
+                if let Some(href) = next {
+                    <a rel="next" href=(href)>"Next page"</a>
+                }
+            </nav>
+        }
     })
 }
 
@@ -387,11 +449,12 @@ async fn order_list(orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat:
 path_param!(id: types::IdentityUUID, error = not_found);
 
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
-/// each line's product by its name in the catalog (`product_choices`), with
-/// the route's status when the call is refused (401, 403, 404). While the
-/// order is placed, the form that cancels it: `cancel` as sent and its
-/// errors after a refused cancel, which keeps the form, and its form-level
-/// message, on the page even when the order is no longer placed.
+/// each line's product by its name, which `references::order_view_labels`
+/// looks up through `listProducts`, with the route's status when the call
+/// is refused (401, 403, 404). While the order is placed, the form that
+/// cancels it: `cancel` as sent and its errors after a refused cancel,
+/// which keeps the form, and its form-level message, on the page even when
+/// the order is no longer placed.
 #[component]
 async fn order_page(
     cx: &Cx,
@@ -404,12 +467,17 @@ async fn order_page(
     let cancellable =
         !errors.is_empty() || order.as_ref().is_ok_and(|order| order.status == types::OrderStatus::Placed);
     let cancel = cancel.unwrap_or_else(|| OrderCancelOrderArgsForm::new(id));
+    let order = order.map(OrderViewRecord::from);
+    let choices = match &order {
+        Ok(record) => references::order_view_labels(cx, std::slice::from_ref(record), Choices::new()).await,
+        Err(_) => Choices::new(),
+    };
     Ok(view! {
         shop_page(
             title: "Order",
             match order {
-                Ok(order) => {
-                    order_view_detail(record: OrderViewRecord::from(order), choices: product_choices())
+                Ok(record) => {
+                    order_view_detail(record: record, choices: choices)
                     if cancellable {
                         <form method=(OrderCancelOrderArgsForm::METHOD) action=(format!("{path}/cancel"))>
                             order_cancel_order_args_fields(form: cancel, errors: errors)
@@ -449,19 +517,13 @@ async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> to
     })
 }
 
-/// Each line's product, from the catalog: `place_order_input_fields`
-/// renders the `productId` of every line (`lines.productId`) as a select
-/// of these, and `order_view_detail` shows an order's lines by their
-/// products' names, on the shop's pages and the console's. A choice's
-/// value is the product's id as the API sends it, the compact text
-/// `to_string()` gives, which a record holds.
-fn product_choices() -> Choices {
-    Choices::new().with("lines.productId", CATALOG.iter().map(|product| (product.id().to_string(), product.name)))
-}
-
 /// The form that places an order: a row per line, each line's product a
 /// select of the catalog's, and the shipping address. The sign-in button
-/// comes first for a shopper the operation would refuse.
+/// comes first for a shopper the operation would refuse. The products are
+/// `listProducts`' first page, which `references::place_order_input_form_choices`
+/// gives every line's `productId` (`lines.productId`), each by its name. A
+/// choice's value is the product's id as the API sends it, the compact text
+/// `to_string()` gives, which a record holds.
 #[component]
 async fn place_order_page(
     cx: &Cx,
@@ -469,6 +531,7 @@ async fn place_order_page(
     #[default] errors: FormErrors,
 ) -> topcoat::Result<impl View> {
     let signed_out = needs_sign_in(operations::can_order_place_order(cx).await);
+    let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
     Ok(view! {
         shop_page(
             title: "Place an order",
@@ -476,7 +539,7 @@ async fn place_order_page(
                 sign_in_button(next: "/orders/new")
             }
             <form method="post" action="/orders/new">
-                place_order_input_fields(form: form, errors: errors, choices: product_choices())
+                place_order_input_fields(form: form, errors: errors, choices: choices)
                 <button type="submit">"Place order"</button>
             </form>
         )

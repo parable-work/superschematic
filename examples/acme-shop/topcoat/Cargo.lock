@@ -100,6 +100,7 @@ version = "0.0.0"
 dependencies = [
  "acme-shop-orders-server",
  "acme-shop-orders-topcoat",
+ "form_urlencoded",
  "http",
  "rusqlite",
  "serde",

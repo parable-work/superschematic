@@ -28,7 +28,7 @@ kind, decorators and auth provider.
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its catalog, orders and reviews in memory, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`): a shopper signs in with their password, places, filters and cancels orders and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`): a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `schemas/dist/bun.lock`, `schemas/dist/Cargo.lock` | the lockfiles of `schemas/dist`'s Bun and Cargo workspaces, the generated files committed, so the storefront's and `shop-stock`'s images and every install and build take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
@@ -69,13 +69,19 @@ cd topcoat && cargo run
 It serves `http://127.0.0.1:3000`, each page linking to the others:
 
 - `/orders/new` places an order: a row per line, each line's product a
-  select of the app's catalog (its one product, an anvil), buttons that
-  add and remove lines without JavaScript, and the shipping address;
-- `/orders` lists the shopper's orders, filtered by status and a limit
-  through a GET form, with a link to each order's page;
-- `/orders/{id}` shows an order and, while it is placed, a form that
-  cancels it with a reason;
-- `/reviews` lists the anvil's reviews, with the form to write one.
+  select of the products `listProducts` lists (the app's catalog, its one
+  product, an anvil), buttons that add and remove lines without
+  JavaScript, and the shipping address;
+- `/orders` lists the shopper's orders, filtered by status through a GET
+  form, 20 a page, or the `limit` its query gives, with a link to each
+  order's page and links to the next page and back to the first;
+- `/orders/{id}` shows an order, its lines by their products' names and,
+  while it is placed, a form that cancels it with a reason;
+- `/reviews` lists the anvil's first 20 reviews, with the form to write
+  one;
+- `/console` is the console the crate generates: the orders and the
+  products a page at a time, an order's and a product's pages, and a
+  product's reviews with a search box.
 
 A refused form comes back with each message at its control. A page whose
 operation needs a signed-in shopper shows a Sign in button, which opens
