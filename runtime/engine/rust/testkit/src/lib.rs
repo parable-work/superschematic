@@ -248,7 +248,9 @@ fn skip_reason(
     }
     let missing: Vec<String> = names("testBehaviors")
         .into_iter()
-        .filter(|name| behaviors::test_behavior(file, name).is_none())
+        .filter(|name| {
+            behaviors::stand_in(name).is_none() && behaviors::test_behavior(file, name).is_none()
+        })
         .collect();
     if !missing.is_empty() {
         return Some(format!("test behaviors not ported: {}", missing.join(", ")));
@@ -328,6 +330,8 @@ struct Run<'d> {
     database: &'d Database,
     repository: &'d Path,
     file: &'d str,
+    /// The test behaviors the scenario lists (`testBehaviors`).
+    test_behaviors: Vec<String>,
     principals: Map<String, Value>,
     engines: Vec<(String, Opened)>,
     places: Vec<(String, Place)>,
@@ -347,6 +351,17 @@ impl<'d> Run<'d> {
             database,
             repository,
             file,
+            test_behaviors: scenario
+                .get("testBehaviors")
+                .and_then(Value::as_array)
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
             principals: scenario
                 .get("principals")
                 .and_then(Value::as_object)
@@ -360,6 +375,20 @@ impl<'d> Run<'d> {
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
             http: http::Served::default(),
         }
+    }
+
+    // behavior_set is a behavior a recording names: the stand-in a test
+    // registers under a work-queue behavior's name, which the scenario
+    // lists among its test behaviors; else the file's test behavior, the
+    // core's or the work queue's.
+    fn behavior_set(&self, name: &str) -> Option<superschematic_engine::BehaviorSet> {
+        self.test_behaviors
+            .iter()
+            .any(|known| known == name)
+            .then(|| behaviors::stand_in(name))
+            .flatten()
+            .or_else(|| behaviors::test_behavior(self.file, name))
+            .or_else(|| behaviors::core_behavior(name))
     }
 
     fn step(&mut self, step: &Value) -> Result<Outcome, String> {
@@ -410,8 +439,8 @@ impl<'d> Run<'d> {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let set = behaviors::test_behavior(self.file, &name)
-                    .or_else(|| behaviors::core_behavior(&name))
+                let set = self
+                    .behavior_set(&name)
                     .ok_or_else(|| format!("the test kit has no behavior {name}"))?;
                 let engine = self
                     .engine_of(step)?
@@ -622,13 +651,11 @@ impl<'d> Run<'d> {
         options.behaviors = superschematic_engine_behaviors::core();
         if let Some(Value::Array(names)) = given.get("behaviors") {
             for name in names.iter().filter_map(Value::as_str) {
-                let set = behaviors::test_behavior(self.file, name)
-                    .or_else(|| behaviors::core_behavior(name))
-                    .ok_or_else(|| {
-                        error_json(&Error::Usage(format!(
-                            "the test kit has no behavior {name}"
-                        )))
-                    })?;
+                let set = self.behavior_set(name).ok_or_else(|| {
+                    error_json(&Error::Usage(format!(
+                        "the test kit has no behavior {name}"
+                    )))
+                })?;
                 options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
             }
         }

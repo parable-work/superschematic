@@ -1834,6 +1834,19 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     })
 }
 
+/// The stand-in a scenario lists among its test behaviors (`testBehaviors`)
+/// under the name of a work-queue behavior, in that behavior's place:
+/// Queue's tests register a Budget that holds a claim to Budget's contract
+/// ([`crate::workqueue_fixtures::BudgetStandIn`]). `None` for another name.
+pub fn stand_in(name: &str) -> Option<BehaviorSet> {
+    match name {
+        "Budget" => {
+            Some(BehaviorSet::new().with(crate::workqueue_fixtures::BudgetStandIn::default()))
+        }
+        _ => None,
+    }
+}
+
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
 /// fixtures', then the work queue's fixtures
