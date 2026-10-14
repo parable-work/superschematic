@@ -73,7 +73,7 @@ pub const MCP_SERVER_NAME: &str = "@superschematic/engine";
 const FIRST_MODERN: &str = "2026-07-28";
 
 // The SDK's limits: a body of at most 4 MiB, a batch of at most 100.
-const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BATCH: usize = 100;
 
 const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
