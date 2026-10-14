@@ -527,3 +527,104 @@ func TestListShelfItemsSendsItsArgumentsBesideThePage(t *testing.T) {
 	}
 }
 `
+
+// TestPagedUnionSDKBuildsAndRuns runs pagedUnionSDKTest in the generated
+// SDK, with Catalog.listEntries added, a page of the union Entry: the
+// method decodes each item through types.EntryWrapper, since a union is an
+// interface that encoding/json cannot fill, and returns the page of the
+// members the wrappers hold, which ListEntriesAll yields in turn.
+func TestPagedUnionSDKBuildsAndRuns(t *testing.T) {
+	schema, apiOutput := loadPagedAPI(t, sdktest.AddEntriesOperation)
+	sdkOutput := runInSDK(t, schema, apiOutput, pagedService, "paged_union_test.go", pagedUnionSDKTest)
+	for _, ns := range sdkOutput.Namespaces {
+		for _, ep := range ns.Endpoints {
+			if ep.MethodName == "ListEntries" && (ep.OutputGoType != "runtime.Page[types.Entry]" || ep.ItemGoType != "types.Entry") {
+				t.Errorf("ListEntries = (%s, %s)", ep.OutputGoType, ep.ItemGoType)
+			}
+		}
+	}
+}
+
+// pagedUnionSDKTest runs in the generated SDK module against a server that
+// answers two pages of entries, items and baskets mixed, then an item the
+// union cannot read, a string.
+const pagedUnionSDKTest = `package sdk_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	sdk "example.com/schemas/sdk/go/fixture-paged-api"
+	"example.com/schemas/sdk/go/fixture-paged-api/runtime"
+	types "example.com/schemas/types/go/fixture-paged-api"
+)
+
+const item = ` + "`" + `{"id":"00000000-0000-4000-8000-000000000001","name":"anvil","sku":"anvil-sku","inStock":true}` + "`" + `
+
+const basket = ` + "`" + `{"id":"00000000-0000-4000-8000-000000000002","lines":[{"itemId":"00000000-0000-4000-8000-000000000001","quantity":2}]}` + "`" + `
+
+func serveEntries(t *testing.T) *sdk.FixturePagedApiSDK {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var data string
+		switch r.URL.Query().Get("cursor") {
+		case "":
+			data = ` + "`" + `{"items":[` + "`" + ` + item + "," + basket + ` + "`" + `],"next":"Mg"}` + "`" + `
+		case "Mg":
+			data = ` + "`" + `{"items":[` + "`" + ` + basket + ` + "`" + `],"next":null}` + "`" + `
+		default:
+			data = ` + "`" + `{"items":["circle"],"next":null}` + "`" + `
+		}
+		_, _ = w.Write([]byte(` + "`" + `{"data":` + "`" + ` + data + ` + "`" + `,"meta":{"requestId":"req-1"}}` + "`" + `))
+	}))
+	t.Cleanup(server.Close)
+	client, err := sdk.New(sdk.SDKConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func describe(entry types.Entry) string {
+	switch member := entry.(type) {
+	case types.ItemView:
+		return "item " + member.Name
+	case types.BasketView:
+		return fmt.Sprintf("basket of %v", member.Lines[0].Quantity)
+	}
+	return "unknown"
+}
+
+func TestListEntriesDecodesEachItemThroughTheUnion(t *testing.T) {
+	client := serveEntries(t)
+	ctx := context.Background()
+
+	page, err := client.CatalogNamespace.ListEntries(ctx, runtime.PageRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || describe(page.Items[0]) != "item anvil" || describe(page.Items[1]) != "basket of 2" || page.Next == nil || *page.Next != "Mg" {
+		t.Fatalf("page = %+v", page)
+	}
+
+	var got []string
+	for entry, err := range client.CatalogNamespace.ListEntriesAll(ctx, runtime.PageRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, describe(entry))
+	}
+	if strings.Join(got, "; ") != "item anvil; basket of 2; basket of 2" {
+		t.Fatalf("entries = %v", got)
+	}
+
+	if _, err := client.CatalogNamespace.ListEntries(ctx, runtime.PageRequest{Cursor: "Mw"}); err == nil || !strings.Contains(err.Error(), "Entry") {
+		t.Fatalf("an item the union cannot read = %v", err)
+	}
+}
+`

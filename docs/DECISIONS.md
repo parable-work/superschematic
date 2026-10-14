@@ -6104,11 +6104,17 @@ TypeScript SDKs' paged method takes the page request and returns
 `runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an `iter.Seq2`) and
 `listItemsAll` (an `AsyncIterable`) ask for each page as the loop reaches
 it, and their tools take `cursor` and `limit` in the query and return the
-page. The Python and Rust SDKs' paged method takes `cursor` and `limit`
+page; the Go SDK reads a page of a union's items through the union's
+wrapper, item by item (`TestPagedUnionSDKBuildsAndRuns`). The Python and
+Rust SDKs' paged method takes `cursor` and `limit`
 and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
 every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
 `fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
-`rustsdkgen`. The Topcoat crate renders a paged operation wherever it
+`rustsdkgen`. In every SDK an empty cursor asks for the first page, as
+the route reads one (Python and Rust leave it out, where they refused
+it), and a page without `next` is the last. A Python namespace that imports a
+schema type named `Page` imports the SDK's as `SDKPage`, as the
+TypeScript SDK names it. The Topcoat crate renders a paged operation wherever it
 renders a call: the in-process call returns the page; each element type a
 paged operation returns has a `<Element>PageRecord { items, next }`, which
 the build refuses when the schemas declare a type named `<Element>Page`;

@@ -249,10 +249,10 @@ class CatalogNamespace:
     def _coerce_page(self, raw: Any, item_type_name: str) -> Page[Any]:
         """Read the page a paged operation answers (D60): its items, each
         coerced as _coerce_response coerces a list's, and next, the cursor
-        of the next page or None after the last."""
-        if not isinstance(raw, dict) or not isinstance(raw.get("items"), list) or "next" not in raw:
-            raise SDKError("expected a page of items and next in the response data")
-        next_cursor = raw["next"]
+        of the next page or None after the last, as a missing next is."""
+        if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+            raise SDKError("expected a page of items in the response data")
+        next_cursor = raw.get("next")
         if next_cursor is not None and not isinstance(next_cursor, str):
             raise SDKError("expected the page's next to be a cursor or null")
         return Page(items=self._coerce_response(raw["items"], item_type_name, True), next=next_cursor)
@@ -473,10 +473,10 @@ class CatalogNamespace:
                 query_params["ids"] = self._query_list_value(ids)
         if in_stock is not None:
             query_params["inStock"] = in_stock
-        if cursor is not None:
+        if cursor:
             self._validate_query_param_constraints(
                 cursor,
-                "cursor", min_length=1, max_length=1024, pattern="^[A-Za-z0-9_-]+$",
+                "cursor", max_length=1024, pattern="^[A-Za-z0-9_-]+$",
             )
             query_params["cursor"] = cursor
         if limit is not None:
@@ -517,10 +517,10 @@ class CatalogNamespace:
     def list_tags(self, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[str]:
         path = "/api/tags"
         query_params: dict[str, Any] | None = {}
-        if cursor is not None:
+        if cursor:
             self._validate_query_param_constraints(
                 cursor,
-                "cursor", min_length=1, max_length=1024, pattern="^[A-Za-z0-9_-]+$",
+                "cursor", max_length=1024, pattern="^[A-Za-z0-9_-]+$",
             )
             query_params["cursor"] = cursor
         if limit is not None:

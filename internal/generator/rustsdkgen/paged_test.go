@@ -131,7 +131,7 @@ func TestPagedMethodsReturnAPageAndAPager(t *testing.T) {
 			continue
 		}
 		cursor, limit := endpoint.QueryParams[len(names)-2], endpoint.QueryParams[len(names)-1]
-		if cursor.RustType != "String" || cursor.Required || *cursor.ValidateMinLength != 1 ||
+		if cursor.RustType != "String" || cursor.Required || cursor.ValidateMinLength != nil || !cursor.EmptyIsAbsent ||
 			*cursor.ValidateMaxLength != ir.PageCursorMaxLength || cursor.ValidatePattern != ir.PageCursorPattern {
 			t.Errorf("%s cursor = %+v", tc.method, cursor)
 		}
@@ -596,13 +596,28 @@ async fn a_pager_at_a_path_value_beside_a_required_query() {
 }
 
 #[tokio::test]
+async fn an_empty_cursor_is_the_first_page() {
+    let (base_url, stub) = serve();
+    let sdk = sdk(base_url);
+    let query = ListItemsQueryParams {
+        cursor: Some(String::new()),
+        ..Default::default()
+    };
+    let first = sdk.catalog.list_items(Some(&query), None).await.unwrap();
+    assert_eq!(names(&first.items), NAMES[..2]);
+    assert_eq!(stub.take(), vec![("/api/items".to_string(), vec![])]);
+    let (items, err) = drain(&mut sdk.catalog.list_items_all(Some(&query), None)).await;
+    assert!(err.is_none(), "{:?}", err);
+    assert_eq!(names(&items), NAMES);
+}
+
+#[tokio::test]
 async fn a_cursor_or_limit_the_route_refuses_fails_before_the_request() {
     let (base_url, stub) = serve();
     let sdk = sdk(base_url);
     for (cursor, limit, message) in [
         (None, Some(0), "limit must be at least 1"),
         (None, Some(6), "limit must be at most 5"),
-        (Some(""), None, "cursor must be at least 1 characters"),
         (Some("e30="), None, "cursor has an invalid format"),
     ] {
         let query = ListItemsQueryParams {

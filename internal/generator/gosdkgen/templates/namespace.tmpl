@@ -521,7 +521,17 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		return zero, err
 	}
 
-	{{- if .IsUnionOutput}}
+	{{- if and .IsUnionOutput .Page}}
+	items := make([]{{.ItemGoType}}, len(out.Items))
+	for i, item := range out.Items {
+		if item.Value == nil {
+			var zero {{.OutputGoType}}
+			return zero, fmt.Errorf("decode {{.MethodName}} response: item %d: {{.OutputType}} union value is nil", i)
+		}
+		items[i] = item.Value
+	}
+	return {{.OutputGoType}}{Items: items, Next: out.Next}, nil
+	{{- else if .IsUnionOutput}}
 	if out.Value == nil {
 		var zero {{.OutputGoType}}
 		return zero, fmt.Errorf("decode {{.MethodName}} response: {{.OutputType}} union value is nil")

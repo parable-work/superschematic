@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,6 +103,11 @@ type NamespaceInfo struct {
 	// HasPagedEndpoints gates the imports of Page, Iterator and SDKError and
 	// the _coerce_page helper, for an operation that pages (D60).
 	HasPagedEndpoints bool
+	// PageType is the name the namespace gives the SDK's Page: Page, or
+	// SDKPage when the namespace imports a schema type named Page, which
+	// would rebind the name for a type checker, as the TypeScript SDK
+	// names it.
+	PageType string
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -174,6 +180,11 @@ type QueryParam struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// EmptyIsAbsent marks a parameter whose empty value is left out, as
+	// the route reads it: a paged operation's cursor (D60), which an empty
+	// one would otherwise send for the first page.
+	EmptyIsAbsent bool
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -385,6 +396,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 
 	for name, importSet := range importsByNamespace {
 		namespaceMap[name].Imports = sortedKeys(importSet)
+	}
+	for _, namespace := range namespaceMap {
+		setPageType(namespace)
 	}
 	for name, jsonTypes := range jsonTypesByNamespace {
 		if len(jsonTypes) > 0 {
@@ -605,22 +619,41 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	return converted
 }
 
+// setPageType names the SDK's Page in a namespace that pages (D60): Page,
+// or SDKPage when the namespace imports a schema type named Page, and
+// each paged method's return type with it.
+func setPageType(namespace *NamespaceInfo) {
+	if !namespace.HasPagedEndpoints {
+		return
+	}
+	namespace.PageType = "Page"
+	if slices.Contains(namespace.Imports, "Page") {
+		namespace.PageType = "SDKPage"
+	}
+	for i := range namespace.Endpoints {
+		if endpoint := &namespace.Endpoints[i]; endpoint.Paged {
+			endpoint.OutputTypeHint = namespace.PageType + "[" + endpoint.ItemTypeHint + "]"
+		}
+	}
+}
+
 // pageQueryParams are a paged operation's two query parameters (D60),
 // after its own and as optional as they are: cursor, the next of the page
 // before, and limit, the most items the page holds. Each is checked before
 // the request by the bounds the route reads it with, so a cursor or limit
-// the route would refuse fails at its name.
+// the route would refuse fails at its name; the route reads an empty
+// cursor as none, so an empty one is left out, the first page.
 func pageQueryParams(page *apigen.PageInfo) []QueryParam {
-	minLength, maxLength := 1, ir.PageCursorMaxLength
+	maxLength := ir.PageCursorMaxLength
 	minLimit, maxLimit := 1.0, float64(page.MaxLimit)
 	return []QueryParam{
 		{
 			Name:              apigen.PageCursorParam,
 			PyName:            apigen.PageCursorParam,
 			PyType:            "str",
-			ValidateMinLength: &minLength,
 			ValidateMaxLength: &maxLength,
 			ValidatePattern:   ir.PageCursorPattern,
+			EmptyIsAbsent:     true,
 		},
 		{
 			Name:        apigen.PageLimitParam,
