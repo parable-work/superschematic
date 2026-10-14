@@ -937,15 +937,19 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: fmt / clippy (native and wasm32) / test, and test with serde_json's preserve_order
+      - name: fmt / clippy (native, without the C ABI, and wasm32) / test, and test with serde_json's preserve_order
         # superscalar turns preserve_order on, and Cargo unifies it into every
         # crate of a build that uses it; the content hash must not change.
+        # Without the ffi feature is how the engine's archive links the core
+        # (D58): the vg_* symbols stay in the version graph's own archive.
         working-directory: runtime/versiongraph/rust
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --no-default-features -- -D warnings
           cargo clippy --target wasm32-unknown-unknown -- -D warnings
           cargo test
+          cargo test --no-default-features
           cargo test --features serde_json/preserve_order
 
       - name: Start Postgres

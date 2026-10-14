@@ -15,6 +15,16 @@ name = "superschematic_versiongraph"
 # wasm32-unknown-unknown module and C consumers that load a shared object.
 crate-type = ["rlib", "staticlib", "cdylib"]
 
+[features]
+default = ["ffi"]
+# The C ABI (src/ffi.rs: vg_compose ... vg_free), which the Go binding links
+# from the staticlib and the browser loads from the wasm build. A crate that
+# links the core into an archive of its own turns it off: the engine's (D58)
+# reaches the core through the version graph's Rust engine, so vg_* stays
+# only in libsuperschematic_versiongraph.a and a Go binary that links both
+# archives defines each symbol once.
+ffi = []
+
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 # arbitrary_precision keeps a numeric column's JSON number as written, so a

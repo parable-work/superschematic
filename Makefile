@@ -217,8 +217,9 @@ rust:
 		&& cargo test && cargo test --all-features \
 		&& cargo test --all-features --features serde_json/arbitrary_precision
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --all-targets --no-default-features -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
-		&& cargo test --features serde_json/preserve_order
+		&& cargo test --no-default-features && cargo test --features serde_json/preserve_order
 	cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --all-features -- -D warnings \
 		&& cargo clippy --no-default-features -- -D warnings \
