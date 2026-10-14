@@ -294,20 +294,20 @@ impl Workers for StockWorkers {
         match filed {
             Ok(0) => tracing::info!(
                 parent: &self.deps.span,
-                product = %product,
+                product = %product.as_uuid(),
                 "a restock request is open already"
             ),
             Ok(_) => tracing::info!(
                 parent: &self.deps.span,
-                product = %product,
+                product = %product.as_uuid(),
                 quantity,
-                level = message.quantity,
+                stock = message.quantity,
                 threshold = message.threshold,
                 "filed a restock request"
             ),
             Err(err) if err.code() == Some(&SqlState::FOREIGN_KEY_VIOLATION) => tracing::info!(
                 parent: &self.deps.span,
-                product = %product,
+                product = %product.as_uuid(),
                 "no product to restock"
             ),
             Err(err) => return Err(err.into()),

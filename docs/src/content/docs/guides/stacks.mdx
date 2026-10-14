@@ -809,15 +809,18 @@ malformed declarations and names nothing registers.
 `shop-api` and `shop-orders`, each on a default Go server, `shop-stock`,
 on a default Rust server, and `shop-storefront`, on a default TypeScript
 server, and exposes all four; `shop-db`, the `authDb` of `shop-api`,
-`shop-orders` and `shop-stock`, joins as their database, `shop-media`,
-the bucket `shop-api` lists, as a bucket, `shop-orders`' worker
-`FulfilOrders` as a worker, which handles `shop-db`'s queue
-`OrderPlaced`, its job `ShipOrders` as a job, and `shop-web`, a static
-site whose browser code calls `shop-api`, as a site. `shop-orders` calls
+`shop-orders` and `shop-stock`, joins as their database; `shop-media`,
+the bucket `shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`,
+which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
+`ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
+`shop-orders`' `ShipOrders` and `shop-stock`'s `PlaceRestockOrders`, in
+Rust, as jobs; and `shop-web`, a static site whose browser code calls
+`shop-api`, as a site. `shop-orders` calls
 `shop-stock`, whose reservations admit only `shop-orders`' server
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
-and runs the job every minute:
+runs `ShipOrders` every minute, and turns `PlaceRestockOrders`' schedule
+off, so it runs only when `stack run` asks:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -832,7 +835,8 @@ the TypeScript one calls. `shop-stock`'s is at `rust-impl/shop-stock`, the
 since its `rust/` is a client crate: the Rust entrypoint calls its
 `create(deps)` and builds the identity service over `shop-db` and the
 service authenticator over its callers field
-([Rust servers](#rust-servers)).
+([Rust servers](#rust-servers)), and its worker's and job's entrypoints
+call its `create_workers(deps)` and `create_jobs(deps)`.
 [Serve and call it from Go](/superschematic/first-project/go-api/) walks
 `shop-api`'s, and
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
@@ -841,19 +845,25 @@ the storefront's.
 From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
 `shop-media`, both Go servers on their generated entrypoints, `shop-stock`'s
-on its generated crate, which cargo builds, the storefront's on Bun, the
-worker as a process, the job on its schedule, and the site, built once
-and served with its config.
+on its generated crate, which cargo builds, the storefront's on Bun, each
+worker as a process, `ShipOrders` on its schedule, and the site, built
+once and served with its config.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
 running, calls each Go and Rust server through its Go SDK, uploads a
 product's image to `shop-media` through the URL `shop-api` signs, sets the
-product's stock on `shop-stock` as staff, reads a cart from the
-storefront, places an order, which reserves its stock on `shop-stock`,
-sees an order beyond the stock refused and a reservation with the
-shopper's session alone refused 401, sees the worker fulfil the order it
-placed, reads the site and its config, checks that `shop-api` answers
-CORS for the site's origin and no other, and sees the job ship the order,
-once with `stack run` and once on the schedule. `PlaceOrder` reserves the
+product's stock and threshold on `shop-stock` as staff, reads a cart
+from the storefront, places an order, which reserves its stock on
+`shop-stock` and runs it low, sees an order beyond the stock refused and
+a reservation with the shopper's session alone refused 401, sees the
+worker fulfil the order it placed and `ReorderStock` file the product's
+restock request, reads the site and its config, checks that `shop-api`
+answers CORS for the site's origin and no other, sees `ShipOrders` ship
+the order, once with `stack run` and once on the schedule, and sees
+`PlaceRestockOrders`, run with `stack run`, order the restock request.
+Then it runs `stack dev` and the job once more, into an output root of
+its own (`--out`), where `shop-stock`'s server, worker and job build
+against that root's mirror of `rust-impl/shop-stock`. `PlaceOrder`
+reserves the
 stock through the client of `shop-stock` its `Deps` holds, which sends
 `shop-orders`' credential and forwards the shopper of the request its
 context belongs to, and refuses the order with `shop-stock`'s reason when
@@ -867,6 +877,18 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 <Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
+
+`shop-stock`'s reservation enqueues `StockLow` in its transaction when a
+line takes a product's level below its threshold
+([Rust servers](#rust-servers)). Its worker and job are
+`create_workers` and `create_jobs` in `rust-impl/shop-stock/src/lib.rs`.
+The worker files one open restock request per product, which a unique
+index in `shop-db` holds it to, and the job orders each open one, watching
+the `Shutdown` its entrypoint cancels on SIGTERM:
+
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
+
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// The supplier's order run" to="        Ok(())" />
 
 ## Run it locally
 
@@ -1125,7 +1147,10 @@ runs, brings the copy up to date. A crate that inherits from a workspace
 `rust-impl/shop-stock`, reads and writes `shop-db`'s `stock_level` table
 with tokio-postgres, which the HTTP runtime re-exports, over the pool its
 `Deps` holds, since no ORM is generated for Rust. A reservation takes
-every line off the shelf in one transaction, or none:
+every line off the shelf in one transaction, or none, and enqueues
+`StockLow` in it, with the runtime's `queue::enqueue` and the descriptor
+`shop-db`'s Rust types hold, for each line that takes its product's level
+below its threshold:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="/// Takes each line's units off the shelf" to="        Ok(levels)" />
 

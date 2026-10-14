@@ -13,6 +13,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "acme-shop-stack-shop-stock-place-restock-orders-job"
+version = "0.0.0"
+dependencies = [
+ "acme-shop-stock-api",
+ "acme-shop-stock-implementation",
+ "superschematic-http-runtime",
+ "tokio",
+]
+
+[[package]]
+name = "acme-shop-stack-shop-stock-reorder-stock-worker"
+version = "0.0.0"
+dependencies = [
+ "acme-shop-stock-api",
+ "acme-shop-stock-implementation",
+ "superschematic-http-runtime",
+ "tokio",
+]
+
+[[package]]
 name = "acme-shop-stack-shop-stock-server"
 version = "0.0.0"
 dependencies = [

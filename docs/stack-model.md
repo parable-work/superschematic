@@ -2333,7 +2333,11 @@ and its job through `stack run` (sections 8.7 and 8.8).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
 over `shop-db` whose reservations admit only `shop-orders`' Go server,
 which reserves an order's stock through `shop-stock`'s Go SDK with its
-edge's credential and the shopper it forwards.
+edge's credential and the shopper it forwards. A reservation that takes a
+product's level below its threshold enqueues `StockLow` in its
+transaction; `shop-stock`'s Rust worker `ReorderStock` files the
+product's restock request, and its Rust job `PlaceRestockOrders`, which
+the test runs with `stack run`, orders it (D65).
 
 Not built: buckets from a Rust server, job or worker, and OpenTelemetry
 export (D57, D65).
