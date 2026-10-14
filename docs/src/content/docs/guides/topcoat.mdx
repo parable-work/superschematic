@@ -274,6 +274,34 @@ message at its control:
 
 <Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
 
+### A paged list and a search box
+
+A `@paginated` operation's call takes the page it asks for in its `Args`,
+`page`, and returns a page: its items and `next`, the cursor of the
+following page, none after the last
+([Pages](/superschematic/guides/api-routes/#pages)). Its argument form, which every paged
+operation has, holds `cursor` and `limit` as the query sends them and
+renders a control for neither. `page()` reads them by the route's rules,
+so a cursor outside the base64url alphabet or a limit past the route's
+maximum is the router's 400, which `submit` answers with, and
+`query_pairs()` is the query the form holds, its filters and the limit
+but never the cursor, from which a page builds its links:
+
+```rust
+let pairs = filter.query_pairs();
+match filter.submit(cx).await {
+    Ok(page) => {
+        // page.items are the rows; page.next, when there is one, is the
+        // cursor the next link adds to pairs.
+    }
+    Err(refused) => { /* refused.status, 400 for a refused cursor or limit */ }
+}
+```
+
+A `SearchQuery` argument is its form's first control, an
+`<input type="search">` labeled "Search", with its rules' attributes, and
+a page that pages the list carries it in its links.
+
 ### Typed controls
 
 A `Temporal.Date` field or argument is `type="date"` and a
@@ -316,6 +344,33 @@ components take the same `Choices` and show a value's label in its place,
 so the order's page names each line's product ([Display
 components](#display-components)).
 
+### Choices from references
+
+An API that declares what an id refers to, `productId: RefersTo<Identity.UUID, ProductView>`
+([References and search](/superschematic/reference/references-and-search/#refersto-a-value-that-names-an-item)),
+needs no choices for it: the
+crate writes `references`, with a function per form that holds one,
+`<form>_choices(cx, choices)`, and per record, `<record>_labels(cx,
+records, choices)`. The first gives each such control the target's items
+as options, from the one operation that lists them, called once a request
+as the page's caller, its first page when it pages; when more items
+follow than the page holds, the control stays a text input, since a
+select would hide them. The second names each value the records hold by
+its item's label, through the listing operation's lookup argument, the
+list argument that narrows it to given values, called once for a
+render's values, in chunks of its `listMax`, at most ten calls. Both
+answer under the app's choices, which win where they name a field, and
+for which no call is made:
+
+```rust
+let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
+view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
+```
+
+A caller the listing operation refuses gets a text input and the id, and
+the page renders as it did. A reference whose listing operation has no
+in-process call, a webhook's, is left out, and the build log says why.
+
 ## Records
 
 `records` mirrors each type a page's call returns, and the types it
@@ -329,6 +384,8 @@ enums are strings, a map is its entries, and an `@uiHidden` or secret
 field is left out, since a record reaches the browser. A webhook's result
 reaches no page, so it has no record ([Procedures](#procedures)), and the
 user model's routes have none, since a page does not call them in-process.
+A paged operation's page is a page record, `<Element>PageRecord`, its
+items' records and `next`.
 
 ## Display components
 
@@ -378,6 +435,10 @@ product's name, "Anvil"; a nested record's component gets the choices
 under its field, `lines.productId` the lines table's `productId`:
 
 <Snippet file="topcoat/src/lib.rs" from="order_view_detail(record" to="order_view_detail(record" />
+
+A value declared `RefersTo` is named the same way, by the labels
+`references::<record>_labels` gives ([Choices from
+references](#choices-from-references)).
 
 The markup is plain HTML and ships no styles. A stylesheet or a test finds
 it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
@@ -497,6 +558,17 @@ to one resource's pages, named by its path below the prefix as
 `pages::RESOURCES` lists it, `products/{product_id}/reviews` say, and a
 resource's choice for a field wins on its pages over the app's.
 
+A paged list's page renders the page's items, then a `<nav
+class="ss-pager">` with "Next page" while another follows and "First
+page" on a later one, each keeping the filter and the limit; a cursor or
+limit the route refuses is its 400, as the form's message. A paged list
+without a filter renders no form, and a paged section on an item's page
+its first page and a link to the next. A search argument is the filter's
+first control, in a `role="search"` form. Every form a page renders
+takes its references' options, and its tables and details their labels,
+under the app's choices, and a list's rows link to their items through a
+detail whose path parameter refers to its own type, `products/{productId}`.
+
 The app's tests drive the console as they drive its own pages. A
 shopper's orders are listed with a link to each; an order's page cancels
 it through its form and goes back to it, and a second cancel is the
@@ -517,7 +589,9 @@ request meets no page's guard, so the shard reads the query as the page
 does and calls the list through the in-process call, which admits the
 caller and checks the filter, with the route's status for a refusal. The
 runtime applies only a 200, so a refusal leaves the table as it was
-until a reload. An action's form keeps its POST-redirect-GET.
+until a reload. A paged list's links set the shard's query too, so a list
+pages in place, with or without a filter. An action's form keeps its
+POST-redirect-GET.
 
 The acme app loads no runtime, so its console's lists are not live. An
 app that does gives the document its head in a root layout of its own,
@@ -557,7 +631,9 @@ calls with its arguments as a record. It answers the result's record, or a
 field's path, rule and message, since a procedure's `Err` would reach the
 browser as a bare 500. `call_<namespace>_<operation>(cx, args)` is the
 procedure's body as a plain function, for Rust code and tests: Topcoat
-turns the procedure itself into a value Rust cannot call.
+turns the procedure itself into a value Rust cannot call. A paged
+operation's procedure takes `cursor` and `limit` beside its arguments and
+answers its page record.
 
 A procedure is a second route to its operation, which any browser can
 reach, so an operation gets one only where a browser's request can meet

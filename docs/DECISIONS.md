@@ -6045,8 +6045,8 @@ and `offset` arguments it finds by name (`<method>_all`).
 | A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
 | `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
 
-Status: designed; the core, the servers and the SDKs built. This batch
-builds all of it: the IR, the decorator, the readers, the JSON Schema and
+Status: designed; the core, the servers, the SDKs and the Topcoat console
+built. This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
 `format`; the OpenAPI document and the tool documents; the Go, TypeScript
 and Rust servers and the in-process call; the four SDKs and the vectors;
 and the Topcoat records, procedures and pager. acme's `listOrders`,
@@ -6083,7 +6083,28 @@ page. The Python and Rust SDKs' paged method takes `cursor` and `limit`
 and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
 every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
 `fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
-`rustsdkgen`.
+`rustsdkgen`. The Topcoat crate renders a paged operation wherever it
+renders a call: the in-process call returns the page; each element type a
+paged operation returns has a `<Element>PageRecord { items, next }`, which
+the build refuses when the schemas declare a type named `<Element>Page`;
+the procedure's arguments record takes `cursor` and `limit`, held to the
+route's limits by `PageSpec::request`, and answers the page record; and
+every paged operation has an argument form, one without another argument
+too, which holds `cursor` and `limit` as the query sends them, renders
+neither, reads them by `PageSpec::query` (`page()`), answers either's
+refusal from `submit` with the route's 400, and gives its links' query
+(`query_pairs()`). The console's list renders the page's items and its
+pager, a paged list without a filter no form and its refusal on its own,
+a nested list's section the first page and a link to the next, and a live
+list's links set its shard's query in place (D44, amended).
+`fixture-console-api`'s `TestTheConsolePagesPicksAndSearches` pages its
+orders, its suppliers and a product's reviews through `Router::handle`,
+the links carrying the filter and the limit, a forged cursor, a cursor
+outside the alphabet and a limit out of bounds the 400, the shard's
+request and its signal a later page, and a procedure a page record;
+`TestAPagedOperationIsItsPageEverywhere`, `TestAPageRecordNamedLikeATypeIsRefused`
+and `TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api`'s
+crate with its page of strings, check the generator.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
@@ -6116,8 +6137,8 @@ wrappers (`QueryParam`, `Validate`).
 | A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of its `listMax`, else the page's `maxLimit`, at most 10 calls; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
 | The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
 
-Status: the core is built; the Topcoat parts are designed. `RefersTo`
-and `RefersToConfig` come from `@superschematic/api`; the TypeScript
+Status: the core and the Topcoat crate are built; acme follows in this
+batch. `RefersTo` and `RefersToConfig` come from `@superschematic/api`; the TypeScript
 reader writes `ir.ReferenceDef` (`references: { type, options, value,
 label }`, `type` required and no member blank) on `FieldDef` after
 `relation` and on `ArgumentDef` after `encrypted`, as the JSON and YAML
@@ -6133,8 +6154,30 @@ reader's `refers_to_test.go` with `broken-references`, the loader's
 `references_test.go` (a dependency's target among them), and
 `fixture-refs-api` in TypeScript, JSON and YAML, which load to one IR and
 round-trip through every writer. No server, SDK or OpenAPI document
-changes. The Topcoat forms, display components and pages follow in this
-batch. acme's `PlaceOrderLine.productId`,
+changes. The Topcoat crate resolves each reference its forms and records
+hold by `ir.ResolveReference` and, when its options operation has an
+in-process call, writes `references`: per form a
+`<form>_choices(cx, choices)` and per record a
+`<record>_labels(cx, records, choices)`, each answering `Choices` by path
+under the app's, which win where they name a path and spare its call. A
+form's options are one listing a request (`#[memoize]`), the first page
+of up to its maxLimit when it pages, none when more follow; a record's
+labels come through the lookup, in chunks of its listMax (else the page's
+maxLimit), at most `MAX_LOOKUP_CALLS`, 10, calls a target, or, without a
+lookup, from the listing; a refused or failed call leaves the plain
+control and the value. A reference whose options operation has no
+in-process call is left out with its reason in the build log. The pages
+pass every form and component its references' choices, and a list's rows
+link to their items through a detail parameter that refers to its own
+result type. `TestTheConsolePagesPicksAndSearches` holds
+`fixture-console-api` to them through `Router::handle`, counting the
+implementation's listings and lookups, with a caller who may not list the
+products, the app's own choices, more products than a page, a reference
+by sku, which no lookup refers by, and the app's own page;
+`TestReferencesResolveByTheCoreRule`, `TestAReferenceWithoutACallIsIgnored`,
+`TestReferencesBuildWithFormsOrViewsAlone` and, over `fixture-refs-api`'s
+lookup that does not page, `TestTheCoreFixturesPageAndRefer` check the
+generator. Next in this batch, acme's `PlaceOrderLine.productId`,
 `OrderLineView.productId` and the `productId` path arguments refer to a
 `ProductView` that `shop-orders` lists in a new `listProducts`, with a
 lookup, and reads in `getProduct`; its app drops its hand-written catalog
@@ -6160,10 +6203,11 @@ console has no box to type into.
 | The console's filter form renders the search argument first, as `<input type="search">` labeled "Search", holding the text sent, with its rules as attributes, and gives the form `role="search"`. A submitted search starts at the first page. | Its argument's name in words as its label, "Q" |
 | SQLite keeps the scan. An FTS5 table with the trigram tokenizer stays for later, for the reasons D27, amended, gave: a virtual table and triggers that the model, the diff and the runner do not know. acme's reviews are few, and a Topcoat app over a SQLite file serves one process. | Building it now, ahead of a SQLite reader that needs search to be fast |
 
-Status: the core and the runtimes' helpers are built; the console's box
-is designed. `SearchQuery` comes from `@superschematic/api`; the readers
-write `search: true` on `ArgumentDef` after `references`, with `isQuery`
-and without `required`, and `format` writes `SearchQuery<T>` back.
+Status: the core, the runtimes' helpers and the console's box are built;
+acme follows in this batch. `SearchQuery` comes from
+`@superschematic/api`; the readers write `search: true` on `ArgumentDef`
+after `references`, with `isQuery` and without `required`, and `format`
+writes `SearchQuery<T>` back.
 `internal/loader/verify/search.go` refuses, in every form, a second search
 argument, one that is not a query parameter of a GET, is required, has a
 default, or holds anything but one text value (`ir.TextValue`, the rule
@@ -6177,8 +6221,13 @@ match is the same in the three. `runtime/http/testdata/search_parity.json`,
 written by the Go package's test, holds them to the same words (Unicode
 `White_Space` without U+FEFF, the first 8), patterns, folds and matches.
 The tests: `verify/search_test.go`, the reader's and the loader's tests
-with `fixture-refs-api`, and each runtime's parity test. The console's
-search box follows in this batch. acme's
+with `fixture-refs-api`, and each runtime's parity test. The Topcoat
+argument form puts its search argument first, a `type="search"` box
+labeled Search with its rules' attributes, which no choices make a
+select, the console's filter form holding one is `role="search"`, and a
+list's links carry it; `TestTheConsolePagesPicksAndSearches` searches
+`fixture-console-api`'s orders and a product's reviews by each word, in
+any case, and pages a search. Next in this batch, acme's
 `listReviews` takes `q`, matched against `Review`'s `search_text` in
 memory, over SQLite and over Postgres. Follows: FTS5; the search in the
 OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
@@ -6247,5 +6296,56 @@ declared, 413, and a slow hold 504, each as the pages' refusal. acme's
 console's new-order and cancel posts carry `placeOrder`'s and
 `cancelOrder`'s controls, its products' trail names a product by its id,
 and its lists are not live, since the app loads no runtime.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console pages a list, picks and names what an id refers to, and searches
+
+D60, D61 and D62 give a list operation a page, a value the item it refers
+to, and a list a search text, and the Topcoat crate rendered none of them.
+A paged operation's `Args` carries the page asked for, which no argument
+form filled, so its call, its procedure and its console page had no way to
+ask for one; the console's list rendered the whole result; a form showed a
+product's id as a text input and a table as the id, unless the app wrote
+the catalog's choices by hand; and a search argument was a text input
+labeled "Q".
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each element type a paged operation returns has a page record, `<Element>PageRecord { items, next }`, its items as a record holds the element and `next` the cursor's text, with `From<&Page<T>>`, `from_wire` and `to_wire`. The build refuses a schema that declares a type named `<Element>Page`, whose record the page record would be too. A paged operation's procedure takes `cursor: Option<String>` and `limit: Option<i64>` beside its arguments, which `to_args` holds to the route's limits with `PageSpec::request`, a refusal the route's 400 as a `ProblemRecord`, and answers its page record. | One generic page record, which a Topcoat record cannot be; the page's items alone, which drops the cursor the next call needs |
+| Every paged operation has an argument form, one with no other argument too. It holds `cursor` and `limit` as `Option<String>`, as the query sends them, renders a control for neither, and reads them with `page()`, `PageSpec::query` over the two values, so each refusal is the router's 400 at its parameter; `parse` builds the `Args`' `page` from it, and `submit` answers a refused cursor or limit with that 400 before it parses the rest. `query_pairs()` is the query the form holds, each argument's values in control order, then `limit` when sent, never `cursor`, from which a page builds its links. | Controls for the cursor and the limit, which D60 leaves out of the filter; a 422 for them, which the JSON API answers 400; a page reading the two values beside the form, which the procedure and the app's own pages would each read again |
+| A paged list's console page renders the page's items in its table and, after it, `<nav class="ss-pager">` with "First page" (`rel="first"`) while a cursor was sent and "Next page" (`rel="next"`) while one follows, each the list's path with `query_pairs()` and, for the next, `cursor`, percent-encoded. A paged list without a filter renders no form, and a refusal of its page renders on its own with its status, as a refused caller's does. A paged list that is a section of its parent's item page shows its first page and a "Next page" link to the list's own page. A live list's links each set its shard's query, which renders the list again in place, and put the query in the address bar; without the runtime they are links. | A previous link, numbered pages and a page size control (D60); paging a section in place, which would give an item's page a query of its own per section |
+| A search argument is its form's first control: `<input type="search">` labeled "Search", with its rules' attributes, which no choices make a select. The console's filter form that holds one is `role="search"`, and its links carry it. | Its argument's name in words, "Q" (D62); a separate search form, which would drop the filters on each search |
+| `references` is written when a form or a record the crate has holds a reference (`RefersTo`), resolved by `ir.ResolveReference`, whose options operation has an in-process call; one without is left out, its control and value as they were, with the reason in the build log. Per form, `<form>_choices(cx, choices) -> Choices` gives each control that holds a reference its target's items as options; per record, `<record>_labels(cx, records, choices) -> Choices` names each value the records hold, at any depth, by its item's label. Both answer by path under `choices`, the app's, through `Choices::or`: the app's win where they name a path, and no call is made for it. | Choices computed for every path, which would call for paths the app names; a function per page, which an app's own page could not call |
+| A form's options are one listing a request, kept with `#[memoize]` and shared by every reference to the target: its first page of up to its maxLimit when it pages, and none when more follow, since a select would hide them. A record's labels come through the options operation's lookup with the distinct values the records hold, in chunks of its listMax, else of the page's maxLimit, at most `MAX_LOOKUP_CALLS`, 10, calls a target, each kept for the request; a reference by a value no lookup refers by, a sku say, is named from the listing. A value no item has shows as it is. A call the operation refuses (401, 403), or that fails, gives the plain control and the value; the page does not fail. A value is the text a record holds and a form sends, read from the item's JSON. | A call per value or per row; a cache across requests, which would show one caller another's items; failing the page, whose own operation the caller may call |
+| Each form a page renders takes its form's choices, a list's rows their record's labels, and an item's detail, on its page and on its delete page, its own; an action's form takes its own choices beside the detail's labels, since a record's path and a form's control may share a name. A detail whose path parameter refers to its own result type links a list's rows by the reference's value field, `products/{productId}` by `id`. | One set of choices per page, which would offer a detail's few labelled values as a form's options |
+
+Status: built. `fixture-console-api`, the extension's own, has products
+listed a page at a time, searched and read by a reference, their reviews a
+page at a time under them, suppliers a page at a time with no filter, and
+orders a page at a time, filtered by status and by a product and searched,
+read, placed from lines that refer to products, gifted a product by its
+sku, and given a line from their page. `TestTheConsolePagesPicksAndSearches`
+drives its console through `Router::handle`: a list's next and first
+links, with the filter and the limit; a cursor outside the alphabet, a
+forged one and a limit out of bounds, each the route's 400 as the form's
+own message, a refused cursor still offering the first page; a list
+without a filter with no form and its refusal on its own; the search box
+first, `role="search"`, matching each word in any case and carried by the
+links, and a search past its rules 422; the new page's selects, the app's
+own page's and an action's, from one listing a render; an order's lines
+named through one lookup and its gift from the listing; a caller who may
+not list the products given text inputs and the ids, the app's choices
+winning and sparing the call, and six products kept as text and named in
+two chunks of five; products linked by their reference and a product's
+reviews a section with a link to their next page; the live list's shard
+paging by its query and by its signal; and a procedure answering a page
+record and its refusals. `TestAPagedOperationIsItsPageEverywhere`,
+`TestReferencesResolveByTheCoreRule`, `TestAReferenceWithoutACallIsIgnored`,
+`TestAPageRecordNamedLikeATypeIsRefused`,
+`TestReferencesBuildWithFormsOrViewsAlone` and
+`TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api` and
+`fixture-refs-api` with their pages, check the generator, and the eight
+earlier goldens are unchanged. acme's pages follow in this batch.
 
 The rule is reversible until the first release.

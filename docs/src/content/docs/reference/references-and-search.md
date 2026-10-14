@@ -99,6 +99,11 @@ argument (`Set.operation(argument)`) named first:
 A reference is not checked at run time: an implementation refuses an id it
 cannot find, as it does without one.
 
+A Topcoat crate offers a reference's items as a select in its forms and
+names each value by its item's label in its display components, through
+the options operation and its lookup
+([Choices from references](/superschematic/guides/topcoat/#choices-from-references)).
+
 ## `SearchQuery`: a list's search text
 
 `SearchQuery<T>` marks an argument as its operation's search text (D62).
@@ -140,3 +145,8 @@ Over SQL each word is one condition, all of them ANDed:
 a table's [`search_text`](/superschematic/guides/database-tables/#text-search)
 serves, and `search_text LIKE ?1 ESCAPE '\'` on SQLite, which reads every
 row and folds case in ASCII alone.
+
+A Topcoat crate renders the search argument as its argument form's first
+control, an `<input type="search">` labeled Search, and the console's
+filter form that holds it as a search form
+([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).

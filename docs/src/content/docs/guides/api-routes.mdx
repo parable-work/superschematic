@@ -196,7 +196,10 @@ Each runtime reads and builds a page: Go's `paging` package (`Read`,
 Every server and SDK renders it: the implementation takes `page`, the
 page request, and returns the page, and each SDK's method takes `cursor`
 and `limit` and returns the page, beside `<operation>All`, which yields
-every item, asking for each page with the last one's `next`.
+every item, asking for each page with the last one's `next`. A Topcoat
+crate's call, procedure and argument form take the page too, and its
+console links a list's next and first pages
+([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
 
 ## Errors
 
