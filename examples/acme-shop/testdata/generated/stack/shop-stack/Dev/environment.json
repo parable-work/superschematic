@@ -393,6 +393,68 @@
       ]
     },
     {
+      "name": "shop-stock-place-restock-orders",
+      "kind": "job",
+      "platform": "local.job",
+      "services": [
+        {
+          "name": "shop-stock",
+          "kind": "API"
+        }
+      ],
+      "language": "RUST",
+      "job": {
+        "api": "shop-stock",
+        "name": "PlaceRestockOrders",
+        "timeZone": "UTC",
+        "timeoutSeconds": 300,
+        "retries": 1
+      },
+      "resourceName": "shop-stock-place-restock-orders",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-stock-place-restock-orders->shop-db"
+        }
+      ]
+    },
+    {
+      "name": "shop-stock-reorder-stock",
+      "kind": "worker",
+      "platform": "local.worker",
+      "services": [
+        {
+          "name": "shop-stock",
+          "kind": "API"
+        }
+      ],
+      "language": "RUST",
+      "worker": {
+        "api": "shop-stock",
+        "name": "ReorderStock",
+        "queue": "StockLow",
+        "database": "shop-db",
+        "instances": 1,
+        "concurrency": 2,
+        "graceSeconds": 8
+      },
+      "resourceName": "shop-stock-reorder-stock",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-stock-reorder-stock->shop-db"
+        }
+      ]
+    },
+    {
       "name": "shop-storefront",
       "kind": "server",
       "platform": "local.process",
@@ -565,6 +627,30 @@
         "kind": "DB"
       },
       "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-stock-place-restock-orders->shop-db",
+      "kind": "sql",
+      "from": "shop-stock-place-restock-orders",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.job-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-stock-reorder-stock->shop-db",
+      "kind": "sql",
+      "from": "shop-stock-reorder-stock",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.worker-postgres",
       "field": "SHOP_DB_DATABASE"
     }
   ],
@@ -892,6 +978,55 @@
         ]
       },
       {
+        "id": "shop-stock-place-restock-orders.job",
+        "type": "local:process/job:Job",
+        "properties": {
+          "api": "shop-stock",
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+            }
+          ],
+          "job": "PlaceRestockOrders",
+          "language": "rust",
+          "module": "server/shop-stack/shop-stock-place-restock-orders",
+          "name": "shop-stock-place-restock-orders",
+          "retries": 1,
+          "timeZone": "UTC",
+          "timeoutSeconds": 300
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-stock-place-restock-orders"
+        ]
+      },
+      {
+        "id": "shop-stock-reorder-stock.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
+            },
+            {
+              "name": "WORKER_CONCURRENCY",
+              "value": "2"
+            }
+          ],
+          "kind": "worker",
+          "language": "rust",
+          "module": "server/shop-stack/shop-stock-reorder-stock",
+          "name": "shop-stock-reorder-stock",
+          "readiness": "started"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-stock-reorder-stock"
+        ]
+      },
+      {
         "id": "shop-stock.process",
         "type": "local:process/process:Process",
         "properties": {
@@ -1169,10 +1304,14 @@
       "deployables": [
         "shop-api",
         "shop-stock",
+        "shop-stock-place-restock-orders",
+        "shop-stock-reorder-stock",
         "shop-storefront"
       ],
       "resources": [
         "shop-api.process",
+        "shop-stock-place-restock-orders.job",
+        "shop-stock-reorder-stock.process",
         "shop-stock.process",
         "shop-storefront.process"
       ]

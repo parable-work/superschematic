@@ -63,8 +63,17 @@ import (
 // the implementation's NewJobs, ships the order fulfilled: once on demand
 // with `superschematic stack run`, and again on the every-minute schedule
 // Dev's settings give it, which stack dev runs
-// (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
-// with --remove-data removes the containers.
+// (section 8.7, D52). The order took the product's level below the
+// threshold staff set, so shop-stock's reservation enqueued StockLow in
+// its transaction, and shop-stock's worker ReorderStock, a Rust process on
+// its generated entrypoint with the implementation's create_workers, files
+// the product's restock request in shop-db; shop-stock's job
+// PlaceRestockOrders, a Rust job Dev runs only on demand, orders it when
+// stack run runs it (D65). The test stops the stack as Ctrl-C does, which
+// with --remove-data removes the containers. Last, it runs stack dev once
+// more, into an output root of its own (--out), where shop-stock's server,
+// worker and job build against that root's mirror of rust-impl/shop-stock
+// and its own API crates, and runs the job there with stack run.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
@@ -90,65 +99,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// implementation the build writes under schemas/dist/impl (D65), and
 	// reuses the crates an earlier run compiled there.
 	outputRoot := filepath.Join("..", "schemas", "dist")
-	output := &lockedBuffer{}
-	stack := exec.Command(binary, "stack", "dev", "--remove-data")
-	stack.Dir = ".."
-	stack.Stdout, stack.Stderr = output, output
-	if err := stack.Start(); err != nil {
-		t.Fatal(err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- stack.Wait() }()
-	// On a failure, stop stack dev as Ctrl-C does, then remove the
-	// containers whatever it left.
-	stopped, containers := false, []string(nil)
-	t.Cleanup(func() {
-		if !stopped {
-			_ = stack.Process.Signal(os.Interrupt)
-			select {
-			case <-exited:
-			case <-time.After(time.Minute):
-				_ = stack.Process.Kill()
-			}
-		}
-		for _, container := range containers {
-			_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
-		}
-		if t.Failed() {
-			t.Logf("stack dev printed:\n%s", output)
-		}
-	})
-
-	// stack dev prints the summary once every server answers /readyz. Its
-	// first run compiles every crate shop-stock's server builds with; later
-	// runs reuse them from the environment's Cargo target directory under
-	// schemas/dist, until the output root is emptied.
-	deadline := time.Now().Add(10 * time.Minute)
-	for !strings.Contains(output.String(), "is running:") {
-		select {
-		case err := <-exited:
-			stopped = true
-			t.Fatalf("stack dev exited before the stack ran: %v", err)
-		default:
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the stack did not come up in 10 minutes")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
-	containers = env.containers
-	for _, server := range []string{"shop-api", "shop-orders", "shop-stock", "shop-storefront"} {
-		if env.servers[server] == "" {
-			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
-		}
-	}
-	for server, url := range env.servers {
-		if status := get(t, url+"/readyz"); status != http.StatusOK {
-			t.Fatalf("%s answered /readyz %d", server, status)
-		}
-	}
+	dev := startStackDev(t, binary)
+	output := dev.output
+	env := dev.waitUntilRunning(t, outputRoot)
 
 	ctx := context.Background()
 	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"])
@@ -215,7 +168,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// shop-stock, on its Rust server (D57): anyone reads the stock, which
 	// holds none of the new product, and is refused setting it; staff, who
-	// hold stock.write, set the product's level to three, and anyone sees it.
+	// hold stock.write, set the product's level to three, restocked below
+	// two, and anyone sees it.
 	anyone, err := stocksdk.New(stocksdk.SDKConfig{BaseURL: env.servers["shop-stock"]})
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +186,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3}); err != nil || level.Quantity != 3 {
+	threshold := stocktypes.InputField[stocktypes.GenericInt64]{Set: true, Value: 2}
+	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3, Threshold: threshold}); err != nil || level.Quantity != 3 || level.Threshold != 2 {
 		t.Fatalf("SetStock = %+v, %v", level, err)
 	}
 	stock, err := anyone.StockNamespace.ListStock(ctx)
@@ -241,7 +196,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// shop-orders: a shopper orders two of it, in one transaction over
-	// the order and its lines, which reserves them on shop-stock.
+	// the order and its lines, which reserves them on shop-stock. That
+	// leaves one, below the threshold, so the reservation enqueues
+	// StockLow in its transaction.
 	orders, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
 	if err != nil {
 		t.Fatal(err)
@@ -299,6 +256,23 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	}
 
+	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
+	// StockLow message the reservation enqueued, and files the product's
+	// one open restock request, for enough units to bring its level of one
+	// back to twice its threshold of two.
+	if !strings.Contains(output.String(), "worker   "+reorderStock+" handles StockLow of shop-db, 2 at a time") {
+		t.Fatalf("stack dev did not run %s", reorderStock)
+	}
+	filed := waitForRestock(ctx, t, env.database, product.Id, "open", time.Minute)
+	if filed.quantity != 3 || filed.orderedAt != nil {
+		t.Fatalf("the restock request ReorderStock filed is %+v, want three units, not ordered", filed)
+	}
+	for _, want := range []string{"[" + reorderStock + "] ", `"msg":"filed a restock request"`} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("stack dev printed no %q", want)
+		}
+	}
+
 	// shop-storefront, on Bun: a shopper puts two green teas in a cart,
 	// and a viewer reads the cart back. Its implementation keeps carts in
 	// memory and knows its callers by static tokens.
@@ -332,7 +306,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// from a file server of its own (D55): its page, its config with
 	// shop-api's address, and the page again for a route of the
 	// application. shop-api answers CORS for the site's origin, which its
-	// CORS field lists, and for no other.
+	// CORS field lists, and for no other: another origin's preflight
+	// reaches shop-api's router, which answers it 405 with no CORS headers
+	// (D55, amended).
 	site := env.site
 	if site == "" {
 		t.Fatalf("environment Dev has no site shop-web")
@@ -353,18 +329,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
 	}
 	listing := env.servers["shop-api"] + "/api/products?inStock=true"
-	if allowed := preflight(t, listing, site); allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
+	if status, allowed := preflight(t, listing, site); status != http.StatusNoContent || allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
 		!strings.Contains(allowed.Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(allowed.Get("Access-Control-Allow-Methods"), "GET") {
-		t.Fatalf("shop-api's answer to the site's preflight: %v", allowed)
+		t.Fatalf("shop-api's answer to the site's preflight: %d %v", status, allowed)
 	}
-	if refused := preflight(t, listing, "https://evil.example"); refused.Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("shop-api allowed another origin: %v", refused)
+	if status, refused := preflight(t, listing, "https://evil.example"); status != http.StatusMethodNotAllowed || refused.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("shop-api's answer to another origin's preflight: %d %v, want 405 and no CORS", status, refused)
 	}
 
 	// shop-orders' job ShipOrders ships every fulfilled order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
-	run := runJob(t, binary)
+	run := runJob(t, binary, shipOrders)
 	for _, want := range []string{
 		"job " + shipOrders + ": start the run stack run asked for, try 1 of 2",
 		"job " + shipOrders + ": the run stack run asked for, try 1 of 2 succeeded",
@@ -376,6 +352,27 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if got := orderStatus(ctx, t, orders, order.Id); got != orderstypes.OrderStatus_Shipped {
 		t.Fatalf("after stack run, order %s is %s, want shipped", order.Id, got)
+	}
+
+	// shop-stock's job PlaceRestockOrders, a Rust job (D65), runs only on
+	// demand in Dev, whose settings turn its schedule off. stack run runs
+	// it, and it orders the open restock request.
+	if !strings.Contains(output.String(), "job "+placeRestockOrders+" runs only on demand") {
+		t.Fatalf("stack dev scheduled %s", placeRestockOrders)
+	}
+	run = runJob(t, binary, placeRestockOrders)
+	for _, want := range []string{
+		"job " + placeRestockOrders + ": start the run stack run asked for, try 1 of 2",
+		"job " + placeRestockOrders + ": the run stack run asked for, try 1 of 2 succeeded",
+		"[" + placeRestockOrders + "] ",
+		`"msg":"placed the open restock orders"`,
+	} {
+		if !strings.Contains(run, want) {
+			t.Fatalf("stack run printed no %q:\n%s", want, run)
+		}
+	}
+	if ordered := restockRequestsOf(ctx, t, env.database, product.Id); len(ordered) != 1 || ordered[0].status != "ordered" || ordered[0].open || ordered[0].orderedAt == nil {
+		t.Fatalf("after stack run, the product's restock requests are %+v, want the one ordered", ordered)
 	}
 
 	// Dev's settings run the job every minute, so stack dev ships an order
@@ -402,27 +399,36 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// Ctrl-C stops the servers, then removes the containers and their data:
 	// Postgres's and the storage emulator's.
-	stopped = true
-	if err := stack.Process.Signal(os.Interrupt); err != nil {
+	dev.stop(t)
+
+	// Once more, into an output root of its own (D65): stack dev --out
+	// builds every service and the stack there, mirrors rust-impl/shop-stock
+	// into the root's impl/shop-stock, and builds shop-stock's server,
+	// worker and job against the root's own API crates. The root starts
+	// with the committed Cargo.lock, so they build the versions the first
+	// run built, and its Cargo target directory is the first run's, so
+	// cargo compiles the crates the root generates and reuses every other.
+	other := otherOutputRoot(t, outputRoot)
+	again := startStackDev(t, binary, "--out", other)
+	againEnv := again.waitUntilRunning(t, other)
+	mirrored, err := os.ReadFile(filepath.Join(other, "impl", "shop-stock", "src", "lib.rs"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-exited:
-		if err != nil {
-			t.Fatalf("stack dev exited with %v", err)
-		}
-	case <-time.After(2 * time.Minute):
-		_ = stack.Process.Kill()
-		t.Fatal("stack dev did not stop in 2 minutes")
+	if implementation, err := os.ReadFile(filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs")); err != nil || !bytes.Equal(mirrored, implementation) {
+		t.Fatalf("the output root %s holds no mirror of rust-impl/shop-stock (%v)", other, err)
 	}
-	for _, container := range env.containers {
-		if !strings.Contains(output.String(), "removed container "+container) {
-			t.Fatalf("stack dev did not remove container %s", container)
-		}
-		if exec.Command("docker", "container", "inspect", container).Run() == nil {
-			t.Fatalf("container %s outlived --remove-data", container)
-		}
+	if !strings.Contains(again.output.String(), "worker   "+reorderStock+" handles StockLow of shop-db, 2 at a time") {
+		t.Fatalf("stack dev --out did not run %s", reorderStock)
 	}
+	if status := get(t, againEnv.servers["shop-stock"]+"/api/stock"); status != http.StatusOK {
+		t.Fatalf("shop-stock built in %s answered GET /api/stock %d", other, status)
+	}
+	run = runJob(t, binary, placeRestockOrders, "--out", other)
+	if !strings.Contains(run, "job "+placeRestockOrders+": the run stack run asked for, try 1 of 2 succeeded") {
+		t.Fatalf("stack run --out printed:\n%s", run)
+	}
+	again.stop(t)
 }
 
 // shipOrders is the deployable of shop-orders' job ShipOrders: the API's
@@ -432,6 +438,220 @@ const shipOrders = "shop-orders-ship-orders"
 // fulfilOrders is the deployable of shop-orders' worker FulfilOrders,
 // named as a job's is (D53).
 const fulfilOrders = "shop-orders-fulfil-orders"
+
+// reorderStock and placeRestockOrders are the deployables of shop-stock's
+// Rust worker ReorderStock and job PlaceRestockOrders (D65).
+const (
+	reorderStock       = "shop-stock-reorder-stock"
+	placeRestockOrders = "shop-stock-place-restock-orders"
+)
+
+// stackDev is a run of `superschematic stack dev --remove-data` from the
+// example's directory, as a person would start it, and what it prints.
+type stackDev struct {
+	cmd        *exec.Cmd
+	output     *lockedBuffer
+	exited     chan error
+	stopped    bool
+	containers []string
+}
+
+// startStackDev starts stack dev with flags. On a failure, the test's
+// cleanup stops it as Ctrl-C does, removes the containers whatever it
+// left, and logs what it printed.
+func startStackDev(t *testing.T, binary string, flags ...string) *stackDev {
+	t.Helper()
+	dev := &stackDev{output: &lockedBuffer{}, exited: make(chan error, 1)}
+	dev.cmd = exec.Command(binary, append([]string{"stack", "dev", "--remove-data"}, flags...)...)
+	dev.cmd.Dir = ".."
+	dev.cmd.Stdout, dev.cmd.Stderr = dev.output, dev.output
+	if err := dev.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { dev.exited <- dev.cmd.Wait() }()
+	t.Cleanup(func() {
+		if !dev.stopped {
+			_ = dev.cmd.Process.Signal(os.Interrupt)
+			select {
+			case <-dev.exited:
+			case <-time.After(time.Minute):
+				_ = dev.cmd.Process.Kill()
+			}
+		}
+		for _, container := range dev.containers {
+			_ = exec.Command("docker", "rm", "--force", "--volumes", container).Run()
+		}
+		if t.Failed() {
+			t.Logf("%s printed:\n%s", strings.Join(dev.cmd.Args[1:], " "), dev.output)
+		}
+	})
+	return dev
+}
+
+// waitUntilRunning waits for stack dev's summary, which it prints once
+// every server answers /readyz, then reads the environment the build
+// resolved into outputRoot and checks each server's /readyz. A first run
+// in an output root compiles every crate shop-stock's server, worker and
+// job build with; later runs reuse them from the environment's Cargo
+// target directory there, until the output root is emptied.
+func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot string) environment {
+	t.Helper()
+	started := time.Now()
+	deadline := started.Add(10 * time.Minute)
+	for !strings.Contains(dev.output.String(), "is running:") {
+		select {
+		case err := <-dev.exited:
+			dev.stopped = true
+			t.Fatalf("stack dev exited before the stack ran: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stack did not come up in 10 minutes")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Logf("%s ran the stack in %s", strings.Join(dev.cmd.Args[1:], " "), time.Since(started).Round(time.Second))
+	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
+	dev.containers = env.containers
+	for _, server := range []string{"shop-api", "shop-orders", "shop-stock", "shop-storefront"} {
+		if env.servers[server] == "" {
+			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
+		}
+	}
+	for server, url := range env.servers {
+		if status := get(t, url+"/readyz"); status != http.StatusOK {
+			t.Fatalf("%s answered /readyz %d", server, status)
+		}
+	}
+	return env
+}
+
+// stop stops stack dev as Ctrl-C does, which stops the servers, then
+// removes the containers and their data, Postgres's and the storage
+// emulator's.
+func (dev *stackDev) stop(t *testing.T) {
+	t.Helper()
+	dev.stopped = true
+	if err := dev.cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-dev.exited:
+		if err != nil {
+			t.Fatalf("stack dev exited with %v", err)
+		}
+	case <-time.After(2 * time.Minute):
+		_ = dev.cmd.Process.Kill()
+		t.Fatal("stack dev did not stop in 2 minutes")
+	}
+	for _, container := range dev.containers {
+		if !strings.Contains(dev.output.String(), "removed container "+container) {
+			t.Fatalf("stack dev did not remove container %s", container)
+		}
+		if exec.Command("docker", "container", "inspect", container).Run() == nil {
+			t.Fatalf("container %s outlived --remove-data", container)
+		}
+	}
+}
+
+// otherOutputRoot is an output root of the test's own, outside the
+// example, holding the lockfile of outputRoot's Cargo workspace and a link
+// to the Cargo target directory of its Dev environment, which every Rust
+// deployable of Dev builds into (D57, D65). Its path is the real one, so
+// the relative paths the build writes from it to the checkout resolve.
+//
+// The Bun workspace stack dev installs there takes in the packages under
+// typescript/ and web/, as outputRoot's does, and the install links each
+// package's node_modules to the new root's. So when the test ends, it
+// installs outputRoot's workspace again, frozen to its lockfile, which
+// links them back, as the TypeScript tests after it and stack dev there
+// need them.
+func otherOutputRoot(t *testing.T, outputRoot string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		install := exec.Command("bun", "install", "--frozen-lockfile")
+		install.Dir = outputRoot
+		if out, err := install.CombinedOutput(); err != nil {
+			t.Errorf("install the Bun workspace of %s again: %v\n%s", outputRoot, err, out)
+		}
+	})
+	lock, err := os.ReadFile(filepath.Join(outputRoot, "Cargo.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Cargo.lock"), lock, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.Abs(filepath.Join(outputRoot, "program", "shop-stack", "Dev", "target"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(root, "program", "shop-stack", "Dev")
+	if err := os.MkdirAll(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(program, "target")); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// restockRequest is a row of shop-db's restock_request table, which
+// shop-stock's worker ReorderStock files and its job PlaceRestockOrders
+// orders.
+type restockRequest struct {
+	status    string
+	quantity  int64
+	open      bool
+	orderedAt *time.Time
+}
+
+// restockRequestsOf reads the product's restock requests from shop-db,
+// oldest first; open says whether the request holds the product's one
+// open place (open_product_id).
+func restockRequestsOf(ctx context.Context, t *testing.T, databaseURL string, product apitypes.IdentityUUID) []restockRequest {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	rows, err := conn.Query(ctx,
+		"SELECT status, quantity, open_product_id IS NOT NULL, ordered_at FROM restock_request WHERE product_id = $1 ORDER BY created_at, id",
+		product.ToUUID().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (restockRequest, error) {
+		var r restockRequest
+		return r, row.Scan(&r.status, &r.quantity, &r.open, &r.orderedAt)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return requests
+}
+
+// waitForRestock waits until the product has one restock request, of
+// status want, and returns it, or fails the test after within.
+func waitForRestock(ctx context.Context, t *testing.T, databaseURL string, product apitypes.IdentityUUID, want string, within time.Duration) restockRequest {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		requests := restockRequestsOf(ctx, t, databaseURL, product)
+		if len(requests) == 1 && requests[0].status == want {
+			return requests[0]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the restock requests of product %s are %+v after %s, want one %s", product, requests, within, want)
+		}
+		time.Sleep(time.Second)
+	}
+}
 
 // waitForStatus waits until order id has status want, or fails the test
 // after within.
@@ -450,14 +670,14 @@ func waitForStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrde
 	}
 }
 
-// runJob runs shop-orders' job once with `superschematic stack run`, from
-// the example's directory as a person would, and returns what it printed.
-// A run from stack dev's every-minute schedule may hold the job while it
-// goes on; then stack run refuses, and runJob tries again.
-func runJob(t *testing.T, binary string) string {
+// runJob runs a job of Dev once with `superschematic stack run` and flags,
+// from the example's directory as a person would, and returns what it
+// printed. A run from stack dev's schedule may hold the job while it goes
+// on; then stack run refuses, and runJob tries again.
+func runJob(t *testing.T, binary, job string, flags ...string) string {
 	t.Helper()
 	for try := 1; ; try++ {
-		cmd := exec.Command(binary, "stack", "run", "Dev", shipOrders)
+		cmd := exec.Command(binary, append(append([]string{"stack", "run"}, flags...), "Dev", job)...)
 		cmd.Dir = ".."
 		out, err := cmd.CombinedOutput()
 		if err == nil {
@@ -655,9 +875,9 @@ func call(t *testing.T, method, url, token, body string) (int, []byte) {
 }
 
 // preflight asks, from origin, as a browser does before a GET with the
-// shopper's token, whether url answers it, and returns the answer's
-// headers. The answer is 204 whatever the origin; only its headers say.
-func preflight(t *testing.T, url, origin string) http.Header {
+// shopper's token, whether url answers it, and returns the answer's status
+// and headers.
+func preflight(t *testing.T, url, origin string) (int, http.Header) {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodOptions, url, nil)
 	if err != nil {
@@ -671,10 +891,7 @@ func preflight(t *testing.T, url, origin string) http.Header {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		t.Fatalf("OPTIONS %s from %s = %d, want 204", url, origin, response.StatusCode)
-	}
-	return response.Header
+	return response.StatusCode, response.Header
 }
 
 func get(t *testing.T, url string) int {

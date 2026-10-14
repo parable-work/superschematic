@@ -143,6 +143,18 @@ tx.commit().await?;
 A queue whose message holds a `POINT` or an `INTERVAL` column stays out
 of `queues`, which says so, and the build refuses a Rust worker of it.
 
+In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`'s
+reservation, in Rust, enqueues in its transaction for each line that takes
+a product's level below its threshold:
+
+<Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="StockLow" />
+
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="if let Some(threshold) = fell_below" to="                levels.push(level);" />
+
+The descriptor carries the statements the Go ORM runs, so a message
+enqueued from Rust is claimed alike by a worker in any language, and the
+other way round.
+
 ## Write a worker
 
 Put `@worker` from `@superschematic/api` on a class of an API's schema,
@@ -200,6 +212,15 @@ fails the stack's build, which says what to add. The acme shop's worker
 marks the order fulfilled:
 
 <Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
+
+`shop-stock`'s worker `ReorderStock`, in Rust, handles `StockLow`. Its
+method in `rust-impl/shop-stock` files one open restock request per
+product, which a unique index of `shop-db`'s `RestockRequest` table holds
+it to, so a message that comes again files none:
+
+<Snippet file="schemas/services/shop-stock/src/workers.schema.ts" symbol="ReorderStock" />
+
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
 A method that returns nil, or resolves, or returns `Ok`, completes its
 message. One that returns an error, or panics, or rejects, fails it: the message is due again after the queue's

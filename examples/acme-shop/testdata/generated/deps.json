@@ -115,7 +115,9 @@
       "name": "example.com/acme/types/go/shop-stock",
       "path": "types/go/shop-stock",
       "service": "shop-stock",
-      "deps": null
+      "deps": [
+        "shop-db-types"
+      ]
     },
     {
       "id": "shop-common-types",
@@ -205,6 +207,7 @@
       "path": "api/shop-stock",
       "service": "shop-stock",
       "deps": [
+        "shop-db-types",
         "shop-stock-types"
       ]
     },
@@ -226,7 +229,9 @@
       "name": "acme-shop-stock-types",
       "path": "types/rust/shop-stock",
       "service": "shop-stock",
-      "deps": null
+      "deps": [
+        "shop-db-types"
+      ]
     },
     {
       "id": "shop-api-sdk",
