@@ -9,8 +9,9 @@
 //! each returned or threw. The replayer resolves the file's shared values,
 //! skips a scenario only the TypeScript engine can run (`js`), one that
 //! needs a behavior this engine does not have (a test behavior the kit has
-//! not ported, [`behaviors`], or a core behavior not ported yet,
-//! milestones 10 and 11), one that writes the file with SQL of its own on
+//! not ported, [`behaviors`], a core behavior not ported yet,
+//! milestones 10 and 11, or a work-queue behavior not ported yet,
+//! milestone 12), one that writes the file with SQL of its own on
 //! Postgres (`dialect: sqlite`), and one that calls a method that changes
 //! the engine and JSON cannot carry ([`UNBUILT_WRITES`]). It opens each
 //! engine as the recording says, with a policy answering from the recorded
@@ -36,6 +37,7 @@
 pub mod behaviors;
 pub mod core_fixtures;
 mod http;
+pub mod workqueue_fixtures;
 
 pub use http::HTTP_FILES;
 
@@ -338,16 +340,31 @@ fn skip_reason(
     }
     composed.sort();
     let core: Vec<String> = composed
-        .into_iter()
+        .iter()
         .filter(|name| {
             CORE_BEHAVIORS.contains(&name.as_str())
                 && !superschematic_engine_behaviors::NAMES.contains(&name.as_str())
         })
+        .cloned()
         .collect();
     if !core.is_empty() {
         return Some(format!(
             "core behaviors not ported yet (milestones 10 and 11): {}",
             core.join(", ")
+        ));
+    }
+    let queue: Vec<String> = composed
+        .iter()
+        .filter(|name| {
+            superschematic_engine_workqueue::NAMES.contains(&name.as_str())
+                && superschematic_engine_workqueue::behavior(name).is_none()
+        })
+        .cloned()
+        .collect();
+    if !queue.is_empty() {
+        return Some(format!(
+            "work-queue behaviors not ported yet (milestone 12): {}",
+            queue.join(", ")
         ));
     }
     if scenario.get("dialect").and_then(Value::as_str) == Some("sqlite")

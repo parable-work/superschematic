@@ -11,8 +11,8 @@ publish = false
 [features]
 # The databases the replayer runs on, as the engine has them.
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
-postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
 
 [dependencies]
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
@@ -20,6 +20,10 @@ superschematic-engine = { path = "../engine", default-features = false }
 # The core's behaviors, which the TypeScript engine registers when it opens:
 # the replayer opens every engine with the ones ported so far.
 superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
+# The work queue's behaviors, which a recording names when its engine
+# registered @superschematic/engine-workqueue, and the work queue's tests
+# open with the core's.
+superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
 
 [lints]
 workspace = true

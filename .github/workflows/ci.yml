@@ -835,6 +835,8 @@ jobs:
           cargo test --all-features --features serde_json/arbitrary_precision
 
   engine-rust:
+    # The workspace has the work queue's crate (runtime/engine-workqueue/rust)
+    # as a member, so --workspace builds, lints and tests it too.
     name: engine-rust (the Rust engine's workspace)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
