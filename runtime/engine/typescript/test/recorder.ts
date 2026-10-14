@@ -5,7 +5,8 @@
 // engine, its bindings and the servers can replay what this one did. Each
 // test is one scenario, named by its full name; at exit each test file's
 // scenarios are written to <dir>/scenarios/<file>.json, or to
-// <dir>/http/<file>.json when its tests served HTTP.
+// <dir>/http/<file>.json when its tests served HTTP. The work queue's tests
+// record here too (recordPackage), as workqueue-<file>.json.
 // runtime/engine/testdata/scenarios/README.md and
 // runtime/engine/testdata/http/README.md give the format; the corpus test
 // (corpus.test.ts) holds the committed files to what this writes.
@@ -22,7 +23,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 
-import { allowAll, permissionPolicy, type Engine, type EngineOptions } from '../dist/index.js';
+import { allowAll, permissionPolicy, type AnyBehaviorImplementation, type Engine, type EngineOptions } from '../dist/index.js';
 
 /** The directory the recorder writes to; undefined when it is off. */
 export const RECORD_DIR: string | undefined = process.env.ENGINE_RECORD ? resolve(process.env.ENGINE_RECORD) : undefined;
@@ -152,6 +153,34 @@ function base62(id: string): string {
     n /= 62n;
   }
   return out;
+}
+
+// A package beside the engine whose tests record here (recordPackage): the
+// prefix its files take, and the declarations of the behaviors it ships.
+let filePrefix = '';
+const packageDeclarations = new WeakSet<object>();
+
+/**
+ * recordPackage says the tests running are a package's beside the engine,
+ * as the work queue's are (runtime/engine-workqueue/typescript): each test
+ * file's scenarios are written as `<prefix><file>.json`, and the behaviors
+ * the package ships, which a replayer implements and registers by name as
+ * it does the core's, are not test behaviors. An implementation is the
+ * package's when it carries one of their declarations, the object itself:
+ * the package's, or a copy of it that wraps a hook or an operation to
+ * count its calls. A behavior the tests define, under a name of the
+ * package's or not, has a declaration of its own, and is a test behavior.
+ */
+export function recordPackage(prefix: string, behaviors: readonly AnyBehaviorImplementation[]): void {
+  filePrefix = prefix;
+  for (const behavior of behaviors) {
+    packageDeclarations.add(behavior.declaration);
+  }
+}
+
+function isPackageBehavior(implementation: unknown): boolean {
+  const declaration = (implementation as { declaration?: unknown } | undefined)?.declaration;
+  return typeof declaration === 'object' && declaration !== null && packageDeclarations.has(declaration);
 }
 
 /** registerDirectory names a temporary directory the recorder writes as {{dir:N}}. */
@@ -284,12 +313,16 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
       case 'metaSchema':
         described.metaSchema = metaSchemaKind(value);
         break;
-      case 'behaviors':
-        described.behaviors = (value as EngineOptions['behaviors'] ?? []).map((implementation) => behaviorName(implementation));
-        for (const name of described.behaviors as string[]) {
-          record.testBehaviors.add(name);
+      case 'behaviors': {
+        const implementations = (value as EngineOptions['behaviors']) ?? [];
+        described.behaviors = implementations.map((implementation) => behaviorName(implementation));
+        for (const implementation of implementations) {
+          if (!isPackageBehavior(implementation)) {
+            record.testBehaviors.add(behaviorName(implementation));
+          }
         }
         break;
+      }
       case 'ids': {
         described.ids = 'fixed';
         record.fixedIds = true;
@@ -568,7 +601,9 @@ function recordCall(engine: EngineRecord, call: string, args: unknown[], invoke:
   if (call === 'behaviors.register') {
     const name = behaviorName(args[0]);
     step.args = [{ behavior: name }];
-    record.testBehaviors.add(name);
+    if (!isPackageBehavior(args[0])) {
+      record.testBehaviors.add(name);
+    }
     record.registered.add(name);
   } else if (rest.length > 0) {
     step.args = rest.map((arg) => encode(arg, record, 'args', step));
@@ -1134,7 +1169,7 @@ export function endCase(context?: TestContextLike): void {
     return;
   }
   const filePath = context?.filePath ?? 'unknown';
-  const file = basename(filePath).replace(/\.test\.ts$/u, '').replace(/\.ts$/u, '');
+  const file = filePrefix + basename(filePath).replace(/\.test\.ts$/u, '').replace(/\.ts$/u, '');
   let entry = files.get(file);
   if (entry === undefined) {
     entry = { source: filePath, cases: [] };
