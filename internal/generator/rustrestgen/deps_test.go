@@ -94,3 +94,42 @@ func TestImplementationScaffoldNeedsItsDeps(t *testing.T) {
 		t.Errorf("a scaffold without Deps: %v", err)
 	}
 }
+
+// TestDeclaresFunc: an implementation declares create_jobs when its
+// src/lib.rs declares a public function of that name, async or not, or
+// re-exports one under it, by path, from a list or through a glob, which
+// may hold it (D65); a private function, one in a comment, another name
+// and one re-exported under another name do not count, and nor does a
+// crate without src/lib.rs.
+func TestDeclaresFunc(t *testing.T) {
+	for _, tc := range []struct {
+		lib  string
+		want bool
+	}{
+		{"pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {\n", true},
+		{"  pub fn create_jobs(deps: Deps) -> impl Future {\n", true},
+		{"pub use jobs::create_jobs;\n", true},
+		{"pub use jobs::{build as create_jobs, Stock};\n", true},
+		{"pub use jobs::{\n    self,\n    create_jobs,\n};\n", true},
+		{"pub use jobs::*;\n", true},
+		{"async fn create_jobs(deps: Deps) {}\n", false},
+		{"// pub async fn create_jobs(deps: Deps)\n/// pub async fn create_jobs\n", false},
+		{"pub async fn create_jobs_later(deps: Deps) {}\n", false},
+		{"pub use jobs::create_jobs as build;\n", false},
+		{"", false},
+	} {
+		dir := t.TempDir()
+		if tc.lib != "" {
+			if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, ImplementationLib), []byte(tc.lib), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := DeclaresFunc(dir, JobsFunc)
+		if err != nil || got != tc.want {
+			t.Errorf("DeclaresFunc over %q = %v, %v; want %v", tc.lib, got, err, tc.want)
+		}
+	}
+}

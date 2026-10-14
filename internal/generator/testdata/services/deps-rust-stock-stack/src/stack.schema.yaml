@@ -1,0 +1,12 @@
+# deps-rust-stock on a Rust server of its own, with its jobs and workers
+# beside it (D65). It declares no environment: the Rust jobs and workers
+# tests in internal/generator build it for the checks the build makes of
+# the implementation and the queues.
+kind: Stack
+types:
+  Stock:
+    name: Stock
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: deps-rust-stock, kind: API }

@@ -22,9 +22,16 @@ pub use {{ .TypesCrateIdent }} as types;
 /// The http runtime crate the router and the interfaces are built on, for a
 /// crate that builds on this one with the same version of it.
 pub use {{ .RuntimeCrateIdent }} as runtime;
+{{- if .HasWorkers }}
+
+/// The Rust types of {{ .Deps.Database }}, the API's database: the messages its
+/// workers handle, and the descriptors of their queues, which a worker claims
+/// with and an implementation enqueues with (D65).
+pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
+{{- end }}
 
 {{ if .Deps -}}
-pub use deps::{Deps, Handlers};
+pub use {{ .DepsExports }}
 {{ end -}}
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, {{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};

@@ -296,6 +296,14 @@ type APIOutput struct {
 	// the router calls, for an input or argument of a type a dependency
 	// declares.
 	DependencyCrates []DependencyCrate
+	// Jobs are the API's jobs, sorted by name: a method each of the Jobs
+	// trait deps.rs declares, which the implementation's create_jobs
+	// builds with the API's Deps (D52, D65).
+	Jobs []JobInfo
+	// Workers are the API's workers, sorted by name: a method each of the
+	// Workers trait deps.rs declares, which handles one message of the
+	// worker's queue (D53, D65).
+	Workers []WorkerInfo
 }
 
 // AllEndpoints are the mounted, the manual and the user model's operations,
@@ -557,6 +565,12 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	sortEndpoints(output.IdentityEndpoints)
 	output.Patterns = b.patterns
 	output.DependencyCrates = b.dependencyCrates()
+	if output.Jobs, err = jobsOf(schema); err != nil {
+		return nil, err
+	}
+	if output.Workers, err = workersOf(schema); err != nil {
+		return nil, err
+	}
 
 	return output, nil
 }
@@ -814,11 +828,12 @@ func generateFile(templateName, outputPath string, data any) error {
 
 func templateFuncs() template.FuncMap {
 	return rustapigen.TemplateFuncs(template.FuncMap{
-		"isGetMethod":    func(m string) bool { return strings.EqualFold(m, "get") },
-		"join":           strings.Join,
-		"toUpper":        strings.ToUpper,
-		"rustString":     rustString,
-		"tracingVersion": func() string { return TracingVersion },
+		"isGetMethod":         func(m string) bool { return strings.EqualFold(m, "get") },
+		"join":                strings.Join,
+		"toUpper":             strings.ToUpper,
+		"rustString":          rustString,
+		"tracingVersion":      func() string { return TracingVersion },
+		"databaseTypesModule": func() string { return DatabaseTypesModule },
 	})
 }
 

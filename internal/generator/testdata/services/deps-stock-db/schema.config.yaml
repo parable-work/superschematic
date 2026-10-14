@@ -1,0 +1,11 @@
+# The database of deps-rust-stock, its one DB-kind dependency: its queues
+# are the ones deps-rust-stock's workers handle, whose messages and
+# descriptors its Rust types declare (D65); its Go types are the Go ORM's,
+# which a DB always generates. The Rust jobs and workers tests in
+# internal/generator build it.
+name: deps-stock-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    rust: { enabled: true }

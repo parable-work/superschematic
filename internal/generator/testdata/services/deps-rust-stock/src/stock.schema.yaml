@@ -1,0 +1,43 @@
+name: deps-rust-stock
+kind: API
+imports:
+  - package: "@schemas/deps-stock-db"
+    types: [Recount, StockLow]
+types:
+  StockView:
+    name: StockView
+    role: APIView
+    fields:
+      - name: productId
+        typeRef: { name: string }
+        required: true
+      - name: level
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: Stock
+    operations:
+      - name: getStock
+        typeRef: { name: StockView }
+        required: true
+        httpMethod: GET
+        restPath: stock/{productId}
+        arguments:
+          - name: productId
+            typeRef: { name: string }
+            required: true
+jobs:
+  - name: PlaceRestockOrders
+    comment: Orders what the open restock requests ask for.
+    schedule: "0 * * * *"
+    timeout: 5m
+    retries: 2
+  - name: ReconcileStock
+workers:
+  - name: ReorderStock
+    comment: Files a restock request for a product running low.
+    queue: StockLow
+    concurrency: 2
+    grace: 5s
+  - name: RecountStock
+    queue: Recount
