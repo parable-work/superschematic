@@ -39,13 +39,13 @@ const serverGenerator = "server"
 // missing, a Go server's in Go, a TypeScript server's in TypeScript and a
 // Rust server's in Rust (sections 8.5 and 8.6). The crates of the Rust
 // servers, jobs and workers are the members of the output root's Cargo
-// workspace, whose root and lockfile it writes (D57, D65). No environment changes the servers, the jobs or the workers, but
-// the entrypoint of a Go or TypeScript one that some environment connects
-// to a database on Cloud SQL links the Cloud SQL connector, or depends on
-// the Node one; a Rust one reaches Cloud SQL through its runtime alone. It
-// plans every entrypoint before it writes anything, so one it refuses
-// leaves the last build's entrypoints and every implementation as they
-// were. A build
+// workspace, whose root and lockfile it writes (D57, D65). No environment
+// changes the servers, the jobs or the workers, but the entrypoint of a Go
+// or TypeScript one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector, or depends on the Node one; a Rust
+// one reaches Cloud SQL through its runtime alone. It plans every
+// entrypoint before it writes anything, so one it refuses leaves the last
+// build's entrypoints and every implementation as they were. A build
 // without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
