@@ -784,10 +784,14 @@ and its options operation has an in-process call, the crate writes
 - **`<record>_labels(cx, records, choices) -> Choices`**, per record that
   shows a reference at any depth (`order_view_labels`), names each value
   the records hold by its item's label: through the lookup with the
-  records' distinct values, in chunks of its listMax, else of the page's
-  maxLimit, at most `references::MAX_LOOKUP_CALLS`, 10, calls a target;
-  without a lookup, a reference by sku say, from the listing. A value no
-  item has shows as it is.
+  records' distinct values, in chunks of the lesser of its listMax and,
+  when the options operation pages, its maxLimit, at most
+  `references::MAX_LOOKUP_CALLS`, 10, calls a target each time it is
+  called; without a lookup, a reference by sku say, from the listing. A
+  value no item has shows as it is. A target's own record may show a
+  reference too, as a product names its supplier: its labels function is
+  still `<record>_labels`, and the functions `references` keeps for the
+  target are named apart from it.
 
 Both answer under `choices`, the app's, through `Choices::or`: the app's
 win where they name a path, and no call is made for it. The listing and
@@ -1009,8 +1013,8 @@ twice.
 
 A page's request meets the `@rateLimit`, `@bodyLimit` and `@timeout` of
 the operation it is for, in the route's order, as the route's request
-does, so the console is no unlimited twin of a route
-([D44](../../docs/DECISIONS.md)). `<service>(...)` adds one layer at the
+does, and of the options operations its references call, so the console
+is no unlimited twin of a route ([D44](../../docs/DECISIONS.md)). `<service>(...)` adds one layer at the
 prefix, `PageControls`, which finds the page by its method and the path
 it is registered at:
 
@@ -1019,18 +1023,29 @@ it is registered at:
   operation;
 - a GET page meets those of the operation it shows: a list its list's,
   an item's page, its edit page and its delete page the detail's. The
-  new page and the index call no operation, and meet none. A GET page
-  carries no body for a body limit to refuse;
-- a [live list](#live-lists)'s shard meets its list's.
+  index calls no operation, and meets none. A GET page carries no body
+  for a body limit to refuse;
+- a [live list](#live-lists)'s shard meets its list's;
+- a page whose forms or records hold a
+  [reference](#what-a-value-refers-to) meets, besides, the rate limit and
+  the timeout of each options operation they call, listing or looking up
+  its target: the new page its form's, a list's page and its shard its
+  filter's and its rows', an item's page its detail's, its actions' forms'
+  and its sections' rows', the edit page its form's, the delete page its
+  form's and the item's, and a post those of the page it renders again.
+  Not the lists its sections call, which keep to their own pages.
 
 The rate limit is the operation's own limiter for the pages, at its
 route's rate, which every page and shard that calls the operation shares,
 and counts each client by its IP address as Topcoat reads it
 (`client_ip`), as a procedure's does; the JSON API's route and the
-procedure keep theirs, as replicas would. The body is read up to its
-limit before the page decodes its form, and the timeout covers the
-page's render, its call included. A refusal is the route's status, 429
-with `Retry-After`, 413 or 504, and the pages' refusal section, its
+procedure keep theirs, as replicas would. A page that meets several
+operations' controls is counted by each limiter, its own operation's
+first, and the tightest timeout covers it; the body limit is its own
+operation's, since no other call carries the body. The body is read up
+to its limit before the page decodes its form, and the timeout covers
+the page's render, its calls included. A refusal is the route's status,
+429 with `Retry-After`, 413 or 504, and the pages' refusal section, its
 heading and the route's message, which no layout frames, since the page
 did not run:
 
@@ -1038,10 +1053,13 @@ did not run:
 <section class="ss-refusal" data-status="429"><h1>Too many requests</h1><p>Too Many Requests</p></section>
 ```
 
-A page meets the controls of its own operation only: the sections an
-item's page shows, and the item a refused delete renders again, are calls
-of a page already admitted. An in-process call from the app's own page
-applies none of them, as before.
+Besides its references', a page meets the controls of its own operation
+only: the sections an item's page shows, and the item a refused delete
+renders again, are calls of a page already admitted. A reference's call
+is not: it lists up to a page's maxLimit of items, or looks up as many,
+on any page that holds one, so a client repeating the page would list
+them past the options operation's limits. An in-process call from the
+app's own page applies none of them, as before.
 
 ### Live lists
 

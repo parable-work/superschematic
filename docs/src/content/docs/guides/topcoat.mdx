@@ -362,8 +362,9 @@ as the page's caller, its first page when it pages; when more items
 follow than the page holds, the control stays a text input, since a
 select would hide them. The second names each value the records hold by
 its item's label, through the listing operation's lookup argument, the
-list argument that narrows it to given values, called once for a
-render's values, in chunks of its `listMax`, at most ten calls. Both
+list argument that narrows it to given values, called with the records'
+values in chunks of the lesser of its `listMax` and, when the listing
+pages, its `maxLimit`, at most ten calls a target each time. Both
 answer under the app's choices, which win where they name a field, and
 for which no call is made. The acme new-order page gives no choices of
 its own, so each line's product is a select of the products
@@ -524,8 +525,10 @@ argument checks hold, and takes its input through the [forms](#forms).
 Its request meets the route's rate limit, body limit and timeout too, in
 the route's order, through a layer `shop_orders` adds at the prefix: a
 post the controls of the operation it submits, a list's page or an
-item's those of the operation it shows. `placeOrder` allows a client 60
-a minute, so the console's new-order post does too, from a limiter of
+item's those of the operation it shows, and every page the rate limit and
+timeout of the listing operations its
+[references](#choices-from-references) call. `placeOrder` allows a client
+60 a minute, so the console's new-order post does too, from a limiter of
 the console's own, keyed by the client's address, as a procedure's is. A
 refusal is the route's 429 with `Retry-After`, 413 or 504, as the pages'
 refusal section without the layout, since the page did not run. A

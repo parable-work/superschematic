@@ -6148,7 +6148,7 @@ wrappers (`QueryParam`, `Validate`).
 | Each member is derived when unsaid, by `ir.ResolveReference`, which the loader and every generator call. `options` is the operation that lists the target, by name or `Set.operation`; unsaid, the API's one GET operation that returns `Target[]`, paged or not, takes no path argument and no required one, and admits an end user (neither `@requireService` nor manual). `value` is the target's field the reference holds, `id` unsaid. `label` is the field that names an item, unsaid the target's `@display` `titleField`, else none, and a UI shows the value. A nullable list query argument of the options operation that refers to its own target by the same value is its lookup (`ids`), which a UI calls with the values it must name. | Deriving the target as well, from `@source` and a `Relation`, which follows; the field a detail's path parameter names, a rule of the console's pages the core does not know |
 | The loader refuses, in every form: a target that is not an object type of the service or its dependencies; a reference outside an API schema, on an operation, on a map or on a list of lists; an `options` that is no such operation or does not list the target, or, unsaid, no operation or several; a `value` that is not a field of the target holding one value of the reference's type (`Identity.UUID` to `Identity.UUID`); and a `label` that is not a single text field, by `titleField`'s rule (D48). A reference is not checked at run time: an implementation refuses an id it cannot find, as it does now. | Checking each value against the options at run time, a read per request for what a foreign key or the implementation already holds |
 | The Topcoat crate gains a `references` module when a form or a record holds a reference. A control whose field or argument refers to a target is a select of the options operation's items, the label as each option's text and the value as its value, from one call per target per request, `PageRequest::first(maxLimit)` when the operation pages. A target with more items than one page holds keeps its text control, since a select would hide the rest. | Every page of the options, without bound; a select of the first page, which hides the item a reader wants |
-| A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of its `listMax`, else the page's `maxLimit`, at most 10 calls; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
+| A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of the lesser of its `listMax` and, when the options operation pages, its `maxLimit`, at most 10 calls a target each time it names a set of records; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
 | The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
 
 Status: built: the core, the Topcoat crate, acme's API and its Topcoat
@@ -6176,10 +6176,11 @@ in-process call, writes `references`: per form a
 under the app's, which win where they name a path and spare its call. A
 form's options are one listing a request (`#[memoize]`), the first page
 of up to its maxLimit when it pages, none when more follow; a record's
-labels come through the lookup, in chunks of its listMax (else the page's
-maxLimit), at most `MAX_LOOKUP_CALLS`, 10, calls a target, or, without a
-lookup, from the listing; a refused or failed call leaves the plain
-control and the value. A reference whose options operation has no
+labels come through the lookup, in chunks of the lesser of its listMax
+and, when the options operation pages, its maxLimit, at most
+`MAX_LOOKUP_CALLS`, 10, calls a target in a `<record>_labels` call, or,
+without a lookup, from the listing; a refused or failed call leaves the
+plain control and the value. A reference whose options operation has no
 in-process call is left out with its reason in the build log. The pages
 pass every form and component its references' choices, and a list's rows
 link to their items through a detail parameter that refers to its own
@@ -6285,7 +6286,7 @@ Orders, the title of `orders` too.
 | Collections are checked in key order, so a collection's pages come before those of one that extends its path or lies under its items. A collection one of whose routes another's page already serves has no pages: each of its operations is left out with the reason in the build log ("its collection, projects/new, has no pages, since the list of projects/new would be served at GET projects/new, the new page of projects"), and it leaves the trail unless a collection under it has pages. | Renaming its pages, which would put the console's paths out of step with the API's; leaving out the console's own new, edit or delete page, which its links and its trail name |
 | `Settings::choices_for(resource, choices)` scopes choices to one resource's pages: its list, its item's page, its new, edit and delete pages, and its section on its parent's page. The resource is named by its path below the prefix, its parameters as its pages name them, as `pages::RESOURCES` lists it; a name none has panics, as a typo would. On its pages a resource's choice for a field wins over the app's for that field, and its other fields keep the app's (`Choices::and`). | Choices per page, which the generated pages could not take; naming a resource by its Rust identifier or by the API's path, whose parameters operations name differently at one place |
 | A request asks the `PageAuthenticator` for its caller once: the crate's `admit` reads it through `#[memoize]`, so each guard is a permission check of that caller. The nav's list of what the caller may list is kept for the request too, which the index shares. | Memoizing each guard, which `#[memoize]` cannot key by an `OperationInfo`; a value the layout puts in the request's context, which Topcoat renders in no order beside its page |
-| A page's request meets the traffic controls of the operation it is for, in the route's order, through `PageControls`, one layer at the prefix that `<service>(...)` adds, which finds the page by its method and the path its route is registered at: a post its operation's; a GET page that shows an operation's result its operation's, a list's page the list's, an item's page and its edit and delete pages, which show the item, the detail's; a live list's shard its list's. The new page and the index call no operation and meet none, and a GET page carries no body for a body limit to refuse. Each operation's limiter for the pages, at its route's rate and keyed by Topcoat's `client_ip`, is shared by every page and shard that calls the operation; the route and the procedure keep theirs, as replicas would. The body is read up to its limit before the page decodes its form, and the timeout covers the render. A refusal is the route's 429 with `Retry-After`, 413 or 504, and the pages' refusal section, its heading and the route's message, without the layout, since the page did not run. A page meets its own operation's controls only, not those of the sections it shows. | A layer per page, which Topcoat matches by prefix, so a list's would cover its items' pages; the controls in the in-process call, which would spend an operation's budget on the app's own pages; limits on posts alone, which would leave a list's page an unlimited read of its route; the layout around a refusal, which only a page renders |
+| A page's request meets the traffic controls of the operation it is for, in the route's order, through `PageControls`, one layer at the prefix that `<service>(...)` adds, which finds the page by its method and the path its route is registered at: a post its operation's; a GET page that shows an operation's result its operation's, a list's page the list's, an item's page and its edit and delete pages, which show the item, the detail's; a live list's shard its list's. The index calls no operation and meets none, and a GET page carries no body for a body limit to refuse. A page whose forms or records hold a reference (D61, the console amendment below) meets, besides, the rate limit and the timeout of each options operation they call, listing or looking up its target: the new page its form's, a list's page and its shard its filter's and its rows', an item's page its detail's, its actions' forms' and its sections' rows', the edit page its form's, the delete page its form's and the item's, and a post those of the page it renders again. Each limiter counts the request, the page's own operation's first, the tightest timeout covers the render, and the body limit is the page's own operation's, since no other call carries the body. Each operation's limiter for the pages, at its route's rate and keyed by Topcoat's `client_ip`, is shared by every page and shard that calls the operation; the route and the procedure keep theirs, as replicas would. The body is read up to its limit before the page decodes its form, and the timeout covers the render. A refusal is the route's 429 with `Retry-After`, 413 or 504, and the pages' refusal section, its heading and the route's message, without the layout, since the page did not run. Besides its references', a page meets its own operation's controls only, not those of the lists its sections show. | A layer per page, which Topcoat matches by prefix, so a list's would cover its items' pages; the controls in the in-process call, which would spend an operation's budget on the app's own pages; limits on posts alone, which would leave a list's page an unlimited read of its route; a page's own operation's controls alone, which would let a client repeat any page that holds a reference for up to a maxLimit of the options operation's items past its limits; the layout around a refusal, which only a page renders |
 | No label guesses a singular. An item is named by its type's `@display` noun, else by its type's name in words, as a table names an untitled row (`Shelf`, `OrderView` an Order view); a collection by its type's `plural`, else by its path's last word as given (Shelves); one whose path extends a sibling's, `orders/archived` beside `orders`, by its own words after the sibling's (Archived), never by its type's `plural`; an item of a collection without pages, which has no type, by its id alone in the trail. A route's parameter keeps its name (`shelve_id`), an identifier, not a label. | The plural with "item" ("Shelves item"), which reads as neither; a dictionary of English plurals; renaming the parameters, which an app's `href!` names |
 
 Status: built. `fixture-pages-api` gains a filter of a project's tasks
@@ -6316,7 +6317,12 @@ and a second; `TestPagesKeepTheirRoutesControls` turns its pages on, live:
 the list's third page in a minute is the route's 429 with `Retry-After`,
 its shard shares the budget both ways, an order's page is not limited,
 and the hold's third post is 429, a body past the megabyte, sent or
-declared, 413, and a slow hold 504, each as the pages' refusal. acme's
+declared, 413, and a slow hold 504, each as the pages' refusal. It also
+gains warehouses, listed two a minute and in a second, and shipments,
+whose list has no control and whose rows name their warehouses through
+the warehouses' list: the shipments' third page in a minute is 429, the
+warehouses' own page shares that budget, and a slow listing of the
+warehouses times the shipments' page out with 504. acme's
 console's new-order and cancel posts carry `placeOrder`'s and
 `cancelOrder`'s controls, its products' trail names a product by its id,
 and its lists are not live, since the app loads no runtime.
@@ -6338,45 +6344,53 @@ labeled "Q".
 |----------|------------------------|
 | Each element type a paged operation returns has a page record, `<Element>PageRecord { items, next }`, its items as a record holds the element and `next` the cursor's text, with `From<&Page<T>>`, `from_wire` and `to_wire`. The build refuses a schema that declares a type named `<Element>Page`, whose record the page record would be too. A paged operation's procedure takes `cursor: Option<String>` and `limit: Option<i64>` beside its arguments, which `to_args` holds to the route's limits with `PageSpec::request`, a refusal the route's 400 as a `ProblemRecord`, and answers its page record. | One generic page record, which a Topcoat record cannot be; the page's items alone, which drops the cursor the next call needs |
 | Every paged operation has an argument form, one with no other argument too. It holds `cursor` and `limit` as `Option<String>`, as the query sends them, renders a control for neither, and reads them with `page()`, `PageSpec::query` over the two values, so each refusal is the router's 400 at its parameter; `parse` builds the `Args`' `page` from it, and `submit` answers a refused cursor or limit with that 400 before it parses the rest. `query_pairs()` is the query the form holds, each argument's values in control order, then `limit` when sent, never `cursor`, from which a page builds its links. | Controls for the cursor and the limit, which D60 leaves out of the filter; a 422 for them, which the JSON API answers 400; a page reading the two values beside the form, which the procedure and the app's own pages would each read again |
-| A paged list's console page renders the page's items in its table and, after it, `<nav class="ss-pager">` with "First page" (`rel="first"`) while a cursor was sent and "Next page" (`rel="next"`) while one follows, each the list's path with `query_pairs()` and, for the next, `cursor`, percent-encoded. A paged list without a filter renders no form, and a refusal of its page renders on its own with its status, as a refused caller's does. A paged list that is a section of its parent's item page shows its first page and a "Next page" link to the list's own page. A live list's links each set its shard's query, which renders the list again in place, and put the query in the address bar; without the runtime they are links. | A previous link, numbered pages and a page size control (D60); paging a section in place, which would give an item's page a query of its own per section |
+| A paged list's console page renders the page's items in its table and, after it, `<nav class="ss-pager">` with "First page" (`rel="first"`) while a cursor was sent and "Next page" (`rel="next"`) while one follows, each the list's path with `query_pairs()` and, for the next, `cursor`, percent-encoded. A paged list without a filter renders no form, and a refusal of its page renders on its own with its status, as a refused caller's does. A paged list that is a section of its parent's item page shows its first page and a "Next page" link to the list's own page. A live list's links each set its shard's query, which renders the list again in place, and put the query in the address bar; without the runtime they are links. The pager's helpers, `pager`, `pager_query` and `pager_href`, are named apart from a collection's functions, `page_href` for a list at `page`, and a collection whose functions would be the pager's takes a number, `pager_2`, as a second collection of one name does. | A previous link, numbered pages and a page size control (D60); paging a section in place, which would give an item's page a query of its own per section |
 | A search argument is its form's first control: `<input type="search">` labeled "Search", with its rules' attributes, which no choices make a select. The console's filter form that holds one is `role="search"`, and its links carry it. | Its argument's name in words, "Q" (D62); a separate search form, which would drop the filters on each search |
-| `references` is written when a form or a record the crate has holds a reference (`RefersTo`), resolved by `ir.ResolveReference`, whose options operation has an in-process call; one without is left out, its control and value as they were, with the reason in the build log. Per form, `<form>_choices(cx, choices) -> Choices` gives each control that holds a reference its target's items as options; per record, `<record>_labels(cx, records, choices) -> Choices` names each value the records hold, at any depth, by its item's label. Both answer by path under `choices`, the app's, through `Choices::or`: the app's win where they name a path, and no call is made for it. | Choices computed for every path, which would call for paths the app names; a function per page, which an app's own page could not call |
-| A form's options are one listing a request, kept with `#[memoize]` and shared by every reference to the target: its first page of up to its maxLimit when it pages, and none when more follow, since a select would hide them. A record's labels come through the options operation's lookup with the distinct values the records hold, in chunks of its listMax, else of the page's maxLimit, at most `MAX_LOOKUP_CALLS`, 10, calls a target, each kept for the request; a reference by a value no lookup refers by, a sku say, is named from the listing. A value no item has shows as it is. A call the operation refuses (401, 403), or that fails, gives the plain control and the value; the page does not fail. A value is the text a record holds and a form sends, read from the item's JSON. | A call per value or per row; a cache across requests, which would show one caller another's items; failing the page, whose own operation the caller may call |
+| `references` is written when a form or a record the crate has holds a reference (`RefersTo`), resolved by `ir.ResolveReference`, whose options operation has an in-process call; one without is left out, its control and value as they were, with the reason in the build log. Per form, `<form>_choices(cx, choices) -> Choices` gives each control that holds a reference its target's items as options; per record, `<record>_labels(cx, records, choices) -> Choices` names each value the records hold, at any depth, by its item's label. The module's own functions for a target are `<target>_target_choices` and `<target>_target_labels`, apart from the labels function of the target's own record, which a target that shows a reference has, as a product names its supplier. Both answer by path under `choices`, the app's, through `Choices::or`: the app's win where they name a path, and no call is made for it. | Choices computed for every path, which would call for paths the app names; a function per page, which an app's own page could not call |
+| A form's options are one listing a request, kept with `#[memoize]` and shared by every reference to the target: its first page of up to its maxLimit when it pages, and none when more follow, since a select would hide them. A record's labels come through the options operation's lookup with the distinct values the records hold, in chunks of the lesser of its listMax and, when the options operation pages, its maxLimit, at most `MAX_LOOKUP_CALLS`, 10, calls a target in a `<record>_labels` call, each kept for the request; a reference by a value no lookup refers by, a sku say, is named from the listing. A value no item has shows as it is. A call the operation refuses (401, 403), or that fails, gives the plain control and the value; the page does not fail. A value is the text a record holds and a form sends, read from the item's JSON. | A call per value or per row; a cache across requests, which would show one caller another's items; failing the page, whose own operation the caller may call |
 | Each form a page renders takes its form's choices, a list's rows their record's labels, and an item's detail, on its page and on its delete page, its own; an action's form takes its own choices beside the detail's labels, since a record's path and a form's control may share a name. A detail whose path parameter refers to its own result type links a list's rows by the reference's value field, `products/{productId}` by `id`. | One set of choices per page, which would offer a detail's few labelled values as a form's options |
 
 Status: built. `fixture-console-api`, the extension's own, has products
-listed a page at a time, searched and read by a reference, their reviews a
-page at a time under them, suppliers a page at a time with no filter, and
-orders a page at a time, filtered by status and by a product and searched,
-read, placed from lines that refer to products, gifted a product by its
-sku, and given a line from their page. `TestTheConsolePagesPicksAndSearches`
-drives its console through `Router::handle`: a list's next and first
-links, with the filter and the limit; a cursor outside the alphabet, a
-forged one and a limit out of bounds, each the route's 400 as the form's
-own message, a refused cursor still offering the first page; a list
-without a filter with no form and its refusal on its own; the search box
-first, `role="search"`, matching each word in any case and carried by the
-links, and a search past its rules 422; the new page's selects, the app's
-own page's and an action's, from one listing a render; an order's lines
-named through one lookup and its gift from the listing; a caller who may
-not list the products given text inputs and the ids, the app's choices
-winning and sparing the call, and six products kept as text and named in
-two chunks of five; products linked by their reference and a product's
-reviews a section with a link to their next page; the live list's shard
-paging by its query and by its signal; and a procedure answering a page
-record and its refusals. `TestAPagedOperationIsItsPageEverywhere`,
-`TestReferencesResolveByTheCoreRule`, `TestAReferenceWithoutACallIsIgnored`,
+listed a page at a time, searched and read by a reference, each naming its
+supplier, their reviews a page at a time under them, suppliers a page at a
+time with no filter, orders a page at a time, filtered by status and by a
+product and searched, read, placed from lines that refer to products,
+gifted a product by its sku, and given a line from their page, and the
+site's pages a page at a time at the path `page`.
+`TestTheConsolePagesPicksAndSearches` drives its console through
+`Router::handle`: a list's next and first links, with the filter and the
+limit; a cursor outside the alphabet, a forged one and a limit out of
+bounds, each the route's 400 as the form's own message, a refused cursor
+still offering the first page; a list without a filter with no form and
+its refusal on its own; the search box first, `role="search"`, matching
+each word in any case and carried by the links, and a search past its
+rules 422; the new page's selects, the app's own page's and an action's,
+from one listing a render; an order's lines named through one lookup and
+its gift from the listing; a caller who may not list the products given
+text inputs and the ids, the app's choices winning and sparing the call,
+and six products kept as text and named in two chunks of five; products
+linked by their reference and a product's reviews a section with a link to
+their next page; a product naming its supplier on its page and its rows
+while its reviews name it; the live list's shard paging by its query and
+by its signal; a procedure answering a page record and its refusals; and
+the site's pages linking their next and first pages.
+`TestAPagedOperationIsItsPageEverywhere`,
+`TestReferencesResolveByTheCoreRule`,
+`TestReferenceFunctionsAreNamedApart`,
+`TestACollectionAtPagerIsNamedApart`,
+`TestAReferenceWithoutACallIsIgnored`,
 `TestAPageRecordNamedLikeATypeIsRefused`,
 `TestReferencesBuildWithFormsOrViewsAlone` and
 `TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api` and
-`fixture-refs-api` with their pages, check the generator, and the eight
-earlier goldens are unchanged. acme's Topcoat app gives the console no
-choices any more: its console and its own pages pick and name products
-through `references`, its `/orders` pages with the pager's links, and
-its tests, in memory and over SQLite, page the orders and the console's
-orders and products by their links, see a product's page show its
-reviews' first page and a link to the next, search a product's reviews,
-refuse a forged cursor and a limit out of range with the route's 400,
-and call the orders' procedure with a cursor and a limit.
+`fixture-refs-api` with their pages, check the generator, and of the eight
+earlier goldens only `fixture-controls-api`'s changes, by its warehouses
+and shipments (the amendment above). acme's Topcoat app gives the console
+no choices any more: its console and its own pages pick and name products
+through `references`, its `/orders` pages with the pager's links, and its
+tests, in memory and over SQLite, page the orders and the console's orders
+and products by their links, see a product's page show its reviews' first
+page and a link to the next, search a product's reviews, refuse a forged
+cursor and a limit out of range with the route's 400, and call the orders'
+procedure with a cursor and a limit.
 
 The rule is reversible until the first release.
