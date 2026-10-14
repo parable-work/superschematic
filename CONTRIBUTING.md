@@ -269,11 +269,12 @@ and concrete.
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
-`api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`,
-`versiongraph`, `engine`, `engine-workqueue`), the
+`api`, `schema-config`, `stack`, `schema-ir`, `schema-runtime`,
+`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`), the
 PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
-(`superschematic-http-runtime`, and `superschematic-versiongraph`,
+(`superschematic-schema-runtime`, `superschematic-http-runtime`, and
+`superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
 `superschematic-versiongraph-python`, which are not published) and the eleven
 Go modules all carry the SemVer

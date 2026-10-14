@@ -28,6 +28,7 @@ From `v0.1.0-alpha.1`:
 npm install @superschematic/schema @superschematic/schema-config
 npm install @superschematic/db      # DB schemas
 npm install @superschematic/api     # API schemas
+npm install @superschematic/stack   # Stack schemas
 ```
 
 Pre-releases publish under the `next` dist-tag
