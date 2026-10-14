@@ -12,9 +12,13 @@ package {{ toPackageName .Endpoint.Namespace }}
 import (
 	"context"
 	"errors"
+{{- if or .Endpoint.Filterable .Endpoint.Page }}
+{{ end }}
 {{- if .Endpoint.Filterable }}
-
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
+{{- end }}
+{{- if .Endpoint.Page }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
 {{- end }}
 {{- if .Endpoint.HasFileUpload }}
 
@@ -82,15 +86,22 @@ import (
 //     * {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes
 {{- end }}
 {{- end }}
+{{- if .Endpoint.Page }}
+//
+// Page (@paginated):
+//   - page (paging.Request): the cursor, "" for the first page, and the limit, 1 to {{ .Endpoint.Page.MaxLimit }} ({{ .Endpoint.Page.DefaultLimit }} when absent)
+{{- end }}
 //
 // Returns:
-{{- if .Endpoint.OutputIsArray }}
+{{- if .Endpoint.Page }}
+//   - {{ .Endpoint.GoResultType }}: the page's items and the cursor of the next page, nil after the last
+{{- else if .Endpoint.OutputIsArray }}
 //   - {{ .Endpoint.OutputGoListType }}: Success response
 {{- else }}
 //   - *{{ .Endpoint.OutputGoType }}: Success response
 {{- end }}
 //   - error: Error if operation fails
-func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .Endpoint.OutputIsArray }}{{ .Endpoint.OutputGoListType }}{{- else }}*{{ .Endpoint.OutputGoType }}{{- end }}, error) {
+func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Endpoint.Page }}, page paging.Request{{- end }}) ({{ .Endpoint.GoResultType }}, error) {
 	// TODO: Implement {{ .Endpoint.ShortImplName }}
 	//
 	// Example implementation patterns:
@@ -131,9 +142,17 @@ func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{-
 {{- end }}
 	//
 {{- end }}
+{{- if .Endpoint.Page }}
+	// 6. Read up to page.Limit+1 items after page.Cursor in the operation's
+	//    own order (paging.DecodeCursor reads the cursor back into your key,
+	//    and refuses one it cannot read), then return the page:
+	//    return paging.FromRows(rows, page.Limit, func(row {{ .Endpoint.OutputGoType }}) any { return key(row) })
+	//    return {{ .Endpoint.GoZeroResult }}, errors.New("something went wrong")
+{{- else }}
 	// 6. Return your response or an error:
 	//    return &{{ .Endpoint.OutputGoType }}{...}, nil
 	//    return nil, errors.New("something went wrong")
+{{- end }}
 
-	return nil, errors.New("{{ .Endpoint.ShortImplName }}: not implemented")
+	return {{ .Endpoint.GoZeroResult }}, errors.New("{{ .Endpoint.ShortImplName }}: not implemented")
 }

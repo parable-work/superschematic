@@ -48,6 +48,9 @@ import (
 {{- if .Auth.Identity }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/identity"
 {{- end }}
+{{- if .HasPagedEndpoints }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
+{{- end }}
 {{- if .RoutesNeedScalars }}
 	scalars "{{ $.Naming.ScalarGoModule }}"
 {{- end }}
@@ -1263,6 +1266,16 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 
+		{{- if .Page }}
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: {{ .Page.DefaultLimit }}, MaxLimit: {{ .Page.MaxLimit }}})
+		if !ok {
+			return
+		}
+		{{- end }}
+
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
 			logger := LoggerFromContext(r.Context())
@@ -1271,7 +1284,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 
 		// Call implementation
-		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .QueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }})
+		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .QueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1289,7 +1302,11 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 
 		// Respond with result
-		{{- if .OutputIsArray }}
+		{{- if .Page }}
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+		{{- else if .OutputIsArray }}
 		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
 		{{- else }}
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)

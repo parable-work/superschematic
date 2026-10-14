@@ -46,6 +46,29 @@ func pageInfo(set *ir.OperationSet, op *ir.FieldDef) *PageInfo {
 	return &PageInfo{DefaultLimit: op.Page.DefaultLimit, MaxLimit: op.Page.MaxLimit, Operation: set.Name + "." + op.Name}
 }
 
+// GoResultType is what the endpoint's Go implementation method returns
+// beside its error: the HTTP runtime's paging.Page of the list's element
+// for a paged operation (D60), the list for any other list, and a pointer
+// to the output otherwise.
+func (e EndpointInfo) GoResultType() string {
+	switch {
+	case e.Page != nil:
+		return "paging.Page[" + e.OutputGoType + "]"
+	case e.OutputIsArray:
+		return e.OutputGoListType()
+	}
+	return "*" + e.OutputGoType
+}
+
+// GoZeroResult is the result a Go method of GoResultType returns beside an
+// error: the empty page for a paged operation, nil otherwise.
+func (e EndpointInfo) GoZeroResult() string {
+	if e.Page != nil {
+		return e.GoResultType() + "{}"
+	}
+	return "nil"
+}
+
 // HasPagedEndpoints reports whether an endpoint of the output pages.
 func (o *APIOutput) HasPagedEndpoints() bool {
 	_, found := firstPaged(o.Endpoints)
