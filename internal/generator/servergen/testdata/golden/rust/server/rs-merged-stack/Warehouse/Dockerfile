@@ -21,7 +21,12 @@
 # The build stage builds the server with the Rust release tools.env pins,
 # frozen to the lockfile: cargo build --release --locked fails when the
 # lockfile does not match the crates the build wrote, and the stage fails
-# first when the context holds none. The image runs the binary on distroless
+# first when the context holds none. A deploy's context gives every file one
+# fixed time, and Cargo takes a path crate whose files are no newer than
+# its last build as built, so the stage touches the context's files first:
+# the target cache every Rust image's build shares keeps the registry's
+# crates compiled, and the generated crates, the mirrors and the runtimes
+# are compiled from this context. The image runs the binary on distroless
 # cc, which holds the glibc, libgcc and OpenSSL it links and nothing else,
 # as a non-root user.
 
@@ -35,6 +40,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/target \
     if [ ! -f /src/schemas/dist/Cargo.lock ]; then \
       echo "schemas/dist/Cargo.lock is not in the context: build every service (superschematic build-all), which writes it, and commit it" >&2; exit 1; fi \
+    && find /src -type f -exec touch {} + \
     && cargo build --release --locked --target-dir /target \
     && mkdir /out && cp /target/release/Warehouse /out/Warehouse
 

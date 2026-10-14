@@ -1173,8 +1173,11 @@ func templateFuncs() template.FuncMap {
 			}
 			return joinNames(names)
 		},
-		"rustString": rustString,
-		"rustLet":    rustLet,
+		"rustString":   rustString,
+		"rustLet":      rustLet,
+		"rustLetCall":  rustLetCall,
+		"rustLetChain": rustLetChain,
+		"rustMacro":    rustMacro,
 	}
 }
 
