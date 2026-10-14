@@ -40,7 +40,11 @@ mod guidance;
 // Milestone 12a: Lease, Assignment, Presence and Retries.
 
 // Milestone 12b: Queue, Budget and Blueprint.
+pub mod blueprint;
 pub mod budget;
+pub use blueprint::{
+    Blueprint, BlueprintConfig, BlueprintFrom, BlueprintStep, BlueprintWhen, MAX_STEPS,
+};
 pub use budget::{
     Budget, BudgetConfig, BudgetMeter, BudgetTransition, ReserveCheck, ScopeRead, ScopeValue,
 };
@@ -68,6 +72,7 @@ const PORTED: &[(&str, Register)] = &[
     // Milestone 12a.
 
     // Milestone 12b.
+    ("Blueprint", |set| set.with(Blueprint)),
     ("Budget", |set| set.with(Budget)),
 ];
 

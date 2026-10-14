@@ -11,6 +11,7 @@
 // Milestone 12a: Lease, Assignment, Presence and Retries.
 
 // Milestone 12b: Queue, Budget and Blueprint.
+pub(crate) mod blueprint;
 pub(crate) mod budget;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};
