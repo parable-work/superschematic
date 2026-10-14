@@ -5676,20 +5676,32 @@ graph's Rust engine over its fixed layout in the call's transaction on
 either database, its ids drawn from the engine's own source (a
 behavior's `uuids()`), whose releases a Reactions rule hears; each with
 its guidance, migrations on both databases, config, guard, fields,
-operations, reactions, schedules and veto codes; and
+operations, reactions, schedules and veto codes;
+`superschematic-engine-workqueue` (milestone 12), the work queue's seven
+behaviors, Lease (with directOn), Assignment, Queue, Presence,
+Blueprint, Budget and Retries, over the plug-in API an extension's
+behavior uses, with their guidance, migrations on both databases and
+the TypeScript package's table and column names, which a host registers
+after the core's (`workqueue()`); and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
-retention's and the tools', and those of the core behaviors'
-`test/core-*.test.ts` against the engine, and replays the scenario and
-HTTP corpora, the core behaviors' files and the behavior catalog
-included, giving their recorded answers on SQLite and Postgres for every
+behaviors and the work queue's, runs the cases of
+`test/behavior-*.test.ts`, the runner's, retention's and the tools',
+those of the core behaviors' `test/core-*.test.ts` and those of the
+work queue's tests against the engine, and replays the scenario and
+HTTP corpora, the core behaviors' files, the work queue's (211 of its
+213 scenarios on SQLite and 208 on Postgres, the rest `js` or writing
+the file with SQL of their own) and the behavior catalog included,
+giving their recorded answers on SQLite and Postgres for every
 case whose test behaviors it has, an event cursor on Postgres held to
 the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
 the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
 is the Rust engine as a Node-API addon, with the core's behaviors it is
-built with, and `@superschematic/engine`'s `src/native` gives it the
+built with and the work queue's an engine's options name (`behaviors`,
+by name: a behavior object is TypeScript code, even one whose
+declaration names one the addon has), and `@superschematic/engine`'s
+`src/native` gives it the
 package's synchronous API: a call by name with JSON in and out on the
 JavaScript thread over SQLite, a promise of one off that thread (an
 `AsyncTask`, or on Postgres a future that owns the engine), the package's
@@ -5701,18 +5713,16 @@ under Node.js and Bun, held to `test/rust-pending.txt`, the files not
 passing yet and why, which a file leaves once it passes (CI's
 `engine-napi` job): with all fifteen of the core's behaviors, 15 of the
 66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
-test that runs fails on what the Rust engine does. The rest wait for
+test that runs fails on what the Rust engine does. The work queue's
+suite runs so too (`--package`), its `test/helpers.ts` passing the
+package's own behaviors by name, held to its own `test/rust-pending.txt`:
+11 of its 19 files pass on both (211 of Node.js's 240 tests, 399 of
+Bun's 455), and none fails on what the Rust engine does. The rest wait for
 milestone 7b's test-only bridge for behaviors written in TypeScript; it
 brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
-and `engineMcp` over the engine's routes. The work queue's behaviors are
-milestone 12, whose first part (12a) has ported Lease (with directOn),
-Assignment, Presence and Retries into `superschematic-engine-workqueue`,
-with their guidance, migrations on both databases and the cases of their
-TypeScript tests; Queue, Budget and Blueprint are its second (12b). Its
-suite's recording (`testdata/scenarios/workqueue-*.json`, 213 scenarios)
-waits for them, outside the replay's files. Until the Rust engine passes the TypeScript
-suite, `@superschematic/engine` is the TypeScript implementation and
-nothing uses the workspace.
+and `engineMcp` over the engine's routes. Until the Rust engine passes
+the TypeScript suite, `@superschematic/engine` is the TypeScript
+implementation and nothing uses the workspace.
 
 The rule is reversible until the first release.
 

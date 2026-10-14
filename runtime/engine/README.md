@@ -59,16 +59,19 @@ full-text search that is the engine's own (`rust/storage/src/fulltext.rs`):
 FTS5 on SQLite, a `tsvector` with a GIN index on Postgres ("Search on
 Postgres") (wave 3); and Branches (milestone 11), the version graph's
 Rust engine over its fixed layout in the call's transaction. The work
-queue's behaviors are milestone 12, in progress.
+queue's seven behaviors (milestone 12) are
+`superschematic-engine-workqueue` (`runtime/engine-workqueue/rust`), a
+member of this workspace (`runtime/engine-workqueue/README.md`).
 `superschematic-engine-testkit` (`rust/testkit`) ports this package's
-test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
-core behaviors' `test/core-*.test.ts` against the Rust engine, and
-replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
-(`testdata/http`) through the engine's calls and routes, all on both
-databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine
-as a Node-API addon, which this package's test suite runs on with
-`ENGINE_IMPL=rust` ("The Rust engine through its Node-API addon", under
-Development).
+test behaviors and the work queue's, runs the cases of
+`test/behavior-*.test.ts`, of the core behaviors' `test/core-*.test.ts`
+and of the work queue's tests against the Rust engine, and replays the
+scenario corpus (`testdata/scenarios`, the work queue's files included)
+and the HTTP corpus (`testdata/http`) through the engine's calls and
+routes, all on both databases. `superschematic-engine-napi` (`rust/napi`)
+is the Rust engine as a Node-API addon, which this package's test suite
+and the work queue's run on with `ENGINE_IMPL=rust` ("The Rust engine
+through its Node-API addon", under Development).
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -4900,7 +4903,7 @@ docker rm -f engine-pg
 
 `rust/napi` builds the Rust engine as a Node-API addon, which Node.js and
 Bun load. It registers the core's behaviors that `core()` returned when it
-was built.
+was built, then the work queue's an engine's options name.
 `scripts/engine-napi.sh` (at the repository's root; `bun run build:napi`
 here) builds it for this host into `typescript/native/`, which git
 ignores, as `superschematic-engine.<triple>.node`; `--debug` builds it
@@ -4922,7 +4925,16 @@ engine's `"allowAll"` and `"permission"`, and the Rust engine's `{ rules
 TypeScript, which the addon asks on the JavaScript thread during a call,
 so such an engine is not called asynchronously and its runner is driven
 by `runDue` rather than `start`. A clock function sets the Rust engine's
-manual clock before each call. `postgres: { url, schema? }` opens the
+manual clock before each call. `behaviors` takes the name of a behavior
+the addon is built with beyond the core's, the work queue's (`Lease`,
+`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`),
+which it registers in Rust after the core's, in the order given; a
+behavior object is TypeScript code to run, even one whose declaration
+names a behavior the addon has (a test's stand-in, or a wrapper of
+`@superschematic/engine-workqueue`'s own that counts its calls), so it
+needs the bridge, and a host with the work queue's objects passes their
+declarations' names (the work queue's `test/helpers.ts` maps its own by
+identity). `postgres: { url, schema? }` opens the
 engine on Postgres in place of `path`; it is called through
 `callAsync(op, principal, ...args)`, since a synchronous call there
 would hold the JavaScript thread while it waits on the database. What the
@@ -4936,7 +4948,10 @@ place of this package's, and `scripts/rust-ratchet.mjs` runs each test
 file so on its own, under Node.js and Bun, and holds the result to
 `test/rust-pending.txt`, the files not passing yet and why: a file that
 fails and is not listed fails the run, and so does a listed file that
-passes, so the list only shrinks. CI's `engine-napi` job runs it:
+passes, so the list only shrinks. `--package` runs another package's
+suite so, held to its own `test/rust-pending.txt`: the work queue's,
+whose `test/helpers.ts` opens the Rust engine with its behaviors by name.
+CI's `engine-napi` job runs both:
 
 ```
 scripts/engine-napi.sh                      # from the repository's root
@@ -4944,6 +4959,8 @@ cd runtime/engine/typescript && bun run build
 bun run test:rust                           # Node.js, then Bun
 node scripts/rust-ratchet.mjs --runtime bun test/events.test.ts --verbose
 node scripts/rust-ratchet.mjs --update      # take off what passes, add what fails
+cd ../../engine-workqueue/typescript && bun run build
+bun run test:rust                           # the work queue's suite, its test/rust-pending.txt
 ```
 
 ### The corpus a second engine replays
