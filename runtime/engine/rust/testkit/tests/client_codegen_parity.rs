@@ -5,10 +5,9 @@
 //! describe document's, descriptions aside, and its behavior fields must
 //! be the ones the describe document names, by behavior — the first two
 //! cases of `test/client-codegen.test.ts`, on an engine with the core's
-//! behaviors ported so far, as `openTestEngine` opens one, which runs
-//! every behavior the vectors' documents compose (the `Project` document's
-//! Rollups since milestone 10a). The test fails if the vectors stop
-//! covering the shapes it checks.
+//! behaviors, as `openTestEngine` opens one, which runs every behavior the
+//! vectors' documents compose. The test fails if the vectors stop covering
+//! the shapes it checks.
 
 mod support;
 

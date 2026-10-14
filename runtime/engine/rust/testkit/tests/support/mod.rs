@@ -128,7 +128,7 @@ impl Target {
 
     /// Options as `openTestEngine` opens an engine for the core behaviors'
     /// tests: the core's meta-schema, every write allowed, and the core's
-    /// behaviors ported so far, as the TypeScript engine registers its own.
+    /// behaviors, as the TypeScript engine registers its own.
     pub fn core_options(&self) -> EngineOptions {
         let mut options = EngineOptions::new(self.storage());
         options.policy = Some(Policy::allow_all());

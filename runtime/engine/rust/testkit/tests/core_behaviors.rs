@@ -1,15 +1,15 @@
 //! The core's behaviors with no extension: the cases of
-//! `test/core-behaviors.test.ts` that compose only the behaviors ported so
-//! far (an engine opened with them registers them and no one else can take
-//! their names; the steps document the core binary builds, and the
-//! documents one, with Workflow, Comments and Revisions on one type; the
-//! tasks, projects and numbered invoices documents, whose projects compose
+//! `test/core-behaviors.test.ts` (an engine opened with them registers all
+//! fifteen and no one else can take their names; the core's meta-schema
+//! admits a work-queue behavior, which an engine without the work queue
+//! refuses; the steps document the core binary builds, and the documents
+//! one, with Workflow, Comments and Revisions on one type; the tasks,
+//! projects and numbered invoices documents, whose projects compose
 //! Rollups; the project tree document, whose projects Reactions starts,
 //! finishes and fails; and the recipes one, whose recipes are version
 //! graphs of Branches), on SQLite and, with the variable set, on Postgres.
-//! The notes document composes Search, of a later wave; the expenses,
-//! requests and invoices documents run in the Approvals, Timers and
-//! StateRules files.
+//! The notes document runs in the Search file; the expenses, requests and
+//! invoices documents in the Approvals, Timers and StateRules files.
 
 mod support;
 
@@ -74,6 +74,32 @@ fn an_engine_opened_with_the_core_registers_it_and_no_one_else_can_take_its_name
         assert!(
             usage(opened).contains("already registered"),
             "an open that names a core behavior again"
+        );
+    }
+}
+
+#[test]
+fn the_core_also_declares_the_work_queue_behaviors_which_this_engine_runs_only_once_a_deployment_registers_them(
+) {
+    for target in targets("core_work_queue") {
+        let engine = target.open_core();
+        let mut document = fixture("fixture-search-json", "note.schema.json");
+        document["types"]["Note"]["behaviors"] =
+            json!([{"name": "Lease", "config": {"ttlMs": 30000}}]);
+        // The core meta-schema admits Lease, so the loader passes it; the
+        // engine has no implementation of it.
+        let refused = refusal(engine.schemas().define(
+            &alice(),
+            &document,
+            DefineOptions::default(),
+        ));
+        assert_eq!(refused.code().as_str(), "invalid_schema");
+        assert!(
+            refused
+                .message()
+                .contains("behavior Lease on type Note: no implementation registered"),
+            "{}",
+            refused.message()
         );
     }
 }
@@ -167,12 +193,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
     let reviewer = Principal::new("rae", ["documents.review"]);
     let publisher = Principal::new("pat", ["documents"]);
     for target in targets("core_documents") {
-        let engine = target.open_core_with(|options| {
-            options.behaviors = BehaviorSet::new()
-                .with(superschematic_engine_behaviors::Workflow)
-                .with(superschematic_engine_behaviors::Comments)
-                .with(superschematic_engine_behaviors::Revisions);
-        });
+        let engine = target.open_core();
         engine
             .schemas()
             .define(&alice(), documents(), DefineOptions::default())
@@ -438,28 +459,6 @@ fn projects() -> Value {
     fixture("fixture-rollups-json", "project.schema.json")
 }
 
-/// The core's behaviors these documents compose, Rollups among them, in
-/// the TypeScript engine's order.
-fn with_rollups() -> BehaviorSet {
-    use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, Rollups,
-        StateRules, Timers, Variants, Workflow,
-    };
-    BehaviorSet::new()
-        .with(Workflow)
-        .with(Comments)
-        .with(Revisions)
-        .with(Dependencies)
-        .with(Links)
-        .with(Rollups)
-        .with(Constants)
-        .with(Variants)
-        .with(StateRules)
-        .with(Approvals)
-        .with(Numbering)
-        .with(Timers)
-}
-
 fn publish_all(engine: &Engine, documents: &[Value]) {
     for document in documents {
         engine
@@ -544,7 +543,7 @@ fn it_runs_the_tasks_document_beside_the_documents_one_blockers_of_both_and_link
 
     let publisher = Principal::new("pat", ["documents"]);
     for target in targets("core_tasks") {
-        let engine = target.open_core_with(|options| options.behaviors = with_rollups());
+        let engine = target.open_core();
         publish_all(&engine, &[documents(), tasks(), projects()]);
         assert_eq!(
             composed(&engine, "tasks"),
@@ -816,7 +815,7 @@ fn it_runs_the_tasks_document_beside_the_documents_one_blockers_of_both_and_link
 fn it_runs_the_projects_document_beside_the_tasks_one_a_project_rolls_up_its_tasks_and_waits_for_them(
 ) {
     for target in targets("core_projects") {
-        let engine = target.open_core_with(|options| options.behaviors = with_rollups());
+        let engine = target.open_core();
         publish_all(&engine, &[documents(), tasks(), projects()]);
         assert_eq!(composed(&engine, "projects"), ["Workflow", "Rollups"]);
         let created = create_as(
@@ -897,29 +896,6 @@ fn project_tree() -> Value {
     fixture("fixture-reactions-json", "project.schema.json")
 }
 
-/// The core's behaviors with Rollups and Reactions, in the TypeScript
-/// engine's order.
-fn with_reactions() -> BehaviorSet {
-    use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
-        Rollups, StateRules, Timers, Variants, Workflow,
-    };
-    BehaviorSet::new()
-        .with(Workflow)
-        .with(Comments)
-        .with(Revisions)
-        .with(Dependencies)
-        .with(Links)
-        .with(Rollups)
-        .with(Reactions)
-        .with(Constants)
-        .with(Variants)
-        .with(StateRules)
-        .with(Approvals)
-        .with(Numbering)
-        .with(Timers)
-}
-
 #[test]
 fn it_runs_the_project_tree_document_a_project_starts_finishes_and_fails_its_parent_after_the_commit(
 ) {
@@ -927,7 +903,6 @@ fn it_runs_the_project_tree_document_a_project_starts_finishes_and_fails_its_par
 
     for target in targets("core_project_tree") {
         let engine = target.open_core_with(|options| {
-            options.behaviors = with_reactions();
             options.runner = Some(RunnerOptions::new(Principal::new(
                 "runner",
                 Vec::<String>::new(),
@@ -1073,7 +1048,6 @@ fn it_runs_the_invoices_document_beside_the_projects_one_an_invoice_is_numbered_
     const JANUARY_1: i64 = 1_798_761_600_000;
     for target in targets("core_numbered_invoices") {
         let engine = target.open_core_with(|options| {
-            options.behaviors = with_rollups();
             options.clock = Clock::Manual(DECEMBER_31);
         });
         publish_all(
@@ -1166,7 +1140,6 @@ fn it_runs_the_recipes_document_whose_drafts_merge_into_the_primary_line_and_a_t
 
     for target in targets("core_recipes") {
         let engine = target.open_core_with(|options| {
-            options.behaviors = BehaviorSet::new().with(superschematic_engine_behaviors::Branches);
             options.runner = Some(RunnerOptions::new(Principal::new(
                 "runner",
                 Vec::<String>::new(),

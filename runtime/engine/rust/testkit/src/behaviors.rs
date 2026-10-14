@@ -1804,7 +1804,7 @@ impl Behavior for Dispatch {
 
 /// A core behavior by name, alone, for a step that registers one again or
 /// an open that names one: the engine refuses it, as the TypeScript engine
-/// refuses a name already registered. `None` for one not ported yet.
+/// refuses a name already registered. `None` for a name not the core's.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
         Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,

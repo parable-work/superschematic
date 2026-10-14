@@ -8,14 +8,13 @@
 //! scenario one test: the calls it made on the engines it opened and what
 //! each returned or threw. The replayer resolves the file's shared values,
 //! skips a scenario only the TypeScript engine can run (`js`), one that
-//! needs a behavior this engine does not have (a test behavior the kit has
-//! not ported, [`behaviors`], or a core behavior not ported yet,
-//! milestones 10 and 11), one that writes the file with SQL of its own on
-//! Postgres (`dialect: sqlite`), and one that calls a method that changes
-//! the engine and JSON cannot carry ([`UNBUILT_WRITES`]). It opens each
+//! needs a test behavior the kit has not ported ([`behaviors`]), one that
+//! writes the file with SQL of its own on Postgres (`dialect: sqlite`), and
+//! one that calls a method that changes the engine and JSON cannot carry
+//! ([`UNBUILT_WRITES`]). It opens each
 //! engine as the recording says, with a policy answering from the recorded
 //! answer table, seeded or fixed ids, a wall (strict) or fixed clock, the
-//! runner, retention and tool options, the core's behaviors ported so far
+//! runner, retention and tool options, the core's behaviors
 //! ([`superschematic_engine_behaviors`]) and the test behaviors it names,
 //! then makes each step's call through [`superschematic_engine::calls`]
 //! (`behaviors.register` through the kit's behaviors and the core's) and
@@ -25,9 +24,7 @@
 //! event cursor is opaque too: the recording's are SQLite's, and a write a
 //! rollback undid leaves a gap in a Postgres identity column (D58), so each
 //! recorded cursor binds to the one read in its place, in the recorded
-//! order, and a cursor argument passes the one bound to it. A read of the
-//! registered behaviors that answers from a core behavior not ported yet
-//! ([`UNBUILT_READS`]) is skipped and counted.
+//! order, and a cursor argument passes the one bound to it.
 //!
 //! The HTTP corpus (`runtime/engine/testdata/http`) replays through the
 //! same runner: its cases are scenarios whose `app`, exchange and stream
@@ -55,64 +52,10 @@ use superschematic_engine::{
     ValueOptions, SCENARIO_SEED,
 };
 
-/// The core's behaviors, which the TypeScript engine registers when it
-/// opens. The replayer opens every engine with the ones ported so far
-/// ([`superschematic_engine_behaviors::core`], whose names
-/// [`superschematic_engine_behaviors::NAMES`] lists); a scenario whose
-/// schemas compose one not ported yet (milestones 10 and 11) is skipped.
-pub const CORE_BEHAVIORS: [&str; 15] = [
-    "Workflow",
-    "Comments",
-    "Revisions",
-    "Dependencies",
-    "Links",
-    "Rollups",
-    "Search",
-    "Reactions",
-    "Constants",
-    "Variants",
-    "Branches",
-    "StateRules",
-    "Approvals",
-    "Timers",
-    "Numbering",
-];
-
 /// Calls that change the engine and are not built: a scenario that makes
 /// one is skipped, since the steps after it depend on it. A transaction of
 /// the file's own and a watch take functions.
 pub const UNBUILT_WRITES: [&str; 2] = ["storage.transaction", "events.watch"];
-
-/// Calls that read the registered behaviors, which answer from what this
-/// engine does not have yet where they list every core behavior (the names
-/// and the behavior catalog) or read one by name not ported yet: the step
-/// is skipped and counted ([`reads_unported`]). This engine registers the
-/// core's behaviors only in part until milestone 11.
-pub const UNBUILT_READS: [&str; 5] = [
-    "behaviors.has",
-    "behaviors.names",
-    "behaviors.declaration",
-    "tools.listBehaviors",
-    "tools.describeBehavior",
-];
-
-/// Whether a read of the registered behaviors ([`UNBUILT_READS`]) answers
-/// from a core behavior this engine does not register yet: a list of every
-/// behavior does, and a read of one by name does when it names one not
-/// ported.
-pub fn reads_unported(call: &str, step: &Value) -> bool {
-    match call {
-        "behaviors.names" | "tools.listBehaviors" => true,
-        _ => step
-            .get("args")
-            .and_then(|args| args.get(0))
-            .and_then(Value::as_str)
-            .is_some_and(|name| {
-                CORE_BEHAVIORS.contains(&name)
-                    && !superschematic_engine_behaviors::NAMES.contains(&name)
-            }),
-    }
-}
 
 /// A scenario file, its shared values resolved.
 #[derive(Clone, Debug)]
@@ -309,46 +252,6 @@ fn skip_reason(
     if !missing.is_empty() {
         return Some(format!("test behaviors not ported: {}", missing.join(", ")));
     }
-    // A schema an exchange defines over HTTP composes behaviors the
-    // recorder never saw, so its body is read for them too.
-    let mut composed = names("behaviors");
-    for step in steps {
-        if let Some(body) = step.get("request").and_then(|request| request.get("body")) {
-            for type_def in body
-                .get("types")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|types| types.values())
-            {
-                for behavior in type_def
-                    .get("behaviors")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if let Some(name) = behavior.get("name").and_then(Value::as_str) {
-                        if !composed.iter().any(|known| known == name) {
-                            composed.push(name.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    composed.sort();
-    let core: Vec<String> = composed
-        .into_iter()
-        .filter(|name| {
-            CORE_BEHAVIORS.contains(&name.as_str())
-                && !superschematic_engine_behaviors::NAMES.contains(&name.as_str())
-        })
-        .collect();
-    if !core.is_empty() {
-        return Some(format!(
-            "core behaviors not ported yet (milestones 10 and 11): {}",
-            core.join(", ")
-        ));
-    }
     if scenario.get("dialect").and_then(Value::as_str) == Some("sqlite")
         && database.dialect() == Dialect::Postgres
     {
@@ -474,9 +377,6 @@ impl<'d> Run<'d> {
             return http::stream(self, step);
         }
         let call = step.get("call").and_then(Value::as_str).unwrap_or_default();
-        if UNBUILT_READS.contains(&call) && reads_unported(call, step) {
-            return Ok(Outcome::Skipped);
-        }
         let mut args = match step.get("args") {
             Some(Value::Array(args)) => args
                 .iter()
@@ -1533,8 +1433,8 @@ impl AccessPolicy for AnswerPolicy {
 
 /// The files of the corpus a replay runs by default: the engine's own
 /// test files, whose scenarios need no behavior or few, and the core
-/// behaviors' files whose behaviors this engine has (a scenario that also
-/// composes one not ported yet is skipped).
+/// behaviors' files. The work queue's (`workqueue-*`) wait for its
+/// behaviors (milestone 12).
 pub const ENGINE_FILES: [&str; 30] = [
     "access",
     "compat",

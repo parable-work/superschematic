@@ -49,19 +49,20 @@ and 2026-07-28, the host keeping authentication, request ids, body and
 rate limits, timeouts and CORS. `superschematic-engine-behaviors`
 (`rust/behaviors`) holds the core's behaviors, each over the copy of its
 declaration `make behaviors` writes into `rust/behaviors/declarations`,
-which a host passes in its options (`core()`): so far Workflow,
-Comments, Constants and Variants (wave 1), and Revisions, Dependencies,
+which a host passes in its options (`core()`), all fifteen: Workflow,
+Comments, Constants and Variants (wave 1); Revisions, Dependencies,
 Links (with what a move of a link's target moves on), Numbering and
 D56's StateRules, Approvals and Timers, whose deadlines the runner fires
-(wave 2), Rollups and Reactions, with D56's changes trigger, and Search
+(wave 2); Rollups and Reactions, with D56's changes trigger, and Search
 with its vectors and the search across a namespace's schemas, over
 full-text search that is the engine's own (`rust/storage/src/fulltext.rs`):
 FTS5 on SQLite, a `tsvector` with a GIN index on Postgres ("Search on
-Postgres") (wave 3), and Branches (milestone 11), the version graph's
-Rust engine over its fixed layout in the call's transaction: all fifteen.
+Postgres") (wave 3); and Branches (milestone 11), the version graph's
+Rust engine over its fixed layout in the call's transaction. The work
+queue's behaviors are milestone 12, in progress.
 `superschematic-engine-testkit` (`rust/testkit`) ports this package's
 test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
-ported behaviors' `test/core-*.test.ts` against the Rust engine, and
+core behaviors' `test/core-*.test.ts` against the Rust engine, and
 replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
 (`testdata/http`) through the engine's calls and routes, all on both
 databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine

@@ -4,54 +4,31 @@
 //! on the edge from not holding to holding, judged with the other linked
 //! instances as they are when the rule runs, and up a tree of the type's
 //! own schema to the runner's depth limit. revised fires when the instance
-//! a link points to gains a revision, on each instance whose link points
-//! there, of a link pinned to a revision only the ones the target has
-//! moved past. parseConfig holds both to the type's Rollups and Links, and
-//! a link to a schema with neither Revisions nor Branches halts the
-//! subscription. On SQLite and, with the variable set, on Postgres. The
-//! two cases of a release, which compose Branches, wait for Branches.
+//! a link points to gains a revision, or a release when its schema
+//! composes Branches, on each instance whose link points there, of a link
+//! pinned to what the target gained only the ones the target has moved
+//! past. parseConfig holds both to the type's Rollups and Links, and a link
+//! to a schema with neither Revisions nor Branches halts the subscription.
+//! On SQLite and, with the variable set, on Postgres.
 
 mod support;
 
 use serde_json::{json, Value};
 
 use superschematic_engine::{
-    BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineEvent, EngineOptions, Error,
-    GetOptions, Principal, ReadEvents, RunnerOptions, SchemaTarget, SubscriptionSkip,
-    SubscriptionState, WriteOptions,
-};
-use superschematic_engine_behaviors::{
-    Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions, Rollups,
-    StateRules, Timers, Variants, Workflow,
+    Clock, CreateOptions, DefineOptions, Engine, EngineEvent, EngineOptions, Error, GetOptions,
+    Principal, ReadEvents, RunnerOptions, SchemaTarget, SubscriptionSkip, SubscriptionState,
+    WriteOptions,
 };
 use support::{alice, issues_of, refusal, schema_document, targets, Target};
-
-/// The core's behaviors with Rollups and Reactions, in the TypeScript
-/// engine's order.
-fn behaviors() -> BehaviorSet {
-    BehaviorSet::new()
-        .with(Workflow)
-        .with(Comments)
-        .with(Revisions)
-        .with(Dependencies)
-        .with(Links)
-        .with(Rollups)
-        .with(Reactions)
-        .with(Constants)
-        .with(Variants)
-        .with(StateRules)
-        .with(Approvals)
-        .with(Numbering)
-        .with(Timers)
-}
 
 fn runner() -> Principal {
     Principal::new("runner", Vec::<String>::new())
 }
 
+/// An engine with the core's behaviors, a manual clock and a runner.
 fn open_with(target: &Target, configure: impl FnOnce(&mut EngineOptions)) -> Engine {
     target.open_core_with(|options| {
-        options.behaviors = behaviors();
         options.clock = Clock::Manual(1_000_000);
         options.runner = Some(RunnerOptions::new(runner()));
         configure(options);
@@ -647,6 +624,207 @@ fn of_a_link_with_no_pin_every_instance_that_points_at_the_target_moves_at_each_
             statuses(&engine, "Work", &["w3", "w4"]),
             [json!("review"), json!("review")]
         );
+    }
+}
+
+/// The Recipe document of `branches-fixtures.ts` (`recipeDocument`): a
+/// Recipe composes Branches, with a step, an ingredient under its step and
+/// a single cover.
+fn recipe_document() -> Value {
+    let mut document = schema_document(
+        "Recipe",
+        json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
+        json!({
+            "enums": {"Unit": {"name": "Unit", "values": [{"name": "GRAM", "serializedAs": "g"}, {"name": "CUP", "serializedAs": "cup"}]}},
+            "types": {
+                "Step": {"name": "Step", "role": "EmbeddedStruct", "fields": [
+                    {"name": "instruction", "typeRef": {"name": "string"}, "required": true},
+                    {"name": "position", "typeRef": {"name": "Int"}, "required": true},
+                    {"name": "timings", "typeRef": {"name": "Generic.JSON"}}
+                ]},
+                "Ingredient": {"name": "Ingredient", "role": "EmbeddedStruct", "fields": [
+                    {"name": "stepKey", "typeRef": {"name": "Identity.UUID"}, "required": true},
+                    {"name": "quantity", "typeRef": {"name": "string"}, "required": true},
+                    {"name": "unit", "typeRef": {"name": "Unit"}}
+                ]},
+                "Cover": {"name": "Cover", "role": "EmbeddedStruct", "fields": [
+                    {"name": "photoUrl", "typeRef": {"name": "string"}, "required": true}
+                ]}
+            }
+        }),
+    );
+    document["types"]["Recipe"]["behaviors"] = json!([{"name": "Branches", "config": {
+        "kinds": {
+            "step": {"type": "Step", "order": "position", "units": {"timings": "keyed"}},
+            "ingredient": {"type": "Ingredient", "parent": {"key": "stepKey", "of": "step"}},
+            "cover": {"type": "Cover", "singleton": true}
+        }
+    }}]);
+    document
+}
+
+/// The Branches calls a test makes on one Recipe, as alice
+/// (`branches-fixtures.ts`'s `Calls`).
+struct Calls<'e> {
+    engine: &'e Engine,
+    id: &'e str,
+}
+
+impl Calls<'_> {
+    fn invoke(&self, operation: &str, params: Value) -> Value {
+        self.engine
+            .instances()
+            .invoke(
+                &alice(),
+                "Recipe",
+                self.id,
+                operation,
+                &params,
+                WriteOptions::default(),
+            )
+            .unwrap_or_else(|error| panic!("{operation}: {error}"))
+    }
+
+    fn main(&self) -> Value {
+        self.invoke("refs", json!({}))["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|r| r["parent"].is_null())
+            .expect("the primary line")
+            .clone()
+    }
+
+    /// Writes rows on a new draft of the primary line, commits it and
+    /// merges it in, tagged; returns the merge's commit.
+    fn change(&self, name: &str, edits: Value) -> Value {
+        let main = self.main();
+        let draft = self.invoke("branch", json!({"fromRef": main["id"], "name": name}));
+        let saved = self.invoke(
+            "save",
+            json!({"ref": draft["id"], "version": draft["version"], "edits": edits}),
+        );
+        let committed = self.invoke(
+            "commit",
+            json!({"ref": saved["ref"]["id"], "version": saved["ref"]["version"]}),
+        );
+        let main = self.main();
+        self.invoke(
+            "merge",
+            json!({"source": committed["ref"]["id"], "target": main["id"], "targetVersion": main["version"], "tag": true}),
+        )["commit"]
+            .clone()
+    }
+
+    fn release(&self, commit: &Value, version: i64) {
+        self.invoke(
+            "releaseCommit",
+            json!({"commit": commit["id"], "version": version}),
+        );
+    }
+}
+
+// recipe_work publishes Work, whose recipe link (pinned as `pin` says)
+// sends it back for review when the recipe is revised or released.
+fn recipe_work(engine: &Engine, pin: Option<&str>) {
+    let mut recipe = json!({"schema": "Recipe"});
+    if let Some(pin) = pin {
+        recipe["pinned"] = json!(pin);
+    }
+    publish(
+        engine,
+        &schema(
+            "Work",
+            json!([
+                work_flow(),
+                {"name": "Links", "config": {"links": {"recipe": recipe}}},
+                reactions(&[json!({"when": {"revised": {"link": "recipe"}}, "then": {"transition": "review"}})])
+            ]),
+        ),
+    );
+}
+
+#[test]
+fn a_release_of_a_schema_that_composes_branches_moves_the_work_linked_to_it_its_other_operations_do_not(
+) {
+    for target in targets("revised_release") {
+        let engine = open(&target);
+        publish(&engine, &recipe_document());
+        recipe_work(&engine, None);
+        create(&engine, "Recipe", "soup", "Soup", None);
+        create(
+            &engine,
+            "Work",
+            "w1",
+            "Cook",
+            Some(json!({"recipe": "soup"})),
+        );
+        let soup = Calls {
+            engine: &engine,
+            id: "soup",
+        };
+        let first = soup.change(
+            "first",
+            json!({"cover": {"upsert": [{"photoUrl": "soup.jpg"}]}}),
+        );
+        update(&engine, "Recipe", "soup", json!({"title": "Tomato soup"}));
+        run_due(&engine);
+        assert_eq!(status(&engine, "Work", "w1"), json!("todo"));
+        soup.release(&first, 0);
+        run_due(&engine);
+        assert_eq!(status(&engine, "Work", "w1"), json!("review"));
+    }
+}
+
+#[test]
+fn of_a_link_pinned_to_a_release_a_release_moves_only_the_work_pinned_to_an_earlier_one_a_revision_of_the_target_moves_every_one(
+) {
+    for target in targets("revised_release_pinned") {
+        let engine = open(&target);
+        let mut recipe = recipe_document();
+        recipe["types"]["Recipe"]["behaviors"]
+            .as_array_mut()
+            .expect("behaviors")
+            .push(json!({"name": "Revisions"}));
+        publish(&engine, &recipe);
+        recipe_work(&engine, Some("release"));
+        create(&engine, "Recipe", "soup", "Soup", None);
+        let soup = Calls {
+            engine: &engine,
+            id: "soup",
+        };
+        let first = soup.change(
+            "first",
+            json!({"cover": {"upsert": [{"photoUrl": "soup.jpg"}]}}),
+        );
+        soup.release(&first, 0);
+        for id in ["w1", "w2"] {
+            create(&engine, "Work", id, id, Some(json!({"recipe": "soup"})));
+        }
+        run_due(&engine);
+        let second = soup.change(
+            "second",
+            json!({"step": {"upsert": [{"instruction": "Boil", "position": 1}]}}),
+        );
+        soup.release(&second, 1);
+        // Before the runner hears it, w1 is pinned to release 2.
+        invoke(
+            &engine,
+            "Work",
+            "w1",
+            "link",
+            json!({"name": "recipe", "id": "soup"}),
+        );
+        run_due(&engine);
+        assert_eq!(
+            statuses(&engine, "Work", &["w1", "w2"]),
+            [json!("todo"), json!("review")]
+        );
+        // A revision is not what the link pins: it moves every instance
+        // that points there.
+        update(&engine, "Recipe", "soup", json!({"title": "Tomato soup"}));
+        run_due(&engine);
+        assert_eq!(status(&engine, "Work", "w1"), json!("review"));
     }
 }
 

@@ -18,7 +18,7 @@ postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/p
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
 # The core's behaviors, which the TypeScript engine registers when it opens:
-# the replayer opens every engine with the ones ported so far.
+# the replayer opens every engine with them.
 superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
 
 [lints]
