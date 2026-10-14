@@ -43,11 +43,13 @@ mod time;
 pub mod assignment;
 pub mod lease;
 pub mod presence;
+pub mod retries;
 
 pub use assignment::{Assignment, AssignmentConfig};
 pub use lease::{Lease, LeaseConfig, LeaseDirectOn, LeaseTransition};
 pub use moves::StatusMove;
 pub use presence::{Presence, PresenceConfig, PresenceTransition};
+pub use retries::{Retries, RetriesConfig, RetriesKeepBest, RetryClass};
 
 // Milestone 12b: Queue, Budget and Blueprint.
 
@@ -75,6 +77,7 @@ const PORTED: &[(&str, Register)] = &[
     ("Lease", |set| set.with(Lease)),
     ("Assignment", |set| set.with(Assignment)),
     ("Presence", |set| set.with(Presence)),
+    ("Retries", |set| set.with(Retries)),
     // Milestone 12b.
 ];
 

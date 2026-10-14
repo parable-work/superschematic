@@ -1,0 +1,172 @@
+{
+  "plain": {
+    "summary": "Failure classes: timeout (3 attempts), invalid (1 attempt) and rejected (terminal: one failure exhausts); at most 4 counted failures in all. Once exhausted, status moves from queued or running to failed, and the Job takes no more attempts, moves only to failed, and is not acquired or claimed.",
+    "operations": {
+      "recordAttempt": {
+        "useWhen": "Use after each attempt: without failure it is a success; with failure, one of timeout, invalid or rejected.",
+        "success": "Returns the counts, whether the instance is exhausted or stuck, and the failure class's hint for the next attempt.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move an exhausted instance anywhere but failed.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Retries.exhausted\": true } lists the Job instances whose retries are exhausted, and false the ones that may run again."
+      }
+    }
+  },
+  "full": {
+    "summary": "Failure classes: invalidOutput (2 attempts), rejected (terminal: one failure exhausts) and timeout (3 attempts); at most 1 counted failure in all, or the caps the instance's caps holds. Once exhausted, status moves from running to failed, and the Job takes no more attempts, moves only to failed, and is not acquired or claimed. 2 failures in a row with the same signature exhaust it as stuck. A kept attempt's result is written to report; a failure's is kept when its score beats the best by 0.25.",
+    "operations": {
+      "recordAttempt": {
+        "useWhen": "Use after each attempt: without failure it is a success; with failure, one of invalidOutput, rejected or timeout. It needs permission jobs.work.",
+        "success": "Returns the counts, whether the instance is exhausted or stuck, and the failure class's hint for the next attempt.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move an exhausted instance anywhere but failed.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Retries.exhausted\": true } lists the Job instances whose retries are exhausted, and false the ones that may run again."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use once behaviors.Retries.exhausted is true.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "claim": {
+        "doNotUseWhen": "Do not use once behaviors.Retries.exhausted is true.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "update": {
+        "doNotUseWhen": "Do not change caps, nor as the holder of its lease.",
+        "errors": [
+          {
+            "code": "limits_fixed",
+            "commonCorrection": "None: a worker never raises its own caps; an operator does."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: caps does not change once the instance exists."
+          }
+        ]
+      }
+    }
+  },
+  "permitted": {
+    "summary": "Failure classes: flaky (1 attempt); at most 3 counted failures in all, or the caps the instance's caps holds. Once exhausted, status moves from queued to failed, and the Job takes no more attempts, moves only to failed, and is not acquired or claimed. A kept attempt's result is written to output.",
+    "operations": {
+      "recordAttempt": {
+        "useWhen": "Use after each attempt: without failure it is a success; with failure, one of flaky.",
+        "success": "Returns the counts, whether the instance is exhausted or stuck, and the failure class's hint for the next attempt.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move an exhausted instance anywhere but failed.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Retries.exhausted\": true } lists the Job instances whose retries are exhausted, and false the ones that may run again."
+      },
+      "update": {
+        "doNotUseWhen": "Do not change caps without permission jobs.caps.",
+        "errors": []
+      }
+    }
+  },
+  "leasedPermitted": {
+    "summary": "Failure classes: flaky (1 attempt); at most 3 counted failures in all, or the caps the instance's caps holds. Once exhausted, status moves from  to failed, and the Job takes no more attempts, moves only to failed, and is not acquired or claimed. A kept attempt's result is written to output; a failure's is kept when its score beats the best by 0.",
+    "operations": {
+      "recordAttempt": {
+        "useWhen": "Use after each attempt: without failure it is a success; with failure, one of flaky.",
+        "success": "Returns the counts, whether the instance is exhausted or stuck, and the failure class's hint for the next attempt.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not move an exhausted instance anywhere but failed.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Retries.exhausted\": true } lists the Job instances whose retries are exhausted, and false the ones that may run again."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use once behaviors.Retries.exhausted is true.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "claim": {
+        "doNotUseWhen": "Do not use once behaviors.Retries.exhausted is true.",
+        "errors": [
+          {
+            "code": "exhausted",
+            "commonCorrection": "None: the instance takes no more attempts; create new work instead."
+          }
+        ]
+      },
+      "update": {
+        "doNotUseWhen": "Do not change caps without permission jobs.caps, nor as the holder of its lease.",
+        "errors": [
+          {
+            "code": "limits_fixed",
+            "commonCorrection": "None: a worker never raises its own caps; an operator does."
+          }
+        ]
+      }
+    }
+  }
+}

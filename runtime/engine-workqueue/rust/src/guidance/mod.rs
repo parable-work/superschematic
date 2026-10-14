@@ -12,6 +12,7 @@
 pub(crate) mod assignment;
 pub(crate) mod lease;
 pub(crate) mod presence;
+pub(crate) mod retries;
 
 // Milestone 12b: Queue, Budget and Blueprint.
 
