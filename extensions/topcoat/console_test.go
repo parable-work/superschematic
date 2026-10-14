@@ -456,7 +456,7 @@ fn page_of<T, K: serde::Serialize + serde::de::DeserializeOwned + Ord>(
     let after: Option<K> = page.cursor.as_ref().map(Cursor::decode).transpose()?;
     rows.sort_by_key(|row| key(row));
     rows.retain(|row| after.as_ref().is_none_or(|after| key(row) > *after));
-    Ok(Page::from_rows(rows, page.limit, key))
+    Page::from_rows(rows, page.limit, key)
 }
 
 struct Shop(Arc<Store>);
