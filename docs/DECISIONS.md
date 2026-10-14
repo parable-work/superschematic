@@ -6084,6 +6084,14 @@ and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
 every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
 `fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
 `rustsdkgen`.
+acme's `shop-orders` pages `listOrders`, without its `limit` argument,
+`listReviews` and a new `listProducts`: its Go implementation reads the
+keys of up to `limit + 1` rows after the cursor's with one query and the
+rows through the ORM, its Rust one pages in memory and over SQLite with
+`Page::from_rows`, `TestStackDevRunsTheShop` pages each list over Postgres,
+`rust-server/tests/shop.rs` in memory and over SQLite, and every
+language's client reads a page and iterates every item against the Go and
+the Rust server. Its Topcoat app follows the console's pager.
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
@@ -6137,8 +6145,10 @@ changes. The Topcoat forms, display components and pages follow in this
 batch. acme's `PlaceOrderLine.productId`,
 `OrderLineView.productId` and the `productId` path arguments refer to a
 `ProductView` that `shop-orders` lists in a new `listProducts`, with a
-lookup, and reads in `getProduct`; its app drops its hand-written catalog
-choices. Follows: the target derived from `@source` and a `Relation`; a
+lookup, and reads in `getProduct`, built in its Go and Rust
+implementations; its app drops its hand-written catalog choices once the
+console names references.
+Follows: the target derived from `@source` and a `Relation`; a
 reference to another service's type; a picker that searches (D62) when the
 options do not fit a page; a vendor key in the OpenAPI and tool documents;
 and a breadcrumb step named by the reference of its route parameter.
@@ -6180,7 +6190,8 @@ The tests: `verify/search_test.go`, the reader's and the loader's tests
 with `fixture-refs-api`, and each runtime's parity test. The console's
 search box follows in this batch. acme's
 `listReviews` takes `q`, matched against `Review`'s `search_text` in
-memory, over SQLite and over Postgres. Follows: FTS5; the search in the
+memory, over SQLite and over Postgres (`rust-server/tests/shop.rs`,
+`TestStackDevRunsTheShop`). Follows: FTS5; the search in the
 OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
 picker that searches a reference's options (D61).
 

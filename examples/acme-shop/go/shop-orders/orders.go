@@ -15,6 +15,8 @@ import (
 	stocktypes "example.com/acme/types/go/shop-stock"
 	"github.com/jackc/pgx/v5/pgconn"
 	scalars "github.com/parable-work/superscalar/go"
+	"github.com/parable-work/superschematic/runtime/http/go/paging"
+	"github.com/parable-work/superschematic/runtime/http/go/search"
 )
 
 // Orders implements the order namespace of shop-orders, which the
@@ -126,28 +128,49 @@ func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.Or
 	return &view, nil
 }
 
-func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, limit *float64) ([]types.OrderView, error) {
-	filter := &orm.OrderFilter{}
+// orderKey is an order's place in ListOrders' order: when it was placed,
+// then its id.
+type orderKey struct {
+	PlacedAt time.Time          `json:"placedAt"`
+	ID       types.IdentityUUID `json:"id"`
+}
+
+func (key orderKey) rowID() types.IdentityUUID { return key.ID }
+
+// ListOrders answers a page of the orders, oldest first, with the given
+// statuses, or of every status when there are none.
+func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error) {
+	query := &keyQuery{}
 	if len(statuses) > 0 {
 		in := make([]string, 0, len(statuses))
 		for _, status := range statuses {
 			in = append(in, string(status))
 		}
-		filter.Status = &orm.StringFilter{In: in}
+		query.where("status = ANY(%s::text[])", in)
 	}
-	options := &orm.OrderFindOptions{Fields: withLines().Fields, Limit: 20}
-	if limit != nil {
-		options.Limit = int(*limit)
+	if page.Cursor != "" {
+		after, err := decodeKey[orderKey](page.Cursor)
+		if err != nil {
+			return paging.Page[types.OrderView]{}, err
+		}
+		query.where("(placed_at, id) > (%s::timestamptz, %s::uuid)", after.PlacedAt, after.ID.ToUUID())
 	}
-	orders, _, err := o.DB.GetOrderRepository().FindMany(ctx, filter, options)
-	if err != nil {
-		return nil, err
-	}
-	views := make([]types.OrderView, 0, len(orders))
-	for _, order := range orders {
-		views = append(views, orderView(order))
-	}
-	return views, nil
+	return readPage[orderKey](ctx, o.DB, query, `"order"`, "placed_at, id", page,
+		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.OrderView, error) {
+			// FindMany answers the orders in no order, and inKeyOrder puts
+			// them in the keys': the ORM's OrderBy leaves a table's name
+			// unquoted, which "order" needs.
+			orders, _, err := tx.GetOrderRepository().FindMany(ctx, &orm.OrderFilter{Id: &orm.UUIDFilter{In: ids}},
+				&orm.OrderFindOptions{Fields: withLines().Fields, Limit: len(ids)})
+			if err != nil {
+				return nil, err
+			}
+			found := make(map[types.IdentityUUID]*db.Order, len(orders))
+			for _, order := range orders {
+				found[*order.Id] = order
+			}
+			return inKeyOrder(ids, found, orderView), nil
+		})
 }
 
 func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
@@ -207,23 +230,47 @@ type Reviews struct {
 
 var _ api.ProductReviewsImplementation = (*Reviews)(nil)
 
-func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID, minRating *float64) ([]types.ReviewView, error) {
-	filter := &orm.ReviewFilter{ProductID: &orm.UUIDFilter{Eq: &productID}}
+// reviewKey is a review's place in ListReviews' order: when it was
+// written, then its id.
+type reviewKey struct {
+	CreatedAt time.Time          `json:"createdAt"`
+	ID        types.IdentityUUID `json:"id"`
+}
+
+func (key reviewKey) rowID() types.IdentityUUID { return key.ID }
+
+// ListReviews answers a page of a product's reviews, oldest first, those
+// rated minRating or more when it is given. A search, q, keeps the reviews
+// whose title or body holds each of its words, in any case (D62): each
+// word is a condition on the table's search_text, which Postgres's trigram
+// index serves. Deleted reviews are left out.
+func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error) {
+	query := &keyQuery{}
+	query.where("product_id = %s::uuid", productID.ToUUID())
+	query.where("deleted_at IS NULL")
 	if minRating != nil {
-		filter.Rating = &orm.FloatFilter{Gte: minRating}
+		query.where("rating >= %s::double precision", *minRating)
 	}
-	// Deleted reviews are left out unless the options ask for them.
-	reviews, _, err := r.DB.GetReviewRepository().FindMany(ctx, filter, &orm.ReviewFindOptions{
-		Fields: orm.ReviewFields{}.All(),
-	})
-	if err != nil {
-		return nil, err
+	if q != nil {
+		for _, term := range search.Terms(*q) {
+			query.where(`search_text ILIKE %s ESCAPE '\'`, search.LikePattern(term))
+		}
 	}
-	views := make([]types.ReviewView, 0, len(reviews))
-	for _, review := range reviews {
-		views = append(views, reviewView(review))
+	if page.Cursor != "" {
+		after, err := decodeKey[reviewKey](page.Cursor)
+		if err != nil {
+			return paging.Page[types.ReviewView]{}, err
+		}
+		query.where("(created_at, id) > (%s::timestamptz, %s::uuid)", after.CreatedAt, after.ID.ToUUID())
 	}
-	return views, nil
+	return readPage[reviewKey](ctx, r.DB, query, "review", "created_at, id", page,
+		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.ReviewView, error) {
+			reviews, err := tx.GetReviewRepository().GetManyByIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			return inKeyOrder(ids, reviews, reviewView), nil
+		})
 }
 
 func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error) {

@@ -19,6 +19,8 @@ import (
 	apisdk "example.com/acme/sdk/go/shop-api"
 	"example.com/acme/sdk/go/shop-api/namespaces"
 	orderssdk "example.com/acme/sdk/go/shop-orders"
+	ordersns "example.com/acme/sdk/go/shop-orders/namespaces"
+	orderspages "example.com/acme/sdk/go/shop-orders/runtime"
 	stocksdk "example.com/acme/sdk/go/shop-stock"
 	apitypes "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
@@ -63,8 +65,11 @@ import (
 // the implementation's NewJobs, ships the order fulfilled: once on demand
 // with `superschematic stack run`, and again on the every-minute schedule
 // Dev's settings give it, which stack dev runs
-// (section 8.7, D52). Last, the test stops the stack as Ctrl-C does, which
-// with --remove-data removes the containers.
+// (section 8.7, D52). shop-orders lists its catalog, by the lookup of the
+// products' ids, and its orders a page at a time over Postgres, and a
+// product's reviews searched by their words and paged (D60, D61, D62).
+// Last, the test stops the stack as Ctrl-C does, which with --remove-data
+// removes the containers.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
@@ -399,6 +404,117 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("stack dev printed no %q", want)
 		}
+	}
+
+	// shop-orders' lists over Postgres, a page at a time (D60). Its catalog,
+	// which anyone reads, holds the product and a second one staff add: by
+	// name, one to a page, through the lookup of their ids (D61).
+	other, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku:        apitypes.IdentitySlug(fmt.Sprintf("black-tea-%d", n)),
+		Name:       "Black tea",
+		PriceCents: 350,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	catalog, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ours := &ordersns.ProductCatalogListProductsQueryParams{Ids: []orderstypes.IdentityUUID{product.Id, other.Id}}
+	first, err := catalog.ProductCatalogNamespace.ListProducts(ctx, ours, orderspages.PageRequest{Limit: 1})
+	if err != nil || len(first.Items) != 1 || first.Items[0].Id != other.Id || first.Next == nil {
+		t.Fatalf("ListProducts, the first page of one: %+v, %v; want the black tea and a next page", first, err)
+	}
+	last, err := catalog.ProductCatalogNamespace.ListProducts(ctx, ours, orderspages.PageRequest{Cursor: *first.Next, Limit: 1})
+	if err != nil || len(last.Items) != 1 || last.Items[0].Id != product.Id || last.Next != nil {
+		t.Fatalf("ListProducts, the page after: %+v, %v; want the green tea and no next page", last, err)
+	}
+	if got, err := catalog.ProductCatalogNamespace.GetProduct(ctx, product.Id.String()); err != nil || got.Sku != product.Sku || got.PriceCents != 450 {
+		t.Fatalf("GetProduct = %+v, %v", got, err)
+	}
+
+	// The orders, oldest first: a page of one order at a time holds each
+	// order once, in the order of one page of them all, the shopper's two
+	// last, and a status filter holds on every page.
+	var paged []orderstypes.IdentityUUID
+	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, nil, orderspages.PageRequest{Limit: 1}) {
+		if err != nil {
+			t.Fatalf("ListOrdersAll: %v", err)
+		}
+		paged = append(paged, listed.Id)
+	}
+	whole, err := orders.OrderNamespace.ListOrders(ctx, nil, orderspages.PageRequest{Limit: 100})
+	if err != nil || whole.Next != nil || len(whole.Items) != len(paged) {
+		t.Fatalf("ListOrders of up to 100 = %d orders, next %v, %v; the pages of one held %d", len(whole.Items), whole.Next, err, len(paged))
+	}
+	for i, listed := range whole.Items {
+		if listed.Id != paged[i] {
+			t.Fatalf("order %d is %s on a page of 100 and %s on the pages of one", i, listed.Id, paged[i])
+		}
+	}
+	if len(paged) < 2 || paged[len(paged)-2] != order.Id || paged[len(paged)-1] != next.Id {
+		t.Fatalf("ListOrdersAll = %v, want %s and %s last", paged, order.Id, next.Id)
+	}
+	placedOnly := &ordersns.OrderListOrdersQueryParams{Statuses: []orderstypes.OrderStatus{orderstypes.OrderStatus_Placed}}
+	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, placedOnly, orderspages.PageRequest{Limit: 1}) {
+		if err != nil || listed.Status != orderstypes.OrderStatus_Placed {
+			t.Fatalf("ListOrdersAll of placed orders yielded %+v, %v", listed, err)
+		}
+	}
+	if _, err := orders.OrderNamespace.ListOrders(ctx, nil, orderspages.PageRequest{Cursor: "e30"}); !errors.As(err, &refused) || refused.StatusCode != http.StatusBadRequest {
+		t.Fatalf("ListOrders after a cursor it never returned: %v, want 400", err)
+	}
+
+	// The product's reviews, searched by every word over Postgres's
+	// search_text, in any case, a % matching itself (D62), and paged: the
+	// shopper and a second shopper review it.
+	reviewer := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"])
+	for _, review := range []struct {
+		token string
+		input orderstypes.WriteReviewInput
+	}{
+		{token, orderstypes.WriteReviewInput{Rating: 5, Title: "Smoky and smooth", Body: "A deep cup."}},
+		{reviewer, orderstypes.WriteReviewInput{Rating: 3, Title: "Grassy", Body: "100% green, and SMOOTH enough."}},
+	} {
+		writer, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: review.token}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.ProductReviewsNamespace.WriteReview(ctx, product.Id.String(), review.input); err != nil {
+			t.Fatalf("WriteReview %q: %v", review.input.Title, err)
+		}
+	}
+	search := func(q string, page orderspages.PageRequest) orderspages.Page[orderstypes.ReviewView] {
+		t.Helper()
+		found, err := catalog.ProductReviewsNamespace.ListReviews(ctx, product.Id.String(), &ordersns.ProductReviewsListReviewsQueryParams{Q: &q}, page)
+		if err != nil {
+			t.Fatalf("ListReviews %q: %v", q, err)
+		}
+		return found
+	}
+	for q, want := range map[string]string{
+		"smooth":       "Smoky and smooth | Grassy",
+		"SMOKY smooth": "Smoky and smooth",
+		"100%":         "Grassy",
+		"1%0":          "",
+		"  ":           "Smoky and smooth | Grassy",
+	} {
+		var titles []string
+		for _, review := range search(q, orderspages.PageRequest{}).Items {
+			titles = append(titles, review.Title)
+		}
+		if got := strings.Join(titles, " | "); got != want {
+			t.Errorf("ListReviews %q = %q, want %q", q, got, want)
+		}
+	}
+	page := search("smooth", orderspages.PageRequest{Limit: 1})
+	if len(page.Items) != 1 || page.Items[0].Title != "Smoky and smooth" || page.Next == nil {
+		t.Fatalf("ListReviews smooth, the first page of one: %+v", page)
+	}
+	page = search("smooth", orderspages.PageRequest{Cursor: *page.Next, Limit: 1})
+	if len(page.Items) != 1 || page.Items[0].Title != "Grassy" || page.Next != nil {
+		t.Fatalf("ListReviews smooth, the page after: %+v", page)
 	}
 
 	// Ctrl-C stops the servers, then removes the containers and their data:

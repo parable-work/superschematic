@@ -9,13 +9,23 @@ import (
 	"context"
 	types "example.com/acme/types/go/shop-orders"
 	"fmt"
+	"github.com/parable-work/superschematic/runtime/http/go/paging"
 )
 
 // OrderImplementation defines the interface for order namespace handlers.
 // Implement in internal/route-impl to provide business logic.
 type OrderImplementation interface {
 	// ListOrders handles GET /api/orders
-	ListOrders(ctx context.Context, statuses []types.OrderStatus, limit *float64) ([]types.OrderView, error)
+	//
+	// The orders, oldest first: by when each was placed, then by its id.
+	//
+	// This endpoint pages its list (@paginated): page is the request's cursor,
+	// "" for the first page, and its limit, 1 to 100 (20 when the request
+	// sends none). Return the items after the cursor in the operation's own
+	// order and, while more follow, the cursor of the last one: read up to
+	// page.Limit+1 rows and build the page with paging.FromRows, and read the
+	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error)
 	// PlaceOrder handles POST /api/orders
 	PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error)
 	// GetOrder handles GET /api/orders/{id}
@@ -26,11 +36,44 @@ type OrderImplementation interface {
 	CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error)
 }
 
+// ProductCatalogImplementation defines the interface for product-catalog namespace handlers.
+// Implement in internal/route-impl to provide business logic.
+type ProductCatalogImplementation interface {
+	// ListProducts handles GET /api/products
+	//
+	// The products, by name, then by id; ids narrows them to the products
+	// with those ids, the lookup a page names its products' ids through.
+	//
+	// This endpoint pages its list (@paginated): page is the request's cursor,
+	// "" for the first page, and its limit, 1 to 100 (20 when the request
+	// sends none). Return the items after the cursor in the operation's own
+	// order and, while more follow, the cursor of the last one: read up to
+	// page.Limit+1 rows and build the page with paging.FromRows, and read the
+	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	ListProducts(ctx context.Context, ids []types.IdentityUUID, page paging.Request) (paging.Page[types.ProductView], error)
+	// GetProduct handles GET /api/products/{productId}
+	//
+	// One product. Its parameter is productId, as the reviews' routes name
+	// the parameter at that place.
+	GetProduct(ctx context.Context, productId types.IdentityUUID) (*types.ProductView, error)
+}
+
 // ProductReviewsImplementation defines the interface for product-reviews namespace handlers.
 // Implement in internal/route-impl to provide business logic.
 type ProductReviewsImplementation interface {
 	// ListReviews handles GET /api/products/{productId}/reviews
-	ListReviews(ctx context.Context, productId types.IdentityUUID, minRating *float64) ([]types.ReviewView, error)
+	//
+	// The product's reviews, oldest first: by when each was written, then by
+	// its id. q keeps the reviews whose title or body holds each of its
+	// words.
+	//
+	// This endpoint pages its list (@paginated): page is the request's cursor,
+	// "" for the first page, and its limit, 1 to 50 (20 when the request
+	// sends none). Return the items after the cursor in the operation's own
+	// order and, while more follow, the cursor of the last one: read up to
+	// page.Limit+1 rows and build the page with paging.FromRows, and read the
+	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	ListReviews(ctx context.Context, productId types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error)
 	// WriteReview handles POST /api/products/{productId}/reviews
 	WriteReview(ctx context.Context, productId types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error)
 }
@@ -39,6 +82,7 @@ type ProductReviewsImplementation interface {
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Implementations struct {
 	Order          OrderImplementation
+	ProductCatalog ProductCatalogImplementation
 	ProductReviews ProductReviewsImplementation
 }
 
@@ -47,6 +91,9 @@ type Implementations struct {
 func (i *Implementations) ValidateImplementations() error {
 	if i.Order == nil {
 		return fmt.Errorf("Implementations.Order is required")
+	}
+	if i.ProductCatalog == nil {
+		return fmt.Errorf("Implementations.ProductCatalog is required")
 	}
 	if i.ProductReviews == nil {
 		return fmt.Errorf("Implementations.ProductReviews is required")
