@@ -5524,11 +5524,11 @@ Status: built.
 
 No Rust server has run on Cloud Run.
 
+D65 builds what this left out of a stack: Rust jobs and workers, and an
+output root that builds against a mirror of each implementation crate,
+so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
+
 Not built:
-- an implementation crate that builds with the API crate somewhere other
-  than the output root its `Cargo.toml` names by path, so `stack dev
-  --out` elsewhere collides in Cargo's lockfile;
-- Rust jobs and workers;
 - buckets from a Rust server;
 - OpenTelemetry export.
 
@@ -6041,9 +6041,44 @@ it. This entry finishes Rust's place in a stack, short of buckets.
 | Each build mirrors each Rust implementation crate it builds against into `<output-root>/impl/<service>/`, copying only what changed, with the crate's path dependencies rewritten for where the mirror sits, and the server, job and worker crates depend on the mirror. So an output root is self-contained: `stack dev --out` anywhere builds against that root's own API crates, an image's build context needs no implementation directory, and the crate the project edits keeps its path to the default output root for its editor and its own `cargo test`. | Rewriting the project's `Cargo.toml` each build, a source change per `--out`. A symlink the build repoints, which two output roots building at once would race on. Refusing another output root. `[patch]`, which cannot patch a path source. |
 | acme-shop proves it: `shop-db` gains a `StockLow` queue and a `RestockRequest` table; `shop-stock`'s reservation enqueues `StockLow` in its transaction when a level falls below its threshold; a Rust worker, `ReorderStock`, files one open restock request per product; and a Rust job, `PlaceRestockOrders`, on a schedule, marks the open ones ordered. `TestStackDevRunsTheShop` places an order that runs a product low, sees the request filed, runs the job with `stack run`, and sees it ordered, and runs once more into an output root of its own. | A fixture alone, which nothing would run end to end. |
 
-Status: not built.
+Status: built.
+- The Rust HTTP runtime gains `Shutdown`, `queue` and `worker`, behind
+  `postgres`. Its tests claim on Postgres from sqlgen's own schema, and
+  run the loop's waits, extensions, panics and grace on tokio's paused
+  clock. `logging::init_json_as` names a job's or a worker's lines as Go
+  and TypeScript do. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+  has each of Go, TypeScript and Rust enqueue, claim, extend, release,
+  fail and complete the others' messages, and refuse each other's lost
+  claims.
+- rustgen writes `queues.rs`, and `TestQueuesDescribeWhatTypeScriptWrites`
+  holds its descriptors to `queues.ts`. rustrestgen writes `Jobs` and
+  `Workers` and the scaffold's `create_jobs` and `create_workers`, and
+  `TestRustJobsAndWorkersCompile` runs clippy over them;
+  `TestRustJobsAndWorkersRefusals`,
+  `TestARustImplementationThatPredatesItsJobsFails` and
+  `TestARustWorkerOfAQueueTheClientCannotHoldFails` hold the refusals.
+  An API with a callers field gains `load_background_env_config`, which
+  a job and a worker load, since a stack gives them no callers field.
+- servergen writes each Rust job's and worker's crate and image, and
+  cigen's `check` compiles them. `TestRustJobAndWorkerRunOnPostgres` runs
+  the fixture's job and worker, `TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun`
+  their images, and `TestStackDevRunsRustJobsAndWorkers` both under
+  `stack dev`, given only the variables the stack derives.
+- Each build mirrors each implementation into `<output-root>/impl/`.
+  `TestRustServersBuildInAnyOutputRoot` builds a fixture into two other
+  output roots, in turn and at once, with `--locked`, and fails without
+  the mirror on Cargo's collision.
+- acme-shop: `shop-stock`'s reservation enqueues `StockLow`, the Rust
+  worker `ReorderStock` files a restock request, and the Rust job
+  `PlaceRestockOrders`, which Dev runs only on demand, orders it.
+  `TestStackDevRunsTheShop` drives both, then runs the shop once more
+  into an output root of its own.
+
+No Rust job or worker has run on Cloud Run.
 
 Not built, and out of this entry: buckets from a Rust server, job or
-worker; and OpenTelemetry export.
+worker; and OpenTelemetry export. A TypeScript build into another output
+root relinks the project's own `node_modules` there, as a Rust build did
+before the mirror.
 
 The rule is reversible until the first release.
