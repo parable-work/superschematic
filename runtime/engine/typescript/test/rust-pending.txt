@@ -21,8 +21,6 @@
 #              (7b)
 #   json       a value JSON cannot carry (NaN, a Date) reaches the Rust engine
 #              as another
-#   unported   a core behavior the addon does not have yet: Rollups, Search
-#              and Reactions (milestone 10), Branches (11)
 #
 # Milestone 7b also brings engineApp and engineMcp as Hono adapters over the
 # engine's own routes (api::handle), a mount's tool filter and onError, and
@@ -33,7 +31,7 @@
 behavior-composition.test.ts             # bridge
 behavior-create-params.test.ts           # bridge
 behavior-create.test.ts                  # bridge
-behavior-guidance.test.ts                # bridge; unported (Rollups, Search, Branches)
+behavior-guidance.test.ts                # bridge
 behavior-instances.test.ts               # bridge
 behavior-own-columns.test.ts             # bridge
 behavior-permissions.test.ts             # bridge
@@ -48,9 +46,11 @@ behavior-updates.test.ts                 # bridge
 behavior-validation.test.ts              # bridge
 client-stream.test.ts                    # bridge
 client.test.ts                           # bridge
+core-behaviors.test.ts                   # bridge (behaviors.register, refused for a name the core has)
 core-branches-sweep.test.ts              # bridge
 core-dependencies.test.ts                # bridge
 core-numbering.test.ts                   # bridge; storage
+core-reactions-changes.test.ts           # bridge
 core-revisions.test.ts                   # bridge
 core-staterules.test.ts                  # bridge
 core-timers.test.ts                      # bridge
@@ -59,34 +59,23 @@ corpus.test.ts                           # bridge
 engine-migrations.test.ts                # bridge
 http.test.ts                             # bridge
 list-filters.test.ts                     # bridge; storage
-mcp.test.ts                              # bridge; unported (Rollups, Search)
+mcp.test.ts                              # bridge
 namespaces.test.ts                       # bridge
 normalize.test.ts                        # bridge
-operations.test.ts                       # bridge; unported (Rollups, Search)
+operations.test.ts                       # bridge
 recorder.test.ts                         # bridge (behaviors and ids)
 retention.test.ts                        # bridge
 runner-schedules.test.ts                 # bridge
 runner.test.ts                           # bridge
-tools.test.ts                            # bridge; unported (Rollups)
+tools.test.ts                            # bridge
 unique.test.ts                           # bridge
 values.test.ts                           # bridge; storage
 
-# The core's behaviors the addon does not have yet.
-client-codegen.test.ts                   # unported (Rollups)
-core-approvals.test.ts                   # unported (Reactions, in one test)
-core-behaviors.test.ts                   # unported (the names core() registers, and each one's tests)
-core-branches.test.ts                    # unported (Branches)
-core-links-many.test.ts                  # unported (Reactions); storage
-core-links.test.ts                       # unported (Branches)
-core-reactions-changes.test.ts           # unported (Reactions); bridge
-core-reactions-holds-revised.test.ts     # unported (Reactions)
-core-reactions.test.ts                   # unported (Reactions)
-core-rollups.test.ts                     # unported (Rollups)
-core-search-vectors.test.ts              # unported (Search)
-core-search.test.ts                      # unported (Search); bridge
-
 # The engine's file, its notifier, and TypeScript objects.
 access.test.ts                           # validator; storage
+core-links-many.test.ts                  # storage (a file Links v2 left, rebuilt through engine.storage)
+core-search-vectors.test.ts              # storage; json (NaN in a vector to settle)
+core-search.test.ts                      # storage; bridge
 events.test.ts                           # watch; storage; bridge
 identity.test.ts                         # storage (the identity store on engine.storage)
 instances.test.ts                        # storage; bridge (ids)

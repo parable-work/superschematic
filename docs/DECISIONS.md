@@ -5652,13 +5652,13 @@ it, an event stream held by an id; and a Postgres connect bounded by its
 connect timeout end to end; `superschematic-engine-behaviors`, the
 core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
-its options (`core()`) since the engine cannot depend on them: wave 1
-(milestone 8) has ported Workflow (with D56's enteredAt), Comments,
-Constants and Variants, and wave 2 (milestone 9) Revisions,
+its options (`core()`) since the engine cannot depend on them, all
+fifteen: wave 1 (milestone 8), Workflow (with D56's enteredAt),
+Comments, Constants and Variants; wave 2 (milestone 9), Revisions,
 Dependencies, Links (with D56's many-valued links, and what a move of a
 link's target moves on, which Reactions and Lease hear), and D56's
 Numbering, StateRules, Approvals and Timers, whose deadlines the runner
-fires, wave 3 (milestone 10) Rollups and Reactions (with D56's changes
+fires; wave 3 (milestone 10), Rollups and Reactions (with D56's changes
 trigger), whose rules the runner runs, and Search, with its vectors,
 similar and the search across a namespace's schemas (`engine.search`,
 its route and its MCP tool), over full-text search the storage owns: on
@@ -5671,23 +5671,23 @@ into (the distinct weights, highest first, A to D, the lower ones
 sharing D), with `ts_headline`'s snippets, an FTS5 expression translated
 before it runs and its NEAR groups and `^` refused, and an email
 address, a URL, a host, a path and a number with a point found whole
-rather than by their words, and milestone 11 Branches, the version
+rather than by their words; and milestone 11, Branches, the version
 graph's Rust engine over its fixed layout in the call's transaction on
 either database, its ids drawn from the engine's own source (a
-behavior's `uuids()`): all fifteen, with their guidance, migrations on
-both databases, configs, guards, fields, operations, reactions,
-schedules and veto codes; and
+behavior's `uuids()`), whose releases a Reactions rule hears; each with
+its guidance, migrations on both databases, config, guard, fields,
+operations, reactions, schedules and veto codes; and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
 behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
-retention's and the tools', and those of the ported behaviors'
+retention's and the tools', and those of the core behaviors'
 `test/core-*.test.ts` against the engine, and replays the scenario and
-HTTP corpora, those behaviors' files included, giving their recorded
-answers on SQLite and Postgres for every case whose behaviors it has,
-an event cursor on Postgres held to the recorded order rather than its
-number (a write a rollback undid leaves a gap in a Postgres identity
-column), but for a step it lists with what explains it (a change the
-recording does not see). CI tests the
-workspace on both databases. `superschematic-engine-napi` (milestone 7a)
+HTTP corpora, the core behaviors' files and the behavior catalog
+included, giving their recorded answers on SQLite and Postgres for every
+case whose test behaviors it has, an event cursor on Postgres held to
+the recorded order rather than its number (a write a rollback undid
+leaves a gap in a Postgres identity column), but for a step it lists
+with what explains it (a change the recording does not see). CI tests
+the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
 is the Rust engine as a Node-API addon, with the core's behaviors it is
 built with, and `@superschematic/engine`'s `src/native` gives it the
 package's synchronous API: a call by name with JSON in and out on the
@@ -5699,12 +5699,15 @@ written in TypeScript asked on the JavaScript thread during a call. With
 `ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
 under Node.js and Bun, held to `test/rust-pending.txt`, the files not
 passing yet and why, which a file leaves once it passes (CI's
-`engine-napi` job): 8 of the 66 pass on both, and no test that runs
-fails on what the Rust engine does. Most wait for milestone 7b's
-test-only bridge for behaviors written in TypeScript; it brings too raw
-SQL on the engine's file, `events.watch`, and `engineApp` and
-`engineMcp` over the engine's routes. The work queue's behaviors are
-milestone 12, in progress. Until the Rust engine passes the TypeScript
+`engine-napi` job): with all fifteen of the core's behaviors, 15 of the
+66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
+test that runs fails on what the Rust engine does. The rest wait for
+milestone 7b's test-only bridge for behaviors written in TypeScript; it
+brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
+and `engineMcp` over the engine's routes. The work queue's behaviors are
+milestone 12, in progress; its suite's recording
+(`testdata/scenarios/workqueue-*.json`, 213 scenarios) waits for them,
+outside the replay's files. Until the Rust engine passes the TypeScript
 suite, `@superschematic/engine` is the TypeScript implementation and
 nothing uses the workspace.
 
