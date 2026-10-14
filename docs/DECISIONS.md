@@ -6059,6 +6059,9 @@ Status: built.
   `TestARustWorkerOfAQueueTheClientCannotHoldFails` hold the refusals.
   An API with a callers field gains `load_background_env_config`, which
   a job and a worker load, since a stack gives them no callers field.
+  TypeScript's `config.ts` gains `loadBackgroundEnvConfig` likewise: a
+  TypeScript job or worker of such an API failed to start without it,
+  which `TestStackDevRunsTypeScriptJobsAndWorkers` now covers.
 - servergen writes each Rust job's and worker's crate and image, and
   cigen's `check` compiles them. `TestRustJobAndWorkerRunOnPostgres` runs
   the fixture's job and worker, `TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun`
