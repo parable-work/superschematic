@@ -23,8 +23,8 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
-| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements | a `POINT` or `INTERVAL` column in a TypeScript queue's message |
-| `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, the `worker` deployable, its entrypoint and image | a Rust worker |
+| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too | a `POINT` or `INTERVAL` column in a TypeScript or Rust queue's message |
+| `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
 
 D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
@@ -118,6 +118,31 @@ hold such a value in a `@jsonField` type. The implementation's
 `package.json` depends on the database's types package by its name, with
 `workspace:*`; the scaffold adds it for an API with workers.
 
+### From Rust
+
+The DB service's Rust types carry each queue's descriptor in their
+`queues` module, the same data as JSON: `STOCK_LOW_QUEUE`, which the Rust
+HTTP runtime's `queue::QueueDefinition::parse` reads. Enable the
+database's Rust types (`outputs.types` for Rust). The API crate of an API
+with workers re-exports them as `database_types`, and the runtime's
+`queue::enqueue` writes a message in the transaction you write in, a
+deadpool `Transaction` of the pool `Deps.db` holds:
+
+```rust
+use schemas_shop_stock_api::database_types::{self, StockLow};
+use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
+
+let queue = QueueDefinition::parse(database_types::STOCK_LOW_QUEUE)?;
+let mut client = deps.db.get().await?;
+let tx = client.transaction().await?;
+// your writes, on the same transaction
+enqueue(&tx, &queue, &StockLow { product_id, quantity, threshold }).await?;
+tx.commit().await?;
+```
+
+A queue whose message holds a `POINT` or an `INTERVAL` column stays out
+of `queues`, which says so, and the build refuses a Rust worker of it.
+
 ## Write a worker
 
 Put `@worker` from `@superschematic/api` on a class of an API's schema,
@@ -156,8 +181,19 @@ export interface Workers {
 export type WorkersConstructor = (deps: Deps) => Workers | Promise<Workers>;
 ```
 
+A Rust API's crate declares `Workers`, a trait with a method per worker
+in snake case, its message typed from the database's Rust types, which
+the crate re-exports as `database_types` (D65):
+
+```rust
+#[async_trait]
+pub trait Workers: Send + Sync {
+    async fn reorder_stock(&self, message: schemas_shop_db_types::StockLow) -> Result<(), BoxError>;
+}
+```
+
 The scaffold writes `NewWorkers`, or exports `createWorkers` in
-TypeScript, and each method returns the not-implemented error, or throws
+TypeScript, or declares `create_workers` in Rust, and each method returns the not-implemented error, or throws
 it, which fails every message, until you write it. A build never writes
 into an implementation that exists, so one that predates its workers
 fails the stack's build, which says what to add. The acme shop's worker
@@ -165,8 +201,8 @@ marks the order fulfilled:
 
 <Snippet file="go/shop-orders/workers.go" symbol="Workers.FulfilOrders" />
 
-A method that returns nil, or resolves, completes its message. One that
-returns an error, or panics, or rejects, fails it: the message is due again after the queue's
+A method that returns nil, or resolves, or returns `Ok`, completes its
+message. One that returns an error, or panics, or rejects, fails it: the message is due again after the queue's
 backoff, until its retries are spent, and then it is dead, where its
 last error stays. Delivery is at least once: a worker that dies holding
 a message gives it back when its claim expires, and another worker
@@ -186,7 +222,10 @@ The build writes each worker an entrypoint module beside the servers',
 API's `Deps`, calls your `NewWorkers`, and claims and handles messages
 until it is stopped. A TypeScript worker's is a package with a `main.ts`,
 which calls your `createWorkers` and runs the HTTP runtime's `runWorker`
-(`@superschematic/http-runtime/worker`) over the claims, the same loop:
+(`@superschematic/http-runtime/worker`) over the claims, and a Rust
+worker's a crate whose `main.rs` calls your `create_workers` and runs the
+Rust HTTP runtime's `worker::run_worker` over a `queue::PostgresQueue` of
+the queue's descriptor, the same loop:
 
 - it claims for its free slots, as many as its concurrency, with
   `FOR UPDATE SKIP LOCKED`, so workers that claim at once take different
@@ -197,14 +236,17 @@ which calls your `createWorkers` and runs the HTTP runtime's `runWorker`
   the grace, then cancels them and gives their messages back, due at once
   for another worker, and exits. A TypeScript method's signal aborts when
   the grace is over; one that ignores it cannot be stopped, but its
-  message is given back all the same, and the process exits.
+  message is given back all the same, and the process exits. A Rust
+  method still running is dropped where it waits.
 
 Its Dockerfile builds an image as a server's does, and `stack build` and
 `stack deploy` build and pin it beside the servers'.
 
 `stack dev` runs each worker as a process with no port, a TypeScript one
-as `bun main.ts`, started with the servers of its wave, each line of its output with its name in front. Its
-exit stops the environment, as a server's does:
+as `bun main.ts` and a Rust one from the binary its crate builds with
+cargo, started with the servers of its wave, each line of its output
+with its name in front. Its exit stops the environment, as a server's
+does:
 
 ```text
   worker   shop-orders-fulfil-orders handles OrderPlaced of shop-db, 4 at a time

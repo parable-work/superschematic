@@ -24,8 +24,8 @@ import (
 // its own `cargo test` build against. A server crate under another output
 // root depends on that root's API crate, and Cargo refuses a workspace
 // that reaches two crates of one name. So each build of a stack copies
-// each Rust implementation its servers build against into
-// `<output-root>/impl/<service>/`, and the server crates depend on the
+// each Rust implementation its servers, jobs and workers build against
+// into `<output-root>/impl/<service>/`, and their crates depend on the
 // copy: an output root builds against its own API crates alone, and an
 // image's context needs no implementation directory.
 //
@@ -58,7 +58,8 @@ import (
 // mirror is no member of the output root's workspace (workspace.go): it is
 // a path dependency, as the implementation was, so the lockfile holds the
 // same packages, none of the crate's dev-dependencies among them. A build
-// removes a mirror no server crate under the output root depends on.
+// removes a mirror no server, job or worker crate under the output root
+// depends on.
 
 // RustMirrorRoot is the directory of the output root that holds the
 // mirrors.
@@ -271,8 +272,9 @@ func (m *RustMirror) header() string {
 # (D65; docs/stack-model.md, section 8.6). Each build of a stack copies the
 # crate's files here and writes this file from its Cargo.toml, with each
 # path dependency re-based for this directory, the API crate's naming this
-# output root's, and the crate's own workspace left out. The server crates
-# of the output root depend on the mirror. Edit the crate, not the mirror.
+# output root's, and the crate's own workspace left out. The server, job
+# and worker crates of the output root depend on the mirror. Edit the
+# crate, not the mirror.
 
 `
 }

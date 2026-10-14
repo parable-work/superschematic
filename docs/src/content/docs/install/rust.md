@@ -631,6 +631,26 @@ An implementation crate is written once, so one that predates its API's
 jobs or workers lacks them. The stack's build reads its `src/lib.rs` and
 refuses it, naming the function to add and its methods.
 
+In a stack, each job and each worker gets a crate of its own beside the
+server's, `schemas/dist/server/<stack>/<job>/`, a member of the same
+workspace, named `schemas-<stack>-<job>-job` or `-worker`, whose binary is
+the deployable's name. Its `src/main.rs` loads the API's `EnvConfig`,
+opens the pool and the SDK clients, builds `Deps` and calls your
+`create_jobs` or `create_workers`. A job then runs its method once with
+`Shutdown::on_signals()`, logs `job started` and `job done` or `job
+failed`, and exits 1 on a failure; a worker runs the runtime's
+`worker::run_worker` over a `queue::PostgresQueue` of its queue's
+descriptor, with `WORKER_CONCURRENCY` or the decorator's concurrency and
+its grace. Neither serves a port or builds an identity service or a
+router, so a stack gives neither the callers, identity or CORS field. For
+an API with a callers field, the crate's config module adds
+`load_background_env_config()`, which the job's and the worker's
+`main.rs` call: it loads what `load_env_config()` does, but leaves the
+callers field without issuers. The identity config and CORS fields read
+as their defaults when unset. Their log lines name the deployable as
+`"job"` or `"worker"` (`logging::init_json_as`), where a server's name it
+`"server"`.
+
 ### Users and sessions
 
 When the API's `authDb` has a `User` table, the core user model (D50),

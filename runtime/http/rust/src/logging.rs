@@ -1,7 +1,7 @@
-//! The log a generated Rust server writes (D57, section 8.6 of
-//! `docs/stack-model.md`): one JSON object per line on stdout, in the shape
-//! the TypeScript runtime's `createLogger` writes and the Go server's zap
-//! logger reads alike:
+//! The log a generated Rust server, job or worker writes (D57, D65; section
+//! 8.6 of `docs/stack-model.md`): one JSON object per line on stdout, in the
+//! shape the TypeScript runtime's `createLogger` writes and the Go server's
+//! zap logger reads alike:
 //!
 //! ```text
 //! {"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"listening","stack":"shop-stack","server":"shop-stock","addr":":8080"}
@@ -10,7 +10,8 @@
 //! `level` is the event's level in lower case (`debug`, `info`, `warn`,
 //! `error`, and `trace`, which TypeScript does not have), `time` is RFC 3339
 //! in UTC to the millisecond, and `msg` is the event's message. Then come
-//! the fields every line carries, `stack` and `server`; the fields of the
+//! the fields every line carries, `stack` and `server`, which a job's line
+//! names `job` and a worker's `worker` ([`init_json_as`]); the fields of the
 //! spans the event is in, the outermost first, such as the `api` of an
 //! [`api_span`]; and the event's own. A later field replaces an earlier one
 //! of the same name in its place, and none replaces `level`, `time` or
@@ -53,10 +54,31 @@ pub fn init_json(
     stack: &str,
     server: &str,
 ) -> Result<(), tracing::subscriber::SetGlobalDefaultError> {
+    init_json_as(stack, SERVER, server)
+}
+
+/// [`init_json`] for a deployable of the kind `kind`, the field that names
+/// it on every line: a job's entrypoint installs it with [`JOB`] and a
+/// worker's with [`WORKER`] (D65), as Go's and TypeScript's job and worker
+/// loggers name theirs. It fails when the process already has a subscriber.
+pub fn init_json_as(
+    stack: &str,
+    kind: &str,
+    name: &str,
+) -> Result<(), tracing::subscriber::SetGlobalDefaultError> {
     tracing::subscriber::set_global_default(
-        tracing_subscriber::registry().with(json_lines(stack, server)),
+        tracing_subscriber::registry().with(json_lines_as(stack, kind, name)),
     )
 }
+
+/// The field that names a server on every line of its log.
+pub const SERVER: &str = "server";
+
+/// The field that names a job on every line of its log.
+pub const JOB: &str = "job";
+
+/// The field that names a worker on every line of its log.
+pub const WORKER: &str = "worker";
 
 /// The span of one API of the server: each line written in it carries
 /// `"api": api`. The generated `Deps` holds one, and the entrypoint runs the
@@ -70,10 +92,18 @@ pub fn api_span(api: &str) -> tracing::Span {
 /// The layer that writes each event as a JSON line, with `stack` and
 /// `server` on every line.
 pub fn json_lines(stack: &str, server: &str) -> JsonLines {
+    json_lines_as(stack, SERVER, server)
+}
+
+/// [`json_lines`] with `kind` in place of `server`: `stack` and `kind`, the
+/// field that names the deployable, on every line. A reserved name
+/// (`level`, `time` or `msg`) stays the head's, and leaves the line without
+/// the deployable's name.
+pub fn json_lines_as(stack: &str, kind: &str, name: &str) -> JsonLines {
     JsonLines {
         fields: vec![
             ("stack".to_string(), Value::from(stack)),
-            ("server".to_string(), Value::from(server)),
+            (kind.to_string(), Value::from(name)),
         ],
         level: LevelFilter::INFO,
         write: Arc::new(|line: &str| {
@@ -415,6 +445,29 @@ mod tests {
                 r#"{"level":"error","time":"2026-10-12T17:32:05.123Z","msg":"down","stack":"shop-stack","server":"shop-stock","api":"shop-stock"}"#
             ]
         );
+    }
+
+    #[test]
+    fn a_job_or_a_worker_is_named_by_its_kind() {
+        for (kind, name) in [
+            (JOB, "shop-stock-place-restock-orders"),
+            (WORKER, "shop-stock-reorder-stock"),
+        ] {
+            let lines = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&lines);
+            let layer = json_lines_as("shop-stack", kind, name)
+                .with_clock(at)
+                .with_writer(move |line| sink.lock().unwrap().push(line.to_string()));
+            tracing::subscriber::with_default(tracing_subscriber::registry().with(layer), || {
+                tracing::info!(api = "shop-stock", "started");
+            });
+            assert_eq!(
+                lines.lock().unwrap().as_slice(),
+                [format!(
+                    r#"{{"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"started","stack":"shop-stack","{kind}":"{name}","api":"shop-stock"}}"#
+                )]
+            );
+        }
     }
 
     #[test]

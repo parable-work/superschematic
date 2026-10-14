@@ -33,19 +33,19 @@ const serverGenerator = "server"
 
 // generateServers writes the entrypoint of each Go, TypeScript and Rust
 // server of the stack the schema declares under servergen.StackDir
-// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go and
-// TypeScript job and worker beside them (sections 8.7 and 8.8, D52, D53),
-// and scaffolds each served API's implementation that is missing, a Go
-// server's in Go, a TypeScript server's in TypeScript and a Rust server's
-// in Rust (sections 8.5 and 8.6). The Rust servers' crates are the members
-// of the output root's Cargo workspace, whose root and lockfile it writes
-// (D57). No environment changes the servers, the jobs or the workers, but
-// the entrypoint of a Go or TypeScript one that some environment connects
-// to a database on Cloud SQL links the Cloud SQL connector, or depends on
-// the Node one; a Rust one reaches Cloud SQL through its runtime alone. It
-// plans every entrypoint before it writes anything, so one it refuses
-// leaves the last build's entrypoints and every implementation as they
-// were. A build
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go,
+// TypeScript and Rust job and worker beside them (sections 8.7 and 8.8,
+// D52, D53, D65), and scaffolds each served API's implementation that is
+// missing, a Go server's in Go, a TypeScript server's in TypeScript and a
+// Rust server's in Rust (sections 8.5 and 8.6). The crates of the Rust
+// servers, jobs and workers are the members of the output root's Cargo
+// workspace, whose root and lockfile it writes (D57, D65). No environment
+// changes the servers, the jobs or the workers, but the entrypoint of a Go
+// or TypeScript one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector, or depends on the Node one; a Rust
+// one reaches Cloud SQL through its runtime alone. It plans every
+// entrypoint before it writes anything, so one it refuses leaves the last
+// build's entrypoints and every implementation as they were. A build
 // without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
@@ -149,6 +149,12 @@ func (r run) generateServers() error {
 				return err
 			}
 			tsPlans = append(tsPlans, job)
+		case APILanguageRust:
+			job, _, err := r.planRustServer(st.Name, j, nil)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, job)
 		default:
 			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
 		}
@@ -177,6 +183,12 @@ func (r run) generateServers() error {
 				return err
 			}
 			tsPlans = append(tsPlans, worker)
+		case APILanguageRust:
+			worker, _, err := r.planRustServer(st.Name, w, nil)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, worker)
 		default:
 			r.Logf("  - worker %s: a %s worker, which gets no generated entrypoint yet\n", w.Name, w.Language)
 		}
@@ -245,7 +257,7 @@ func (r run) generateServers() error {
 			return err
 		}
 		if server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", server.Kind, server.Name, server.NoDocker)
 		}
 	}
 	if err := r.writeRustMirrors(rustPlans); err != nil {
@@ -259,11 +271,11 @@ func (r run) generateServers() error {
 }
 
 // writeRustMirrors brings the mirror of each implementation the stack's
-// Rust servers build against up to date under the output root (D65;
-// servergen's mirror.go), once for an implementation two servers serve,
-// after the scaffolds are written, then removes the mirrors no server
-// crate under the output root depends on any longer, whichever stack's.
-// cargo update reads the mirrors next.
+// Rust servers, jobs and workers build against up to date under the output
+// root (D65; servergen's mirror.go), once for an implementation two of
+// them build against, after the scaffolds are written, then removes the
+// mirrors no crate under the output root's server/ depends on any longer,
+// whichever stack's. cargo update reads the mirrors next.
 func (r run) writeRustMirrors(servers []*servergen.RustServer) error {
 	written := map[string]bool{}
 	for _, server := range servers {
@@ -280,9 +292,9 @@ func (r run) writeRustMirrors(servers []*servergen.RustServer) error {
 	return servergen.PruneRustMirrors(r.Options.OutputRoot)
 }
 
-// writeRustWorkspace writes the output root's Cargo workspace for the Rust
-// server crates on disk, every stack's (D57), and, when this stack has
-// one, brings its lockfile up to date with cargo (servergen.
+// writeRustWorkspace writes the output root's Cargo workspace for the
+// crates of the Rust servers, jobs and workers on disk, every stack's (D57,
+// D65), and, when this stack has one, brings its lockfile up to date with cargo (servergen.
 // UpdateRustLockfile), which the project commits, and says in one line how
 // to commit it when git ignores it. Without cargo on PATH, or when cargo
 // cannot resolve the workspace, as after a build of the stack alone,
@@ -832,11 +844,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 }
 
 // planRustServer plans the entrypoint of the Rust server s of the stack
-// (D57): the Rust API crate of each API it serves, with its Deps, as that
-// API's own build writes it, its EnvConfig, and where each implementation
-// lives, at the naming file's [implementation_paths] rust template, by
-// the names its Cargo.toml gives it. It returns the APIs whose
-// implementation is missing, which the caller scaffolds.
+// (D57), or of its Rust job or worker (D65): the Rust API crate of each API
+// it serves, with its Deps, as that API's own build writes it, its
+// EnvConfig, and where each implementation lives, at the naming file's
+// [implementation_paths] rust template, by the names its Cargo.toml gives
+// it. It returns the APIs whose implementation is missing, which the
+// caller scaffolds.
 func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map[string]bool) (*servergen.RustServer, []*rustrestgen.APIOutput, error) {
 	out := r.Options.OutputRoot
 	in := servergen.RustInput{
@@ -849,6 +862,12 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		ImplementationRoot: r.Options.RepositoryRoot,
 		SDKDirs:            map[string]string{},
 		Paths:              r.Options.Paths,
+	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
+	}
+	if s.Worker != nil {
+		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
 	var scaffolds []*rustrestgen.APIOutput
 	for _, ref := range s.Services {

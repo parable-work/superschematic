@@ -15,12 +15,13 @@ import (
 	publicregistry "github.com/parable-work/superschematic/registry"
 )
 
-// rustGolden is the workflow of a stack whose Rust servers stand beside a
-// Go one, which TestRustServersInCheck renders.
+// rustGolden is the workflow of a stack whose Rust servers, job and worker
+// stand beside a Go server, which TestRustServersInCheck renders.
 const rustGolden = "testdata/golden/stock-stack.yml"
 
 // stockRequest is storefrontRequest's stack with a Go server and two Rust
-// ones in place of the TypeScript servers (D57).
+// ones in place of the TypeScript servers (D57), and a Rust job and a Rust
+// worker of shop-stock (D65).
 func stockRequest() publicregistry.CIRequest {
 	req := storefrontRequest()
 	req.Stack.Name, req.Stack.Dir = "stock-stack", "schemas/services/stock-stack"
@@ -31,6 +32,8 @@ func stockRequest() publicregistry.CIRequest {
 		{Name: "Orders", Kind: ir.DeployableServer, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
 		{Name: "pricing", Kind: ir.DeployableServer, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-pricing", Kind: ir.SchemaKindAPI}}},
 		{Name: "stock", Kind: ir.DeployableServer, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
+		{Name: "shop-stock-reorder-stock", Kind: ir.DeployableWorker, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
+		{Name: "shop-stock-place-restock-orders", Kind: ir.DeployableJob, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
 	}
 	req.Environments[0].Environment = &env
 	return req
@@ -39,7 +42,8 @@ func stockRequest() publicregistry.CIRequest {
 // TestRustServersInCheck: check sets up the Rust release tools.env pins
 // before the build, which brings the output root's Cargo lockfile up to
 // date with it, then checks the lockfile is committed and the build left
-// it as it was, and compiles each Rust server frozen to it (D57). Every
+// it as it was, and compiles each Rust server frozen to it (D57), then
+// each Rust job and worker (D65). Every
 // other job that builds sets up the same release before its build, and
 // a plan, which builds nothing, sets up none. The golden, which -update
 // rewrites, shows the jobs.
@@ -69,6 +73,7 @@ func TestRustServersInCheck(t *testing.T) {
 	want := []string{
 		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Rust",
 		"Build the services", "Compile server Orders", lockfile, "Compile server pricing", "Compile server stock",
+		"Compile job shop-stock-place-restock-orders", "Compile worker shop-stock-reorder-stock",
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
@@ -80,8 +85,10 @@ func TestRustServersInCheck(t *testing.T) {
 		t.Errorf("check checks the lockfile with %+v", s)
 	}
 	for name, dir := range map[string]string{
-		"Compile server pricing": "schemas/dist/server/stock-stack/pricing",
-		"Compile server stock":   "schemas/dist/server/stock-stack/stock",
+		"Compile server pricing":                      "schemas/dist/server/stock-stack/pricing",
+		"Compile server stock":                        "schemas/dist/server/stock-stack/stock",
+		"Compile job shop-stock-place-restock-orders": "schemas/dist/server/stock-stack/shop-stock-place-restock-orders",
+		"Compile worker shop-stock-reorder-stock":     "schemas/dist/server/stock-stack/shop-stock-reorder-stock",
 	} {
 		if s := check.step(name); s.WorkingDirectory != dir || s.Run != "cargo check --locked" {
 			t.Errorf("%s: %+v", name, s)
