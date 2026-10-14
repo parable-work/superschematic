@@ -11,35 +11,72 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestQueueParityWithTypeScriptOnPostgres runs the Go ORM's queue and the
-// TypeScript queue client against one Postgres, on the queue OrderPlaced
-// of fixture-queue-db, whose message holds a field of every kind a column
-// takes (D53). The Go ORM enqueues a message, which the TypeScript client
-// claims and reads field for field; the Go ORM fails that claim under the
-// TypeScript token; the TypeScript client enqueues a message, which the Go
-// ORM claims and reads back, its enum's default included; and the
-// TypeScript client releases and completes claims the Go ORM made. Both
-// run the statements sqlutil.PostgresQueueStatements writes, so each sees
-// the other's states, attempts and tokens. It needs Bun, builds the HTTP
-// runtime, and runs on the database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL,
-// skipping without it.
-func TestQueueParityWithTypeScriptOnPostgres(t *testing.T) {
+// queueParitySubtests are the subtests of the generated TestQueueParity,
+// each of which must pass.
+var queueParitySubtests = []string{
+	"GoAndTypeScript",
+	"RustReadsGoAndTypeScript",
+	"GoAndTypeScriptReadRust",
+	"EachChangesTheOthersClaims",
+	"AttemptsAndStatesAgree",
+}
+
+// TestQueueParityOfGoTypeScriptAndRustOnPostgres runs the Go ORM's queue,
+// the TypeScript queue client and the Rust queue client against one
+// Postgres, on the queue OrderPlaced of fixture-queue-db, whose message
+// holds a field of every kind a column takes (D53, D65). All three run the
+// statements sqlutil.PostgresQueueStatements writes, so each sees the
+// others' states, attempts and tokens. The Go ORM runs in the generated
+// test; the TypeScript client and the Rust client run a step per process,
+// the TypeScript one through parity.ts and the Rust one through a binary
+// over the DB's generated Rust types (queueParityRust), and print what
+// they claimed as their types serialize it.
+//
+// The generated TestQueueParity holds a subtest per case, each in a schema
+// of its own:
+//   - GoAndTypeScript: Go and TypeScript claim, read, fail, release and
+//     complete each other's messages, until one is dead;
+//   - RustReadsGoAndTypeScript: Rust claims and reads, field for field, what
+//     Go and TypeScript enqueue, an unset enum as its default;
+//   - GoAndTypeScriptReadRust: Go and TypeScript claim and read what Rust
+//     enqueues, its own wire form among it;
+//   - EachChangesTheOthersClaims: for each pair of sides, a message the
+//     third enqueues is claimed by one and extended, released, failed and
+//     completed by the other, and once complete each side refuses the token
+//     as a lost claim;
+//   - AttemptsAndStatesAgree: one message's attempts pass through every
+//     side until it is dead, and a claim one side lets expire another
+//     claims again.
+//
+// It needs Bun and cargo, builds the HTTP runtimes, and runs on the
+// database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, skipping without
+// it. Without Bun or cargo it skips, unless SUPERSCHEMATIC_REQUIRE_TS_CHECKS
+// says the gate must run.
+func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
-		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Go and TypeScript queues against one Postgres")
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Go, TypeScript and Rust queues against one Postgres")
 	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	// The gate is the TypeScript one too, which a skip for want of cargo
+	// would hide.
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("cargo not available for the Rust side: %v", err))
 	}
 	paths := testpaths.Local(t)
 	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist")); err != nil {
@@ -132,6 +169,8 @@ func TestQueueParityWithTypeScriptOnPostgres(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, out))
 	}
 
+	rust := buildQueueParityRust(t, cargo, paths, schema, clock, root)
+
 	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: queueFixture})
 	if err != nil {
 		t.Fatalf("generate ddl: %v", err)
@@ -142,11 +181,224 @@ func TestQueueParityWithTypeScriptOnPostgres(t *testing.T) {
 	}
 	t.Setenv("QUEUE_PARITY_BUN", bun)
 	t.Setenv("QUEUE_PARITY_SCRIPT", filepath.Join(scriptDir, "parity.ts"))
+	t.Setenv("QUEUE_PARITY_RUST", rust)
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "parity_test.go", queueParityORMTest)
-	if !strings.Contains(out, "--- PASS: TestQueueParityWithTypeScript") {
+	if !strings.Contains(out, "--- PASS: TestQueueParity ") {
 		t.Fatal("the generated parity test did not pass")
 	}
+	for _, subtest := range queueParitySubtests {
+		if !strings.Contains(out, "--- PASS: TestQueueParity/"+subtest+" ") {
+			t.Errorf("the generated parity test's %s did not pass", subtest)
+		}
+	}
 }
+
+// buildQueueParityRust generates fixture-queue-db's Rust types crate under
+// root, beside it a binary crate that runs a step of the Rust queue client
+// over the crate's ORDER_PLACED_QUEUE (queueParityRust), and builds it
+// with cargo, returning the binary's path. The binary crate's lockfile
+// starts as the HTTP runtime's, which the repository commits, so cargo
+// keeps the versions it pins wherever the types crate's dependencies
+// allow, and resolves only what the types crate adds. It builds without
+// --locked: the parity crate's graph has no lockfile of its own, and one
+// committed here would go stale with each change to the runtime's or the
+// scalar crate's dependencies. Nor --offline: CI's Go job caches no
+// crates, so the build may fetch what the cargo cache lacks, which
+// CARGO_NET_OFFLINE=true forbids. The target directory is CARGO_TARGET_DIR
+// when set, which CI shares among the tests that run cargo, and otherwise
+// one in root.
+func buildQueueParityRust(t *testing.T, cargo string, paths naming.LocalPaths, schema *ir.Schema, clock codegen.Clock, root string) string {
+	t.Helper()
+	typesDir := filepath.Join(root, "types", "rust", queueFixture)
+	output, err := rustgen.Generate(schema, rustgen.Options{SchemaName: queueFixture, Clock: clock})
+	if err != nil {
+		t.Fatalf("generate rust types: %v", err)
+	}
+	if err := rustgen.SetLocalPaths(output, paths, typesDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := rustgen.WriteTypes(output, typesDir); err != nil {
+		t.Fatal(err)
+	}
+	crateDir := filepath.Join(root, "server", "parity", "queue-rust")
+	if err := os.MkdirAll(filepath.Join(crateDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.ReadFile(filepath.Join(paths.HTTPRuntimeRust, "Cargo.lock"))
+	if err != nil {
+		t.Fatalf("the HTTP runtime's lockfile: %v", err)
+	}
+	manifest := fmt.Sprintf(queueParityRustManifest, filepath.ToSlash(paths.HTTPRuntimeRust), output.CrateName, filepath.ToSlash(typesDir))
+	for name, content := range map[string]string{
+		"Cargo.toml":  manifest,
+		"Cargo.lock":  string(lock),
+		"src/main.rs": queueParityRust,
+	} {
+		if err := os.WriteFile(filepath.Join(crateDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := os.Getenv("CARGO_TARGET_DIR")
+	if target == "" {
+		target = filepath.Join(root, "target")
+	}
+	build := exec.Command(cargo, "build", "--quiet")
+	build.Dir = crateDir
+	build.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("cargo build in %s: %v\n%s", crateDir, err, out)
+	}
+	// A copy of the test's own, which a build of another run into a shared
+	// target directory cannot replace while the test runs it.
+	built, err := os.ReadFile(filepath.Join(target, "debug", queueParityRustBinary))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin", queueParityRustBinary)
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, built, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// queueParityRustBinary is the Rust side's binary, named after its crate.
+const queueParityRustBinary = "ormgen-queue-parity"
+
+// queueParityRustManifest is the Rust side's Cargo.toml, given the HTTP
+// runtime's directory, the types crate's name and its directory.
+const queueParityRustManifest = `# The Rust side of ormgen's queue parity test (D65): a step of the Rust
+# queue client per run, over the DB's generated Rust types.
+[package]
+name = "` + queueParityRustBinary + `"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = "1.0.149"
+superschematic-http-runtime = { path = %q, features = ["postgres"] }
+tokio = { version = "1.52.2", features = ["macros", "rt"] }
+types = { package = %q, path = %q }
+
+# Its own workspace, so no manifest above the test's directory claims it.
+[workspace]
+`
+
+// queueParityRust is the Rust side's src/main.rs: one step of the Rust
+// queue client on the database its second argument names, which prints
+// its result as JSON, as queueParityScript does for TypeScript.
+const queueParityRust = `//! One step of the Rust queue client (D65) on the queue ` + "`OrderPlaced`" + ` of
+//! fixture-queue-db, for ormgen's queue parity test, as its TypeScript
+//! script runs one of the TypeScript client: the step, the database's URL,
+//! then the step's arguments. It prints the step's result as JSON, a
+//! claim's message as the Rust types serialize it, and on a failure its
+//! error, a lost claim's as ` + "`ClaimLost: ...`" + `, exiting 1.
+
+use std::process::ExitCode;
+use std::time::Duration;
+
+use serde_json::{json, Value};
+use superschematic_http_runtime::postgres::connect;
+use superschematic_http_runtime::queue::{enqueue, PostgresQueue, QueueDefinition, QueueError};
+use superschematic_http_runtime::stackconfig::Database;
+use types::{OrderPlaced, ORDER_PLACED_QUEUE};
+
+/// The lease of a claim, the TypeScript script's.
+const LEASE: Duration = Duration::from_secs(60);
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match run(&args).await {
+        Ok(result) => {
+            println!("{result}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("{message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// A queue's error as the test reads it, a lost claim's apart.
+fn refused(err: QueueError) -> String {
+    if err.is_claim_lost() {
+        format!("ClaimLost: {err}")
+    } else {
+        format!("QueueError: {err}")
+    }
+}
+
+/// Argument i of args.
+fn arg(args: &[String], i: usize) -> Result<&str, String> {
+    args.get(i)
+        .map(String::as_str)
+        .ok_or_else(|| format!("argument {i} is missing"))
+}
+
+async fn run(args: &[String]) -> Result<Value, String> {
+    let step = arg(args, 0)?;
+    let url = arg(args, 1)?;
+    let rest = &args[2..];
+    let definition = QueueDefinition::parse(ORDER_PLACED_QUEUE).map_err(refused)?;
+    let pool = connect(&Database::Url(url.to_string())).map_err(|err| err.to_string())?;
+    let queue = PostgresQueue::<OrderPlaced>::new(pool.clone(), definition.clone());
+    let result = match step {
+        "enqueue" => {
+            let message: OrderPlaced = serde_json::from_str(arg(rest, 0)?)
+                .map_err(|err| format!("the message: {err}"))?;
+            let mut client = pool.get().await.map_err(|err| err.to_string())?;
+            let tx = client.transaction().await.map_err(|err| err.to_string())?;
+            enqueue(&tx, &definition, &message).await.map_err(refused)?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            Value::Null
+        }
+        "claim" => {
+            let n: usize = arg(rest, 0)?.parse().map_err(|err| format!("n: {err}"))?;
+            let mut claims = Vec::new();
+            for claim in queue.claim(n, LEASE).await.map_err(refused)? {
+                let message = serde_json::to_value(&claim.message).map_err(|err| err.to_string())?;
+                claims.push(json!({
+                    "id": claim.id,
+                    "token": claim.token,
+                    "attempt": claim.attempt,
+                    "message": message,
+                }));
+            }
+            Value::Array(claims)
+        }
+        "complete" => {
+            queue.complete(arg(rest, 0)?, arg(rest, 1)?).await.map_err(refused)?;
+            Value::Null
+        }
+        "fail" => Value::Bool(
+            queue
+                .fail(arg(rest, 0)?, arg(rest, 1)?, arg(rest, 2)?)
+                .await
+                .map_err(refused)?,
+        ),
+        "extend" => {
+            let seconds: u64 = arg(rest, 2)?.parse().map_err(|err| format!("seconds: {err}"))?;
+            queue
+                .extend(arg(rest, 0)?, arg(rest, 1)?, Duration::from_secs(seconds))
+                .await
+                .map_err(refused)?;
+            Value::Null
+        }
+        "release" => {
+            queue.release(arg(rest, 0)?, arg(rest, 1)?).await.map_err(refused)?;
+            Value::Null
+        }
+        other => return Err(format!("no step {other}")),
+    };
+    pool.close();
+    Ok(result)
+}
+`
 
 // queueParityScript runs one step of the TypeScript queue client on the
 // database its second argument names, and prints its result as JSON.
@@ -177,6 +429,9 @@ try {
     case 'fail':
       result = await queue.fail(args[0], args[1], args[2]);
       break;
+    case 'extend':
+      await queue.extend(args[0], args[1], Number(args[2]));
+      break;
     case 'release':
       await queue.release(args[0], args[1]);
       break;
@@ -200,6 +455,7 @@ const queueParityORMTest = `package orm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -214,16 +470,52 @@ import (
 	types "example.com/schemas/types/go/fixture-queue-db"
 )
 
-// tsClaim is a claim the TypeScript client printed: its message as the
-// TypeScript types hold it, a timestamp as its ISO text.
-type tsClaim struct {
-	ID      string ` + "`json:\"id\"`" + `
-	Token   string ` + "`json:\"token\"`" + `
-	Attempt int    ` + "`json:\"attempt\"`" + `
+// printedClaim is a claim the TypeScript client or the Rust binary
+// printed, its message as that side's types serialize it: TypeScript's
+// UUID hyphenated and its timestamp as its ISO text, Rust's UUID in base62
+// and its timestamp in RFC 3339, its fraction trimmed, as Go's types write
+// them.
+type printedClaim struct {
+	ID      string         ` + "`json:\"id\"`" + `
+	Token   string         ` + "`json:\"token\"`" + `
+	Attempt int            ` + "`json:\"attempt\"`" + `
 	Message map[string]any ` + "`json:\"message\"`" + `
 }
 
-func TestQueueParityWithTypeScript(t *testing.T) {
+// claim is a claim of any side, its message as Go's types read it.
+type claim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.OrderPlaced
+}
+
+// side is one language's queue client over a parity's schema. A change
+// refused as a lost claim returns an error wrapping ErrClaimLost.
+type side struct {
+	name     string
+	enqueue  func(message string)
+	claim    func(n int) []claim
+	complete func(id, token string) error
+	fail     func(id, token, cause string) (bool, error)
+	extend   func(id, token string, seconds int) error
+	release  func(id, token string) error
+}
+
+// parity is a schema of a subtest's own holding the queue's tables, the Go
+// ORM's queue over it, and the URL by which the TypeScript client and the
+// Rust binary reach the same schema.
+type parity struct {
+	t     *testing.T
+	ctx   context.Context
+	pool  *pgxpool.Pool
+	db    *Database
+	queue *OrderPlacedQueue
+	url   string
+}
+
+func newParity(t *testing.T) *parity {
+	t.Helper()
 	ctx := context.Background()
 	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
 	createSQL, err := os.ReadFile("testdata/create.sql")
@@ -257,66 +549,308 @@ func TestQueueParityWithTypeScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queue := db.OrderPlacedQueue()
-
-	// The TypeScript client reaches the same schema.
+	// The option holds no space: a URL's query writes one as +, which
+	// tokio-postgres reads as a plus.
 	u, err := url.Parse(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := u.Query()
-	q.Set("options", "-c search_path="+schema+",public")
+	q.Set("options", "-csearch_path="+schema+",public")
 	u.RawQuery = q.Encode()
-	run := func(step string, args ...string) (string, error) {
-		cmd := exec.Command(os.Getenv("QUEUE_PARITY_BUN"), append([]string{os.Getenv("QUEUE_PARITY_SCRIPT"), step, u.String()}, args...)...)
-		out, err := cmd.CombinedOutput()
-		return strings.TrimSpace(string(out)), err
-	}
-	ts := func(step string, args ...string) string {
-		t.Helper()
-		out, err := run(step, args...)
-		if err != nil {
-			t.Fatalf("the TypeScript client's %s: %v\n%s", step, err, out)
-		}
-		return out
-	}
-	tsClaims := func(n int) []tsClaim {
-		t.Helper()
-		var claims []tsClaim
-		if err := json.Unmarshal([]byte(ts("claim", fmt.Sprint(n))), &claims); err != nil {
-			t.Fatal(err)
-		}
-		return claims
-	}
-	stateOf := func(id string) (string, int, string) {
-		t.Helper()
-		var s, lastError string
-		var attempts int
-		if err := pool.QueryRow(ctx, "SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&s, &attempts, &lastError); err != nil {
-			t.Fatal(err)
-		}
-		return s, attempts, lastError
-	}
-	due := func() {
-		t.Helper()
-		if _, err := pool.Exec(ctx, "UPDATE order_placed_queue SET due_at = now() - interval '1 second' WHERE state = 'ready'"); err != nil {
-			t.Fatal(err)
-		}
-	}
+	return &parity{t: t, ctx: ctx, pool: pool, db: db, queue: db.OrderPlacedQueue(), url: u.String()}
+}
 
-	// Go enqueues; TypeScript claims and reads every field.
-	placed := scalars.TemporalDateTime(time.Date(2026, 10, 9, 12, 30, 15, 250000000, time.UTC))
-	id, _ := scalars.ParseUUID("6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e")
-	msg := &types.OrderPlaced{
-		OrderId:  id,
-		PlacedAt: placed,
+// step runs one step of the TypeScript client or the Rust binary and
+// returns what it printed. A step refused as a lost claim, which
+// TypeScript prints as its ClaimLostError and the Rust binary as
+// ClaimLost, returns an error wrapping ErrClaimLost.
+func (p *parity) step(side, step string, args ...string) (string, error) {
+	var cmd *exec.Cmd
+	var lost string
+	switch side {
+	case "TypeScript":
+		cmd = exec.Command(os.Getenv("QUEUE_PARITY_BUN"), append([]string{os.Getenv("QUEUE_PARITY_SCRIPT"), step, p.url}, args...)...)
+		lost = "ClaimLostError: "
+	case "Rust":
+		cmd = exec.Command(os.Getenv("QUEUE_PARITY_RUST"), append([]string{step, p.url}, args...)...)
+		lost = "ClaimLost: "
+	default:
+		p.t.Fatalf("no side %s", side)
+	}
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	switch {
+	case err == nil:
+		return text, nil
+	case strings.HasPrefix(text, lost):
+		return text, fmt.Errorf("the %s %s printed %q: %w", side, step, text, ErrClaimLost)
+	default:
+		return text, fmt.Errorf("the %s %s: %v\n%s", side, step, err, text)
+	}
+}
+
+// must is step, failing the test on an error.
+func (p *parity) must(side, step string, args ...string) string {
+	p.t.Helper()
+	out, err := p.step(side, step, args...)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	return out
+}
+
+// printed claims up to n messages with the TypeScript client or the Rust
+// binary, as it printed them.
+func (p *parity) printed(side string, n int) []printedClaim {
+	p.t.Helper()
+	out := p.must(side, "claim", fmt.Sprint(n))
+	var claims []printedClaim
+	if err := json.Unmarshal([]byte(out), &claims); err != nil {
+		p.t.Fatalf("the %s claim printed %s: %v", side, out, err)
+	}
+	return claims
+}
+
+// typed reads a message a side printed as Go's types read it.
+func (p *parity) typed(side string, message map[string]any) types.OrderPlaced {
+	p.t.Helper()
+	data, err := json.Marshal(message)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	var m types.OrderPlaced
+	if err := json.Unmarshal(data, &m); err != nil {
+		p.t.Fatalf("Go's types read the %s message %s: %v", side, data, err)
+	}
+	return m
+}
+
+// sides are the three queue clients over p's schema: the Go ORM in the
+// test's process, and the TypeScript client and the Rust binary in a
+// process per step. Each enqueues a message from its JSON as its types
+// read it.
+func (p *parity) sides() map[string]side {
+	ctx := p.ctx
+	goSide := side{
+		name: "Go",
+		enqueue: func(message string) {
+			p.t.Helper()
+			var msg types.OrderPlaced
+			if err := json.Unmarshal([]byte(message), &msg); err != nil {
+				p.t.Fatal(err)
+			}
+			if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, &msg) }); err != nil {
+				p.t.Fatalf("Go's enqueue: %v", err)
+			}
+		},
+		claim: func(n int) []claim {
+			p.t.Helper()
+			got, err := p.queue.Claim(ctx, n, time.Minute)
+			if err != nil {
+				p.t.Fatalf("Go's Claim: %v", err)
+			}
+			claims := make([]claim, len(got))
+			for i, c := range got {
+				claims[i] = claim{ID: c.ID, Token: c.Token, Attempt: c.Attempt, Message: c.Message}
+			}
+			return claims
+		},
+		complete: func(id, token string) error { return p.queue.Complete(ctx, id, token) },
+		fail:     func(id, token, cause string) (bool, error) { return p.queue.Fail(ctx, id, token, cause) },
+		extend: func(id, token string, seconds int) error {
+			return p.queue.Extend(ctx, id, token, time.Duration(seconds)*time.Second)
+		},
+		release: func(id, token string) error { return p.queue.Release(ctx, id, token) },
+	}
+	process := func(name string) side {
+		return side{
+			name:    name,
+			enqueue: func(message string) { p.t.Helper(); p.must(name, "enqueue", message) },
+			claim: func(n int) []claim {
+				p.t.Helper()
+				printed := p.printed(name, n)
+				claims := make([]claim, len(printed))
+				for i, c := range printed {
+					claims[i] = claim{ID: c.ID, Token: c.Token, Attempt: c.Attempt, Message: p.typed(name, c.Message)}
+				}
+				return claims
+			},
+			complete: func(id, token string) error {
+				_, err := p.step(name, "complete", id, token)
+				return err
+			},
+			fail: func(id, token, cause string) (bool, error) {
+				out, err := p.step(name, "fail", id, token, cause)
+				if err != nil {
+					return false, err
+				}
+				if out != "true" && out != "false" {
+					return false, fmt.Errorf("the %s fail printed %q", name, out)
+				}
+				return out == "true", nil
+			},
+			extend: func(id, token string, seconds int) error {
+				_, err := p.step(name, "extend", id, token, fmt.Sprint(seconds))
+				return err
+			},
+			release: func(id, token string) error {
+				_, err := p.step(name, "release", id, token)
+				return err
+			},
+		}
+	}
+	return map[string]side{"Go": goSide, "TypeScript": process("TypeScript"), "Rust": process("Rust")}
+}
+
+// one is the one claim s makes of a single message, which must be the
+// message's attempt.
+func (p *parity) one(s side, attempt int) claim {
+	p.t.Helper()
+	claims := s.claim(1)
+	if len(claims) != 1 || claims[0].Attempt != attempt {
+		p.t.Fatalf("the %s claim = %+v, want one message's attempt %d", s.name, claims, attempt)
+	}
+	return claims[0]
+}
+
+// state is a message's state, its attempts and its last error.
+func (p *parity) state(id string) (string, int, string) {
+	p.t.Helper()
+	var s, lastError string
+	var attempts int
+	if err := p.pool.QueryRow(p.ctx, "SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&s, &attempts, &lastError); err != nil {
+		p.t.Fatal(err)
+	}
+	return s, attempts, lastError
+}
+
+// expect fails the test unless a message is in state after attempts, its
+// last error lastError.
+func (p *parity) expect(id, state string, attempts int, lastError string) {
+	p.t.Helper()
+	if s, a, e := p.state(id); s != state || a != attempts || e != lastError {
+		p.t.Fatalf("message %s is %s after %d attempts, its last error %q; want %s after %d, %q", id, s, a, e, state, attempts, lastError)
+	}
+}
+
+// expiresIn is the seconds until a message's claim expires.
+func (p *parity) expiresIn(id string) float64 {
+	p.t.Helper()
+	var seconds float64
+	if err := p.pool.QueryRow(p.ctx, "SELECT extract(epoch FROM claim_expires_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&seconds); err != nil {
+		p.t.Fatal(err)
+	}
+	return seconds
+}
+
+// due makes each ready message due now, past its backoff.
+func (p *parity) due() {
+	p.t.Helper()
+	if _, err := p.pool.Exec(p.ctx, "UPDATE order_placed_queue SET due_at = now() - interval '1 second' WHERE state = 'ready'"); err != nil {
+		p.t.Fatal(err)
+	}
+}
+
+func mustUUID(text string) scalars.UUID {
+	id, err := scalars.ParseUUID(text)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
+// sameMessage reports whether two messages hold the same values: the same
+// instant, wherever its location, and an empty list as no list.
+func sameMessage(a, b types.OrderPlaced) bool {
+	if !time.Time(a.PlacedAt).Equal(time.Time(b.PlacedAt)) {
+		return false
+	}
+	a.PlacedAt, b.PlacedAt = scalars.TemporalDateTime{}, scalars.TemporalDateTime{}
+	if len(a.Tags) == 0 {
+		a.Tags = nil
+	}
+	if len(b.Tags) == 0 {
+		b.Tags = nil
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+// fullGoMessage is a message that sets every field, as Go enqueues it.
+func fullGoMessage() *types.OrderPlaced {
+	return &types.OrderPlaced{
+		OrderId:  mustUUID("6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e"),
+		PlacedAt: scalars.TemporalDateTime(time.Date(2026, 10, 9, 12, 30, 15, 250000000, time.UTC)),
 		Priority: types.Priority_High,
 		Quantity: 9007199254740991,
 		Note:     "leave it by the door",
 		ShipTo:   types.Address{Line1: "1 Main St", City: "Springfield"},
 		Tags:     []string{"gift", "fragile"},
 	}
-	if err := db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
+}
+
+// orderJSON is a message each side enqueues as it is: its ID hyphenated,
+// its timestamp in RFC 3339, and tags an array literal quotes and escapes,
+// an empty one and one beyond ASCII among them.
+func orderJSON(id string) string {
+	data, err := json.Marshal(map[string]any{
+		"orderId":  id,
+		"placedAt": "2026-10-12T16:45:30.75Z",
+		"priority": "high",
+		"quantity": 42,
+		"note":     "from every side",
+		"shipTo":   map[string]any{"line1": "5 Birch Ln", "city": "Capital City"},
+		"tags":     []string{"a", "b \"c\"", "x,y", "back\\slash", "NULL", "", "ünïcode"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+// order is orderJSON's message as Go's types hold it.
+func order(id string) types.OrderPlaced {
+	return types.OrderPlaced{
+		OrderId:  mustUUID(id),
+		PlacedAt: scalars.TemporalDateTime(time.Date(2026, 10, 12, 16, 45, 30, 750000000, time.UTC)),
+		Priority: types.Priority_High,
+		Quantity: 42,
+		Note:     "from every side",
+		ShipTo:   types.Address{Line1: "5 Birch Ln", City: "Capital City"},
+		Tags:     []string{"a", "b \"c\"", "x,y", "back\\slash", "NULL", "", "ünïcode"},
+	}
+}
+
+// TestQueueParity runs the Go ORM's queue, the TypeScript client and the
+// Rust client against one Postgres, each subtest in a schema of its own.
+func TestQueueParity(t *testing.T) {
+	t.Run("GoAndTypeScript", testGoAndTypeScript)
+	t.Run("RustReadsGoAndTypeScript", testRustReadsGoAndTypeScript)
+	t.Run("GoAndTypeScriptReadRust", testGoAndTypeScriptReadRust)
+	t.Run("EachChangesTheOthersClaims", testEachChangesTheOthersClaims)
+	t.Run("AttemptsAndStatesAgree", testAttemptsAndStatesAgree)
+}
+
+// testGoAndTypeScript: the Go ORM enqueues a message, which the TypeScript
+// client claims and reads field for field; Go fails that claim under the
+// TypeScript token; TypeScript enqueues one, which Go claims and reads,
+// its enum's default included; TypeScript releases and completes claims Go
+// made; and each fails the other's claims until the message is dead.
+func testGoAndTypeScript(t *testing.T) {
+	p := newParity(t)
+	ctx, queue := p.ctx, p.queue
+	ts := func(step string, args ...string) string {
+		t.Helper()
+		return p.must("TypeScript", step, args...)
+	}
+	tsClaims := func(n int) []printedClaim {
+		t.Helper()
+		return p.printed("TypeScript", n)
+	}
+
+	// Go enqueues; TypeScript claims and reads every field.
+	msg := fullGoMessage()
+	if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
 		t.Fatal(err)
 	}
 	claims := tsClaims(5)
@@ -341,20 +875,18 @@ func TestQueueParityWithTypeScript(t *testing.T) {
 	if dead, err := queue.Fail(ctx, fromTS.ID, fromTS.Token, "failed in Go"); err != nil || dead {
 		t.Fatalf("Go's Fail of the TypeScript claim = %t, %v", dead, err)
 	}
-	if s, attempts, lastError := stateOf(fromTS.ID); s != "ready" || attempts != 1 || lastError != "failed in Go" {
-		t.Fatalf("after Go's Fail: %s, %d attempts, %q", s, attempts, lastError)
+	p.expect(fromTS.ID, "ready", 1, "failed in Go")
+	if _, err := p.step("TypeScript", "complete", fromTS.ID, fromTS.Token); !errors.Is(err, ErrClaimLost) {
+		t.Fatalf("the TypeScript complete under the token Go's Fail ended = %v, want a lost claim", err)
 	}
-	if out, err := run("complete", fromTS.ID, fromTS.Token); err == nil || !strings.Contains(out, "ClaimLostError") {
-		t.Fatalf("the TypeScript complete under the token Go's Fail ended = %v, want a lost claim:\n%s", err, out)
-	}
-	if s, _, _ := stateOf(fromTS.ID); s != "ready" {
+	if s, _, _ := p.state(fromTS.ID); s != "ready" {
 		t.Fatalf("a complete under a lost token changed the message: %s", s)
 	}
 
 	// TypeScript enqueues, with the enum unset and a timestamp as its ISO
 	// text; Go claims and reads it, the enum's default included.
 	ts("enqueue", ` + "`" + `{"orderId":"0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b","placedAt":"2026-10-10T08:00:00.5Z","quantity":7,"shipTo":{"line1":"2 Elm St","city":"Shelbyville"},"tags":["from-ts"]}` + "`" + `)
-	due()
+	p.due()
 	got, err := queue.Claim(ctx, 5, time.Minute)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("Go's Claim = %+v, %v, want both messages", got, err)
@@ -371,29 +903,26 @@ func TestQueueParityWithTypeScript(t *testing.T) {
 		t.Fatalf("Go claimed attempts %d and %d, want 2 for the failed message and 1 for TypeScript's", mine.Attempt, theirs.Attempt)
 	}
 	m := theirs.Message
-	tsID, _ := scalars.ParseUUID("0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b")
-	if m.OrderId != tsID || !time.Time(m.PlacedAt).Equal(time.Date(2026, 10, 10, 8, 0, 0, 500000000, time.UTC)) ||
+	if m.OrderId != mustUUID("0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b") || !time.Time(m.PlacedAt).Equal(time.Date(2026, 10, 10, 8, 0, 0, 500000000, time.UTC)) ||
 		m.Priority != types.Priority_Low || m.Quantity != 7 || m.Note != "" || m.ShipTo != (types.Address{Line1: "2 Elm St", City: "Shelbyville"}) || !reflect.DeepEqual(m.Tags, []string{"from-ts"}) {
 		t.Fatalf("Go read the TypeScript message as %+v", m)
 	}
 
 	// TypeScript releases one Go claim, uncounted, and completes the other.
 	ts("release", mine.ID, mine.Token)
-	if s, attempts, _ := stateOf(mine.ID); s != "ready" || attempts != 1 {
-		t.Fatalf("after the TypeScript release: %s after %d attempts, want ready after 1", s, attempts)
-	}
+	p.expect(mine.ID, "ready", 1, "failed in Go")
 	ts("complete", theirs.ID, theirs.Token)
-	if s, _, _ := stateOf(theirs.ID); s != "done" {
+	if s, _, _ := p.state(theirs.ID); s != "done" {
 		t.Fatalf("after the TypeScript complete: %s, want done", s)
 	}
-	if err := queue.Complete(ctx, theirs.ID, theirs.Token); err == nil {
-		t.Fatal("Go completed a message TypeScript completed")
+	if err := queue.Complete(ctx, theirs.ID, theirs.Token); !errors.Is(err, ErrClaimLost) {
+		t.Fatalf("Go's Complete of a message TypeScript completed = %v, want a lost claim", err)
 	}
 
 	// Each fails the other's claims until the retries, three, are spent:
 	// the fourth failure, TypeScript's, leaves it dead.
 	for attempt := 2; attempt <= 4; attempt++ {
-		due()
+		p.due()
 		claims := tsClaims(1)
 		if len(claims) != 1 || claims[0].Attempt != attempt {
 			t.Fatalf("the TypeScript claim of attempt %d = %+v", attempt, claims)
@@ -408,8 +937,346 @@ func TestQueueParityWithTypeScript(t *testing.T) {
 			t.Fatalf("the TypeScript fail of the last attempt printed %s, want true", dead)
 		}
 	}
-	if s, attempts, lastError := stateOf(mine.ID); s != "dead" || attempts != 4 || lastError != "try 4" {
-		t.Fatalf("after the last failure: %s, %d attempts, %q", s, attempts, lastError)
+	p.expect(mine.ID, "dead", 4, "try 4")
+}
+
+// testRustReadsGoAndTypeScript: the Rust client claims what Go and
+// TypeScript enqueue and reads each field as Rust's types serialize it:
+// Go's message that sets every field, Go's that leaves the enum, the note
+// and the list unset, its timestamp to the microsecond, and TypeScript's
+// that leaves them out, each unset enum as its default and each unset list
+// empty. Go's types read what
+// Rust read of Go's first message as Go wrote it, and while Rust holds the
+// claims neither Go nor TypeScript claims a message.
+func testRustReadsGoAndTypeScript(t *testing.T) {
+	p := newParity(t)
+	ctx := p.ctx
+	full := fullGoMessage()
+	unset := &types.OrderPlaced{
+		OrderId:  mustUUID("5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"),
+		PlacedAt: scalars.TemporalDateTime(time.Date(2026, 10, 9, 13, 0, 0, 123456000, time.UTC)),
+		Quantity: -3,
+		ShipTo:   types.Address{Line1: "9 Ash Ct", City: "Springfield"},
 	}
+	for _, msg := range []*types.OrderPlaced{full, unset} {
+		if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.must("TypeScript", "enqueue", ` + "`" + `{"orderId":"0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b","placedAt":"2026-10-10T08:00:00.5Z","quantity":7,"shipTo":{"line1":"2 Elm St","city":"Shelbyville"}}` + "`" + `)
+
+	// Each message as Rust's types serialize it, by its ID in base62.
+	want := map[string]map[string]any{
+		"3Nf1lmBDcdDKfsC9ccR4DG": {
+			"orderId":  "3Nf1lmBDcdDKfsC9ccR4DG",
+			"placedAt": "2026-10-09T12:30:15.25Z",
+			"priority": "high",
+			"quantity": float64(9007199254740991),
+			"note":     "leave it by the door",
+			"shipTo":   map[string]any{"line1": "1 Main St", "city": "Springfield"},
+			"tags":     []any{"gift", "fragile"},
+		},
+		"2sCDvWPkytfLo9GgrB0aAj": {
+			"orderId":  "2sCDvWPkytfLo9GgrB0aAj",
+			"placedAt": "2026-10-09T13:00:00.123456Z",
+			"priority": "low",
+			"quantity": float64(-3),
+			"shipTo":   map[string]any{"line1": "9 Ash Ct", "city": "Springfield"},
+			"tags":     []any{},
+		},
+		"NXgbePD9wdfLRTkUZGl1X": {
+			"orderId":  "NXgbePD9wdfLRTkUZGl1X",
+			"placedAt": "2026-10-10T08:00:00.5Z",
+			"priority": "low",
+			"quantity": float64(7),
+			"shipTo":   map[string]any{"line1": "2 Elm St", "city": "Shelbyville"},
+			"tags":     []any{},
+		},
+	}
+	claims := p.printed("Rust", 5)
+	if len(claims) != len(want) {
+		t.Fatalf("the Rust claim = %+v, want the %d messages", claims, len(want))
+	}
+	for _, c := range claims {
+		id, _ := c.Message["orderId"].(string)
+		if !reflect.DeepEqual(c.Message, want[id]) {
+			t.Errorf("the Rust client read %v, want %v", c.Message, want[id])
+		}
+		if c.Attempt != 1 {
+			t.Errorf("the Rust claim of %s is attempt %d, want 1", id, c.Attempt)
+		}
+		p.expect(c.ID, "claimed", 1, "")
+		if id == "3Nf1lmBDcdDKfsC9ccR4DG" {
+			if got := p.typed("Rust", c.Message); !sameMessage(got, *full) {
+				t.Errorf("Go read the Rust client's message as %+v, want %+v", got, *full)
+			}
+		}
+	}
+
+	// The claims are Rust's: neither of the others claims a message.
+	for name, s := range p.sides() {
+		if name == "Rust" {
+			continue
+		}
+		if got := s.claim(5); len(got) != 0 {
+			t.Errorf("%s claimed %+v, which Rust holds", name, got)
+		}
+	}
+}
+
+// testGoAndTypeScriptReadRust: Go and TypeScript claim and read what the
+// Rust client enqueues: a message that sets every field, its ID hyphenated
+// and its timestamp at an offset, and one in Rust's own wire form, its ID
+// in base62, that leaves the enum and the note out, which Rust's types
+// write as the enum's default and no note, its timestamp to the
+// microsecond. Go reads each, the microseconds too, then releases it,
+// uncounted, for TypeScript to read, whose Date holds milliseconds.
+func testGoAndTypeScriptReadRust(t *testing.T) {
+	p := newParity(t)
+	enqueue := func(message map[string]any) {
+		t.Helper()
+		data, err := json.Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.must("Rust", "enqueue", string(data))
+	}
+	enqueue(map[string]any{
+		"orderId":  "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+		"placedAt": "2026-10-11T09:15:00.125+02:00",
+		"priority": "high",
+		"quantity": 9007199254740991,
+		"note":     "ring twice",
+		"shipTo":   map[string]any{"line1": "3 Oak Ave", "city": "Ogdenville"},
+		"tags":     []string{"from-rust", "b \"c\"", "x,y"},
+	})
+	enqueue(map[string]any{
+		"orderId":  "1rQEED3tFAHf9ylzV54KNR",
+		"placedAt": "2026-10-11T10:00:00.654321Z",
+		"quantity": 0,
+		"shipTo":   map[string]any{"line1": "4 Pine Rd", "city": "North Haverbrook"},
+		"tags":     []string{},
+	})
+
+	wantGo := map[string]types.OrderPlaced{
+		"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": {
+			OrderId:  mustUUID("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"),
+			PlacedAt: scalars.TemporalDateTime(time.Date(2026, 10, 11, 7, 15, 0, 125000000, time.UTC)),
+			Priority: types.Priority_High,
+			Quantity: 9007199254740991,
+			Note:     "ring twice",
+			ShipTo:   types.Address{Line1: "3 Oak Ave", City: "Ogdenville"},
+			Tags:     []string{"from-rust", "b \"c\"", "x,y"},
+		},
+		"3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d": {
+			OrderId:  mustUUID("3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d"),
+			PlacedAt: scalars.TemporalDateTime(time.Date(2026, 10, 11, 10, 0, 0, 654321000, time.UTC)),
+			Priority: types.Priority_Low,
+			Quantity: 0,
+			ShipTo:   types.Address{Line1: "4 Pine Rd", City: "North Haverbrook"},
+		},
+	}
+	got, err := p.queue.Claim(p.ctx, 5, time.Minute)
+	if err != nil || len(got) != len(wantGo) {
+		t.Fatalf("Go's Claim = %+v, %v, want the %d Rust messages", got, err, len(wantGo))
+	}
+	for _, c := range got {
+		id := c.Message.OrderId.ToUUID().String()
+		if want, ok := wantGo[id]; !ok || !sameMessage(c.Message, want) {
+			t.Errorf("Go read the Rust message %s as %+v, want %+v", id, c.Message, want)
+		}
+		if c.Attempt != 1 {
+			t.Errorf("Go's claim of %s is attempt %d, want 1", id, c.Attempt)
+		}
+		if err := p.queue.Release(p.ctx, c.ID, c.Token); err != nil {
+			t.Fatal(err)
+		}
+		p.expect(c.ID, "ready", 0, "")
+	}
+
+	// Each message as TypeScript's types hold it, by its ID.
+	wantTS := map[string]map[string]any{
+		"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": {
+			"orderId":  "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+			"placedAt": "2026-10-11T07:15:00.125Z",
+			"priority": "high",
+			"quantity": float64(9007199254740991),
+			"note":     "ring twice",
+			"shipTo":   map[string]any{"line1": "3 Oak Ave", "city": "Ogdenville"},
+			"tags":     []any{"from-rust", "b \"c\"", "x,y"},
+		},
+		"3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d": {
+			"orderId":  "3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d",
+			"placedAt": "2026-10-11T10:00:00.654Z",
+			"priority": "low",
+			"quantity": float64(0),
+			"shipTo":   map[string]any{"line1": "4 Pine Rd", "city": "North Haverbrook"},
+			"tags":     []any{},
+		},
+	}
+	claims := p.printed("TypeScript", 5)
+	if len(claims) != len(wantTS) {
+		t.Fatalf("the TypeScript claim = %+v, want the %d Rust messages", claims, len(wantTS))
+	}
+	for _, c := range claims {
+		id, _ := c.Message["orderId"].(string)
+		if !reflect.DeepEqual(c.Message, wantTS[id]) {
+			t.Errorf("the TypeScript client read %v, want %v", c.Message, wantTS[id])
+		}
+		if c.Attempt != 1 {
+			t.Errorf("the TypeScript claim of %s is attempt %d, want 1, Go's released uncounted", id, c.Attempt)
+		}
+	}
+}
+
+// testEachChangesTheOthersClaims: for each side that claims and each other
+// side that changes the claim, a message the third side enqueues is
+// claimed by the first, which reads it as it was written. The second
+// extends that claim and releases it, uncounted, under the first's token,
+// which then claims the message no more; fails the first's next claim,
+// which makes it due after the backoff; and completes the claim after
+// that. Once complete, the token is refused as a lost claim by each side.
+func testEachChangesTheOthersClaims(t *testing.T) {
+	names := []string{"Go", "TypeScript", "Rust"}
+	for _, claimer := range names {
+		for _, changer := range names {
+			if claimer == changer {
+				continue
+			}
+			var enqueuer string
+			for _, name := range names {
+				if name != claimer && name != changer {
+					enqueuer = name
+				}
+			}
+			t.Run(enqueuer+"Enqueues"+claimer+"Claims"+changer+"Changes", func(t *testing.T) {
+				p := newParity(t)
+				sides := p.sides()
+				c, x, e := sides[claimer], sides[changer], sides[enqueuer]
+				const id = "9b8a7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+				e.enqueue(orderJSON(id))
+
+				first := p.one(c, 1)
+				if !sameMessage(first.Message, order(id)) {
+					t.Fatalf("%s read %s's message as %+v, want %+v", claimer, enqueuer, first.Message, order(id))
+				}
+				if err := x.extend(first.ID, first.Token, 600); err != nil {
+					t.Fatalf("%s's extend of %s's claim: %v", changer, claimer, err)
+				}
+				if s := p.expiresIn(first.ID); s < 500 || s > 600 {
+					t.Fatalf("after %s's extend of %s's claim it expires in %.0fs, want about 600", changer, claimer, s)
+				}
+				if err := x.release(first.ID, first.Token); err != nil {
+					t.Fatalf("%s's release of %s's claim: %v", changer, claimer, err)
+				}
+				p.expect(first.ID, "ready", 0, "")
+				if err := e.complete(first.ID, first.Token); !errors.Is(err, ErrClaimLost) {
+					t.Fatalf("%s's complete under the token %s released = %v, want a lost claim", enqueuer, changer, err)
+				}
+
+				second := p.one(c, 1)
+				if second.Token == first.Token {
+					t.Fatalf("%s's claim after the release kept the token %s", claimer, first.Token)
+				}
+				cause := "failed in " + changer
+				if dead, err := x.fail(second.ID, second.Token, cause); err != nil || dead {
+					t.Fatalf("%s's fail of %s's claim = %t, %v", changer, claimer, dead, err)
+				}
+				p.expect(second.ID, "ready", 1, cause)
+				if got := c.claim(1); len(got) != 0 {
+					t.Fatalf("%s claimed %+v within the backoff", claimer, got)
+				}
+				p.due()
+
+				third := p.one(c, 2)
+				if err := x.complete(third.ID, third.Token); err != nil {
+					t.Fatalf("%s's complete of %s's claim: %v", changer, claimer, err)
+				}
+				p.expect(third.ID, "done", 2, cause)
+				for _, s := range []side{c, x, e} {
+					if err := s.complete(third.ID, third.Token); !errors.Is(err, ErrClaimLost) {
+						t.Errorf("%s's complete of the message %s completed = %v, want a lost claim", s.name, changer, err)
+					}
+					if dead, err := s.fail(third.ID, third.Token, "late"); !errors.Is(err, ErrClaimLost) || dead {
+						t.Errorf("%s's fail of the message %s completed = %t, %v, want a lost claim", s.name, changer, dead, err)
+					}
+				}
+				if err := c.extend(third.ID, third.Token, 60); !errors.Is(err, ErrClaimLost) {
+					t.Errorf("%s's extend of the message %s completed = %v, want a lost claim", claimer, changer, err)
+				}
+				if err := e.release(third.ID, third.Token); !errors.Is(err, ErrClaimLost) {
+					t.Errorf("%s's release of the message %s completed = %v, want a lost claim", enqueuer, changer, err)
+				}
+				p.expect(third.ID, "done", 2, cause)
+				if got := c.claim(1); len(got) != 0 {
+					t.Fatalf("%s claimed %+v, which is done", claimer, got)
+				}
+			})
+		}
+	}
+}
+
+// testAttemptsAndStatesAgree: a message Rust enqueues passes through every
+// side, each attempt claimed by one and failed by another, each side
+// counting the same attempt, until the retries, three, are spent and the
+// fourth failure, Rust's of Go's claim, leaves it dead, which no side
+// claims. Then a claim TypeScript lets expire Rust claims again, one
+// attempt more under a new token, and the expired token is lost to each.
+func testAttemptsAndStatesAgree(t *testing.T) {
+	p := newParity(t)
+	sides := p.sides()
+	const id = "9b8a7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+	sides["Rust"].enqueue(orderJSON(id))
+	lastError := ""
+	for i, round := range []struct{ claimer, failer string }{
+		{"Go", "TypeScript"},
+		{"TypeScript", "Rust"},
+		{"Rust", "Go"},
+		{"Go", "Rust"},
+	} {
+		attempt := i + 1
+		p.due()
+		c := p.one(sides[round.claimer], attempt)
+		if !sameMessage(c.Message, order(id)) {
+			t.Fatalf("%s read attempt %d as %+v", round.claimer, attempt, c.Message)
+		}
+		p.expect(c.ID, "claimed", attempt, lastError)
+		lastError = fmt.Sprintf("attempt %d failed in %s", attempt, round.failer)
+		dead, err := sides[round.failer].fail(c.ID, c.Token, lastError)
+		if err != nil || dead != (attempt == 4) {
+			t.Fatalf("%s's fail of %s's attempt %d = %t, %v; want dead after the fourth", round.failer, round.claimer, attempt, dead, err)
+		}
+		state := "ready"
+		if attempt == 4 {
+			state = "dead"
+		}
+		p.expect(c.ID, state, attempt, lastError)
+	}
+	p.due()
+	for name, s := range sides {
+		if got := s.claim(5); len(got) != 0 {
+			t.Fatalf("%s claimed %+v, which is dead", name, got)
+		}
+	}
+
+	const expiring = "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
+	sides["Go"].enqueue(orderJSON(expiring))
+	first := p.one(sides["TypeScript"], 1)
+	if _, err := p.pool.Exec(p.ctx, "UPDATE order_placed_queue SET claim_expires_at = now() - interval '1 second' WHERE id = $1::uuid", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := p.one(sides["Rust"], 2)
+	if again.ID != first.ID || again.Token == first.Token {
+		t.Fatalf("Rust claimed %+v, want the expired claim %s again under a new token", again, first.ID)
+	}
+	for name, s := range sides {
+		if err := s.complete(first.ID, first.Token); !errors.Is(err, ErrClaimLost) {
+			t.Errorf("%s's complete under the expired token = %v, want a lost claim", name, err)
+		}
+	}
+	if err := sides["Go"].complete(again.ID, again.Token); err != nil {
+		t.Fatalf("Go's complete of Rust's claim: %v", err)
+	}
+	p.expect(again.ID, "done", 2, "")
 }
 `
