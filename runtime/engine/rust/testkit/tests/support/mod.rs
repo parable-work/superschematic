@@ -148,6 +148,30 @@ impl Target {
     pub fn open_core(&self) -> Engine {
         self.open_core_with(|_| {})
     }
+
+    /// Options as the work queue's `openTestEngine` opens an engine: every
+    /// write allowed, and the core's behaviors and the work queue's ported
+    /// so far (`superschematic_engine_workqueue::workqueue`), as a
+    /// deployment registers `workQueueBehaviors` after the core's.
+    pub fn workqueue_options(&self) -> EngineOptions {
+        let mut options = self.core_options();
+        options.behaviors = std::mem::take(&mut options.behaviors)
+            .extend(superschematic_engine_workqueue::workqueue());
+        options
+    }
+
+    /// An engine with the core's and the work queue's behaviors, its
+    /// options changed by `configure`.
+    pub fn open_workqueue_with(&self, configure: impl FnOnce(&mut EngineOptions)) -> Engine {
+        let mut options = self.workqueue_options();
+        configure(&mut options);
+        Engine::open(options).expect("open the engine")
+    }
+
+    /// An engine with the core's and the work queue's behaviors.
+    pub fn open_workqueue(&self) -> Engine {
+        self.open_workqueue_with(|_| {})
+    }
 }
 
 impl Drop for Target {

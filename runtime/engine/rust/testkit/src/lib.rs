@@ -33,6 +33,7 @@
 pub mod behaviors;
 pub mod core_fixtures;
 mod http;
+pub mod workqueue_fixtures;
 
 pub use http::HTTP_FILES;
 

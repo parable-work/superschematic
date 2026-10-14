@@ -5705,9 +5705,12 @@ test that runs fails on what the Rust engine does. The rest wait for
 milestone 7b's test-only bridge for behaviors written in TypeScript; it
 brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
 and `engineMcp` over the engine's routes. The work queue's behaviors are
-milestone 12, in progress; its suite's recording
-(`testdata/scenarios/workqueue-*.json`, 213 scenarios) waits for them,
-outside the replay's files. Until the Rust engine passes the TypeScript
+milestone 12, whose first part (12a) has ported Lease (with directOn),
+Assignment, Presence and Retries into `superschematic-engine-workqueue`,
+with their guidance, migrations on both databases and the cases of their
+TypeScript tests; Queue, Budget and Blueprint are its second (12b). Its
+suite's recording (`testdata/scenarios/workqueue-*.json`, 213 scenarios)
+waits for them, outside the replay's files. Until the Rust engine passes the TypeScript
 suite, `@superschematic/engine` is the TypeScript implementation and
 nothing uses the workspace.
 

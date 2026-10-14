@@ -1804,7 +1804,10 @@ impl Behavior for Dispatch {
 
 /// A core behavior by name, alone, for a step that registers one again or
 /// an open that names one: the engine refuses it, as the TypeScript engine
-/// refuses a name already registered. `None` for a name not the core's.
+/// refuses a name already registered. A work-queue behavior's name finds
+/// it ([`superschematic_engine_workqueue::behavior`]), as a recording names
+/// the package's behaviors its engine registered. `None` for a name neither
+/// the core's nor the work queue's.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
         Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,
@@ -1827,13 +1830,15 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Approvals" => set.with(Approvals),
         "Numbering" => set.with(Numbering),
         "Timers" => set.with(Timers),
-        _ => return None,
+        _ => return superschematic_engine_workqueue::behavior(name),
     })
 }
 
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
-/// fixtures'. `None` for one the test kit has not ported.
+/// fixtures', then the work queue's fixtures
+/// ([`crate::workqueue_fixtures`]) and its behaviors, which its tests
+/// register as theirs. `None` for one the test kit has not ported.
 pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
     let set = BehaviorSet::new();
     Some(match (file, name) {
@@ -1861,6 +1866,9 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Reader") => set.with(Reader),
         (_, "test.Broken") => set.with(Broken),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
-        _ => return None,
+        (_, "test.Signal") => set.with(crate::workqueue_fixtures::Signal),
+        (_, "test.Gate") => set.with(crate::workqueue_fixtures::Gate),
+        (_, "test.Lock") => set.with(crate::workqueue_fixtures::Lock),
+        _ => return superschematic_engine_workqueue::behavior(name),
     })
 }

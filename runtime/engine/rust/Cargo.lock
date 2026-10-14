@@ -1563,6 +1563,17 @@ dependencies = [
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
+ "superschematic-engine-workqueue",
+]
+
+[[package]]
+name = "superschematic-engine-workqueue"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-engine",
+ "superschematic-engine-behaviors",
 ]
 
 [[package]]

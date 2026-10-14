@@ -83,6 +83,38 @@ engine in the registry, as the engine's own optional peer dependency on
 package's build and tests link the checkout's engine
 (`typescript/scripts/link-local-deps.mjs`).
 
+### The Rust engine's crate
+
+`rust/` is `superschematic-engine-workqueue`, the same behaviors for the
+Rust engine (D58), a member of the engine's Cargo workspace
+(`runtime/engine/rust`), so it builds with that lock file and toolchain
+and `make engine-rust` lints and tests it. It reaches the engine through
+the plug-in API alone, as this package does, and the core's behaviors
+through the helpers the package imports from `@superschematic/engine`
+(`superschematic-engine-behaviors`). Each behavior embeds its
+declaration from `rust/declarations`, a copy `make behaviors` writes and
+`make behaviors-check` checks. A host registers them after the core's:
+
+```rust
+options.behaviors = superschematic_engine_behaviors::core()
+    .extend(superschematic_engine_workqueue::workqueue());
+```
+
+`workqueue()` is every behavior ported, in `workQueueBehaviors`' order
+(`NAMES`), and `behavior(name)` one alone. Milestone 12 ports them in
+two parts: 12a has ported Lease (with directOn), Assignment, Presence
+and Retries, which keep this package's table and column names; Queue,
+Budget and Blueprint are 12b's, and until then the TypeScript package's
+alone. The guidance tests are `rust/tests/guidance_<behavior>.rs`, each
+held to the text this package's built guidance returned under node,
+recorded in `rust/tests/guidance/<behavior>.json`; the behaviors' own
+tests, ports of `typescript/test/*.test.ts` on SQLite and on Postgres
+when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, are the engine
+test kit's `tests/workqueue_<behavior>.rs`, with the test behaviors of
+`typescript/test/fixtures.ts` in its `workqueue_fixtures`. A case that
+needs a behavior the Rust engine lacks (Branches, Queue) is ignored,
+naming it.
+
 ## Lease
 
 An exclusive, time-bounded lease on the instance, held by one principal
