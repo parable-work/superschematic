@@ -15,9 +15,12 @@
 //! engine as the recording says, with a policy answering from the recorded
 //! answer table, seeded or fixed ids, a wall (strict) or fixed clock, the
 //! runner, retention and tool options, the core's behaviors
-//! ([`superschematic_engine_behaviors`]) and the test behaviors it names,
-//! then makes each step's call through [`superschematic_engine::calls`]
-//! (`behaviors.register` through the kit's behaviors and the core's) and
+//! ([`superschematic_engine_behaviors`]) and the behaviors it names: the
+//! work queue's ([`superschematic_engine_workqueue`]), or a test's where
+//! the scenario lists it among its test behaviors (`testBehaviors`, as the
+//! Budget stand-in of Queue's tests), then makes each step's call through
+//! [`superschematic_engine::calls`] (`behaviors.register` through the
+//! kit's behaviors, the core's and the work queue's) and
 //! compares its result or its error (class, code, message and details),
 //! binding the symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`,
 //! `{{opaque:N}}`) at their first appearance in an answer. On Postgres an
@@ -1460,10 +1463,11 @@ impl AccessPolicy for AnswerPolicy {
 }
 
 /// The files of the corpus a replay runs by default: the engine's own
-/// test files, whose scenarios need no behavior or few, and the core
-/// behaviors' files. The work queue's (`workqueue-*`) wait for its
-/// behaviors (milestone 12).
-pub const ENGINE_FILES: [&str; 30] = [
+/// test files, whose scenarios need no behavior or few, the core
+/// behaviors' files and the work queue's (`workqueue-*`), whose engines
+/// register its behaviors by name after the core's
+/// ([`superschematic_engine_workqueue::behavior`]).
+pub const ENGINE_FILES: [&str; 45] = [
     "access",
     "compat",
     "core-approvals",
@@ -1494,6 +1498,21 @@ pub const ENGINE_FILES: [&str; 30] = [
     "normalize",
     "registry",
     "unique",
+    "workqueue-assignment",
+    "workqueue-blueprint",
+    "workqueue-budget",
+    "workqueue-filters",
+    "workqueue-lease",
+    "workqueue-lease-approvals",
+    "workqueue-lease-branches",
+    "workqueue-lease-direct-on",
+    "workqueue-lease-numbering",
+    "workqueue-lease-timers",
+    "workqueue-package",
+    "workqueue-presence",
+    "workqueue-queue",
+    "workqueue-queue-exclusion",
+    "workqueue-retries",
 ];
 
 /// Counts of a set of reports, by file.
