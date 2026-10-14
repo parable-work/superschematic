@@ -23,8 +23,10 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # scripts/superscalar-dep.sh builds under third_party/superscalar. Every go
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
 # The version-graph binding (runtime/versiongraph/go) links the core's static
-# archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
-export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
+# archive, which scripts/versiongraph-archive.sh (make versiongraph) stages,
+# and the engine's (runtime/engine/go) the engine's, which
+# scripts/engine-archive.sh (make engine-archive) stages.
+export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print)
 
 GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
@@ -47,6 +49,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust engine-rust \
+        engine-archive engine-go engine-link-check \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -247,6 +250,23 @@ engine-rust:
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
 		&& cargo test --workspace --all-features
 
+# The engine's static archive (D58), the core's C ABI over the core's
+# behaviors, staged where its Go binding links it
+# (runtime/engine/go/lib/<goos>_<goarch>).
+engine-archive:
+	scripts/engine-archive.sh >/dev/null
+
+# The engine's Go binding (runtime/engine/go): build, vet and test over the
+# core's archive.
+engine-go: engine-archive
+	cd runtime/engine/go && go build ./... && go vet ./... && go test -count=1 ./...
+
+# One Go binary that links superscalar's, the version graph's and the
+# engine's archives together and calls each (scripts/engine-link-check.sh),
+# after checking that each archive defines its own C functions alone.
+engine-link-check:
+	scripts/engine-link-check.sh
+
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
 versiongraph:
@@ -404,7 +424,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behaviors-check ts python rust engine-rust cli-smoke example-migrations versions
+test: go-test catalog-check schema-file-types-check behaviors-check ts python rust engine-rust engine-go engine-link-check cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 
