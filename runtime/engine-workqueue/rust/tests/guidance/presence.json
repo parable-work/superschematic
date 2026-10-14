@@ -1,0 +1,98 @@
+{
+  "plain": {
+    "summary": "Each Worker stands for the principal subject names, which beats it at least every 30 seconds; the runner misses one past its deadline within 5 seconds.",
+    "operations": {
+      "beat": {
+        "useWhen": "Use as the principal subject names, at least every 30 seconds, to show it is alive.",
+        "success": "Returns the new deadline; a missed instance is present again.",
+        "errors": [
+          {
+            "code": "not_principal",
+            "commonCorrection": "Beat the instance whose subject names you."
+          },
+          {
+            "code": "no_principal",
+            "commonCorrection": "Set subject to the principal's subject first."
+          }
+        ]
+      },
+      "miss": {
+        "useWhen": "Use to apply the miss of an instance past its deadline; the runner's sweep does so within 5 seconds.",
+        "success": "Returns missed, false for an instance not past its deadline, and the leases it released, by schema."
+      },
+      "update": {
+        "doNotUseWhen": "Do not change subject once it holds a principal.",
+        "errors": [
+          {
+            "code": "principal_fixed",
+            "commonCorrection": "Create a new instance for another principal."
+          }
+        ]
+      }
+    }
+  },
+  "full": {
+    "summary": "Each Worker stands for the principal subject names, which beats it at least every 90 seconds; the runner misses one past its deadline within 1500 ms. A miss moves status from idle or busy to missing. A miss expires the principal's leases on Job, Task and Build, but those renewed since its last beat. A beat moves status from missing to idle.",
+    "operations": {
+      "beat": {
+        "useWhen": "Use as the principal subject names, at least every 90 seconds, to show it is alive.",
+        "success": "Returns the new deadline; a missed instance is present again.",
+        "errors": [
+          {
+            "code": "not_principal",
+            "commonCorrection": "Beat the instance whose subject names you."
+          },
+          {
+            "code": "no_principal",
+            "commonCorrection": "Set subject to the principal's subject first."
+          }
+        ]
+      },
+      "miss": {
+        "useWhen": "Use to apply the miss of an instance past its deadline; the runner's sweep does so within 1500 ms.",
+        "success": "Returns missed, false for an instance not past its deadline, and the leases it released, by schema."
+      },
+      "update": {
+        "doNotUseWhen": "Do not change subject once it holds a principal.",
+        "errors": [
+          {
+            "code": "principal_fixed",
+            "commonCorrection": "Create a new instance for another principal."
+          }
+        ]
+      }
+    }
+  },
+  "one": {
+    "summary": "Each Worker stands for the principal who names, which beats it at least every 1 hour; the runner misses one past its deadline within 1 minute. A miss expires the principal's leases on Job, but those renewed since its last beat. A beat moves status from missing to idle.",
+    "operations": {
+      "beat": {
+        "useWhen": "Use as the principal who names, at least every 1 hour, to show it is alive.",
+        "success": "Returns the new deadline; a missed instance is present again.",
+        "errors": [
+          {
+            "code": "not_principal",
+            "commonCorrection": "Beat the instance whose who names you."
+          },
+          {
+            "code": "no_principal",
+            "commonCorrection": "Set who to the principal's subject first."
+          }
+        ]
+      },
+      "miss": {
+        "useWhen": "Use to apply the miss of an instance past its deadline; the runner's sweep does so within 1 minute.",
+        "success": "Returns missed, false for an instance not past its deadline, and the leases it released, by schema."
+      },
+      "update": {
+        "doNotUseWhen": "Do not change who once it holds a principal.",
+        "errors": [
+          {
+            "code": "principal_fixed",
+            "commonCorrection": "Create a new instance for another principal."
+          }
+        ]
+      }
+    }
+  }
+}

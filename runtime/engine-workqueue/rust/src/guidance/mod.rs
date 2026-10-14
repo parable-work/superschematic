@@ -10,6 +10,7 @@
 
 // Milestone 12a: Lease, Assignment, Presence and Retries.
 pub(crate) mod lease;
+pub(crate) mod presence;
 
 // Milestone 12b: Queue, Budget and Blueprint.
 
