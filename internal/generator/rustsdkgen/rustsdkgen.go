@@ -153,6 +153,10 @@ type QueryParam struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+	// EmptyIsAbsent marks a parameter whose empty value is left out, as
+	// the route reads it: a paged operation's cursor (D60), which an empty
+	// one would otherwise send for the first page.
+	EmptyIsAbsent bool
 }
 
 // ChecksItems reports whether the SDK checks each item of a list parameter
@@ -728,18 +732,19 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 // pageQueryParams are a paged operation's two query parameters (D60),
 // after its own and as optional as they are: cursor, the next of the page
 // before, and limit, the most items the page holds. Each is checked before
-// the request by the bounds the route reads it with.
+// the request by the bounds the route reads it with, which reads an empty
+// cursor as none: an empty one is left out, the first page.
 func pageQueryParams(page *apigen.PageInfo) []QueryParam {
-	minLength, maxLength := 1, ir.PageCursorMaxLength
+	maxLength := ir.PageCursorMaxLength
 	minLimit, maxLimit := 1.0, float64(page.MaxLimit)
 	return []QueryParam{
 		{
 			Name:              apigen.PageCursorParam,
 			RustName:          toRustFieldName(apigen.PageCursorParam),
 			RustType:          "String",
-			ValidateMinLength: &minLength,
 			ValidateMaxLength: &maxLength,
 			ValidatePattern:   ir.PageCursorPattern,
+			EmptyIsAbsent:     true,
 		},
 		{
 			Name:        apigen.PageLimitParam,

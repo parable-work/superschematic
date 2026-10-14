@@ -1,8 +1,10 @@
 package pysdkgen
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -110,8 +112,8 @@ func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 		}
 		page := endpoint.QueryParams[len(endpoint.QueryParams)-2:]
 		cursor, limit := page[0], page[1]
-		if cursor.Name != "cursor" || *cursor.ValidateMinLength != 1 || *cursor.ValidateMaxLength != ir.PageCursorMaxLength ||
-			cursor.ValidatePattern != ir.PageCursorPattern {
+		if cursor.Name != "cursor" || cursor.ValidateMinLength != nil || *cursor.ValidateMaxLength != ir.PageCursorMaxLength ||
+			cursor.ValidatePattern != ir.PageCursorPattern || !cursor.EmptyIsAbsent {
 			t.Errorf("%s cursor = %+v", tc.method, cursor)
 		}
 		if limit.Name != "limit" || *limit.ValidateMin != 1 || *limit.ValidateMax != tc.maxLimit {
@@ -256,8 +258,9 @@ ITEMS = [
 ]
 TAGS = ["blue", "green", "red"]
 requests = []
-# next_override, when set, is the next the stub answers instead of its own.
-stub = {"next_override": None}
+# next_override, when set, is the next the stub answers instead of its own;
+# drop_next leaves next out of the page.
+stub = {"next_override": None, "drop_next": False}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -277,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             page = from_rows(ITEMS[start : start + limit + 1], limit, lambda item: {"id": item["id"]})
             if stub["next_override"] is not None:
                 page["next"] = stub["next_override"]
+            if stub["drop_next"]:
+                del page["next"]
         else:
             assert url.path == "/api/tags", self.path
             # A server that answers the cursor it was sent, after the first page.
@@ -392,9 +397,168 @@ def refused_before_the_request(call, want):
 refused_before_the_request(lambda: catalog.list_items(limit=0), {"limit": "min"})
 refused_before_the_request(lambda: catalog.list_items(limit=6), {"limit": "max"})
 refused_before_the_request(lambda: catalog.list_tags(limit=101), {"limit": "max"})
-refused_before_the_request(lambda: catalog.list_items(cursor=""), {"cursor": "minLength"})
 refused_before_the_request(lambda: catalog.list_items(cursor="e30="), {"cursor": "pattern"})
 refused_before_the_request(lambda: catalog.list_items(cursor="A" * 1025), {"cursor": "maxLength"})
 refused_before_the_request(lambda: next(catalog.list_items_all(limit=9)), {"limit": "max"})
+
+# An empty cursor is none, as the route reads it: the first page, asked
+# without a cursor.
+again = catalog.list_items(cursor="")
+assert requests[-1] == ("/api/items", {}), requests[-1]
+assert names_of(again.items) == NAMES[:2], again.items
+assert names_of(catalog.list_items_all(cursor="")) == NAMES
+
+# A page without next is the last, as the other SDKs read one.
+stub["drop_next"] = True
+assert catalog.list_items().next is None
+assert names_of(catalog.list_items_all(limit=3)) == NAMES[:3]
+stub["drop_next"] = False
+server.shutdown()
+`
+
+// addGuidePages adds a schema type named Page to the loaded
+// fixture-paged-api, with Catalog.listPages, a paged list of it, and
+// Catalog.getPage, which returns one: the namespace imports the type
+// Page beside the SDK's Page.
+func addGuidePages(t *testing.T, schema *ir.Schema) {
+	t.Helper()
+	item := schema.Types["ItemView"]
+	schema.Types["Page"] = &ir.TypeDef{
+		Name:    "Page",
+		Comment: "A page of the catalog's guide.",
+		Role:    item.Role,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		},
+	}
+	for _, set := range schema.OperationSets {
+		if set.Name != "Catalog" {
+			continue
+		}
+		set.Operations = append(set.Operations,
+			&ir.FieldDef{
+				Name: "listPages", Comment: "The pages of the guide.", TypeRef: ir.TypeRef{Name: "Page", IsArray: true}, Required: true,
+				HTTPMethod: "GET", RestPath: "pages", Page: &ir.OperationPage{DefaultLimit: 20, MaxLimit: 100},
+			},
+			&ir.FieldDef{
+				Name: "getPage", Comment: "One page of the guide.", TypeRef: ir.TypeRef{Name: "Page"}, Required: true,
+				Arguments:  []*ir.ArgumentDef{{Name: "pageId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true}},
+				HTTPMethod: "GET", RestPath: "pages/{pageId}",
+			})
+		return
+	}
+	t.Fatal("fixture-paged-api has no Catalog operation set")
+}
+
+// TestASchemaTypeNamedPageKeepsTheSDKPage: a namespace that imports a
+// schema type named Page imports the SDK's Page as SDKPage, as the
+// TypeScript SDK names it, so the type checker's Page is the schema's in
+// getPage and the SDK's page is SDKPage in every paged method; a
+// namespace without one keeps Page. The module imports and runs: listPages
+// answers an SDK page of the schema's pages.
+func TestASchemaTypeNamedPageKeepsTheSDKPage(t *testing.T) {
+	schema, apiOutput := loadPagedAPI(t)
+	addGuidePages(t, schema)
+	apiOutput, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: pagedService, Clock: nestedArraysClock})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	sdkOutput := generatePagedSDK(t, apiOutput)
+	if namespace := sdkOutput.Namespaces[0]; namespace.PageType != "SDKPage" {
+		t.Fatalf("PageType = %q", namespace.PageType)
+	}
+	root := t.TempDir()
+	sdkDir := filepath.Join(root, "sdk")
+	if err := WriteSDK(sdkOutput, sdkDir); err != nil {
+		t.Fatalf("WriteSDK: %v", err)
+	}
+	module, err := os.ReadFile(filepath.Join(sdkDir, sdkOutput.PackageName, "namespaces", sdkOutput.Namespaces[0].ModuleName+".py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(module)
+	for _, want := range []string{
+		"from ..page import Page as SDKPage\n",
+		"        Page,\n",
+		") -> SDKPage[Page]:",
+		") -> SDKPage[ItemView]:",
+		") -> Page:",
+		"def _coerce_page(self, raw: Any, item_type_name: str) -> SDKPage[Any]:",
+		"return SDKPage(items=",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("the namespace module lacks %q", want)
+		}
+	}
+	if strings.Contains(source, "from ..page import Page\n") || strings.Contains(source, "-> Page[") {
+		t.Error("the namespace module still names the SDK's Page as Page")
+	}
+
+	if testing.Short() {
+		return
+	}
+	python, err := findCompatiblePython()
+	if err != nil {
+		t.Skipf("no compatible python: %v", err)
+	}
+	typesDir := filepath.Join(root, "types")
+	typesOutput, err := pygen.Generate(schema, pygen.Options{SchemaName: pagedService, Clock: nestedArraysClock})
+	if err != nil {
+		t.Fatalf("pygen.Generate: %v", err)
+	}
+	if err := pygen.WriteTypes(typesOutput, typesDir); err != nil {
+		t.Fatalf("pygen.WriteTypes: %v", err)
+	}
+	if err := exec.Command(python, "-c", "import pydantic").Run(); err != nil {
+		t.Skip("pydantic not available; skipping the Python SDK probe")
+	}
+	probe := exec.Command(python, "-c", guidePagesProbe,
+		typesDir, sdkDir, sdkOutput.PackageName, sdkOutput.SDKClassName, typesOutput.PythonModuleName, sdkOutput.Namespaces[0].AccessorName)
+	if out, err := probe.CombinedOutput(); err != nil {
+		t.Fatalf("Python SDK probe failed: %v\n%s", err, out)
+	}
+}
+
+// guidePagesProbe takes the types and SDK directories, the SDK package and
+// class, the types package and the namespace accessor as arguments.
+const guidePagesProbe = `
+import json
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+types_dir, sdk_dir, sdk_name, sdk_class, types_name, accessor = sys.argv[1:]
+sys.path.insert(0, types_dir)
+sys.path.insert(0, sdk_dir)
+sdk_package = __import__(sdk_name)
+types_package = __import__(types_name)
+GUIDE = {"id": "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40", "title": "Anvils"}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        data = {"items": [GUIDE], "next": None} if self.path == "/api/pages" else GUIDE
+        body = json.dumps({"data": data, "meta": {"requestId": "req-1"}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+server = HTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+sdk = getattr(sdk_package, sdk_class)(sdk_package.ClientConfig(base_url=f"http://127.0.0.1:{server.server_address[1]}", max_network_retries=0))
+catalog = getattr(sdk, accessor)
+page = catalog.list_pages()
+assert isinstance(page, sdk_package.Page), type(page)
+assert [type(item) for item in page.items] == [types_package.Page], page.items
+assert page.items[0].title == "Anvils" and page.next is None, page
+one = catalog.get_page(GUIDE["id"])
+assert isinstance(one, types_package.Page) and one.title == "Anvils", one
 server.shutdown()
 `

@@ -15,6 +15,8 @@
 // In memory, Matches(text, Terms(q)).
 package search
 
+//go:generate sh -c "cd ../../rust && cargo run -q --example fold_mappings | (cd ../go/search && go run gen_fold.go)"
+
 import (
 	"strings"
 	"unicode"
@@ -60,9 +62,20 @@ func LikePattern(term string) string {
 // Fold is the text an in-memory search compares: each character's simple
 // lowercase mapping (Unicode's UnicodeData), one character for one, so
 // "İ" is "i", a final "Σ" is "σ", and a character without a lowercase is
-// itself.
+// itself. The mappings are the TypeScript and Rust runtimes': Go's
+// unicode tables are of an older Unicode, and foldAdded holds what the
+// later versions added.
 func Fold(text string) string {
-	return strings.Map(unicode.ToLower, text)
+	return strings.Map(lower, text)
+}
+
+// lower is a character's simple lowercase mapping, foldAdded's when it
+// has one.
+func lower(r rune) rune {
+	if folded, ok := foldAdded[r]; ok {
+		return folded
+	}
+	return unicode.ToLower(r)
 }
 
 // Matches reports whether a searchable text contains every term, by Fold:

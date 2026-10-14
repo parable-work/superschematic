@@ -292,6 +292,26 @@
       "name": "no case",
       "text": "金床 🔨 123",
       "fold": "金床 🔨 123"
+    },
+    {
+      "name": "a Cyrillic letter Unicode 16 cased",
+      "text": "Ᲊᲊ",
+      "fold": "ᲊᲊ"
+    },
+    {
+      "name": "Latin letters Unicode 16 and 17 cased",
+      "text": "ꟋꟌ꟎꟒꟔ꟚꟜꟍ꟏",
+      "fold": "ɤꟍ꟏ꟓꟕꟛƛꟍ꟏"
+    },
+    {
+      "name": "the Garay capitals Unicode 16 added",
+      "text": "𐵐𐵑𐵒𐵓𐵔𐵕𐵖𐵗𐵘𐵙𐵚𐵛𐵜𐵝𐵞𐵟𐵠𐵡𐵢𐵣𐵤𐵥",
+      "fold": "𐵰𐵱𐵲𐵳𐵴𐵵𐵶𐵷𐵸𐵹𐵺𐵻𐵼𐵽𐵾𐵿𐶀𐶁𐶂𐶃𐶄𐶅"
+    },
+    {
+      "name": "the Beria Erfe capitals Unicode 17 added",
+      "text": "𖺠𖺡𖺢𖺣𖺤𖺥𖺦𖺧𖺨𖺩𖺪𖺫𖺬𖺭𖺮𖺯𖺰𖺱𖺲𖺳𖺴𖺵𖺶𖺷𖺸",
+      "fold": "𖺻𖺼𖺽𖺾𖺿𖻀𖻁𖻂𖻃𖻄𖻅𖻆𖻇𖻈𖻉𖻊𖻋𖻌𖻍𖻎𖻏𖻐𖻑𖻒𖻓"
     }
   ],
   "matches": [
@@ -389,6 +409,18 @@
       "name": "the ninth word does not count",
       "text": "one two three four five six seven eight",
       "query": "one two three four five six seven eight nine",
+      "match": true
+    },
+    {
+      "name": "a Garay word in capitals",
+      "text": "𐵐𐵑𐵒𐵓𐵔𐵕𐵖𐵗𐵘𐵙𐵚𐵛𐵜𐵝𐵞𐵟𐵠𐵡𐵢𐵣𐵤𐵥",
+      "query": "𐵰𐵱𐵲𐵳𐵴𐵵𐵶𐵷𐵸𐵹𐵺𐵻𐵼𐵽𐵾𐵿𐶀𐶁𐶂𐶃𐶄𐶅",
+      "match": true
+    },
+    {
+      "name": "a Latin letter Unicode 16 cased",
+      "text": "Ƛ",
+      "query": "ƛ",
       "match": true
     }
   ]

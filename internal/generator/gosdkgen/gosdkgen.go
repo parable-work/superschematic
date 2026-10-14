@@ -688,16 +688,18 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			for namespaceIndex := range output.Namespaces {
 				for endpointIndex := range output.Namespaces[namespaceIndex].Endpoints {
 					endpoint := &output.Namespaces[namespaceIndex].Endpoints[endpointIndex]
-					if endpoint.Page != nil {
-						// A page decodes its items itself.
-						continue
-					}
 					outputType := normalizeTypeName(endpoint.OutputType)
 					if _, ok := unionTypes[outputType]; !ok {
 						continue
 					}
 					endpoint.IsUnionOutput = true
 					endpoint.OutputUnionWrapperGoType = "types." + outputType + "Wrapper"
+					if endpoint.Page != nil {
+						// A page of a union decodes each item through its
+						// wrapper, since a union is an interface, and
+						// returns the page of the items the wrappers hold.
+						endpoint.OutputUnionWrapperGoType = "runtime.Page[" + endpoint.OutputUnionWrapperGoType + "]"
+					}
 				}
 			}
 		}

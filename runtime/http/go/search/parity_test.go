@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,22 @@ type matchVector struct {
 	Text  string `json:"text"`
 	Query string `json:"query"`
 	Match bool   `json:"match"`
+}
+
+// garay and beriaErfe are the capitals of two scripts whose case Unicode
+// 16 and 17 added, which Go's unicode tables lack (foldAdded).
+var (
+	garay     = runes(0x10D50, 0x10D65)
+	beriaErfe = runes(0x16EA0, 0x16EB8)
+)
+
+// runes is the text of the characters from first to last.
+func runes(first, last rune) string {
+	var b strings.Builder
+	for r := first; r <= last; r++ {
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // parityCorpus builds the vectors, each with the answer this package gives.
@@ -114,6 +131,10 @@ func parityCorpus() parityFile {
 		{Name: "fullwidth letters", Text: "ＡＢＣ"},
 		{Name: "combining marks", Text: "E\u0301COLE"},
 		{Name: "no case", Text: "金床 🔨 123"},
+		{Name: "a Cyrillic letter Unicode 16 cased", Text: "\u1c89\u1c8a"},
+		{Name: "Latin letters Unicode 16 and 17 cased", Text: "\ua7cb\ua7cc\ua7ce\ua7d2\ua7d4\ua7da\ua7dc\ua7cd\ua7cf"},
+		{Name: "the Garay capitals Unicode 16 added", Text: garay},
+		{Name: "the Beria Erfe capitals Unicode 17 added", Text: beriaErfe},
 	}
 	for i := range folds {
 		folds[i].Fold = Fold(folds[i].Text)
@@ -136,6 +157,8 @@ func parityCorpus() parityFile {
 		{Name: "combining marks are not composed", Text: "e\u0301cole", Query: "école"},
 		{Name: "a no-break space splits the query", Text: "anvil, red", Query: "red\u00a0anvil"},
 		{Name: "the ninth word does not count", Text: "one two three four five six seven eight", Query: "one two three four five six seven eight nine"},
+		{Name: "a Garay word in capitals", Text: garay, Query: Fold(garay)},
+		{Name: "a Latin letter Unicode 16 cased", Text: "\ua7dc", Query: "\u019b"},
 	}
 	for i := range matches {
 		matches[i].Match = Matches(matches[i].Text, Terms(matches[i].Query))

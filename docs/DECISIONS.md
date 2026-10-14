@@ -6060,7 +6060,32 @@ twins); `format`; the loader's checks (`internal/loader/verify/page.go`);
 and the tool documents' parameters, page and sentence (`toolsutil`); Go's
 `paging`, TypeScript's `readPage` and Rust's `page` module, held to
 `page_parity.json`; each reads a parameter's first value and an empty one
-as absent. Each server and SDK generator refused a paged operation until
+as absent. Each parses the raw query as WHATWG's form-urlencoded parser
+does, pairs split at `&` alone and a `%` that starts no escape kept as it
+is (Go's `paging.QueryValues`, since `url.Query` drops a pair with a
+malformed escape and splits at `;`), so `?limit=%zz` and
+`?limit=500;x=1` are the limit's 400 in all three, not the first page;
+and each checks a cursor's alphabet before its length, on bytes, so a
+cursor outside ASCII is refused for its pattern however a runtime decodes
+a broken UTF-8 escape. Every runtime refuses to read a cursor whose key
+names no position, JSON `null` or an empty object (which Go would read
+into a struct key as its zero), or holds what one runtime cannot read: a
+number past `f64`'s range (which TypeScript would read as Infinity), a
+`\u` escape of a lone surrogate (which Go would read as U+FFFD) and
+arrays or objects nested 128 deep (serde_json's limit). `EncodeCursor`,
+`encodeCursor` and `Cursor::encode`, and so the three `from_rows`, fail
+on such a key and on one whose cursor would be past 1024 characters, the
+implementation's error rather than a `next` no router reads: Go's error,
+TypeScript's `RangeError`, and Rust's 500 `ApiError`, `Cursor::encode`
+and `Page::from_rows` returning `Result`. The vectors hold all of it
+(`refused`, and `unencodable`, the keys no runtime encodes). Two
+differences stay, the key's shape being the implementation's: an object
+that lacks a member of the key's type reads in Go, its field zero, and in
+TypeScript, which checks no shape, where serde refuses one that lacks a
+required field, so an implementation refuses a key without its id itself
+(acme's `decodeKey`); and an object that names a member twice reads as
+its last in Go, TypeScript and a serde `Value`, where a serde struct
+refuses it. Each server and SDK generator refused a paged operation until
 it rendered it, and every one renders it now, so the refusal
 (`apigen.RefusePages`) and its test are gone. The Go server's paged method takes `page paging.Request` last and returns
 `paging.Page[T]`, its route reads the page with `paging.Read` after its
@@ -6079,11 +6104,17 @@ TypeScript SDKs' paged method takes the page request and returns
 `runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an `iter.Seq2`) and
 `listItemsAll` (an `AsyncIterable`) ask for each page as the loop reaches
 it, and their tools take `cursor` and `limit` in the query and return the
-page. The Python and Rust SDKs' paged method takes `cursor` and `limit`
+page; the Go SDK reads a page of a union's items through the union's
+wrapper, item by item (`TestPagedUnionSDKBuildsAndRuns`). The Python and
+Rust SDKs' paged method takes `cursor` and `limit`
 and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
 every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
 `fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
-`rustsdkgen`. The Topcoat crate renders a paged operation wherever it
+`rustsdkgen`. In every SDK an empty cursor asks for the first page, as
+the route reads one (Python and Rust leave it out, where they refused
+it), and a page without `next` is the last. A Python namespace that imports a
+schema type named `Page` imports the SDK's as `SDKPage`, as the
+TypeScript SDK names it. The Topcoat crate renders a paged operation wherever it
 renders a call: the in-process call returns the page; each element type a
 paged operation returns has a `<Element>PageRecord { items, next }`, which
 the build refuses when the schemas declare a type named `<Element>Page`;
@@ -6162,10 +6193,14 @@ derives the target, options, value, label and lookup and reports the
 first rule broken, and `ir.ReferencesOf` lists every reference with its
 holder. `internal/loader/verify/references.go` runs it after the display
 checks, adds the refusals of placement and of the value's type, and reads
-the dependency whose type a reference names when the schema imports it.
+the dependency whose type a reference names when the schema imports it:
+only a dependency its config declares, of a kind an API may reference
+types from, so two APIs that refer to each other get the import's own
+refusal, and a cycle of such reads is refused, not read without end.
 The tests: `ir/reference_test.go`, `verify/references_test.go`, the
 reader's `refers_to_test.go` with `broken-references`, the loader's
-`references_test.go` (a dependency's target among them), and
+`references_test.go` (a dependency's target and two APIs that refer to
+each other among them), and
 `fixture-refs-api` in TypeScript, JSON and YAML, which load to one IR and
 round-trip through every writer. No server, SDK or OpenAPI document
 changes. The Topcoat crate resolves each reference its forms and records
@@ -6238,9 +6273,14 @@ in Go (`runtime/http/go/search`), `searchTerms`, `likePattern`,
 `foldText` and `searchMatches` in TypeScript, and `search::terms`,
 `search::like_pattern`, `search::fold` and `search::matches` in Rust: the
 fold is each character's simple lowercase, one for one, so an in-memory
-match is the same in the three. `runtime/http/testdata/search_parity.json`,
-written by the Go package's test, holds them to the same words (Unicode
-`White_Space` without U+FEFF, the first 8), patterns, folds and matches.
+match is the same in the three. Go's `unicode` tables are Unicode 15.0,
+and Rust's `char` and Bun's ICU Unicode 17.0, so Go's `Fold` takes the 55
+simple lowercase mappings the later versions added first, from
+`fold_table.go`, which `go generate` writes from the Rust runtime's
+`fold_mappings` example, and the vectors fold and match each of them.
+`runtime/http/testdata/search_parity.json`, written by the Go package's
+test, holds them to the same words (Unicode `White_Space` without
+U+FEFF, the first 8), patterns, folds and matches.
 The tests: `verify/search_test.go`, the reader's and the loader's tests
 with `fixture-refs-api`, and each runtime's parity test. The Topcoat
 argument form puts its search argument first, a `type="search"` box

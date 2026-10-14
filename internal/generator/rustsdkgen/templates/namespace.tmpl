@@ -587,6 +587,9 @@ checks per item. */}}
 {{- else if .IsArray}}
             // An empty list is left out: the route refuses a present empty value.
             if let Some(query_param_value) = query.{{.RustName}}.as_ref().filter(|list| !list.is_empty()) {
+{{- else if .EmptyIsAbsent}}
+            // An empty value is left out, as the route reads it: none.
+            if let Some(query_param_value) = query.{{.RustName}}.as_ref().filter(|text| !text.is_empty()) {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}

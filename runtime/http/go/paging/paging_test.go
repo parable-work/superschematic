@@ -2,6 +2,7 @@ package paging
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -124,5 +125,41 @@ func TestReadWritesTheProblemAndDecodeRefuses(t *testing.T) {
 	}
 	if err := DecodeCursor("e30", orderKey{}); err == nil || errors.As(err, &appErr) || !strings.Contains(err.Error(), "paging: decode a cursor") {
 		t.Fatalf("a key that is not a pointer = %v", err)
+	}
+}
+
+// A key whose cursor no router reads back fails at encode time, the
+// implementation's error, not a next page every reader refuses: past
+// CursorMaxLength, null, an empty object. FromRows returns the error.
+func TestEncodeRefusesAKeyNoRouterReads(t *testing.T) {
+	long := strings.Repeat("x", 767)
+	for _, key := range []any{long, nil, map[string]any{}, struct{}{}, json.RawMessage(`"\ud800"`), json.RawMessage(`1e400`)} {
+		if cursor, err := EncodeCursor(key); err == nil || errors.As(err, new(*apperror.AppError)) {
+			t.Errorf("EncodeCursor(%v) = %q, %v", key, cursor, err)
+		}
+	}
+	if _, err := EncodeCursor(long[1:]); err != nil {
+		t.Fatalf("a key of 768 bytes: %v", err)
+	}
+	page, err := FromRows([]string{"a", long, "c"}, 2, func(row string) any { return row })
+	if err == nil || !strings.Contains(err.Error(), "its cursor is 1026 characters, past the 1024 a router reads") {
+		t.Fatalf("FromRows = %+v, %v", page, err)
+	}
+}
+
+// DecodeCursor refuses JSON null and an empty object, which would leave a
+// struct key zero, and reads an escaped surrogate pair as its character.
+func TestDecodeRefusesAKeyThatNamesNoPosition(t *testing.T) {
+	var appErr *apperror.AppError
+	for _, text := range []string{`null`, `{}`, "\t{ \n}"} {
+		cursor := base64.RawURLEncoding.EncodeToString([]byte(text))
+		if err := DecodeCursor(cursor, &orderKey{}); !errors.As(err, &appErr) || appErr.Message != RefusedCursorDetail {
+			t.Errorf("%q: DecodeCursor = %v", text, err)
+		}
+	}
+	var key map[string]string
+	cursor := base64.RawURLEncoding.EncodeToString([]byte(`{"a😀":"😀b"}`))
+	if err := DecodeCursor(cursor, &key); err != nil || key["a😀"] != "😀b" {
+		t.Fatalf("an escaped surrogate pair = %v, %v", key, err)
 	}
 }

@@ -163,28 +163,56 @@ pub struct Cursor(String);
 impl Cursor {
     /// The cursor of a position: the unpadded base64url of the compact
     /// JSON of `key`, which serde_json writes as the Go and TypeScript
-    /// runtimes do. A key should encode short: a router reads a cursor of
-    /// at most [`CURSOR_MAX_LENGTH`] characters, about 768 bytes of JSON.
-    ///
-    /// # Panics
-    ///
-    /// When `key` does not serialize as JSON, a map with keys that are not
-    /// strings, say: the implementation's error, not the caller's.
-    pub fn encode<K: Serialize + ?Sized>(key: &K) -> Self {
-        let json = serde_json::to_vec(key).expect("a cursor's key serializes as JSON");
-        Self(URL_SAFE_NO_PAD.encode(json))
+    /// runtimes do. A key every router would refuse to read back is the
+    /// implementation's error, a 500: one that does not serialize as JSON
+    /// (a map with keys that are not strings, say), one whose cursor is
+    /// past [`CURSOR_MAX_LENGTH`] characters, about 768 bytes of JSON, and
+    /// one [`Cursor::decode`] refuses (null, an empty object, arrays and
+    /// objects nested 128 deep).
+    pub fn encode<K: Serialize + ?Sized>(key: &K) -> Result<Self, ApiError> {
+        let unreadable = |problem: &str| {
+            ApiError::internal(format!(
+                "encode a cursor's key: {problem}, which no router reads back"
+            ))
+        };
+        let json = serde_json::to_vec(key).map_err(|err| {
+            ApiError::internal(format!("encode a cursor's key: it is not JSON: {err}"))
+        })?;
+        let value: Value = serde_json::from_slice(&json)
+            .map_err(|_| unreadable("the key nests 128 arrays or objects deep"))?;
+        if let Some(problem) = key_problem(&value) {
+            return Err(unreadable(problem));
+        }
+        let text = URL_SAFE_NO_PAD.encode(json);
+        if text.len() > CURSOR_MAX_LENGTH {
+            return Err(ApiError::internal(format!(
+                "encode a cursor's key: its cursor is {} characters, past the {CURSOR_MAX_LENGTH} a router reads",
+                text.len()
+            )));
+        }
+        Ok(Self(text))
     }
 
     /// Reads the cursor back into the implementation's key type. A cursor
     /// that is not of the alphabet, not the canonical unpadded base64url of
-    /// JSON, or whose JSON is not a `K`, is refused with the 400 every
-    /// runtime answers, at `cursor`: the caller starts again.
+    /// JSON, whose JSON names no position or holds what another runtime
+    /// cannot read (null, an empty object, a number past `f64`'s range, a
+    /// lone surrogate escape, arrays and objects nested 128 deep), or whose
+    /// JSON is not a `K`, is refused with the 400 every runtime answers, at
+    /// `cursor`: the caller starts again.
     pub fn decode<K: DeserializeOwned>(&self) -> Result<K, ApiError> {
         let text = self.0.as_str();
         if text.is_empty() || text.len() > CURSOR_MAX_LENGTH || !text.bytes().all(is_cursor_byte) {
             return Err(refused_cursor());
         }
         let bytes = URL_SAFE_NO_PAD.decode(text).map_err(|_| refused_cursor())?;
+        // serde_json refuses the escape and the depth itself; the key is
+        // read as a JSON value first so the rest is refused whatever `K`
+        // is.
+        let value: Value = serde_json::from_slice(&bytes).map_err(|_| refused_cursor())?;
+        if key_problem(&value).is_some() {
+            return Err(refused_cursor());
+        }
         serde_json::from_slice(&bytes).map_err(|_| refused_cursor())
     }
 
@@ -233,16 +261,23 @@ impl<T> Page<T> {
     /// to `limit + 1` rows in the operation's order, after the request's
     /// cursor, and `from_rows` keeps `limit` of them and, when there were
     /// more, sets `next` to the cursor of the last one kept,
-    /// `Cursor::encode(&key(row))`. `limit` is the request's; one below 1
-    /// is taken as 1.
-    pub fn from_rows<K: Serialize>(mut rows: Vec<T>, limit: i64, key: impl Fn(&T) -> K) -> Self {
+    /// `Cursor::encode(&key(row))`, whose error it returns. `limit` is the
+    /// request's; one below 1 is taken as 1.
+    pub fn from_rows<K: Serialize>(
+        mut rows: Vec<T>,
+        limit: i64,
+        key: impl Fn(&T) -> K,
+    ) -> Result<Self, ApiError> {
         let keep = usize::try_from(limit.max(1)).unwrap_or(usize::MAX);
         if rows.len() <= keep {
-            return Self::last(rows);
+            return Ok(Self::last(rows));
         }
         rows.truncate(keep);
-        let next = rows.last().map(|row| Cursor::encode(&key(row)));
-        Self { items: rows, next }
+        let next = rows
+            .last()
+            .map(|row| Cursor::encode(&key(row)))
+            .transpose()?;
+        Ok(Self { items: rows, next })
     }
 
     /// The page with each item mapped, its next kept.
@@ -285,19 +320,45 @@ fn refuse(parameter: &str, reason: &str, validator: Option<&str>) -> ApiError {
         .with_details(Value::Object(details))
 }
 
+/// Why every runtime refuses to read a cursor's key, beyond what
+/// serde_json refuses as it reads it (a lone surrogate escape, arrays and
+/// objects nested 128 deep), or `None`: JSON null or an empty object,
+/// which name no position whatever the key's type, and a number past
+/// `f64`'s range, which serde_json reads with `arbitrary_precision`.
+fn key_problem(value: &Value) -> Option<&'static str> {
+    fn infinite(value: &Value) -> bool {
+        match value {
+            Value::Number(number) => !number.as_f64().is_some_and(f64::is_finite),
+            Value::Array(items) => items.iter().any(infinite),
+            Value::Object(members) => members.values().any(infinite),
+            _ => false,
+        }
+    }
+    match value {
+        Value::Null => Some("the key is null, which names no position"),
+        Value::Object(members) if members.is_empty() => {
+            Some("the key is an empty object, which names no position")
+        }
+        _ if infinite(value) => Some("a number of the key is past f64's range"),
+        _ => None,
+    }
+}
+
 /// A byte of the unpadded base64url alphabet.
 fn is_cursor_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
 }
 
+/// The alphabet is checked first, on bytes, so a cursor outside ASCII is
+/// refused for its pattern however long it is, as in every runtime.
 fn check_cursor_text(text: &str) -> Result<(), ApiError> {
-    if text.chars().count() > CURSOR_MAX_LENGTH {
-        let reason = format!("must be at most {CURSOR_MAX_LENGTH} characters");
-        return Err(refuse(CURSOR_PARAM, &reason, Some("maxLength")));
-    }
     if text.is_empty() || !text.bytes().all(is_cursor_byte) {
         let reason = "does not match the required pattern";
         return Err(refuse(CURSOR_PARAM, reason, Some("pattern")));
+    }
+    if text.len() > CURSOR_MAX_LENGTH {
+        let reason = format!("must be at most {CURSOR_MAX_LENGTH} characters");
+        return Err(refuse(CURSOR_PARAM, &reason, Some("maxLength")));
     }
     Ok(())
 }
@@ -367,7 +428,7 @@ mod tests {
             placed_at: row.placed_at.to_owned(),
             id: row.id.to_owned(),
         };
-        let page = Page::from_rows(rows.clone(), 2, key);
+        let page = Page::from_rows(rows.clone(), 2, key).unwrap();
         assert_eq!(page.items, rows[..2]);
         let next = page.next.clone().unwrap();
         assert_eq!(
@@ -378,10 +439,13 @@ mod tests {
             }
         );
         assert_eq!(
-            Page::from_rows(rows.clone(), 3, key),
+            Page::from_rows(rows.clone(), 3, key).unwrap(),
             Page::last(rows.clone())
         );
-        assert_eq!(Page::from_rows(rows.clone(), 0, key).items.len(), 1);
+        assert_eq!(
+            Page::from_rows(rows.clone(), 0, key).unwrap().items.len(),
+            1
+        );
 
         // The next request starts after it, and the page maps to records.
         let request = SPEC.request(Some(next.as_str()), Some(2)).unwrap();
@@ -396,11 +460,51 @@ mod tests {
 
     #[test]
     fn a_cursor_of_another_shape_is_refused() {
-        let forged = Cursor::encode(&json!({"id": 1}));
+        let forged = Cursor::encode(&json!({"id": 1})).unwrap();
         let err = forged.decode::<OrderKey>().unwrap_err();
         assert_eq!(err.status, http::StatusCode::BAD_REQUEST);
         assert_eq!(err.message, REFUSED_CURSOR_DETAIL);
         assert_eq!(reason(&err), REFUSED_CURSOR_REASON);
+
+        // Null and an empty object name no position, whatever the key's
+        // type: one of optional members would read either.
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        struct Optional {
+            id: Option<String>,
+        }
+        for json in ["null", "{}", " { } "] {
+            let forged = Cursor(URL_SAFE_NO_PAD.encode(json));
+            assert_eq!(
+                forged.decode::<Option<Optional>>().unwrap_err().message,
+                REFUSED_CURSOR_DETAIL,
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_no_router_reads_back_is_the_implementations_error() {
+        let long = "x".repeat(767);
+        let err = Cursor::encode(&long).unwrap_err();
+        assert_eq!(err.status, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            err.message
+                .contains("its cursor is 1026 characters, past the 1024 a router reads"),
+            "{}",
+            err.message
+        );
+        assert_eq!(Cursor::encode(&long[1..]).unwrap().as_str().len(), 1024);
+        assert!(Cursor::encode(&()).is_err());
+        assert!(Cursor::encode(&f64::INFINITY).is_err());
+        assert!(Cursor::encode(&json!({})).is_err());
+        let mut map = std::collections::BTreeMap::new();
+        map.insert((1, 2), 3);
+        assert!(Cursor::encode(&map).is_err());
+
+        let rows = vec!["a".to_owned(), long, "c".to_owned()];
+        let err = Page::from_rows(rows, 2, Clone::clone).unwrap_err();
+        assert_eq!(err.status, http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]

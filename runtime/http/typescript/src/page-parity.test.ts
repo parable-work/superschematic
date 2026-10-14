@@ -40,6 +40,7 @@ interface Corpus {
   }[];
   readonly cursors: readonly { readonly name: string; readonly keyJSON: string; readonly cursor: string }[];
   readonly refused: readonly { readonly name: string; readonly cursor: string; readonly problem: Problem }[];
+  readonly unencodable: readonly { readonly name: string; readonly keyJSON: string }[];
   readonly fromRows: readonly {
     readonly name: string;
     readonly rows: unknown[];
@@ -64,7 +65,7 @@ function problemOf(run: () => unknown): Problem {
 
 describe('page parity vectors', () => {
   test('every section has vectors with distinct names', () => {
-    for (const section of [corpus.reads, corpus.cursors, corpus.refused, corpus.fromRows]) {
+    for (const section of [corpus.reads, corpus.cursors, corpus.refused, corpus.unencodable, corpus.fromRows]) {
       expect(section.length).toBeGreaterThan(0);
       expect(new Set(section.map(vector => vector.name)).size).toBe(section.length);
     }
@@ -102,6 +103,14 @@ describe('page parity vectors', () => {
     });
   }
 
+  for (const vector of corpus.unencodable) {
+    test(`unencodable: ${vector.name}`, () => {
+      const key = JSON.parse(vector.keyJSON);
+      expect(() => encodeCursor(key)).toThrow(RangeError);
+      expect(() => pageFromRows(['first', key, 'after'], 2, row => row)).toThrow(RangeError);
+    });
+  }
+
   for (const vector of corpus.fromRows) {
     test(`fromRows: ${vector.name}`, () => {
       expect(pageFromRows(vector.rows, vector.limit, row => row)).toEqual(vector.page);
@@ -127,5 +136,22 @@ describe('pages', () => {
 
   test('a key that does not encode as JSON is the implementation’s error', () => {
     expect(() => encodeCursor(undefined)).toThrow(TypeError);
+  });
+
+  test('a key no router reads back throws at encode time', () => {
+    expect(() => encodeCursor('x'.repeat(767))).toThrow('its cursor is 1026 characters, past the 1024 a router reads');
+    expect(encodeCursor('x'.repeat(766))).toHaveLength(1024);
+    expect(() => encodeCursor(Infinity)).toThrow(RangeError);
+    expect(() => encodeCursor({ name: 'a\ud800' })).toThrow('a string of the key holds a lone surrogate');
+    expect(() => encodeCursor({ ['\udc00']: 1 })).toThrow('a member name of the key holds a lone surrogate');
+  });
+
+  test('a forged cursor JSON reads as no other runtime does is refused', () => {
+    const forged = (json: string) => Buffer.from(json).toString('base64url');
+    // JSON.parse would read 1e400 as Infinity and keep a lone surrogate.
+    for (const json of ['1e400', '[-1e999]', '"\\ud800"', '{"\\udfff":1}', 'null', '{ }']) {
+      expect(() => decodeCursor(forged(json))).toThrow(HttpProblem);
+    }
+    expect(decodeCursor(forged('"\\ud83d\\ude00"'))).toBe('😀');
   });
 });

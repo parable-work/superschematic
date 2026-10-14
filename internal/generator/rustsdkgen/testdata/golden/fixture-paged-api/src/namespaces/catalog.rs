@@ -90,11 +90,9 @@ impl CatalogNamespace {
             if let Some(query_param_value) = &query.in_stock {
             query_params.push(("inStock".to_string(), query_param_value.to_string()));
             }
-            if let Some(query_param_value) = &query.cursor {
+            // An empty value is left out, as the route reads it: none.
+            if let Some(query_param_value) = query.cursor.as_ref().filter(|text| !text.is_empty()) {
             let query_param_text = query_param_value.to_string();
-            if query_param_text.chars().count() < 1 {
-                return Err(SDKError::config("cursor must be at least 1 characters"));
-            }
             if query_param_text.chars().count() > 1024 {
                 return Err(SDKError::config("cursor must be at most 1024 characters"));
             }
@@ -167,11 +165,9 @@ impl CatalogNamespace {
         let path = "/api/tags";
         let mut query_params: Vec<(String, String)> = Vec::new();
         if let Some(query) = query {
-            if let Some(query_param_value) = &query.cursor {
+            // An empty value is left out, as the route reads it: none.
+            if let Some(query_param_value) = query.cursor.as_ref().filter(|text| !text.is_empty()) {
             let query_param_text = query_param_value.to_string();
-            if query_param_text.chars().count() < 1 {
-                return Err(SDKError::config("cursor must be at least 1 characters"));
-            }
             if query_param_text.chars().count() > 1024 {
                 return Err(SDKError::config("cursor must be at most 1024 characters"));
             }

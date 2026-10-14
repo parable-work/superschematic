@@ -191,3 +191,31 @@ func AddShelfItemsOperation(schema *ir.Schema) error {
 	}
 	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
 }
+
+// AddEntriesOperation adds the union Entry (ItemView | BasketView) and
+// Catalog.listEntries, a paged GET (D60, two to a page, up to five) of
+// Entry, to the loaded fixture-paged-api schema: the TypeScript schema
+// form declares no unions. An SDK decodes each item of its page through
+// the union, which the fixture's own paged operations do not need.
+func AddEntriesOperation(schema *ir.Schema) error {
+	if schema.Unions == nil {
+		schema.Unions = map[string]*ir.UnionDef{}
+	}
+	schema.Unions["Entry"] = &ir.UnionDef{Name: "Entry", Comment: "An item or a placed basket.", Types: []string{"ItemView", "BasketView"}}
+	for _, set := range schema.OperationSets {
+		if set.Name != "Catalog" {
+			continue
+		}
+		set.Operations = append(set.Operations, &ir.FieldDef{
+			Name:       "listEntries",
+			Comment:    "The items and the placed baskets, in one list.",
+			TypeRef:    ir.TypeRef{Name: "Entry", IsArray: true},
+			Required:   true,
+			HTTPMethod: "GET",
+			RestPath:   "entries",
+			Page:       &ir.OperationPage{DefaultLimit: 2, MaxLimit: 5},
+		})
+		return nil
+	}
+	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
+}

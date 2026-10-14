@@ -50,9 +50,8 @@ func codegenImportPackages(schema *ir.Schema) map[string]bool {
 }
 
 // checkServiceReference enforces the cross-kind type-reference rules for one
-// @schemas/* import that appears in schema.Imports: the kind's
-// AllowedReferences when it has a positive allowlist, else its
-// DeniedReferences.
+// @schemas/* import that appears in schema.Imports, by the kind's
+// KindSpec.MayReference.
 func checkServiceReference(schema *ir.Schema, kind registry.KindSpec, in Input, r *Result, site ImportSite) {
 	service := serviceNameForPackage(site.Package)
 	if service == schema.Name {
@@ -72,14 +71,7 @@ func checkServiceReference(schema *ir.Schema, kind registry.KindSpec, in Input, 
 		return
 	}
 
-	if kind.AllowedReferences != nil {
-		if !kind.AllowedReferences[string(depKind)] {
-			r.errorAt(site.File, site.Line, site.Col,
-				"a %s schema cannot reference types from %s service %q", schema.Kind, depKind, service)
-		}
-		return
-	}
-	if kind.DeniedReferences[string(depKind)] {
+	if !kind.MayReference(string(depKind)) {
 		r.errorAt(site.File, site.Line, site.Col,
 			"a %s schema cannot reference types from %s service %q", schema.Kind, depKind, service)
 	}
