@@ -5687,8 +5687,24 @@ an event cursor on Postgres held to the recorded order rather than its
 number (a write a rollback undid leaves a gap in a Postgres identity
 column), but for a step it lists with what explains it (a change the
 recording does not see). CI tests the
-workspace on both databases. The Node-API addon is milestone 7, and the
-work queue's milestone 12. Until the Rust engine passes the TypeScript
+workspace on both databases. `superschematic-engine-napi` (milestone 7a)
+is the Rust engine as a Node-API addon, with the core's behaviors it is
+built with, and `@superschematic/engine`'s `src/native` gives it the
+package's synchronous API: a call by name with JSON in and out on the
+JavaScript thread over SQLite, a promise of one off that thread (an
+`AsyncTask`, or on Postgres a future that owns the engine), the package's
+error classes rebuilt from the class, code and members the addon throws,
+a panic caught at every entry, and a policy or permission matcher
+written in TypeScript asked on the JavaScript thread during a call. With
+`ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
+under Node.js and Bun, held to `test/rust-pending.txt`, the files not
+passing yet and why, which a file leaves once it passes (CI's
+`engine-napi` job): 8 of the 66 pass on both, and no test that runs
+fails on what the Rust engine does. Most wait for milestone 7b's
+test-only bridge for behaviors written in TypeScript; it brings too raw
+SQL on the engine's file, `events.watch`, and `engineApp` and
+`engineMcp` over the engine's routes. The work queue's behaviors are
+milestone 12, in progress. Until the Rust engine passes the TypeScript
 suite, `@superschematic/engine` is the TypeScript implementation and
 nothing uses the workspace.
 

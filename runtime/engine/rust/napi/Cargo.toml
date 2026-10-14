@@ -1,0 +1,48 @@
+[package]
+name = "superschematic-engine-napi"
+description = "The engine's Node-API addon, which @superschematic/engine loads to run on the Rust engine (D58)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "superschematic_engine_napi"
+# The addon `napi build` writes into runtime/engine/typescript/native
+# (scripts/engine-napi.sh). Its Node-API symbols resolve only when Node.js
+# or Bun loads it, so it has no Rust tests: a test binary would not link.
+# The TypeScript suite tests it (ENGINE_IMPL=rust).
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[features]
+# Both databases by default, as the engine has them: a test or a local run
+# opens SQLite, a server Postgres.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
+
+[dependencies]
+# superscalar's pins (third_party/superscalar/Cargo.lock): napi 3.13.0,
+# napi-derive 3.6.9 over napi-derive-backend 6.1.4, napi-build 2.5.0. The
+# lock file holds napi-derive-backend at 6.1.4, which a fresh resolve moves
+# past to one that does not compile, so the addon builds --locked. `async`
+# runs a call on Postgres off the JavaScript thread (tokio's blocking
+# pool).
+napi = { version = "=3.13.0", default-features = false, features = ["napi8", "async"] }
+napi-derive = "=3.6.9"
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-engine = { path = "../engine", default-features = false }
+# The core's behaviors, which the addon registers when an engine opens:
+# whatever core() returns when it is built.
+superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
+
+[build-dependencies]
+napi-build = "=2.5.0"
+
+[lints]
+workspace = true

@@ -64,7 +64,10 @@ test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
 replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
 (`testdata/http`) through the engine's calls and routes, all on both
-databases.
+databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine
+as a Node-API addon, which this package's test suite runs on with
+`ENGINE_IMPL=rust` ("The Rust engine through its Node-API addon", under
+Development).
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -4890,6 +4893,56 @@ fail when there is none:
 docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --publish 55432:5432 postgres:16-alpine
 SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable' make engine-rust
 docker rm -f engine-pg
+```
+
+### The Rust engine through its Node-API addon
+
+`rust/napi` builds the Rust engine as a Node-API addon, which Node.js and
+Bun load. It registers the core's behaviors that `core()` returned when it
+was built.
+`scripts/engine-napi.sh` (at the repository's root; `bun run build:napi`
+here) builds it for this host into `typescript/native/`, which git
+ignores, as `superschematic-engine.<triple>.node`; `--debug` builds it
+quicker and slower to run. It needs the superscalar checkout
+(`scripts/superscalar-dep.sh --checkout`), and builds with the toolchain
+`tools.env` pins, `--locked` to `rust/Cargo.lock`. Rebuild it after a
+change to the Rust engine, or after merging one that ports more
+behaviors.
+
+`src/native/` is the TypeScript over it: `openNativeEngine(options)`
+returns an engine with this package's synchronous, principal-first API
+(`namespaces`, `schemas`, `instances`, `events`, `tools`, `values`,
+`runner`, `search`, `close`), each method a call by name with JSON in and
+out on the JavaScript thread, and each refusal this package's error class,
+its members restored. The options are this package's: `allowAll` and a
+`permissionPolicy()` without a matcher of its own become the Rust
+engine's `"allowAll"` and `"permission"`, and the Rust engine's `{ rules
+}` passes as it is; any other policy, and a `permissionMatcher`, stay
+TypeScript, which the addon asks on the JavaScript thread during a call,
+so such an engine is not called asynchronously and its runner is driven
+by `runDue` rather than `start`. A clock function sets the Rust engine's
+manual clock before each call. `postgres: { url, schema? }` opens the
+engine on Postgres in place of `path`; it is called through
+`callAsync(op, principal, ...args)`, since a synchronous call there
+would hold the JavaScript thread while it waits on the database. What the
+addon does not do yet throws `NativeUnsupportedError`, naming the gap:
+a behavior or an id source written in TypeScript, `engine.storage`,
+`events.watch` and `schemas.validator` come with milestone 7b. Until then
+this package's engine is the TypeScript one.
+
+With `ENGINE_IMPL=rust`, `test/helpers.ts` opens the Rust engine in
+place of this package's, and `scripts/rust-ratchet.mjs` runs each test
+file so on its own, under Node.js and Bun, and holds the result to
+`test/rust-pending.txt`, the files not passing yet and why: a file that
+fails and is not listed fails the run, and so does a listed file that
+passes, so the list only shrinks. CI's `engine-napi` job runs it:
+
+```
+scripts/engine-napi.sh                      # from the repository's root
+cd runtime/engine/typescript && bun run build
+bun run test:rust                           # Node.js, then Bun
+node scripts/rust-ratchet.mjs --runtime bun test/events.test.ts --verbose
+node scripts/rust-ratchet.mjs --update      # take off what passes, add what fails
 ```
 
 ### The corpus a second engine replays

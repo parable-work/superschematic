@@ -2,7 +2,9 @@
 // temporary directory (not :memory:, so write-ahead logging behaves as it
 // does in a deployment), and cleanup closes and removes them. With
 // ENGINE_RECORD set, the engines they open record the test's calls
-// (recorder.ts).
+// (recorder.ts). With ENGINE_IMPL=rust they are the Rust engine, through
+// its Node-API addon (D58; scripts/engine-napi.sh builds it, and
+// scripts/rust-ratchet.mjs runs the suite so against rust-pending.txt).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,7 +21,26 @@ import {
   type InstanceRecord,
   type Principal,
 } from '../dist/index.js';
+import { openNativeEngine } from '../dist/native/index.js';
 import { endCase, recordOpen, registerDirectory, type TestContextLike } from './recorder.ts';
+
+/**
+ * The engine the tests open: the TypeScript engine, or with
+ * ENGINE_IMPL=rust the Rust engine, behind the same API.
+ */
+export const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+
+function implementation(given: string | undefined): 'typescript' | 'rust' {
+  if (given === undefined || given === '' || given === 'typescript') {
+    return 'typescript';
+  }
+  if (given === 'rust') {
+    return 'rust';
+  }
+  throw new Error(`ENGINE_IMPL is typescript (the default) or rust, got ${given}`);
+}
+
+const openImpl: (options: EngineOptions) => Engine = engineImpl === 'rust' ? (options) => openNativeEngine(options) as unknown as Engine : openDistEngine;
 
 /** The principal most tests act as; openTestEngine allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
@@ -45,11 +66,12 @@ export function track<T extends { close(): void }>(item: T): T {
 }
 
 /**
- * openEngine is the engine's openEngine, recording the engine's calls when
- * ENGINE_RECORD is set; tests open engines through it or openTestEngine.
+ * openEngine is the engine's openEngine (the Rust engine's with
+ * ENGINE_IMPL=rust), recording the engine's calls when ENGINE_RECORD is
+ * set; tests open engines through it or openTestEngine.
  */
 export function openEngine(options: EngineOptions): Engine {
-  return recordOpen(options, openDistEngine);
+  return recordOpen(options, openImpl);
 }
 
 export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {

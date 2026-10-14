@@ -53,6 +53,7 @@ mod indexes;
 pub mod instances;
 pub mod json;
 mod namespaces;
+mod options;
 mod paging;
 mod principal;
 mod registry;
@@ -77,7 +78,7 @@ pub use engine::{
 };
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,
-    SchemaIssue, ValidationIssue, Veto,
+    SchemaIssue, Thrown, ValidationIssue, Veto,
 };
 pub use events::{
     cursor_refusal, EngineEvent, EventCause, EventPage, Events, EventsAfter, ReadEvents,

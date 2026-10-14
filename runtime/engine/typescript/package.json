@@ -29,13 +29,24 @@
   "engines": {
     "node": ">=24"
   },
+  "napi": {
+    "binaryName": "superschematic-engine",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu"
+    ]
+  },
   "scripts": {
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "build:napi": "../../../scripts/engine-napi.sh",
     "test": "bun run build && bun run test:node && bun run test:bun",
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
-    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
+    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test",
+    "test:rust": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node scripts/rust-ratchet.mjs"
   },
   "dependencies": {
     "@superschematic/versiongraph": "file:../../versiongraph/typescript",
@@ -61,6 +72,7 @@
     "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/client": "2.2.0",
     "@modelcontextprotocol/server": "2.2.0",
+    "@napi-rs/cli": "3.10.5",
     "@types/node": "22.19.9",
     "hono": "4.13.8",
     "typescript": "5.9.3"
