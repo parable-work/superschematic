@@ -1989,6 +1989,352 @@ func ProductFromYAMLNonStrict(data []byte) (*Product, error) {
 	return decoded, nil
 }
 
+// RestockRequest - A request to the supplier for more of a product: shop-stock's worker
+// ReorderStock files one when a reservation runs the product low, and its
+// job PlaceRestockOrders orders each open one. A product has at most one
+// open request: openProductId is the product while the request is open and
+// null once it is ordered, and the unique index over it admits one row per
+// product, since a unique index lets nulls repeat.
+type RestockRequest struct {
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	UpdatedAt *TemporalDateTime `json:"updatedAt,omitempty"`
+
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Product Product `json:"product"`
+
+	Status RestockStatus `json:"status"`
+
+	Quantity GenericInt64 `json:"quantity"`
+
+	OpenProductId *IdentityUUID `json:"openProductId,omitempty"`
+
+	OrderedAt *TemporalDateTime `json:"orderedAt,omitempty"`
+}
+
+// NewRestockRequest returns a RestockRequest with @default values from the schema applied.
+// Fields without a declared default are left at their Go zero value.
+func NewRestockRequest() *RestockRequest {
+	return &RestockRequest{
+		Status: RestockStatus("open"),
+	}
+}
+
+// applyDefaults seeds the declared @default values on the receiver. Existing
+// non-zero / wrapper-set fields are preserved so this is safe to call before
+// json.Unmarshal: keys present in the payload overwrite the defaults, while
+// keys absent from the payload retain them.
+func (t *RestockRequest) applyDefaults() {
+	if t == nil {
+		return
+	}
+	var zeroStatus RestockStatus
+	if t.Status == zeroStatus {
+		t.Status = RestockStatus("open")
+	}
+
+}
+
+// MaskSecrets returns a copy of RestockRequest with secret fields cleared.
+func (t *RestockRequest) MaskSecrets() *RestockRequest {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RestockRequest{}
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	masked.Id = t.Id
+
+	maskedValueProduct := t.Product.MaskSecrets()
+	if maskedValueProduct != nil {
+		masked.Product = *maskedValueProduct
+	}
+
+	masked.Status = t.Status
+
+	masked.Quantity = t.Quantity
+
+	masked.OpenProductId = t.OpenProductId
+
+	masked.OrderedAt = t.OrderedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RestockRequest's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RestockRequest) JSONFieldNames() []string {
+	return []string{"createdAt", "updatedAt", "id", "product", "status", "quantity", "openProductId", "orderedAt"}
+}
+
+// Validate validates all fields in RestockRequest
+func (t *RestockRequest) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := t.UpdatedAt.Validate(); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate product (required nested type)
+
+	if fieldErrs := t.Product.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("product", fieldErrs)
+	}
+
+	// Validate status (optional)
+
+	// Validate optional enum value field only when non-empty
+	if string(t.Status) != "" {
+		if valid, fieldErrs := t.Status.Validate(); !valid {
+			errors.SetFieldErrors("status", fieldErrs)
+		}
+	}
+
+	// Validate quantity (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Quantity, true); !valid {
+		errors.SetFieldErrors("quantity", fieldErrs)
+	}
+
+	// Validate openProductId (optional)
+
+	// Validate optional pointer field
+	if t.OpenProductId != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.OpenProductId, false); !valid {
+			errors.SetFieldErrors("openProductId", fieldErrs)
+		}
+	}
+
+	// Validate orderedAt (optional)
+
+	// Validate optional pointer field
+	if t.OrderedAt != nil {
+		if valid, fieldErrs := t.OrderedAt.Validate(); !valid {
+			errors.SetFieldErrors("orderedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RestockRequest to JSON
+func (t *RestockRequest) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RestockRequest
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RestockRequest from JSON with validation
+func (t *RestockRequest) UnmarshalJSON(data []byte) error {
+	// Apply @default values first; standard json decoding preserves these
+	// for any keys absent from the payload while overwriting them when
+	// a value is provided explicitly.
+	t.applyDefaults()
+	type Alias RestockRequest
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RestockRequest into a map representation.
+func (t *RestockRequest) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RestockRequest to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RestockRequest to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RestockRequest from a map using lenient decoding.
+func (t *RestockRequest) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RestockRequest from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RestockRequest from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RestockRequest from a map and rejects unknown fields.
+func (t *RestockRequest) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RestockRequest from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RestockRequest from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RestockRequest from JSON and rejects unknown fields.
+func (t *RestockRequest) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RestockRequest from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RestockRequest from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RestockRequest from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RestockRequest from JSON using lenient decoding.
+func (t *RestockRequest) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RestockRequest from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RestockRequest from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RestockRequest from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RestockRequest from YAML and rejects unknown fields.
+func (t *RestockRequest) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RestockRequest from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RestockRequest from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RestockRequest from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RestockRequest from YAML using lenient decoding.
+func (t *RestockRequest) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RestockRequest from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RestockRequest from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RestockRequest from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RestockRequestFromMap builds RestockRequest from a map using lenient decoding.
+func RestockRequestFromMap(value map[string]any) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RestockRequestFromMapStrict builds RestockRequest from a map and rejects unknown fields.
+func RestockRequestFromMapStrict(value map[string]any) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RestockRequestFromJSON builds RestockRequest from JSON and rejects unknown fields.
+func RestockRequestFromJSON(data []byte) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RestockRequestFromJSONNonStrict builds RestockRequest from JSON using lenient decoding.
+func RestockRequestFromJSONNonStrict(data []byte) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RestockRequestFromYAML builds RestockRequest from YAML and rejects unknown fields.
+func RestockRequestFromYAML(data []byte) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RestockRequestFromYAMLNonStrict builds RestockRequest from YAML using lenient decoding.
+func RestockRequestFromYAMLNonStrict(data []byte) (*RestockRequest, error) {
+	decoded := &RestockRequest{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Review - A shopper's review of a product. Shoppers search reviews by their text,
 // and each shopper reviews a product once. A moderator hides a review by
 // deleting it; the row stays, marked deleted.
@@ -3239,6 +3585,8 @@ type StockLevel struct {
 	Product Product `json:"product"`
 
 	Quantity GenericInt64 `json:"quantity"`
+
+	Threshold GenericInt64 `json:"threshold,omitempty"`
 }
 
 // MaskSecrets returns a copy of StockLevel with secret fields cleared.
@@ -3262,6 +3610,8 @@ func (t *StockLevel) MaskSecrets() *StockLevel {
 
 	masked.Quantity = t.Quantity
 
+	masked.Threshold = t.Threshold
+
 	return masked
 }
 
@@ -3269,7 +3619,7 @@ func (t *StockLevel) MaskSecrets() *StockLevel {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*StockLevel) JSONFieldNames() []string {
-	return []string{"createdAt", "updatedAt", "id", "product", "quantity"}
+	return []string{"createdAt", "updatedAt", "id", "product", "quantity", "threshold"}
 }
 
 // Validate validates all fields in StockLevel
@@ -3304,6 +3654,15 @@ func (t *StockLevel) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateGenericInt64Value(t.Quantity, true); !valid {
 		errors.SetFieldErrors("quantity", fieldErrs)
+	}
+
+	// Validate threshold (optional)
+
+	// Validate optional value field only when it is set
+	if !reflect.ValueOf(t.Threshold).IsZero() {
+		if valid, fieldErrs := validateGenericInt64Value(t.Threshold, false); !valid {
+			errors.SetFieldErrors("threshold", fieldErrs)
+		}
 	}
 
 	return errors
@@ -3496,6 +3855,262 @@ func StockLevelFromYAML(data []byte) (*StockLevel, error) {
 // StockLevelFromYAMLNonStrict builds StockLevel from YAML using lenient decoding.
 func StockLevelFromYAMLNonStrict(data []byte) (*StockLevel, error) {
 	decoded := &StockLevel{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLow - Enqueued by shop-stock's reservation, in its transaction, when it takes a
+// product's level below its threshold: shop-stock's worker ReorderStock
+// files a restock request for the product. The message holds the level and
+// the threshold as the reservation left them. A message whose handler fails
+// is retried every half minute, five times at most.
+type StockLow struct {
+	ProductId IdentityUUID `json:"productId"`
+
+	Quantity GenericInt64 `json:"quantity"`
+
+	Threshold GenericInt64 `json:"threshold"`
+}
+
+// MaskSecrets returns a copy of StockLow with secret fields cleared.
+func (t *StockLow) MaskSecrets() *StockLow {
+	if t == nil {
+		return nil
+	}
+
+	masked := &StockLow{}
+
+	masked.ProductId = t.ProductId
+
+	masked.Quantity = t.Quantity
+
+	masked.Threshold = t.Threshold
+
+	return masked
+}
+
+// JSONFieldNames are the keys StockLow's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*StockLow) JSONFieldNames() []string {
+	return []string{"productId", "quantity", "threshold"}
+}
+
+// Validate validates all fields in StockLow
+func (t *StockLow) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate productId (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.ProductId, true); !valid {
+		errors.SetFieldErrors("productId", fieldErrs)
+	}
+
+	// Validate quantity (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Quantity, true); !valid {
+		errors.SetFieldErrors("quantity", fieldErrs)
+	}
+
+	// Validate threshold (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Threshold, true); !valid {
+		errors.SetFieldErrors("threshold", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals StockLow to JSON
+func (t *StockLow) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias StockLow
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals StockLow from JSON with validation
+func (t *StockLow) UnmarshalJSON(data []byte) error {
+	type Alias StockLow
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts StockLow into a map representation.
+func (t *StockLow) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert StockLow to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert StockLow to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes StockLow from a map using lenient decoding.
+func (t *StockLow) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode StockLow from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode StockLow from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes StockLow from a map and rejects unknown fields.
+func (t *StockLow) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode StockLow from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode StockLow from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes StockLow from JSON and rejects unknown fields.
+func (t *StockLow) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode StockLow from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode StockLow from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode StockLow from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes StockLow from JSON using lenient decoding.
+func (t *StockLow) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode StockLow from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode StockLow from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode StockLow from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes StockLow from YAML and rejects unknown fields.
+func (t *StockLow) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode StockLow from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode StockLow from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode StockLow from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes StockLow from YAML using lenient decoding.
+func (t *StockLow) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode StockLow from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode StockLow from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode StockLow from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// StockLowFromMap builds StockLow from a map using lenient decoding.
+func StockLowFromMap(value map[string]any) (*StockLow, error) {
+	decoded := &StockLow{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLowFromMapStrict builds StockLow from a map and rejects unknown fields.
+func StockLowFromMapStrict(value map[string]any) (*StockLow, error) {
+	decoded := &StockLow{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLowFromJSON builds StockLow from JSON and rejects unknown fields.
+func StockLowFromJSON(data []byte) (*StockLow, error) {
+	decoded := &StockLow{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLowFromJSONNonStrict builds StockLow from JSON using lenient decoding.
+func StockLowFromJSONNonStrict(data []byte) (*StockLow, error) {
+	decoded := &StockLow{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLowFromYAML builds StockLow from YAML and rejects unknown fields.
+func StockLowFromYAML(data []byte) (*StockLow, error) {
+	decoded := &StockLow{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// StockLowFromYAMLNonStrict builds StockLow from YAML using lenient decoding.
+func StockLowFromYAMLNonStrict(data []byte) (*StockLow, error) {
+	decoded := &StockLow{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

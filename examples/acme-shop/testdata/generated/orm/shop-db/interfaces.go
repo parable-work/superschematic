@@ -52,6 +52,20 @@ type ProductRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *ProductFilter) (int, error)
 }
 
+// RestockRequestRepositoryInterface defines the contract for RestockRequest data access.
+type RestockRequestRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RestockRequestGetOptions) (*types.RestockRequest, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RestockRequest, error)
+	FindOne(ctx context.Context, filter *RestockRequestFilter, opts *RestockRequestFindOptions) (*types.RestockRequest, error)
+	FindMany(ctx context.Context, filter *RestockRequestFilter, opts *RestockRequestFindOptions) ([]*types.RestockRequest, int, error)
+	CreateOne(ctx context.Context, input *types.RestockRequest) (*types.RestockRequest, error)
+	CreateMany(ctx context.Context, inputs []*types.RestockRequest) ([]*types.RestockRequest, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RestockRequestUpdate) (*types.RestockRequest, error)
+	UpdateMany(ctx context.Context, filter *RestockRequestFilter, update *RestockRequestUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *RestockRequestFilter) (int, error)
+}
+
 // ReviewRepositoryInterface defines the contract for Review data access.
 type ReviewRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ReviewGetOptions) (*types.Review, error)
@@ -159,6 +173,7 @@ type DatabaseInterface interface {
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetRestockRequestRepository() RestockRequestRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
@@ -175,6 +190,7 @@ type TxInterface interface {
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetRestockRequestRepository() RestockRequestRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
@@ -190,6 +206,7 @@ type NoOpDatabase struct {
 	Order          *NoOpOrderRepository
 	OrderLine      *NoOpOrderLineRepository
 	Product        *NoOpProductRepository
+	RestockRequest *NoOpRestockRequestRepository
 	Review         *NoOpReviewRepository
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
@@ -204,6 +221,7 @@ type NoOpTx struct {
 	Order          *NoOpOrderRepository
 	OrderLine      *NoOpOrderLineRepository
 	Product        *NoOpProductRepository
+	RestockRequest *NoOpRestockRequestRepository
 	Review         *NoOpReviewRepository
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
@@ -223,6 +241,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.OrderLine = db.OrderLine
 	db.Product = &NoOpProductRepository{}
 	tx.Product = db.Product
+	db.RestockRequest = &NoOpRestockRequestRepository{}
+	tx.RestockRequest = db.RestockRequest
 	db.Review = &NoOpReviewRepository{}
 	tx.Review = db.Review
 	db.Role = &NoOpRoleRepository{}
@@ -432,6 +452,60 @@ func (r *NoOpProductRepository) DeleteOne(_ context.Context, _ types.IdentityUUI
 }
 
 func (r *NoOpProductRepository) DeleteMany(_ context.Context, _ *ProductFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetRestockRequestRepository() RestockRequestRepositoryInterface {
+	return db.RestockRequest
+}
+
+func (tx *NoOpTx) GetRestockRequestRepository() RestockRequestRepositoryInterface {
+	return tx.RestockRequest
+}
+
+// NoOpRestockRequestRepository provides deterministic no-op repository behavior.
+type NoOpRestockRequestRepository struct{}
+
+func (r *NoOpRestockRequestRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *RestockRequestGetOptions) (*types.RestockRequest, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRestockRequestRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.RestockRequest, error) {
+	return map[types.IdentityUUID]*types.RestockRequest{}, nil
+}
+
+func (r *NoOpRestockRequestRepository) FindOne(_ context.Context, _ *RestockRequestFilter, _ *RestockRequestFindOptions) (*types.RestockRequest, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRestockRequestRepository) FindMany(_ context.Context, _ *RestockRequestFilter, _ *RestockRequestFindOptions) ([]*types.RestockRequest, int, error) {
+	return []*types.RestockRequest{}, 0, nil
+}
+
+func (r *NoOpRestockRequestRepository) CreateOne(_ context.Context, input *types.RestockRequest) (*types.RestockRequest, error) {
+	return input, nil
+}
+
+func (r *NoOpRestockRequestRepository) CreateMany(_ context.Context, inputs []*types.RestockRequest) ([]*types.RestockRequest, error) {
+	if inputs == nil {
+		return []*types.RestockRequest{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpRestockRequestRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RestockRequestUpdate) (*types.RestockRequest, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRestockRequestRepository) UpdateMany(_ context.Context, _ *RestockRequestFilter, _ *RestockRequestUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpRestockRequestRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpRestockRequestRepository) DeleteMany(_ context.Context, _ *RestockRequestFilter) (int, error) {
 	return 0, nil
 }
 
@@ -828,6 +902,8 @@ var (
 	_ OrderLineRepositoryInterface      = (*NoOpOrderLineRepository)(nil)
 	_ ProductRepositoryInterface        = (*ProductRepository)(nil)
 	_ ProductRepositoryInterface        = (*NoOpProductRepository)(nil)
+	_ RestockRequestRepositoryInterface = (*RestockRequestRepository)(nil)
+	_ RestockRequestRepositoryInterface = (*NoOpRestockRequestRepository)(nil)
 	_ ReviewRepositoryInterface         = (*ReviewRepository)(nil)
 	_ ReviewRepositoryInterface         = (*NoOpReviewRepository)(nil)
 	_ RoleRepositoryInterface           = (*RoleRepository)(nil)
