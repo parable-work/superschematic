@@ -2014,7 +2014,11 @@ as they are, with no build step (D51). The pieces mirror Go's:
   variables Go's `stackconfig` reads, and throws a `StackConfigError`
   naming every variable at fault. Vectors shared by both runtimes
   (`runtime/http/testdata/stackconfig_parity.json`) hold them to one
-  encoding.
+  encoding. A job and a worker are given no callers field, and an API
+  with a callers field and a job or a worker gets
+  `loadBackgroundEnvConfig()` too, which their entrypoints call: it reads
+  what `loadEnvConfig()` reads but the callers field, which holds no
+  issuers (D65).
 - **Implementation.** `[implementation_paths] typescript` defaults to
   `typescript/{service}`. The API generator writes `Deps` and
   `Constructor`, `(deps: Deps) => Implementations |
@@ -2414,7 +2418,9 @@ export abstract class ShipOrders {}
   serves no port and answers no health check. A package that predates its
   jobs, with no `NewJobs`, fails the build with the signature to add
   (section 8.5). A TypeScript job's package (section 8.6) does the same on
-  Bun: `main.ts` calls the implementation's `createJobs`, then the job's
+  Bun: `main.ts` loads the API's `EnvConfig` with
+  `loadBackgroundEnvConfig()` where it has a callers field, which no job
+  is given, calls the implementation's `createJobs`, then the job's
   method once with the signal, logs `job started`, then `job done` or
   `job failed` with how long the run took in seconds, through the HTTP
   runtime's logger, and exits 1 when the method rejects. An
@@ -2665,7 +2671,9 @@ export abstract class FulfilOrders {}
     exits 0.
 
   A TypeScript worker's package (section 8.6) does the same on Bun: its
-  `main.ts` calls the implementation's `createWorkers` and runs
+  `main.ts` loads the API's `EnvConfig` with `loadBackgroundEnvConfig()`
+  where it has a callers field, calls the implementation's
+  `createWorkers` and runs
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
   `workerConcurrency` reads from `WORKER_CONCURRENCY`. Each method gets a

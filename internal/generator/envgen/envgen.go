@@ -96,8 +96,9 @@ type ConfigOutput struct {
 	// whose entrypoint loads the API's EnvConfig too (D52, D53). A stack
 	// sets no callers field for a job or a worker, which serves no
 	// request, so the Rust config.rs of such an API with a callers field
-	// writes load_background_env_config beside load_env_config, which
-	// leaves the field without issuers (D65).
+	// writes load_background_env_config beside load_env_config, and the
+	// TypeScript config.ts loadBackgroundEnvConfig beside loadEnvConfig,
+	// either of which leaves the field without issuers (D65).
 	Background bool
 }
 

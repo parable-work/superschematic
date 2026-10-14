@@ -16,9 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -286,6 +289,61 @@ func TestTypeScriptJobAndWorkerRunOnPostgres(t *testing.T) {
 	} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("the worker's output lacks %s:\n%s", want, logs.String())
+		}
+	}
+}
+
+// TestTypeScriptJobOfAnAPIWithCallers: the server of an API with a service
+// clause loads its config with loadEnvConfig and verifies its callers
+// against the callers field, while a job of the API, which a stack gives
+// no callers field, loads it with loadBackgroundEnvConfig, which leaves the
+// field without issuers, and verifies no caller (D65).
+func TestTypeScriptJobOfAnAPIWithCallers(t *testing.T) {
+	input := func(job *servergen.JobInput) servergen.TypeScriptInput {
+		return servergen.TypeScriptInput{
+			Stack:  "shop-stack",
+			Server: "shop-api",
+			Dir:    t.TempDir(),
+			APIs: []servergen.TypeScriptAPIInput{{
+				Output: &tsrestgen.APIOutput{
+					SchemaName:        "shop-api",
+					PackageName:       "@schemas/shop-api-api",
+					HasEnvConfig:      true,
+					HasServiceCallers: true,
+					Jobs:              []tsrestgen.JobInfo{{Name: "Reindex", Method: "reindex"}},
+				},
+				Routes:         &apigen.APIOutput{SchemaName: "shop-api"},
+				Config:         &envgen.ConfigOutput{SchemaName: "shop-api", CallersField: ir.CallersField("shop-api"), Background: true},
+				Implementation: servergen.TypeScriptImplementation{Package: "@schemas/shop-api-implementation"},
+			}},
+			Job: job,
+		}
+	}
+	for _, c := range []struct {
+		job             *servergen.JobInput
+		loader, callers string
+	}{
+		{nil, "loadEnvConfig", "SHOP_API_CALLERS"},
+		{&servergen.JobInput{Name: "Reindex"}, "loadBackgroundEnvConfig", ""},
+	} {
+		in := input(c.job)
+		s, err := servergen.PlanTypeScript(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		api := s.APIs[0]
+		if api.ConfigLoader != c.loader || api.Callers != c.callers {
+			t.Errorf("the %s loads its config with %s and verifies callers against %q, want %s and %q", s.Kind, api.ConfigLoader, api.Callers, c.loader, c.callers)
+		}
+		if err := servergen.WriteTypeScript(s, in.Dir); err != nil {
+			t.Fatal(err)
+		}
+		main, err := os.ReadFile(filepath.Join(in.Dir, servergen.TypeScriptMainFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "() => " + api.Module + "." + c.loader + "());"; !strings.Contains(string(main), want) {
+			t.Errorf("the %s's main.ts does not load its config with %s:\n%s", s.Kind, c.loader, main)
 		}
 	}
 }

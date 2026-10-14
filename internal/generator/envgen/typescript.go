@@ -188,6 +188,11 @@ type typeScriptEnvConfig struct {
 	HasBucket      bool
 	Callers        string
 	CallersLiteral string
+	// Background is true for an API with a callers field and a job or a
+	// worker: loadEnvConfig and loadBackgroundEnvConfig, which leaves the
+	// callers field without issuers, share readEnvConfig, which reads it
+	// or not (D65).
+	Background bool
 }
 
 // typeScriptDerivedField is a field an edge derives, read by the HTTP
@@ -206,6 +211,9 @@ type typeScriptDerivedField struct {
 // derives for it and its callers field, and loadEnvConfig, which reads
 // them all from the environment through the HTTP runtime's stackconfig
 // readers (D51; docs/stack-model.md, sections 3.4 and 8.6). Deps holds it.
+// An API with a callers field and a job or a worker gets
+// loadBackgroundEnvConfig too, which their entrypoints call: a stack gives
+// neither a callers field, so it leaves the field without issuers (D65).
 func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 	n := output.Naming.OrDefault()
 	view := typeScriptEnvConfig{
@@ -215,6 +223,7 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 		TypeName:       output.TypeName,
 		Callers:        output.CallersField,
 		CallersLiteral: jsString(output.CallersField),
+		Background:     output.Background && output.CallersField != "",
 	}
 	for _, field := range output.Derived {
 		derived := typeScriptDerivedField{Key: field.Key, KeyLiteral: jsString(field.Key)}
