@@ -332,7 +332,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// from a file server of its own (D55): its page, its config with
 	// shop-api's address, and the page again for a route of the
 	// application. shop-api answers CORS for the site's origin, which its
-	// CORS field lists, and for no other.
+	// CORS field lists, and for no other: another origin's preflight
+	// reaches shop-api's router, which answers it 405 with no CORS headers
+	// (D55, amended).
 	site := env.site
 	if site == "" {
 		t.Fatalf("environment Dev has no site shop-web")
@@ -353,12 +355,12 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
 	}
 	listing := env.servers["shop-api"] + "/api/products?inStock=true"
-	if allowed := preflight(t, listing, site); allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
+	if status, allowed := preflight(t, listing, site); status != http.StatusNoContent || allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
 		!strings.Contains(allowed.Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(allowed.Get("Access-Control-Allow-Methods"), "GET") {
-		t.Fatalf("shop-api's answer to the site's preflight: %v", allowed)
+		t.Fatalf("shop-api's answer to the site's preflight: %d %v", status, allowed)
 	}
-	if refused := preflight(t, listing, "https://evil.example"); refused.Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("shop-api allowed another origin: %v", refused)
+	if status, refused := preflight(t, listing, "https://evil.example"); status != http.StatusMethodNotAllowed || refused.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("shop-api's answer to another origin's preflight: %d %v, want 405 and no CORS", status, refused)
 	}
 
 	// shop-orders' job ShipOrders ships every fulfilled order (D52).
@@ -655,9 +657,9 @@ func call(t *testing.T, method, url, token, body string) (int, []byte) {
 }
 
 // preflight asks, from origin, as a browser does before a GET with the
-// shopper's token, whether url answers it, and returns the answer's
-// headers. The answer is 204 whatever the origin; only its headers say.
-func preflight(t *testing.T, url, origin string) http.Header {
+// shopper's token, whether url answers it, and returns the answer's status
+// and headers.
+func preflight(t *testing.T, url, origin string) (int, http.Header) {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodOptions, url, nil)
 	if err != nil {
@@ -671,10 +673,7 @@ func preflight(t *testing.T, url, origin string) http.Header {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		t.Fatalf("OPTIONS %s from %s = %d, want 204", url, origin, response.StatusCode)
-	}
-	return response.Header
+	return response.StatusCode, response.Header
 }
 
 func get(t *testing.T, url string) int {
