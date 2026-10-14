@@ -276,7 +276,7 @@ impl OrderImplementation for Shop {
                 .is_none_or(|statuses| statuses.is_empty() || statuses.contains(&order.status))
         });
         let rows = rows_after(listed.cloned(), &args.page, order_key)?;
-        Ok(Page::from_rows(rows, args.page.limit, order_key))
+        Page::from_rows(rows, args.page.limit, order_key)
     }
 
     async fn place_order(
@@ -367,7 +367,7 @@ impl ProductCatalogImplementation for Shop {
                 .is_none_or(|ids| ids.is_empty() || ids.contains(&product.id))
         });
         let rows = rows_after(listed.cloned(), &args.page, product_key)?;
-        Ok(Page::from_rows(rows, args.page.limit, product_key))
+        Page::from_rows(rows, args.page.limit, product_key)
     }
 
     async fn get_product(
@@ -406,7 +406,7 @@ impl ProductReviewsImplementation for Shop {
             })
             .map(|review| review.view.clone());
         let rows = rows_after(listed, &args.page, review_key)?;
-        Ok(Page::from_rows(rows, args.page.limit, review_key))
+        Page::from_rows(rows, args.page.limit, review_key)
     }
 
     async fn write_review(

@@ -373,7 +373,7 @@ impl ListQuery {
             })
             .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
             .map_err(internal)?;
-        Ok(Page::from_rows(rows, page.limit, |(key, _)| key.clone()).map(|(_, row)| row))
+        Ok(Page::from_rows(rows, page.limit, |(key, _)| key.clone())?.map(|(_, row)| row))
     }
 }
 

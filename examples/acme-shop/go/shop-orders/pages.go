@@ -43,9 +43,10 @@ func (q *keyQuery) where(condition string, values ...any) {
 	q.conditions = append(q.conditions, fmt.Sprintf(condition, placeholders...))
 }
 
-// decodeKey reads a cursor back into the key of a row. Any JSON object
-// decodes, so a key without an id, which names no row, is refused as a
-// cursor that does not decode is: 400 at cursor.
+// decodeKey reads a cursor back into the key of a row. DecodeCursor
+// refuses null and an empty object, but an object without an id decodes,
+// its id zero, so a key without one, which names no row, is refused here
+// as a cursor that does not decode is: 400 at cursor.
 func decodeKey[K rowKey](cursor string) (K, error) {
 	var key K
 	if err := paging.DecodeCursor(cursor, &key); err != nil {

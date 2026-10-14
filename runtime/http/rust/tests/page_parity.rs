@@ -26,6 +26,7 @@ struct ParityFile {
     reads: Vec<Read>,
     cursors: Vec<CursorVector>,
     refused: Vec<Refused>,
+    unencodable: Vec<Unencodable>,
     #[serde(rename = "fromRows")]
     from_rows: Vec<FromRows>,
 }
@@ -73,6 +74,14 @@ struct Refused {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct Unencodable {
+    name: String,
+    #[serde(rename = "keyJSON")]
+    key_json: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FromRows {
     name: String,
     rows: Vec<Value>,
@@ -105,10 +114,11 @@ fn query_of(query: &str) -> QueryValues {
 #[test]
 fn every_section_has_vectors_with_distinct_names() {
     let file = corpus();
-    let sections: [Vec<&str>; 4] = [
+    let sections: [Vec<&str>; 5] = [
         file.reads.iter().map(|v| v.name.as_str()).collect(),
         file.cursors.iter().map(|v| v.name.as_str()).collect(),
         file.refused.iter().map(|v| v.name.as_str()).collect(),
+        file.unencodable.iter().map(|v| v.name.as_str()).collect(),
         file.from_rows.iter().map(|v| v.name.as_str()).collect(),
     ];
     for names in sections {
@@ -150,7 +160,7 @@ fn reads() {
 fn cursors() {
     for vector in corpus().cursors {
         let key: Value = serde_json::from_str(&vector.key_json).unwrap();
-        let cursor = Cursor::encode(&key);
+        let cursor = Cursor::encode(&key).unwrap_or_else(|err| panic!("{}: {err:?}", vector.name));
         assert_eq!(cursor.as_str(), vector.cursor, "{}", vector.name);
         assert_eq!(cursor.decode::<Value>().unwrap(), key, "{}", vector.name);
     }
@@ -170,10 +180,37 @@ fn refused() {
     }
 }
 
+/// A key as a JSON value. serde_json reads no value nested 128 deep, which
+/// an implementation can still build, so lists that deep are built.
+fn key_of(json: &str) -> Value {
+    serde_json::from_str(json).unwrap_or_else(|err| {
+        let depth = json.len() / 2;
+        assert_eq!(json, "[".repeat(depth) + &"]".repeat(depth), "{err}");
+        (1..depth).fold(json!([]), |inner, _| json!([inner]))
+    })
+}
+
+#[test]
+fn unencodable() {
+    for vector in corpus().unencodable {
+        let key = key_of(&vector.key_json);
+        let err = Cursor::encode(&key)
+            .err()
+            .unwrap_or_else(|| panic!("{}: encoded", vector.name));
+        assert_eq!(err.status.as_u16(), 500, "{}", vector.name);
+        let rows = vec![json!("first"), key, json!("after")];
+        assert!(
+            Page::from_rows(rows, 2, Clone::clone).is_err(),
+            "{}",
+            vector.name
+        );
+    }
+}
+
 #[test]
 fn from_rows() {
     for vector in corpus().from_rows {
-        let page = Page::from_rows(vector.rows, vector.limit, Clone::clone);
+        let page = Page::from_rows(vector.rows, vector.limit, Clone::clone).unwrap();
         assert_eq!(
             serde_json::to_value(&page).unwrap(),
             vector.page,

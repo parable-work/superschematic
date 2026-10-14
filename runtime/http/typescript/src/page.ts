@@ -38,6 +38,10 @@ export const REFUSED_CURSOR_DETAIL = 'cursor is not one this operation returned'
 export const REFUSED_CURSOR_REASON = 'not a cursor this operation returned';
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
+/** How deep a cursor's key may not nest its arrays and objects: the Rust runtime's JSON reader refuses the 128th level. */
+const MAX_KEY_DEPTH = 128;
+/** A lone surrogate, which a JSON \u escape can spell and the Go and Rust readers cannot read. */
+const LONE_SURROGATE = /\p{Cs}/u;
 const INTEGER_TEXT = /^[+-]?[0-9]+$/;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
@@ -65,17 +69,19 @@ function refuse(parameter: string, reason: string, validator?: string): never {
 /**
  * Reads a page request from a query: the first value of cursor and of
  * limit, an empty one as absent. A cursor is 1 to 1024 characters of the
- * unpadded base64url alphabet; a limit a whole number from 1 to the spec's
- * maxLimit, its defaultLimit when absent. A refusal throws the 400
- * HttpProblem at the parameter, the cursor's first.
+ * unpadded base64url alphabet, the alphabet checked first, so a cursor
+ * outside ASCII is refused for its pattern however long it is; a limit a
+ * whole number from 1 to the spec's maxLimit, its defaultLimit when
+ * absent. A refusal throws the 400 HttpProblem at the parameter, the
+ * cursor's first.
  */
 export function readPage(query: PageQuery, spec: PageSpec): PageRequest {
   const cursor = firstValue(query, 'cursor');
   if (cursor) {
-    if ([...cursor].length > PAGE_CURSOR_MAX_LENGTH) {
+    if (!CURSOR_PATTERN.test(cursor)) refuse('cursor', 'does not match the required pattern', 'pattern');
+    if (cursor.length > PAGE_CURSOR_MAX_LENGTH) {
       refuse('cursor', `must be at most ${PAGE_CURSOR_MAX_LENGTH} characters`, 'maxLength');
     }
-    if (!CURSOR_PATTERN.test(cursor)) refuse('cursor', 'does not match the required pattern', 'pattern');
   }
   let limit = spec.defaultLimit;
   const text = firstValue(query, 'limit');
@@ -90,19 +96,55 @@ export function readPage(query: PageQuery, spec: PageSpec): PageRequest {
 }
 
 /**
+ * Why every runtime refuses to read a cursor's key, or undefined: JSON
+ * null or an empty object, which name no position; a number that is not
+ * finite, which the Go and Rust readers refuse as past float64's range; a
+ * lone surrogate, which a \u escape spells and the Go and Rust readers
+ * refuse; and arrays and objects nested 128 deep, which the Rust reader
+ * refuses.
+ */
+function keyProblem(key: unknown): string | undefined {
+  if (key === null) return 'the key is null, which names no position';
+  if (typeof key === 'object' && !Array.isArray(key) && Object.keys(key).length === 0) {
+    return 'the key is an empty object, which names no position';
+  }
+  const unreadable = (value: unknown, depth: number): string | undefined => {
+    if (typeof value === 'number') return Number.isFinite(value) ? undefined : 'a number of the key is not finite';
+    if (typeof value === 'string') return LONE_SURROGATE.test(value) ? 'a string of the key holds a lone surrogate' : undefined;
+    if (value === null || typeof value !== 'object') return undefined;
+    if (depth + 1 >= MAX_KEY_DEPTH) return `the key nests ${MAX_KEY_DEPTH} arrays or objects deep`;
+    for (const [name, member] of Object.entries(value)) {
+      if (!Array.isArray(value) && LONE_SURROGATE.test(name)) return 'a member name of the key holds a lone surrogate';
+      const problem = unreadable(member, depth + 1);
+      if (problem !== undefined) return problem;
+    }
+    return undefined;
+  };
+  return unreadable(key, 0);
+}
+
+/**
  * The cursor of a position: the unpadded base64url of the compact JSON of
- * key. A key should encode short: a router reads a cursor of at most 1024
- * characters, about 768 bytes of JSON.
+ * key. A key every router would refuse to read back throws, the
+ * implementation's error: one whose cursor is past 1024 characters, about
+ * 768 bytes of JSON, and one decodeCursor refuses (null, an empty object,
+ * a lone surrogate, arrays and objects nested 128 deep). A key that does
+ * not encode as JSON throws a TypeError.
  */
 export function encodeCursor(key: unknown): string {
   const text = JSON.stringify(key);
   if (text === undefined) throw new TypeError('encodeCursor: the key does not encode as JSON');
+  const problem = keyProblem(JSON.parse(text));
+  if (problem !== undefined) throw new RangeError(`encodeCursor: ${problem}, which no router reads back`);
   const bytes = new TextEncoder().encode(text);
   let out = '';
   for (let i = 0; i < bytes.length; i += 3) {
     const n = (bytes[i]! << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
     const chars = Math.min(bytes.length - i, 3) + 1;
     for (let j = 0; j < chars; j++) out += ALPHABET[(n >> (18 - 6 * j)) & 63];
+  }
+  if (out.length > PAGE_CURSOR_MAX_LENGTH) {
+    throw new RangeError(`encodeCursor: its cursor is ${out.length} characters, past the ${PAGE_CURSOR_MAX_LENGTH} a router reads`);
   }
   return out;
 }
@@ -138,10 +180,13 @@ function decodeBase64url(text: string): Uint8Array | null {
 
 /**
  * Reads a cursor back into the implementation's key. A cursor that is not
- * of the alphabet, not the canonical unpadded base64url of UTF-8 JSON, is
- * refused with the 400 every runtime answers, at cursor: the caller starts
- * again. The key's JSON is not checked against K; an implementation that
- * finds no position in it throws refusedCursor() itself.
+ * of the alphabet, not the canonical unpadded base64url of UTF-8 JSON, or
+ * whose JSON names no position or holds what another runtime cannot read
+ * (null, an empty object, a number past float64's range, a lone surrogate,
+ * arrays and objects nested 128 deep), is refused with the 400 every
+ * runtime answers, at cursor: the caller starts again. The key's JSON is
+ * not checked against K; an implementation that finds no position in it
+ * throws refusedCursor() itself.
  */
 export function decodeCursor<K>(cursor: string): K {
   if (cursor.length === 0 || cursor.length > PAGE_CURSOR_MAX_LENGTH || !CURSOR_PATTERN.test(cursor)) throw refusedCursor();
@@ -154,11 +199,14 @@ export function decodeCursor<K>(cursor: string): K {
   } catch {
     throw refusedCursor();
   }
+  let key: unknown;
   try {
-    return JSON.parse(text) as K;
+    key = JSON.parse(text);
   } catch {
     throw refusedCursor();
   }
+  if (keyProblem(key) !== undefined) throw refusedCursor();
+  return key as K;
 }
 
 /** The last page: items and no next. */
@@ -175,8 +223,9 @@ export function morePage<T>(items: T[], next: string): Page<T> {
  * The page of rows an implementation read for a request: it reads up to
  * limit + 1 rows in the operation's order, after the request's cursor, and
  * pageFromRows keeps limit of them and, when there were more, sets next to
- * the cursor of the last one kept, encodeCursor(key(row)). limit is the
- * request's; one below 1 is taken as 1.
+ * the cursor of the last one kept, encodeCursor(key(row)), which throws
+ * for a key no router reads back. limit is the request's; one below 1 is
+ * taken as 1.
  */
 export function pageFromRows<T>(rows: readonly T[], limit: number, key: (row: T) => unknown): Page<T> {
   const keep = Math.max(limit, 1);

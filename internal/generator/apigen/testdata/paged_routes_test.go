@@ -430,7 +430,7 @@ func TestRoutesRefuseCursorsAsTheVectors(t *testing.T) {
 	for name, key := range map[string]any{
 		"an item not in the catalog": itemKey{ID: unknown},
 		"another key":                map[string]string{"id": "anvil"},
-		"no key":                     map[string]any{},
+		"a key without an id":        map[string]any{"position": 3},
 	} {
 		cursor, err := paging.EncodeCursor(key)
 		if err != nil {

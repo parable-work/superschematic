@@ -214,7 +214,7 @@ impl CatalogImplementation for Catalog {
             .filter(|item| args.in_stock.is_none_or(|in_stock| item.in_stock == in_stock))
             .take(usize::try_from(args.page.limit).unwrap() + 1)
             .collect();
-        Ok(Page::from_rows(rows, args.page.limit, |item| item.id.to_string()))
+        Page::from_rows(rows, args.page.limit, |item| item.id.to_string())
     }
     async fn get_item(&self, _ctx: RequestContext, _args: CatalogGetItemArgs) -> Result<types::ItemView, ApiError> {
         Ok(item(0))
@@ -353,7 +353,7 @@ async fn a_cursor_this_operation_did_not_return_is_refused() {
     same_refusal(status, &body, list_in_process(args(PageRequest::after(forged, 2))).await.unwrap_err());
 
     // A key of the right type that names no item.
-    let unknown = Cursor::encode("no such item");
+    let unknown = Cursor::encode("no such item").unwrap();
     let (status, body) = get(implementations(), &format!("/api/items?cursor={unknown}")).await;
     same_refusal(status, &body, refused_cursor());
 
