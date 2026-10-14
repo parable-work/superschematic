@@ -45,6 +45,9 @@ pub mod stackconfig;
 mod token_source;
 #[cfg(any(feature = "identity", feature = "postgres"))]
 mod uuid62;
+// A worker's claim loop (D53, D65), with the `postgres` feature.
+#[cfg(feature = "postgres")]
+pub mod worker;
 
 /// The error a job's or a worker's method returns (D65), and any other
 /// error a generated crate passes on without naming its type.

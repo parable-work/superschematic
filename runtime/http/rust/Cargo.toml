@@ -124,6 +124,11 @@ required-features = ["postgres"]
 name = "queue"
 required-features = ["postgres"]
 
+# The worker loop's log lines, as a worker writes them.
+[[test]]
+name = "worker_log"
+required-features = ["postgres", "logging"]
+
 [lints.clippy]
 all = { level = "deny", priority = -1 }
 cognitive_complexity = "warn"

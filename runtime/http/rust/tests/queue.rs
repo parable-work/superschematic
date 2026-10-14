@@ -5,11 +5,13 @@
 //! the fixture-queue-db schema, and reads the descriptors of its queues
 //! from `order_placed.json` and `ping.json`, tsgen's golden `queues.ts`
 //! for the same schema as JSON, which a Rust types crate's `queues.rs`
-//! holds.
+//! holds. The worker loop runs over the same queues at the end.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
@@ -18,6 +20,8 @@ use superschematic_http_runtime::queue::{
     enqueue, Claim, PostgresQueue, QueueDefinition, QueueError, CLAIM_LOST,
 };
 use superschematic_http_runtime::stackconfig::Database;
+use superschematic_http_runtime::worker::{run_worker, Options};
+use superschematic_http_runtime::{BoxError, Shutdown};
 
 const URL_ENV: &str = "SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL";
 
@@ -133,6 +137,32 @@ impl Db {
             .await
             .unwrap()
             .get(0)
+    }
+
+    /// Waits until `n` messages of `table` are as `condition` says, for up
+    /// to ten seconds.
+    async fn until(&self, table: &str, condition: &str, n: i64) {
+        let start = Instant::now();
+        let sql = format!("SELECT count(*) FROM {table} WHERE {condition}");
+        loop {
+            let held: i64 = self
+                .pool
+                .get()
+                .await
+                .unwrap()
+                .query_one(&sql, &[])
+                .await
+                .unwrap()
+                .get(0);
+            if held == n {
+                return;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "{held} messages of {table} are as {condition} says, not {n}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     async fn enqueue(&self, queue: &QueueDefinition, message: &(impl Serialize + Sync)) {
@@ -652,5 +682,190 @@ async fn a_column_of_each_type_reads_back_as_the_value_written() {
         empty.claim(1, LEASE).await.unwrap().remove(0).message,
         json!({})
     );
+    db.close().await;
+}
+
+/// A worker's options for a test: a short idle wait.
+fn quick(concurrency: usize, grace: Duration) -> Options {
+    Options {
+        concurrency,
+        grace,
+        idle: Duration::from_millis(50),
+    }
+}
+
+#[tokio::test]
+async fn a_worker_handles_every_message_no_more_than_its_concurrency_at_a_time() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    for n in 0..6 {
+        db.enqueue(&def, &an_order(n)).await;
+    }
+    let (now, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (counting, peak) = (Arc::clone(&now), Arc::clone(&most));
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def),
+        move |_order: OrderPlaced| {
+            let (now, most) = (Arc::clone(&counting), Arc::clone(&peak));
+            async move {
+                most.fetch_max(now.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                now.fetch_sub(1, Ordering::SeqCst);
+                Ok::<(), BoxError>(())
+            }
+        },
+        quick(2, Duration::from_secs(1)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "state = 'done'", 6).await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    assert_eq!(most.load(Ordering::SeqCst), 2);
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_handlers_error_or_panic_is_recorded_as_its_messages_failure() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    db.enqueue(&def, &an_order(1)).await;
+    db.enqueue(&def, &an_order(2)).await;
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def),
+        |order: OrderPlaced| async move {
+            if order.quantity == 1 {
+                panic!("order {} has no lines", order.quantity);
+            }
+            Err::<(), BoxError>("the warehouse is closed".into())
+        },
+        quick(2, Duration::from_secs(1)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "state = 'ready' AND attempts = 1", 2)
+        .await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    let client = db.pool.get().await.unwrap();
+    let rows = client
+        .query(
+            "SELECT quantity, attempts, last_error, due_at > now() + interval '50 seconds' \
+             FROM order_placed_queue ORDER BY quantity",
+            &[],
+        )
+        .await
+        .unwrap();
+    let read: Vec<(i64, i32, String, bool)> = rows
+        .iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (1, 1, "panic: order 1 has no lines".to_string(), true),
+            (2, 1, "the warehouse is closed".to_string(), true),
+        ],
+        "each retried after the minute's backoff"
+    );
+    drop(client);
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_long_handler_keeps_its_message_by_extending_its_claim() {
+    let Some(db) = Db::open().await else { return };
+    let mut def = order_placed();
+    def.lease_seconds = 1;
+    db.enqueue(&def, &an_order(1)).await;
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def.clone()),
+        |_order: OrderPlaced| async {
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+            Ok::<(), BoxError>(())
+        },
+        quick(1, Duration::from_secs(1)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "state = 'claimed'", 1).await;
+    // Another worker finds nothing to claim while the claim is extended,
+    // though the lease is a second.
+    let other = queue::<OrderPlaced>(&db, def);
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(2000) {
+        assert!(other.claim(1, LEASE).await.unwrap().is_empty());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    db.until("order_placed_queue", "state = 'done'", 1).await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    let id: String = db
+        .pool
+        .get()
+        .await
+        .unwrap()
+        .query_one("SELECT id::text FROM order_placed_queue", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(
+        db.row("order_placed_queue", &id).await,
+        ("done".into(), 1, None)
+    );
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_stopping_worker_releases_the_messages_its_handlers_did_not_finish() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    for n in 1..=3 {
+        db.enqueue(&def, &an_order(n)).await;
+    }
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def),
+        |order: OrderPlaced| async move {
+            if order.quantity == 1 {
+                return Ok::<(), BoxError>(());
+            }
+            std::future::pending::<()>().await;
+            Ok(())
+        },
+        quick(3, Duration::from_millis(200)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "state = 'done'", 1).await;
+    db.until("order_placed_queue", "state = 'claimed'", 2).await;
+    let stopping = Instant::now();
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    assert!(
+        stopping.elapsed() >= Duration::from_millis(200),
+        "the grace"
+    );
+    let client = db.pool.get().await.unwrap();
+    let rows = client
+        .query(
+            "SELECT quantity, state, attempts, claim_token IS NULL FROM order_placed_queue ORDER BY quantity",
+            &[],
+        )
+        .await
+        .unwrap();
+    let read: Vec<(i64, String, i32, bool)> = rows
+        .iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (1, "done".to_string(), 1, true),
+            (2, "ready".to_string(), 0, true),
+            (3, "ready".to_string(), 0, true),
+        ],
+        "released, due at once, their attempts uncounted"
+    );
+    drop(client);
     db.close().await;
 }
