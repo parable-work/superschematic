@@ -1,0 +1,18 @@
+# A fake Rust job that honours the contract of a generated job entrypoint
+# (docs/stack-model.md, section 8.7) for the local target's integration
+# test (D65). It depends on nothing, so cargo builds it offline. Its one
+# binary is named after its deployable, as servergen names a Rust job's,
+# not after its package.
+[package]
+name = "fake-rust-job"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ledger-rs-settle-ledger"
+path = "src/main.rs"
+
+# Its own workspace, so no Cargo.toml above the directory it is copied to
+# claims it.
+[workspace]

@@ -16,14 +16,16 @@ import (
 
 // The jobs of a local environment (docs/stack-model.md, section 8.7, D52).
 // A rollout step builds each Go job's entrypoint module with go build, as
-// it builds a server's, and runs a TypeScript job's main.ts on Bun after
-// installing the output root's workspace, as it runs a server's. While stack dev waits on the environment, each job
-// with a schedule runs on it, in its time zone: never two runs of one job
-// at once, each line of a run's output with the job's name in front, a run
-// stopped at the job's timeout and run again up to its retries when it
-// fails. A run's end, success or failure, is logged and never stops the
-// environment. RunJob runs one job once, for stack run, against the
-// environment stack dev runs.
+// it builds a server's, runs a TypeScript job's main.ts on Bun after
+// installing the output root's workspace, as it runs a server's, and
+// builds a Rust job's crate with cargo into the environment's Cargo target
+// directory, as it builds a Rust server's (D65). While stack dev waits on
+// the environment, each job with a schedule runs on it, in its time zone:
+// never two runs of one job at once, each line of a run's output with the
+// job's name in front, a run stopped at the job's timeout and run again up
+// to its retries when it fails. A run's end, success or failure, is logged
+// and never stops the environment. RunJob runs one job once, for stack
+// run, against the environment stack dev runs.
 //
 // A lock file per job in the environment's state directory keeps a run
 // stack run starts and one stack dev's schedule starts apart: the schedule
@@ -34,9 +36,9 @@ import (
 // holds each job's lock file.
 const JobsDir = "jobs"
 
-// builtJob is a job a rollout built: the command that runs it, a Go job's
-// binary or Bun with main.ts, its module directory and its whole
-// environment.
+// builtJob is a job a rollout built: the command that runs it, a Go or
+// Rust job's binary or Bun with main.ts, its module directory and its
+// whole environment.
 type builtJob struct {
 	job    *Job
 	binary string
@@ -84,8 +86,11 @@ func (p *Provisioner) jobEnviron(req registry.ProvisionRequest, prog *Program, j
 }
 
 // buildJob builds a Go job's entrypoint module into the program's bin
-// directory, or installs the output root's Bun workspace for a TypeScript
-// one, and returns the job with its command and its environment.
+// directory, installs the output root's Bun workspace for a TypeScript
+// one, or builds a Rust one's crate into the program's Cargo target
+// directory, and returns the job with its command and its environment. A
+// Rust job's binary is the one its Cargo.toml names, which no other Rust
+// deployable of the environment may name too (rustBinaries).
 func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionRequest, prog *Program, j *Job) (*builtJob, error) {
 	if req.OutputRoot == "" {
 		return nil, errors.New("local: the request names no output root, where the build wrote each job's entrypoint module")
@@ -107,6 +112,21 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 			return nil, err
 		}
 		return &builtJob{job: j, binary: bun, args: []string{TypeScriptEntrypoint}, module: module, env: env}, nil
+	}
+	if j.Language == LanguageRust {
+		cargo, err := p.lookPath("cargo")
+		if err != nil {
+			return nil, err
+		}
+		binaries, err := rustBinaries(req.OutputRoot, prog)
+		if err != nil {
+			return nil, err
+		}
+		binary, err := p.buildRust(ctx, req, j.crate(), cargo, binaries[j.ID])
+		if err != nil {
+			return nil, err
+		}
+		return &builtJob{job: j, binary: binary, module: module, env: env}, nil
 	}
 	binary, err := filepath.Abs(filepath.Join(req.Dir, filepath.FromSlash(j.Binary)))
 	if err != nil {

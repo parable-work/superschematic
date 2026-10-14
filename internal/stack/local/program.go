@@ -35,9 +35,10 @@ const MigrationsDir = "migrations"
 const binDir = "bin"
 
 // RustTargetDir is the Cargo target directory, under the program
-// directory, every Rust server of the environment builds into (D57): cargo
-// keeps its compiled dependencies there between runs, where the server's
-// own directory, which each build of the stack empties, would lose them.
+// directory, every Rust server, job and worker of the environment builds
+// into (D57, D65): cargo keeps its compiled dependencies there between
+// runs, where the deployable's own directory, which each build of the
+// stack empties, would lose them.
 // The binary runs from `target/release/<binary>`, the binary the crate's
 // Cargo.toml names. The output root a project ignores holds it, and a
 // Dockerfile's ignore file leaves out every `target` directory.
@@ -153,7 +154,8 @@ type Migration struct {
 // binary its Cargo.toml names, which the provisioner reads as it builds,
 // runs from there, so Binary is empty (D57). A worker's process (Kind
 // "worker", D53) has no port and no URL, and is ready once it starts
-// (ReadinessStarted).
+// (ReadinessStarted); it is built and run as a server in its language is,
+// a Rust one's crate included (D65).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
@@ -181,8 +183,10 @@ func (s *Server) what() string {
 // servers and run with its environment on its schedule, in its time zone,
 // while the environment runs, or once by `stack run`. A Go job's module is
 // built into Binary; a TypeScript job's main.ts runs on Bun, with no
-// binary. A run that outlives TimeoutSeconds is stopped, and a failed run
-// is run again up to Retries times.
+// binary; a Rust job's crate is built into RustTargetDir, as a Rust
+// server's is, and the binary its Cargo.toml names runs from there, so
+// Binary is empty (D65). A run that outlives TimeoutSeconds is stopped,
+// and a failed run is run again up to Retries times.
 type Job struct {
 	ID             string   `json:"id"`
 	Deployable     string   `json:"deployable"`
@@ -680,9 +684,9 @@ func jobOf(res *ir.Resource) (*Job, error) {
 	switch j.Language, _ = res.Properties["language"].(string); j.Language {
 	case LanguageGo:
 		j.Binary = filepath.ToSlash(filepath.Join(binDir, j.Name))
-	case LanguageTypeScript:
+	case LanguageTypeScript, LanguageRust:
 	default:
-		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s and %s jobs", j.Language, LanguageGo, LanguageTypeScript)
+		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s, %s and %s jobs", j.Language, LanguageGo, LanguageTypeScript, LanguageRust)
 	}
 	env, err := envOf(res.Properties["env"])
 	if err != nil {

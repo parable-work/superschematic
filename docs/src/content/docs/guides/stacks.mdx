@@ -777,7 +777,7 @@ lowered:
 | `unknown-env-key` | an `env` key that is not a field of the server's `@envVars`, or an `env` on a database |
 | `secret-literal` | a literal or a parameter for a `Secret<T>` field |
 | `kind-mismatch` | a handle whose kind is not the kind of the service it names, or a handle in a place that does not take its kind |
-| `unrealizable` | a deployable its platform cannot run, such as a Rust job on `local`, or a server whose APIs are in two languages |
+| `unrealizable` | a deployable its platform cannot run, such as a job on a target with no job platform, or a server whose APIs are in two languages |
 | `no-connector` | an edge no connector realizes between the two platforms |
 | `expose-not-server` | an exposed deployable that is not a server |
 | `unreachable-edge` | a `calls` edge to an API none of whose operations admits the calling server |

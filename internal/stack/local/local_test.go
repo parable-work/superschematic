@@ -214,6 +214,64 @@ func TestRustGolden(t *testing.T) {
 	}
 }
 
+// rustOrdersStack is the shop with shop-orders written in Rust (D65), over
+// rustOrdersShop's services.
+func rustOrdersStack() *ir.Stack {
+	s := shop()
+	s.Name = "rust-orders-stack"
+	return s
+}
+
+// rustOrdersShop is the acme-shop services with shop-orders written in
+// Rust: its server Orders, its job ShipOrders and its worker FulfilOrders
+// are Rust processes. shop-api stays in Go with its bucket, and
+// shop-orders lists none.
+func rustOrdersShop() []stack.Service {
+	return stacktest.InRust(stacktest.AcmeShop(), "shop-orders")
+}
+
+// TestRustJobAndWorkerGolden resolves the shop with shop-orders in Rust in
+// Dev (D65): its job is on local.job and its worker on local.worker, in
+// Rust, with the edges and the environment a Go one's has. The program
+// holds the job with no binary, as it holds a Rust server, since the
+// provisioner reads the binary's name from the crate as it builds it, and
+// the worker as a Rust process with no port and no binary.
+func TestRustJobAndWorkerGolden(t *testing.T) {
+	reg := assemble(t)
+	checkGoldenEnvironment(t, reg, rustOrdersStack(), rustOrdersShop(), "Dev")
+	env := resolve(t, reg, rustOrdersStack(), rustOrdersShop(), "Dev")
+	goEnv := resolve(t, reg, rustOrdersStack(), stacktest.AcmeShop(), "Dev")
+	for name, platform := range map[string]string{
+		"Orders":                     local.ServerPlatform,
+		stacktest.ShipOrdersJob:      local.JobPlatform,
+		stacktest.FulfilOrdersWorker: local.WorkerPlatform,
+	} {
+		d, goD := env.Deployable(name), goEnv.Deployable(name)
+		if d == nil || d.Platform != platform || d.Language != registry.APILanguageRust {
+			t.Fatalf("%s is %+v, want a Rust deployable on %s", name, d, platform)
+		}
+		if !equalJSON(t, d.Bindings, goD.Bindings) {
+			t.Errorf("%s's bindings differ from a Go %s's", name, d.Kind)
+		}
+	}
+	prog, err := local.ProgramOf(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job := prog.JobOf(stacktest.ShipOrdersJob); job == nil || job.Language != local.LanguageRust || job.Binary != "" {
+		t.Errorf("the program's job = %+v, want a Rust job with no binary", job)
+	}
+	var worker *local.Server
+	for _, s := range prog.Servers {
+		if s.Deployable == stacktest.FulfilOrdersWorker {
+			worker = s
+		}
+	}
+	if worker == nil || worker.Language != local.LanguageRust || worker.Kind != "worker" || worker.Binary != "" || worker.Port != 0 {
+		t.Errorf("the program's worker = %+v, want a Rust process with no binary and no port", worker)
+	}
+}
+
 // checkGoldenEnvironment resolves env of s and checks its environment.json
 // and the program the provisioner renders from it against the golden
 // files.
@@ -533,16 +591,27 @@ func TestRefusals(t *testing.T) {
 			t.Errorf("got %v, want the one lowering error %q", errs, want)
 		}
 	})
-	t.Run("a Rust job or worker", func(t *testing.T) {
-		// shop-orders' server is a Rust process; its job and its worker
-		// are left out of D57.
-		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-orders"), "Dev")
-		wantFailure(t, errs, stack.CodeUnrealizable, "job "+stacktest.ShipOrdersJob+" is a RUST job, and platform local.job runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
-		wantFailure(t, errs, stack.CodeUnrealizable, "worker "+stacktest.FulfilOrdersWorker+" is a RUST worker, and platform local.worker runs only GO, TYPESCRIPT; Rust jobs and workers are not built (D57)")
-		for _, e := range errs.List {
-			if strings.Contains(e.Message, "local.process") {
-				t.Errorf("the Rust server Orders was refused: %s", e.Message)
+	t.Run("a Rust job's or worker's bucket", func(t *testing.T) {
+		// shop-orders lists shop-media in Rust: its job and its worker
+		// take its edges (D52, D53), so each bucket edge is refused as
+		// its server's is, and nothing else is (D65).
+		services := stacktest.InRust(stacktest.AcmeShop(), "shop-orders")
+		for i := range services {
+			if services[i].Name == stacktest.ShopOrders.Name {
+				services[i].Buckets = []ir.ServiceRef{stacktest.ShopMedia}
 			}
+		}
+		errs := resolveErr(t, shop(), services, "Dev")
+		var got []string
+		for _, e := range errs.List {
+			got = append(got, string(e.Code)+": "+e.Message)
+		}
+		for _, d := range []string{"server Orders", "job " + stacktest.ShipOrdersJob, "worker " + stacktest.FulfilOrdersWorker} {
+			kind, _, _ := strings.Cut(d, " ")
+			wantFailure(t, errs, stack.CodeLowering, d+" is a RUST "+kind+", which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)")
+		}
+		if len(errs.List) != 3 {
+			t.Errorf("got %d failures, want the three bucket edges':\n%s", len(errs.List), strings.Join(got, "\n"))
 		}
 	})
 	t.Run("a PORT field", func(t *testing.T) {
