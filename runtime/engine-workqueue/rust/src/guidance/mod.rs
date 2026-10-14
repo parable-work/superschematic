@@ -8,16 +8,13 @@
 
 #![allow(dead_code)]
 
-// Milestone 12a: Lease, Assignment, Presence and Retries.
 pub(crate) mod assignment;
-pub(crate) mod lease;
-pub(crate) mod presence;
-pub(crate) mod retries;
-
-// Milestone 12b: Queue, Budget and Blueprint.
 pub(crate) mod blueprint;
 pub(crate) mod budget;
+pub(crate) mod lease;
+pub(crate) mod presence;
 pub(crate) mod queue;
+pub(crate) mod retries;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};
 

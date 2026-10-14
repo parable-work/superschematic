@@ -7,9 +7,7 @@
 //! order, each claim reserving its budget, and the runner puts a job whose
 //! time ran out back in the queue, settling what it reserved; each
 //! behavior's guidance on it says what its config means. On SQLite and,
-//! with the variable set, on Postgres. The cases over the jobs and the
-//! workers wait for Lease, Assignment, Presence and Retries (milestone
-//! 12a); the batch's runs now.
+//! with the variable set, on Postgres.
 
 mod support;
 
@@ -159,7 +157,6 @@ fn open(target: &Target) -> Engine {
 // The work-queue behaviors say what their config means.
 
 #[test]
-#[ignore = "needs Lease, Assignment and Retries (12a)"]
 fn lease_on_the_fixture_gives_its_lengths_what_an_expiry_does_and_fences_every_write() {
     for target in targets("fixture_lease_guidance") {
         let engine = open(&target);
@@ -202,7 +199,6 @@ fn lease_on_the_fixture_gives_its_lengths_what_an_expiry_does_and_fences_every_w
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment and Retries (12a)"]
 fn queue_names_its_claim_states_its_order_its_match_fields_and_what_keeps_work_out() {
     for target in targets("fixture_queue_guidance") {
         let engine = open(&target);
@@ -264,7 +260,6 @@ fn queue_names_its_claim_states_its_order_its_match_fields_and_what_keeps_work_o
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment and Retries (12a)"]
 fn retries_gives_its_classes_and_caps_budget_its_meters_and_scopes_assignment_who_may_assign() {
     for target in targets("fixture_budget_guidance") {
         let engine = open(&target);
@@ -349,7 +344,6 @@ fn publish_fixture(engine: &Engine) {
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment, Presence and Retries (12a)"]
 fn presence_names_who_beats_an_instance_and_blueprint_what_a_stamp_creates() {
     for target in targets("fixture_presence_blueprint_guidance") {
         let engine = open(&target);
@@ -398,7 +392,6 @@ fn presence_names_who_beats_an_instance_and_blueprint_what_a_stamp_creates() {
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment, Presence and Retries (12a)"]
 fn every_operation_of_the_fixture_says_when_to_use_it_in_plain_ascii_and_the_tools_document_and_meta_carry_it(
 ) {
     for target in targets("fixture_guidance_ascii") {
@@ -529,7 +522,6 @@ fn claim_next(engine: &Engine, who: &Principal, topic: &str) -> Value {
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment and Retries (12a)"]
 fn it_runs_the_document_the_core_binary_builds_claimed_in_order_held_and_put_back_when_its_time_runs_out(
 ) {
     for target in targets("fixture_jobs_run") {
@@ -695,7 +687,6 @@ fn it_runs_the_document_the_core_binary_builds_claimed_in_order_held_and_put_bac
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment, Presence and Retries (12a)"]
 fn it_runs_the_fixtures_worker_type_a_missed_workers_live_lease_is_spared_and_goes_when_it_runs_out(
 ) {
     for target in targets("fixture_worker_run") {

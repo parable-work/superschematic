@@ -6,8 +6,7 @@
 //! whose own scope link moves wakes what waits under it; a blocker is heard
 //! only when its status moves; and excludeStale keeps work pinned to a
 //! superseded revision or release out of claimNext and claim), on SQLite
-//! and, with the variable set, on Postgres. Every Job composes Lease, so the
-//! cases wait for it (milestone 12a), and the release's for Branches.
+//! and, with the variable set, on Postgres.
 
 mod support;
 
@@ -555,7 +554,6 @@ fn pooled(target: &Target, behaviors: Option<BehaviorSet>) -> Engine {
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment, Presence and Retries (12a)"]
 fn a_write_that_crosses_no_amount_runs_no_check_and_no_hook_and_one_that_does_reaches_only_those_it_crosses(
 ) {
     for target in targets("a_write_that_crosses_no_amount") {
@@ -650,7 +648,6 @@ fn a_write_that_crosses_no_amount_runs_no_check_and_no_hook_and_one_that_does_re
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn each_waiting_instance_hears_the_values_of_its_scopes_the_answer_turns_on_at_its_own_amount() {
     for target in targets("each_waiting_instance_hears") {
         let engine = pooled(&target, None);
@@ -681,7 +678,6 @@ fn each_waiting_instance_hears_the_values_of_its_scopes_the_answer_turns_on_at_i
 // Queue: a daily scope and a scope's own scope.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_daily_scopes_settled_reservations_let_its_waiting_work_in_at_the_next_day() {
     for target in targets("a_daily_scopes_settled_reservations") {
         let engine = open(&target, None);
@@ -738,7 +734,6 @@ fn a_daily_scopes_settled_reservations_let_its_waiting_work_in_at_the_next_day()
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_scope_whose_own_scope_link_moves_wakes_what_waits_under_it() {
     for target in targets("a_scope_whose_own_scope_link_moves") {
         let engine = open(&target, None);
@@ -813,7 +808,6 @@ fn a_scope_whose_own_scope_link_moves_wakes_what_waits_under_it() {
 // Queue: a blocker is heard when its status moves.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_blockers_change_that_leaves_its_status_refreshes_no_dependent_and_one_that_moves_it_does() {
     for target in targets("a_blockers_change") {
         let engine = open(&target, None);
@@ -883,7 +877,6 @@ fn specced(target: &Target, extra: Vec<Value>, behaviors: Option<BehaviorSet>) -
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_whose_pinned_link_the_target_has_moved_past_is_no_candidate_until_it_is_linked_again(
 ) {
     for target in targets("an_instance_whose_pinned_link_moved") {
@@ -942,7 +935,6 @@ fn an_instance_whose_pinned_link_the_target_has_moved_past_is_no_candidate_until
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn the_delete_of_a_pinned_links_target_lets_go_of_it_whichever_reference_hears_the_delete_first() {
     for target in targets("the_delete_of_a_pinned_links_target") {
         let engine = specced(&target, Vec::new(), None);
@@ -996,7 +988,6 @@ fn the_delete_of_a_pinned_links_target_lets_go_of_it_whichever_reference_hears_t
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_pin_to_an_earlier_revision_is_stale_from_its_create_and_an_unpinned_link_is_never_stale() {
     for target in targets("a_pin_to_an_earlier_revision") {
         let engine = specced(&target, Vec::new(), None);
@@ -1020,7 +1011,6 @@ fn a_pin_to_an_earlier_revision_is_stale_from_its_create_and_an_unpinned_link_is
 }
 
 #[test]
-#[ignore = "needs Lease, Assignment, Presence and Retries (12a)"]
 fn with_budget_beside_it_a_stale_link_keeps_the_instance_out_without_a_budget_check() {
     for target in targets("a_stale_link_without_a_budget_check") {
         let counting = counting();
@@ -1051,7 +1041,6 @@ fn with_budget_beside_it_a_stale_link_keeps_the_instance_out_without_a_budget_ch
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn parse_config_holds_exclude_stale_to_pinned_links_of_the_type_that_hold_one_target() {
     for target in targets("parse_config_holds_exclude_stale") {
         let engine = open(&target, None);
@@ -1188,7 +1177,6 @@ fn release_recipe(engine: &Engine, id: &str) -> i64 {
 }
 
 #[test]
-#[ignore = "needs Lease (12a) and Branches (PR #377)"]
 fn a_link_pinned_to_a_release_keeps_its_instance_out_once_the_target_is_released_again() {
     for target in targets("a_link_pinned_to_a_release") {
         let engine = open(&target, None);

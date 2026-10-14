@@ -7,8 +7,7 @@
 //! definition, read from the revision the link pins and stamped when the
 //! link is set; the creator's permissions; and one transaction for the
 //! parent and every child), on SQLite and, with the variable set, on
-//! Postgres. A case that releases a recipe waits for Branches; one whose
-//! children are claimed waits for Lease (milestone 12a). The guidance is
+//! Postgres. The guidance is
 //! held to the TypeScript text in the work-queue crate's
 //! `tests/guidance_blueprint.rs`.
 
@@ -1052,7 +1051,6 @@ fn release_recipe(engine: &Engine, id: &str) -> i64 {
 }
 
 #[test]
-#[ignore = "needs Branches (PR #377)"]
 fn copy_links_keeps_the_release_a_runs_link_pins_where_the_childs_link_pins_releases_too() {
     for target in targets("copy_links_keeps_the_release") {
         let engine = open(&target);
@@ -1635,7 +1633,6 @@ fn from_must_be_a_link_pinned_to_a_revision_to_a_schema_with_revisions_and_the_f
 // Blueprint: children that are claimable work.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn stamped_children_compose_queue_and_claim_next_claims_them_in_the_order_their_edges_give() {
     for target in targets("stamped_children_compose_queue") {
         let engine = open(&target);

@@ -9,8 +9,7 @@
 //! an attempt's detail in its event and its class's hint in its result;
 //! and the config rules), on SQLite and, with the variable set, on
 //! Postgres. A TypeScript case that opens a second engine is a test of its
-//! own here; the cases that claim through Queue wait for Queue (milestone
-//! 12b).
+//! own here.
 
 mod support;
 mod workqueue_support;
@@ -924,7 +923,6 @@ fn claim_next(engine: &Engine, who: &Principal) -> Value {
 }
 
 #[test]
-#[ignore = "needs Queue in the Rust engine (milestone 12b)"]
 fn an_exhausted_instance_still_in_a_claimable_state_is_not_claimed() {
     for target in targets("retries_queue_exhausted") {
         let engine = queued(&target, with(base(), json!({"from": ["running"]})));
@@ -956,7 +954,6 @@ fn an_exhausted_instance_still_in_a_claimable_state_is_not_claimed() {
 }
 
 #[test]
-#[ignore = "needs Queue in the Rust engine (milestone 12b)"]
 fn a_claimed_job_that_fails_until_its_caps_run_out_moves_to_exhausted_state_and_out_of_the_queue() {
     for target in targets("retries_queue_caps") {
         let engine = queued(&target, base());

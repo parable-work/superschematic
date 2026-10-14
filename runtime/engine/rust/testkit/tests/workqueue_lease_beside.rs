@@ -8,7 +8,7 @@
 //! lease, and assignNumber is the holder's unless exempt) and
 //! `test/lease-branches.test.ts` (Lease's release and Branches'
 //! releaseCommit on one type), on SQLite and, with the variable set, on
-//! Postgres. The Branches case waits for Branches in the Rust engine.
+//! Postgres.
 
 mod support;
 mod workqueue_support;
@@ -328,7 +328,6 @@ fn recipe_document() -> Value {
 }
 
 #[test]
-#[ignore = "needs Branches in the Rust engine (PR #377)"]
 fn a_type_composes_lease_and_branches_and_each_runs_its_own_release() {
     for target in targets("lease_branches") {
         let engine = target.open_workqueue_with(|options| options.clock = Clock::Manual(1_000_000));

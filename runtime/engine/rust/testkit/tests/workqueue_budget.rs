@@ -9,8 +9,7 @@
 //! read never writes; scope operations that cannot free what an instance
 //! still holds; checkReserve, the read-only answer Queue copies; and the
 //! config rules), on SQLite and, with the variable set, on Postgres. The
-//! cases whose types compose Lease wait for it (milestone 12a); the ones
-//! that claim through Queue too. The guidance is held to the TypeScript
+//! guidance is held to the TypeScript
 //! text in the work-queue crate's `tests/guidance_budget.rs`.
 
 mod support;
@@ -347,7 +346,6 @@ fn three(engine: &Engine) -> Vec<Value> {
 // Budget: one instance.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_claim_reserves_usage_draws_the_reservation_down_and_the_release_settles_the_rest() {
     for target in targets("a_claim_reserves") {
         let engine = single(
@@ -388,7 +386,6 @@ fn a_claim_reserves_usage_draws_the_reservation_down_and_the_release_settles_the
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_reservation_that_does_not_fit_is_refused_and_one_with_a_meter_takes_an_amount() {
     for target in targets("a_reservation_that_does_not_fit") {
         let engine = single(
@@ -497,7 +494,6 @@ fn a_reservation_that_does_not_fit_is_refused_and_one_with_a_meter_takes_an_amou
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn on_a_type_that_composes_lease_reserve_needs_an_active_lease_and_only_its_holder_reserves() {
     for target in targets("reserve_needs_an_active_lease") {
         let engine = single(
@@ -568,7 +564,6 @@ fn without_lease_on_the_type_a_reservation_needs_no_lease_and_lasts_until_it_is_
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn usage_is_never_refused_and_the_holder_gets_one_directive_per_lease() {
     for target in targets("usage_is_never_refused") {
         let engine = single(
@@ -658,7 +653,6 @@ fn usage_is_never_refused_and_the_holder_gets_one_directive_per_lease() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn settle_releases_the_own_reservation_of_one_meter_or_of_every_meter() {
     for target in targets("settle_releases") {
         let engine = single(
@@ -694,7 +688,6 @@ fn settle_releases_the_own_reservation_of_one_meter_or_of_every_meter() {
 // Budget: settlement when a lease ends.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_release_settles_the_reservation_here_and_in_every_enclosing_scope() {
     for target in targets("a_release_settles") {
         let engine = chain(&target, Chain::default());
@@ -716,7 +709,6 @@ fn a_release_settles_the_reservation_here_and_in_every_enclosing_scope() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_expiry_settles_it_and_an_expire_that_finds_the_lease_active_settles_nothing() {
     for target in targets("an_expiry_settles") {
         let engine = chain(&target, Chain::default());
@@ -739,7 +731,6 @@ fn an_expiry_settles_it_and_an_expire_that_finds_the_lease_active_settles_nothin
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_acquire_over_a_lapsed_lease_settles_the_reservation_of_the_lease_it_expires() {
     for target in targets("an_acquire_over_a_lapsed_lease") {
         let engine = chain(&target, Chain::default());
@@ -762,7 +753,6 @@ fn an_acquire_over_a_lapsed_lease_settles_the_reservation_of_the_lease_it_expire
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn deleting_an_instance_settles_everything_it_reserved_up_the_chain() {
     for target in targets("deleting_an_instance_settles") {
         let engine = chain(
@@ -802,7 +792,6 @@ fn deleting_an_instance_settles_everything_it_reserved_up_the_chain() {
 // Budget: enclosing scopes.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_scope_that_cannot_fit_a_reservation_refuses_it_and_leaves_nothing_in_the_chain() {
     for target in targets("a_scope_that_cannot_fit") {
         let engine = chain(&target, Chain::default());
@@ -867,7 +856,6 @@ fn a_scope_that_cannot_fit_a_reservation_refuses_it_and_leaves_nothing_in_the_ch
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_reservation_reaches_the_outermost_scope_through_every_level_each_with_its_own_event() {
     for target in targets("a_reservation_reaches_the_outermost_scope") {
         let engine = chain(
@@ -965,7 +953,6 @@ fn a_reservation_reaches_the_outermost_scope_through_every_level_each_with_its_o
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn usage_beyond_a_reservation_releases_only_the_reservations_part_at_each_scope() {
     for target in targets("usage_beyond_a_reservation") {
         let engine = chain(
@@ -1013,7 +1000,6 @@ fn usage_beyond_a_reservation_releases_only_the_reservations_part_at_each_scope(
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn usage_rolls_up_and_stays_when_the_reservation_is_settled() {
     for target in targets("usage_rolls_up") {
         let engine = chain(&target, Chain::default());
@@ -1038,7 +1024,6 @@ fn usage_rolls_up_and_stays_when_the_reservation_is_settled() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn each_instances_reserve_field_reserves_its_own_amount_and_the_scopes_add_them_up() {
     for target in targets("each_instances_reserve_field") {
         let engine = chain(
@@ -1078,7 +1063,6 @@ fn each_instances_reserve_field_reserves_its_own_amount_and_the_scopes_add_them_
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn with_reserve_beside_reserve_field_an_instance_without_a_positive_integer_reserves_the_config_amount(
 ) {
     for target in targets("reserve_beside_reserve_field") {
@@ -1110,7 +1094,6 @@ fn with_reserve_beside_reserve_field_an_instance_without_a_positive_integer_rese
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn usage_that_takes_a_scope_over_its_limit_is_reported_and_directs_the_holder() {
     for target in targets("usage_that_takes_a_scope_over") {
         let engine = chain(
@@ -1154,7 +1137,6 @@ fn usage_that_takes_a_scope_over_its_limit_is_reported_and_directs_the_holder() 
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn the_scope_operations_cannot_free_what_an_instance_still_holds_nor_hold_more_than_it_reserved() {
     for target in targets("the_scope_operations") {
         let engine = chain(&target, Chain::default());
@@ -1234,7 +1216,6 @@ fn the_scope_operations_cannot_free_what_an_instance_still_holds_nor_hold_more_t
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_scope_link_does_not_move_while_a_reservation_is_held_through_it() {
     for target in targets("a_scope_link_does_not_move") {
         let engine = chain(&target, Chain::default());
@@ -1416,7 +1397,6 @@ fn step_of(engine: &Engine, id: &str) -> Value {
 // Budget: claimed through Queue.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_claim_reserves_every_meters_claim_amount_here_and_in_every_scope() {
     for target in targets("a_claim_reserves_every_meter") {
         let engine = queued(
@@ -1448,7 +1428,6 @@ fn a_claim_reserves_every_meters_claim_amount_here_and_in_every_scope() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_reservation_that_does_not_fit_refuses_the_claim_which_leaves_nothing() {
     for target in targets("a_reservation_refuses_the_claim") {
         let engine = queued(&target, &[("s1", "r1"), ("s2", "r2")], None, &[]);
@@ -1484,7 +1463,6 @@ fn a_reservation_that_does_not_fit_refuses_the_claim_which_leaves_nothing() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_next_passes_over_a_candidate_whose_budget_does_not_fit_and_claims_the_next() {
     for target in targets("claim_next_passes_over") {
         let engine = queued(&target, &[("s1", "r1"), ("s2", "r2")], None, &[("r1", 50)]);
@@ -1502,7 +1480,6 @@ fn claim_next_passes_over_a_candidate_whose_budget_does_not_fit_and_claims_the_n
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_release_and_the_runners_expiry_settle_the_claims_reservation_and_queues_copies_follow() {
     for target in targets("a_release_and_the_runners_expiry") {
         let engine = queued(&target, &[("s1", "r1")], None, &[]);
@@ -1541,7 +1518,6 @@ fn a_release_and_the_runners_expiry_settle_the_claims_reservation_and_queues_cop
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn through_three_levels_claim_next_claims_what_the_pool_can_fit() {
     for target in targets("through_three_levels") {
         let engine = queued(
@@ -1594,7 +1570,6 @@ fn through_three_levels_claim_next_claims_what_the_pool_can_fit() {
 // Budget: a scope a new version moves.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn what_is_held_at_the_old_scope_is_released_there_and_a_reservation_through_the_new_one_waits() {
     for target in targets("a_scope_a_new_version_moves") {
         let engine = chain(&target, Chain::default());
@@ -1694,7 +1669,6 @@ fn scopes(amount: i64) -> Value {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn check_reserve_says_whether_reserve_would_fit_lists_the_scopes_it_read_and_changes_nothing() {
     for target in targets("check_reserve_says") {
         let engine = chain(
@@ -1741,7 +1715,6 @@ fn check_reserve_says_whether_reserve_would_fit_lists_the_scopes_it_read_and_cha
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn check_reserve_counts_a_leases_reservation_as_settled_once_the_lease_is_no_longer_active() {
     for target in targets("check_reserve_counts_a_lapsed_lease") {
         let engine = chain(
@@ -1778,7 +1751,6 @@ fn check_reserve_counts_a_leases_reservation_as_settled_once_the_lease_is_no_lon
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_reservation_daily_meters_keep_out_fits_at_the_start_of_the_next_utc_day() {
     for target in targets("daily_meters_keep_out") {
         let engine = chain(
@@ -1846,7 +1818,6 @@ fn pool_flow(permission: Option<&str>) -> Value {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn usage_that_leaves_the_instance_over_its_limit_moves_its_status_in_the_same_operation() {
     for target in targets("usage_moves_its_status") {
         let engine = single(
@@ -1913,7 +1884,6 @@ fn usage_that_leaves_the_instance_over_its_limit_moves_its_status_in_the_same_op
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_scope_over_its_limit_moves_by_its_own_config_as_the_caller() {
     for target in targets("a_scope_over_its_limit_moves") {
         let engine = open(&target);
@@ -2048,7 +2018,6 @@ fn escalate_needs_workflow_its_states_and_a_transition_from_each_from_state() {
 // Budget: limits.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn set_limit_needs_limit_permission_and_never_goes_below_what_is_used_and_reserved() {
     for target in targets("set_limit_needs_limit_permission") {
         let engine = single(
@@ -2199,7 +2168,6 @@ fn set_limit_needs_limit_permission_and_never_goes_below_what_is_used_and_reserv
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn limit_field_holds_the_instances_limit_which_only_limit_permission_changes() {
     for target in targets("limit_field_holds_the_limit") {
         let engine = single(
@@ -2267,7 +2235,6 @@ fn limit_field_holds_the_instances_limit_which_only_limit_permission_changes() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn limit_beside_limit_field_is_the_limit_while_the_field_holds_no_count() {
     for target in targets("limit_beside_limit_field") {
         let engine = single(
@@ -2332,7 +2299,6 @@ fn limit_beside_limit_field_is_the_limit_while_the_field_holds_no_count() {
 // Budget: daily meters.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_daily_meters_usage_starts_again_each_utc_day_and_a_read_writes_nothing() {
     for target in targets("a_daily_meters_usage") {
         let engine = chain(

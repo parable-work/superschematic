@@ -31,37 +31,33 @@
 //! # Ok::<(), superschematic_engine::Error>(())
 //! ```
 //!
-//! Milestone 12 ports them in two parts, which [`behavior`] answers for as
-//! each lands; [`workqueue`] registers the ones ported, in [`NAMES`]'
-//! order.
+//! [`workqueue`] registers all seven, in [`NAMES`]' order; [`behavior`]
+//! gives one by name.
 
 mod guidance;
 mod moves;
 mod time;
 
-// Milestone 12a: Lease, Assignment, Presence and Retries.
 pub mod assignment;
+pub mod blueprint;
+pub mod budget;
 pub mod lease;
 pub mod presence;
+pub mod queue;
 pub mod retries;
 
 pub use assignment::{Assignment, AssignmentConfig};
-pub use lease::{Lease, LeaseConfig, LeaseDirectOn, LeaseTransition};
-pub use moves::StatusMove;
-pub use presence::{Presence, PresenceConfig, PresenceTransition};
-pub use retries::{Retries, RetriesConfig, RetriesKeepBest, RetryClass};
-
-// Milestone 12b: Queue, Budget and Blueprint.
-pub mod blueprint;
-pub mod budget;
-pub mod queue;
 pub use blueprint::{
     Blueprint, BlueprintConfig, BlueprintFrom, BlueprintStep, BlueprintWhen, MAX_STEPS,
 };
 pub use budget::{
     Budget, BudgetConfig, BudgetMeter, BudgetTransition, ReserveCheck, ScopeRead, ScopeValue,
 };
+pub use lease::{Lease, LeaseConfig, LeaseDirectOn, LeaseTransition};
+pub use moves::StatusMove;
+pub use presence::{Presence, PresenceConfig, PresenceTransition};
 pub use queue::{Queue, QueueClaim, QueueConfig, DEFAULT_MAX_CANDIDATES, EXCLUDED};
+pub use retries::{Retries, RetriesConfig, RetriesKeepBest, RetryClass};
 
 use superschematic_engine::BehaviorSet;
 
@@ -80,38 +76,34 @@ pub const NAMES: [&str; 7] = [
 /// Registers one behavior in a set.
 type Register = fn(BehaviorSet) -> BehaviorSet;
 
-/// The behaviors ported so far, by name, in any order: [`workqueue`]
-/// registers them in [`NAMES`]' order.
-const PORTED: &[(&str, Register)] = &[
-    // Milestone 12a.
+/// Each behavior, by name, in [`NAMES`]' order.
+const REGISTER: [(&str, Register); 7] = [
     ("Lease", |set| set.with(Lease)),
     ("Assignment", |set| set.with(Assignment)),
-    ("Presence", |set| set.with(Presence)),
-    ("Retries", |set| set.with(Retries)),
-    // Milestone 12b.
     ("Queue", |set| set.with(Queue)),
+    ("Presence", |set| set.with(Presence)),
     ("Blueprint", |set| set.with(Blueprint)),
     ("Budget", |set| set.with(Budget)),
+    ("Retries", |set| set.with(Retries)),
 ];
 
 /// One work-queue behavior by name, for a host that registers only some
 /// (the TypeScript package exports each one by one); `None` for a name
-/// that is none of [`NAMES`], or one not ported yet.
+/// that is none of [`NAMES`].
 pub fn behavior(name: &str) -> Option<BehaviorSet> {
-    PORTED
+    REGISTER
         .iter()
         .find(|(known, _)| *known == name)
         .map(|(_, register)| register(BehaviorSet::new()))
 }
 
-/// Every work-queue behavior ported, in [`NAMES`]' order: what a host
-/// passes in `EngineOptions::behaviors` after the core's
+/// Every work-queue behavior, in [`NAMES`]' order: what a host passes in
+/// `EngineOptions::behaviors` after the core's
 /// (`superschematic_engine_behaviors::core`).
 pub fn workqueue() -> BehaviorSet {
-    NAMES
+    REGISTER
         .iter()
-        .filter_map(|name| behavior(name))
-        .fold(BehaviorSet::new(), BehaviorSet::extend)
+        .fold(BehaviorSet::new(), |set, (_, register)| register(set))
 }
 
 #[cfg(test)]
@@ -128,6 +120,7 @@ mod tests {
             assert!(std::path::Path::new(&path).is_file(), "{path}");
         }
         assert!(behavior("Workflow").is_none());
-        assert!(workqueue().len() <= NAMES.len());
+        assert_eq!(REGISTER.map(|(name, _)| name), NAMES);
+        assert_eq!(workqueue().len(), NAMES.len());
     }
 }

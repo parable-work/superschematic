@@ -7,8 +7,7 @@
 //! its blockers and its enclosing budget scopes, so work over its budget is
 //! not tried and does not starve the work behind it; countClaimable counts
 //! the same candidates; and the config rules), on SQLite and, with the
-//! variable set, on Postgres. Queue requires Lease, so every case whose
-//! type composes Queue waits for it (milestone 12a). The guidance is held
+//! variable set, on Postgres. The guidance is held
 //! to the TypeScript text in the work-queue crate's `tests/guidance_queue.rs`.
 
 mod support;
@@ -399,7 +398,6 @@ fn run_sql(engine: &Engine, sql: &str, params: &[SqlValue]) {
 // Queue: claim.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_takes_the_lease_and_moves_the_status_in_one_call() {
     for target in targets("claim_takes_the_lease") {
         let engine = world(&target, World::default());
@@ -433,7 +431,6 @@ fn claim_takes_the_lease_and_moves_the_status_in_one_call() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_checks_the_instance_itself_a_state_it_is_not_claimed_from_and_a_blocker_refuse_it() {
     for target in targets("claim_checks_the_instance_itself") {
         let engine = world(
@@ -479,7 +476,6 @@ fn claim_checks_the_instance_itself_a_state_it_is_not_claimed_from_and_a_blocker
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_lease_on_a_type_that_composes_queue_is_taken_only_by_claiming_it() {
     for target in targets("taken_only_by_claiming") {
         let engine = world(&target, World::default());
@@ -504,7 +500,6 @@ fn a_lease_on_a_type_that_composes_queue_is_taken_only_by_claiming_it() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_refusal_after_the_lease_is_taken_undoes_the_lease() {
     for target in targets("a_refusal_undoes_the_lease") {
         let engine = world(
@@ -534,7 +529,6 @@ fn a_refusal_after_the_lease_is_taken_undoes_the_lease() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_expires_a_lapsed_lease_first_and_checks_the_status_its_expiry_leaves() {
     for target in targets("claim_expires_a_lapsed_lease") {
         let engine = world(&target, World::default());
@@ -558,7 +552,6 @@ fn claim_expires_a_lapsed_lease_first_and_checks_the_status_its_expiry_leaves() 
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn with_budget_on_the_type_claim_reserves_after_the_lease_and_before_the_transition() {
     for target in targets("claim_reserves_after_the_lease") {
         let budget = BudgetStandIn::default();
@@ -601,7 +594,6 @@ fn with_budget_on_the_type_claim_reserves_after_the_lease_and_before_the_transit
 // Queue: claimNext.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_next_claims_highest_priority_first_then_oldest_then_by_id() {
     for target in targets("claim_next_claims_highest_priority_first") {
         let engine = world(&target, World::default());
@@ -636,7 +628,6 @@ fn claim_next_claims_highest_priority_first_then_oldest_then_by_id() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_change_of_priority_reorders_the_queue() {
     for target in targets("a_change_of_priority") {
         let engine = world(&target, World::default());
@@ -669,7 +660,6 @@ fn a_change_of_priority_reorders_the_queue() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn match_takes_a_list_of_values_any_of_which_an_instance_holds() {
     for target in targets("match_takes_a_list") {
         let engine = world(&target, World::default());
@@ -713,7 +703,6 @@ fn match_takes_a_list_of_values_any_of_which_an_instance_holds() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn claim_next_passes_ttl_ms_to_the_claim() {
     for target in targets("claim_next_passes_ttl_ms") {
         let engine = world(&target, World::default());
@@ -726,7 +715,6 @@ fn claim_next_passes_ttl_ms_to_the_claim() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_claim_forbidden_to_the_caller_is_skipped_and_when_every_one_is_claim_next_says_why() {
     for target in targets("a_claim_forbidden_to_the_caller") {
         let engine = world(
@@ -756,7 +744,6 @@ fn a_claim_forbidden_to_the_caller_is_skipped_and_when_every_one_is_claim_next_s
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn match_filters_on_the_configs_fields_by_equality_and_refuses_another_field() {
     for target in targets("match_filters_on_the_configs_fields") {
         let engine = world(&target, World::default());
@@ -807,7 +794,6 @@ fn assigned() -> Value {
 }
 
 #[test]
-#[ignore = "needs Lease and Assignment (12a)"]
 fn an_instance_assigned_to_a_principal_is_a_candidate_for_that_principal_only() {
     for target in targets("an_instance_assigned_to_a_principal") {
         let engine = world(
@@ -836,7 +822,6 @@ fn an_instance_assigned_to_a_principal_is_a_candidate_for_that_principal_only() 
 }
 
 #[test]
-#[ignore = "needs Lease and Assignment (12a)"]
 fn assigned_only_takes_only_the_work_assigned_to_the_caller_and_needs_assignment() {
     for target in targets("assigned_only") {
         let engine = world(
@@ -884,7 +869,6 @@ fn assigned_only_takes_only_the_work_assigned_to_the_caller_and_needs_assignment
 }
 
 #[test]
-#[ignore = "needs Lease and Assignment (12a)"]
 fn count_claimable_counts_what_claim_next_would_try_without_max_candidates_and_changes_nothing() {
     for target in targets("count_claimable_counts") {
         let engine = world(
@@ -959,7 +943,6 @@ fn dependencies_across() -> Value {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_waits_while_a_blocker_in_another_schema_is_open() {
     for target in targets("waits_while_a_blocker_is_open") {
         let engine = world(
@@ -1001,7 +984,6 @@ fn an_instance_waits_while_a_blocker_in_another_schema_is_open() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_a_create_gives_its_blockers_is_no_candidate_from_its_create() {
     for target in targets("a_create_gives_its_blockers") {
         let engine = world(
@@ -1046,7 +1028,6 @@ fn an_instance_a_create_gives_its_blockers_is_no_candidate_from_its_create() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_refresh_that_finds_the_copies_right_changes_nothing_and_one_that_finds_them_wrong_writes() {
     for target in targets("a_refresh_that_finds_the_copies_right") {
         let engine = world(
@@ -1110,7 +1091,6 @@ fn a_refresh_that_finds_the_copies_right_changes_nothing_and_one_that_finds_them
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_blockers_change_refreshes_a_dependent_another_principal_holds_the_lease_of() {
     for target in targets("leases_guard_lets_refresh_through") {
         let engine = world(
@@ -1162,7 +1142,6 @@ fn a_blockers_change_refreshes_a_dependent_another_principal_holds_the_lease_of(
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_stale_copy_costs_a_skipped_candidate_never_a_wrong_claim_and_max_candidates_caps_the_tries() {
     for target in targets("a_stale_copy_costs_a_skipped_candidate") {
         let engine = world(
@@ -1212,7 +1191,6 @@ fn a_stale_copy_costs_a_skipped_candidate_never_a_wrong_claim_and_max_candidates
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_at_max_expiries_is_no_candidate_until_its_expiries_are_reset() {
     for target in targets("an_instance_at_max_expiries") {
         let engine = world(
@@ -1245,7 +1223,6 @@ fn an_instance_at_max_expiries_is_no_candidate_until_its_expiries_are_reset() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn the_runners_lease_sweep_puts_a_claim_whose_worker_went_quiet_back_in_the_queue() {
     for target in targets("the_runners_lease_sweep") {
         let engine = world(
@@ -1334,7 +1311,6 @@ fn excluded_until(engine: &Engine, id: &str) -> i64 {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn more_over_budget_candidates_than_max_candidates_ahead_of_a_claimable_one_do_not_starve_it() {
     for target in targets("over_budget_candidates_do_not_starve") {
         let engine = pooled(&target);
@@ -1397,7 +1373,6 @@ fn more_over_budget_candidates_than_max_candidates_ahead_of_a_claimable_one_do_n
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn a_scopes_new_limit_lets_its_waiting_work_in_refreshed_as_the_principal_that_set_it() {
     for target in targets("a_scopes_new_limit") {
         let engine = pooled(&target);
@@ -1440,7 +1415,6 @@ fn a_scopes_new_limit_lets_its_waiting_work_in_refreshed_as_the_principal_that_s
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_a_create_links_to_a_scope_without_room_is_excluded_from_its_create() {
     for target in targets("excluded_from_its_create") {
         let engine = pooled(&target);
@@ -1496,7 +1470,6 @@ fn an_instance_a_create_links_to_a_scope_without_room_is_excluded_from_its_creat
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn an_instance_over_its_own_daily_limit_waits_for_the_next_day_which_lets_it_in_with_no_change() {
     for target in targets("over_its_own_daily_limit") {
         let engine = open_with(&target, None, |_| {});
@@ -1542,7 +1515,6 @@ fn an_instance_over_its_own_daily_limit_waits_for_the_next_day_which_lets_it_in_
 // Queue: its config.
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn parse_config_holds_the_claim_to_the_types_workflow_and_the_fields_to_the_types() {
     for target in targets("parse_config_holds_the_claim") {
         let engine = open_with(&target, None, |_| {});
@@ -1615,7 +1587,6 @@ fn queue_requires_lease_on_the_type() {
 }
 
 #[test]
-#[ignore = "needs Lease (12a)"]
 fn it_goes_on_a_schema_before_it_has_instances_and_is_not_removed_from_one_that_has_them() {
     // without is the Job schema with Workflow and Lease and no Queue.
     let without = || {

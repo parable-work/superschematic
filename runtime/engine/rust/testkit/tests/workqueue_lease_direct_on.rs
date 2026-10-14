@@ -9,10 +9,8 @@
 //! reactions are off, and they start at the publish that turns them on.
 //! On SQLite and, with the variable set, on Postgres.
 //!
-//! The Recipe schema is a version graph's root (Branches) where the engine
-//! has Branches; until the Rust engine does (PR #377), it is a plain schema
-//! that the cases on revisions only link to, and the cases on releases
-//! wait.
+//! The Recipe schema is a version graph's root (Branches), which the cases
+//! on revisions only link to.
 
 mod support;
 mod workqueue_support;
@@ -45,15 +43,8 @@ fn plans() -> Value {
 }
 
 /// Recipe is a version graph's root, with covers, which a release points
-/// at; on an engine without Branches, a plain schema.
-fn recipes(engine: &Engine) -> Value {
-    let behaviors = if engine.behaviors().has("Branches") {
-        json!([{"name": "Branches", "config": {"kinds": {"cover": {"type": "Cover"}}}}])
-    } else {
-        // TODO(integration): Branches arrives with PR #377; then every
-        // case publishes the version graph.
-        json!([])
-    };
+/// at.
+fn recipes() -> Value {
     json!({
         "kind": "General",
         "name": "Recipe",
@@ -61,7 +52,7 @@ fn recipes(engine: &Engine) -> Value {
             "Recipe": {
                 "name": "Recipe",
                 "role": "EmbeddedStruct",
-                "behaviors": behaviors,
+                "behaviors": [{"name": "Branches", "config": {"kinds": {"cover": {"type": "Cover"}}}}],
                 "fields": [{"name": "title", "typeRef": {"name": "string"}, "required": true}]
             },
             "Cover": {"name": "Cover", "role": "EmbeddedStruct", "fields": [{"name": "photoUrl", "typeRef": {"name": "string"}, "required": true}]}
@@ -233,7 +224,7 @@ fn world_with(
         configure(options);
     });
     publish(&engine, &plans());
-    publish(&engine, &recipes(&engine));
+    publish(&engine, &recipes());
     publish(&engine, &jobs_with(lease, more));
     let created = |schema: &str, id: &str, data: Value| {
         Instances {
@@ -394,7 +385,6 @@ fn a_pinned_link_tells_only_the_jobs_the_target_moved_past_a_plain_link_every_ho
 }
 
 #[test]
-#[ignore = "needs Branches in the Rust engine (PR #377)"]
 fn a_release_of_a_recipe_the_job_links_to_tells_its_holder_with_the_commit() {
     for target in targets("direct_on_release") {
         let w = world_with(
@@ -425,7 +415,6 @@ fn a_release_of_a_recipe_the_job_links_to_tells_its_holder_with_the_commit() {
 }
 
 #[test]
-#[ignore = "needs Branches in the Rust engine (PR #377)"]
 fn a_link_pinned_to_a_release_tells_only_the_jobs_pinned_to_an_earlier_release() {
     for target in targets("direct_on_release_pinned") {
         let w = world_with(

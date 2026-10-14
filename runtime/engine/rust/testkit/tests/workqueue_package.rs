@@ -1,8 +1,7 @@
 //! The work-queue crate as a deployment uses it, on the Rust engine (D58):
 //! the parts of the work queue's `test/package.test.ts` and
-//! `test/guidance.test.ts` that the behaviors of milestone 12a run (the
-//! fixture-workqueue-json document composes Queue and Budget, and its
-//! batch Blueprint, which milestone 12b ports): its behaviors register in
+//! `test/guidance.test.ts` not over the fixture-workqueue-json document
+//! (`workqueue_fixture.rs` has those): its behaviors register in
 //! `workQueueBehaviors`' order beside the core's and carry the declarations
 //! the core binary writes; Lease's guidance gives its lengths and fences
 //! every write but the exempt ones; and every operation of a type that
@@ -16,7 +15,9 @@ mod workqueue_support;
 use serde_json::{json, Value};
 
 use superschematic_engine::{Behavior, Engine, ToolTarget};
-use superschematic_engine_workqueue::{lease, Assignment, Lease, Presence, Retries, NAMES};
+use superschematic_engine_workqueue::{
+    lease, Assignment, Blueprint, Budget, Lease, Presence, Queue, Retries, NAMES,
+};
 use support::{alice, repository, targets};
 use workqueue_support::{job_flow, jobs_document, publish};
 
@@ -48,24 +49,22 @@ fn its_behaviors_carry_the_core_declarations_and_register_beside_the_core_behavi
     );
     assert_eq!(declared(&Lease), declaration_file("Lease"));
     assert_eq!(declared(&Assignment), declaration_file("Assignment"));
+    assert_eq!(declared(&Queue), declaration_file("Queue"));
     assert_eq!(declared(&Presence), declaration_file("Presence"));
+    assert_eq!(declared(&Blueprint), declaration_file("Blueprint"));
+    assert_eq!(declared(&Budget), declaration_file("Budget"));
     assert_eq!(declared(&Retries), declaration_file("Retries"));
     assert_eq!(lease::DEFAULT_TTL_MS, 60000);
-    let ported: Vec<&str> = NAMES
-        .iter()
-        .copied()
-        .filter(|name| superschematic_engine_workqueue::behavior(name).is_some())
-        .collect();
     assert_eq!(
         superschematic_engine_workqueue::workqueue().len(),
-        ported.len()
+        NAMES.len()
     );
     for target in targets("workqueue_package_names") {
         let engine = target.open_workqueue();
         let mut expected: Vec<&str> = superschematic_engine_behaviors::NAMES
             .iter()
             .copied()
-            .chain(ported.iter().copied())
+            .chain(NAMES)
             .collect();
         expected.sort_unstable();
         assert_eq!(engine.behaviors().names(), expected);
