@@ -5648,8 +5648,19 @@ and the D37 stand-in, the event stream's every byte, which the host
 pulls a frame at a time, and MCP's stateless JSON-RPC on the 2025
 revisions and 2026-07-28, the host keeping authentication, request ids,
 body and rate limits, timeouts and CORS; the calls by name for all of
-it, an event stream held by an id; and a Postgres connect bounded by its
-connect timeout end to end; `superschematic-engine-behaviors`, the
+it, an event stream held by an id; a Postgres connect bounded by its
+connect timeout end to end; and, behind the `axum` feature (milestone
+16), the axum router a Rust server mounts the routes with
+(`superschematic_engine::axum::router`): every route's path under the
+prefix, a method no route on it takes the engine's 404, the caller from
+the host's function or the request's extensions, the request id the host
+settled, the body limit of a route that takes a body, each call on
+tokio's blocking pool, and the event stream as a body that pulls its
+frames, woken by one thread per router that waits on the notifier,
+closed when the client goes away, the engine never reached or dropped on
+an async thread, since the Postgres client blocks on a runtime of its
+own; `[paths] engine_rust` names the crate for the Rust servers that
+will mount it (milestone 19); `superschematic-engine-behaviors`, the
 core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
 its options (`core()`) since the engine cannot depend on them: wave 1
@@ -5664,7 +5675,8 @@ guards, fields, operations, schedules and veto codes; and
 behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
 retention's and the tools', and those of the ported behaviors'
 `test/core-*.test.ts` against the engine, and replays the scenario and
-HTTP corpora, those behaviors' files included, giving their recorded
+HTTP corpora, those behaviors' files included, the HTTP corpus through
+the engine's routes and through its axum router, giving their recorded
 answers on SQLite and Postgres for every case whose behaviors it has,
 an event cursor on Postgres held to the recorded order rather than its
 number (a write a rollback undid leaves a gap in a Postgres identity
