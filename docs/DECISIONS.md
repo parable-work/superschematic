@@ -5718,8 +5718,9 @@ ORM's semantics, since one queue may have Go and TypeScript callers.
 | The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
 | `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
 
-Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
-Go ORM and the TypeScript client against one Postgres, and
+Status: built in #348. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+(so named since D65 made Rust its third side) runs the Go ORM and the
+TypeScript client against one Postgres, and
 `TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
 `TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
 it handles a message, retries one that fails once after the backoff, marks
