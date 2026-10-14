@@ -217,9 +217,9 @@ done
 
 echo "==> the Rust server's crate checks, frozen to the committed lockfile"
 # shop-stock's server, the one member of schemas/dist's Cargo workspace,
-# with the generated API crate and the implementation in rust-impl/shop-stock
-# it depends on by path, as stack dev, the image and the generated CI build
-# it (D57).
+# with the generated API crate and the mirror of the implementation in
+# rust-impl/shop-stock it depends on by path, as stack dev, the image and
+# the generated CI build it (D57, D65).
 echo "    server/shop-stack/shop-stock"
 (cd "$DIST" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" cargo check --locked --workspace -q)
 

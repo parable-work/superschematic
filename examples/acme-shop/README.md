@@ -51,10 +51,7 @@ URL, port and service credential, and Ctrl-C stops it. While it runs,
 Placing an order reserves its stock on `shop-stock`, so give the product
 some first: staff who hold `stock.write` set it with `PUT
 /api/stock/{productId}` on `shop-stock`, and an order for more than the
-warehouse holds is refused with 409. Keep the default output root:
-`rust-impl/shop-stock/Cargo.toml` names the API crate under
-`schemas/dist`, so `stack dev --out` elsewhere cannot build `shop-stock`'s
-server.
+warehouse holds is refused with 409.
 
 ### The Topcoat app
 

@@ -569,11 +569,15 @@ builds the identity and service authenticators and passes them to
 `/readyz`, JSON logs and a drain on SIGTERM. The build scaffolds a
 missing implementation crate at the `rust` template, and the server's
 `Cargo.toml` depends on it by the package name its `Cargo.toml` gives it,
-so you may rename it.
+so you may rename it. Each build of the stack copies the crate into the
+output root, `schemas/dist/impl/<service>/`, with its path dependencies
+re-based there and the API crate's naming that output root's, and the
+server builds against the copy, so any output root builds against its
+own API crates; edit the crate, which the next build copies again.
 
 The server crates are the members of the Cargo workspace whose root is
-`schemas/dist/Cargo.toml`; the generated crates and the implementations
-are path dependencies. Commit `schemas/dist/Cargo.lock`, which each
+`schemas/dist/Cargo.toml`; the generated crates and the implementations'
+copies are path dependencies. Commit `schemas/dist/Cargo.lock`, which each
 build of the stack brings up to date with `cargo update --workspace`:
 `stack dev`, the image and the generated CI build with `--locked` from
 it. The naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust`

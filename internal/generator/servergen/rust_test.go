@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -89,7 +90,8 @@ func rustFakePaths(repoRoot string) naming.LocalPaths {
 }
 
 // rustGenerated lists the files of each Rust entrypoint the stack's build
-// writes, and the workspace's root, by their path under rustGoldenRoot.
+// writes, the workspace's root, and the manifest of each implementation's
+// mirror (D65), by their path under rustGoldenRoot.
 func rustGenerated(repoRoot string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	files := map[string]string{servergen.RustWorkspaceFile: filepath.Join(out, servergen.RustWorkspaceFile)}
@@ -97,6 +99,9 @@ func rustGenerated(repoRoot string) map[string]string {
 		for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 			files[filepath.Join("server", server[0], server[1], filepath.FromSlash(file))] = filepath.Join(servergen.ServerDir(out, server[0], server[1]), filepath.FromSlash(file))
 		}
+	}
+	for _, service := range []string{"rs-catalog", "rs-pricing", "rs-stock"} {
+		files[filepath.Join(servergen.RustMirrorRoot, service, servergen.RustManifestFile)] = filepath.Join(servergen.RustMirrorDir(out, service), servergen.RustManifestFile)
 	}
 	return files
 }
@@ -304,9 +309,11 @@ func rustTargetDir(t *testing.T) string {
 }
 
 // buildRustFixture builds the fixture into a repository of its own with
-// this checkout's runtimes, writes the implementations, and builds the
-// workspace's servers with cargo, frozen to the lockfile the stack's build
-// wrote. It returns the repository root and the directory of the binaries.
+// this checkout's runtimes, writes the implementations, builds the stacks
+// again, which copies them into the output root's mirrors (D65), and
+// builds the workspace's servers with cargo, frozen to the lockfile the
+// stack's build wrote. It returns the repository root and the directory of
+// the binaries.
 func buildRustFixture(t *testing.T, cargo string) (string, string) {
 	t.Helper()
 	paths := testpaths.Local(t)
@@ -317,16 +324,24 @@ func buildRustFixture(t *testing.T, cargo string) (string, string) {
 	if _, err := os.Stat(filepath.Join(out, servergen.RustLockfileName)); err != nil {
 		t.Fatalf("the stack's build wrote no lockfile: %v", err)
 	}
+	writeRustImplementations(t, repoRoot)
+	f.build(t, repoRoot, paths, rustStack, rustMergedStack)
+	target := rustTargetDir(t)
+	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
+	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
+	return repoRoot, filepath.Join(target, "debug")
+}
+
+// writeRustImplementations writes rs-pricing's and rs-stock's
+// implementations over their scaffolds in the repository at repoRoot.
+func writeRustImplementations(t *testing.T, repoRoot string) {
+	t.Helper()
 	names := naming.Default()
 	for service, code := range map[string]string{"rs-pricing": rustPricingImplementation, "rs-stock": rustStockImplementation} {
 		if err := os.WriteFile(filepath.Join(names.RustImplementationDir(repoRoot, service), "src", "lib.rs"), []byte(code), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	target := rustTargetDir(t)
-	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
-	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
-	return repoRoot, filepath.Join(target, "debug")
 }
 
 // TestRustEntrypointCompilesAndServes: each Rust server's crate builds in
@@ -719,6 +734,141 @@ func TestRustBuildKeepsTheLockfile(t *testing.T) {
 		t.Errorf("the build did not say there is no cargo:\n%s", log)
 	}
 }
+
+// TestRustServersBuildInAnyOutputRoot (D65): the implementations, whose
+// Cargo.toml files name the API crates under schemas/dist, where their
+// scaffolds were written, build into two other output roots, one after the
+// other and both at once. Each root's build mirrors them into its impl/,
+// and cargo builds every server of the root's workspace frozen to the
+// root's lockfile, against the root's own API crates and mirrors alone.
+// The lockfile the first root's build wrote holds in the second as it is,
+// as a project's committed one would, since it names no path crate's
+// directory, and outlasts another build of either; a change to an
+// implementation reaches each root's mirror with its next build.
+func TestRustServersBuildInAnyOutputRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cargo build in -short mode")
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not available; skipping the Rust build")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := testpaths.TempDir(t)
+	f := loadRustFixture(t)
+	f.build(t, repoRoot, paths, rustOrder...)
+	writeRustImplementations(t, repoRoot)
+	roots := []string{filepath.Join(testpaths.TempDir(t), "a"), filepath.Join(testpaths.TempDir(t), "b")}
+	buildInto := func(out string, services ...string) error {
+		opts := f.options(repoRoot, paths)
+		opts.OutputRoot = out
+		for _, name := range services {
+			if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+				return fmt.Errorf("build %s into %s: %w", name, out, err)
+			}
+		}
+		return nil
+	}
+	target := rustTargetDir(t)
+	cargoBuild := func(out string) error {
+		cmd := exec.Command(cargo, "build", "--locked", "--workspace", "--quiet")
+		cmd.Dir = out
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cargo build --locked in %s: %w\n%s", out, err, output)
+		}
+		return nil
+	}
+	lockfile := func(out string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(out, servergen.RustLockfileName))
+		if err != nil {
+			t.Fatalf("the build of %s wrote no lockfile: %v", out, err)
+		}
+		return string(data)
+	}
+
+	// One root after the other, the second from the first's lockfile.
+	var lock string
+	for i, out := range roots {
+		if i > 0 {
+			if err := os.MkdirAll(out, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(out, servergen.RustLockfileName), []byte(lock), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := buildInto(out, rustOrder...); err != nil {
+			t.Fatal(err)
+		}
+		if err := cargoBuild(out); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			lock = lockfile(out)
+		} else if got := lockfile(out); got != lock {
+			t.Errorf("the build of %s changed the lockfile of %s:\n%s\n---\n%s", out, roots[0], lock, got)
+		}
+	}
+
+	// Both at once, after a change to rs-pricing's implementation.
+	pricing := filepath.Join(naming.Default().RustImplementationDir(repoRoot, "rs-pricing"), "src", "lib.rs")
+	const changed = "\n// The mirror follows the crate (D65).\n"
+	if err := os.WriteFile(pricing, []byte(rustPricingImplementation+changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	together := func(run func(out string) error) {
+		t.Helper()
+		errs := make(chan error, len(roots))
+		for _, out := range roots {
+			go func() { errs <- run(out) }()
+		}
+		for range roots {
+			if err := <-errs; err != nil {
+				t.Error(err)
+			}
+		}
+		if t.Failed() {
+			t.FailNow()
+		}
+	}
+	together(func(out string) error { return buildInto(out, rustStack, rustMergedStack) })
+	together(cargoBuild)
+	for _, out := range roots {
+		if got := lockfile(out); got != lock {
+			t.Errorf("another build changed %s's lockfile:\n%s", out, got)
+		}
+		mirrored, err := os.ReadFile(filepath.Join(servergen.RustMirrorDir(out, "rs-pricing"), "src", "lib.rs"))
+		if err != nil || !strings.HasSuffix(string(mirrored), changed) {
+			t.Errorf("the change to rs-pricing did not reach %s's mirror: %v", out, err)
+		}
+		// cargo tree prints a path crate with its directory, and resolves
+		// the host's dependencies alone, which the build downloaded.
+		generated := 0
+		for _, line := range strings.Split(cargoCommand(t, cargo, out, target, "tree", "--locked", "--offline", "--workspace", "--prefix", "none", "--format", "{p}"), "\n") {
+			crate := cargoTreePath.FindStringSubmatch(line)
+			if crate == nil || !strings.HasPrefix(crate[1], naming.Default().RustCratePrefix) {
+				continue
+			}
+			generated++
+			under := out
+			if strings.HasSuffix(crate[1], "-implementation") {
+				under = filepath.Join(out, servergen.RustMirrorRoot)
+			}
+			if rel, err := filepath.Rel(under, crate[2]); err != nil || strings.HasPrefix(rel, "..") {
+				t.Errorf("%s's workspace builds %s from %s, outside %s", out, crate[1], crate[2], under)
+			}
+		}
+		if generated == 0 {
+			t.Errorf("%s's workspace builds no generated crate", out)
+		}
+	}
+}
+
+// cargoTreePath matches a path crate in cargo tree's lines: its name and
+// its directory.
+var cargoTreePath = regexp.MustCompile(`^(\S+) v\S+ \(([^)]+)\)`)
 
 // TestTheRustWorkspaceNamesEveryStacksServers: the workspace's root names
 // the Rust server crates of every stack under the output root, and only

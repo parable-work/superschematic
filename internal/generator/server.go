@@ -207,8 +207,12 @@ func (r run) generateServers() error {
 	}
 	if len(plans) == 0 && len(tsPlans) == 0 && len(rustPlans) == 0 {
 		// The stack's Rust servers are gone, if it had any: the workspace's
-		// root names the other stacks' alone, or is removed.
+		// root names the other stacks' alone, or is removed, and so do the
+		// implementations' mirrors.
 		if _, err := servergen.WriteRustWorkspace(r.Options.OutputRoot); err != nil {
+			return err
+		}
+		if err := servergen.PruneRustMirrors(r.Options.OutputRoot); err != nil {
 			return err
 		}
 		r.Skip(serverGenerator)
@@ -238,11 +242,36 @@ func (r run) generateServers() error {
 			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
 		}
 	}
+	if err := r.writeRustMirrors(rustPlans); err != nil {
+		return fmt.Errorf("stack %s: %w", st.Name, err)
+	}
 	if err := r.writeRustWorkspace(len(rustPlans) > 0); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
 	r.Done(serverGenerator, dir)
 	return nil
+}
+
+// writeRustMirrors brings the mirror of each implementation the stack's
+// Rust servers build against up to date under the output root (D65;
+// servergen's mirror.go), once for an implementation two servers serve,
+// after the scaffolds are written, then removes the mirrors no server
+// crate under the output root depends on any longer, whichever stack's.
+// cargo update reads the mirrors next.
+func (r run) writeRustMirrors(servers []*servergen.RustServer) error {
+	written := map[string]bool{}
+	for _, server := range servers {
+		for _, m := range server.Mirrors {
+			if written[m.Dir] {
+				continue
+			}
+			written[m.Dir] = true
+			if err := servergen.WriteRustMirror(m); err != nil {
+				return err
+			}
+		}
+	}
+	return servergen.PruneRustMirrors(r.Options.OutputRoot)
 }
 
 // writeRustWorkspace writes the output root's Cargo workspace for the Rust

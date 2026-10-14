@@ -67,6 +67,10 @@ type RustImplementation struct {
 	// writes it (ReadRustImplementation).
 	Crate string
 	Lib   string
+
+	// Manifest is its Cargo.toml, nil when the scaffold writes it, which
+	// the plan of its mirror checks (D65; mirror.go).
+	Manifest []byte
 }
 
 // RustAPIInput is one API a Rust server serves.
@@ -155,6 +159,11 @@ type RustServer struct {
 	// Dependencies are Cargo.toml's, the registry crates first, then the
 	// HTTP runtime and the crates of the workspace, each in name order.
 	Dependencies []CargoDependency
+
+	// Mirrors are the mirrors of the served APIs' implementations under
+	// the output root, which the crate depends on in their place (D65;
+	// mirror.go), and which the build writes beside it.
+	Mirrors []*RustMirror
 
 	// Docker is the Dockerfile's plan, nil when none is written, and
 	// NoDocker says why.
@@ -275,7 +284,8 @@ type RustDocker struct {
 	// Include are the paths the build context holds: the workspace's root
 	// and lockfile, and every crate a member of the workspace reaches by
 	// path, which Cargo reads to check the lockfile, whichever stack's
-	// server the member is.
+	// server the member is: the generated crates and the implementations'
+	// mirrors under the output root, and the runtimes' checkouts.
 	Include []string
 }
 
@@ -455,6 +465,16 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		}
 		s.APIs = append(s.APIs, api)
 	}
+	for _, a := range in.APIs {
+		if a.Implementation.Dir == "" {
+			continue
+		}
+		m, err := planRustMirror(in.OutputRoot, a)
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: server %s: %w", in.Stack, in.Server, err)
+		}
+		s.Mirrors = append(s.Mirrors, m)
+	}
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
 		return nil, err
@@ -472,8 +492,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 // planManifest plans Cargo.toml's dependencies: axum, serde_json and tokio
 // with the features main.rs uses, tower for a server of more than one API,
 // the HTTP runtime from its checkout with the features main.rs and the
-// served APIs use, each API crate, its implementation, and each callee's
-// SDK, by paths relative to the crate.
+// served APIs use, each API crate, its implementation's mirror under the
+// output root (D65), and each callee's SDK, by paths relative to the
+// crate.
 func (s *RustServer) planManifest(in RustInput, dir string) error {
 	if in.Paths.HTTPRuntimeRust == "" {
 		return fmt.Errorf("stack %s: server %s is a Rust server, whose crate depends on the HTTP runtime's checkout, and the naming file's [paths] http_runtime_rust is unset", in.Stack, in.Server)
@@ -531,7 +552,7 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		if local[a.Output.CrateName], err = pathDep(a.Dir); err != nil {
 			return err
 		}
-		if local[a.Implementation.Crate], err = pathDep(a.Implementation.Dir); err != nil {
+		if local[a.Implementation.Crate], err = pathDep(RustMirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
 			return err
 		}
 	}
@@ -559,17 +580,14 @@ func quoteToml(s string) string {
 // planRustDocker plans the Dockerfile, or says why there is none. The image
 // builds the server with `cargo build --release --locked` in the output
 // root's workspace, which reads every member's manifest and every crate a
-// member reaches by path to check the lockfile: the generated crates under
-// the output root, the implementations, and the checkouts of the HTTP
-// runtime, the schema runtime, superscalar and, where the naming file
-// names it, the version graph's engine. Every one must lie under the build
-// context.
+// member reaches by path to check the lockfile: the generated crates and
+// the implementations' mirrors under the output root (D65), and the
+// checkouts of the HTTP runtime, the schema runtime, superscalar and,
+// where the naming file names it, the version graph's engine. Every one
+// must lie under the build context.
 func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, string, error) {
 	if in.RepositoryRoot == "" {
 		return nil, "no repository root to take as the build context", nil
-	}
-	if in.ImplementationRoot == "" {
-		return nil, "no repository root to find the implementations under", nil
 	}
 	for _, p := range []struct{ key, dir string }{
 		{"scalar_rust", in.Paths.ScalarRust},
@@ -606,16 +624,13 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		return nil, outside("the server's crate", dir), nil
 	}
 	d.Dockerfile = path.Join(d.Context, DockerFile)
-	implementations, ok := rel(filepath.Join(in.ImplementationRoot, filepath.FromSlash(in.Naming.OrDefault().RustImplementationGlob())))
-	if !ok {
-		return nil, outside("the Rust implementations at", in.Naming.OrDefault().RustImplementationGlob()), nil
-	}
 	// Every crate the workspace's members reach by path, by where the
 	// build lays it out, so the context does not depend on which stack's
 	// servers were built: a member's manifest and its main.rs, each Rust
 	// API crate's manifest, sources and the OpenAPI document its source
-	// embeds, the Rust SDKs and types, and each implementation's manifest
-	// and sources. The served APIs' implementations go in whole.
+	// embeds, the Rust SDKs and types, and every implementation's mirror
+	// whole, which holds the implementation's files alone. No
+	// implementation's own directory goes in.
 	d.Include = []string{
 		d.Workspace + "/" + RustManifestFile,
 		d.Workspace + "/" + RustLockfileName + "*",
@@ -624,18 +639,10 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		d.Workspace + "/api/*/" + RustManifestFile,
 		d.Workspace + "/api/*/src",
 		d.Workspace + "/api/*/openapi.json",
+		d.Workspace + "/" + RustMirrorRoot,
 		d.Workspace + "/sdk/rust",
 		d.Workspace + "/types/rust",
-		implementations + "/" + RustManifestFile,
-		implementations + "/src",
 		d.Context,
-	}
-	for _, a := range in.APIs {
-		r, ok := rel(a.Implementation.Dir)
-		if !ok {
-			return nil, outside("the implementation of "+a.Output.SchemaName+", at", a.Implementation.Dir), nil
-		}
-		d.Include = append(d.Include, r)
 	}
 	for _, p := range []struct{ what, dir string }{
 		{"the HTTP runtime's Rust crate", in.Paths.HTTPRuntimeRust},
@@ -665,9 +672,9 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 
 // ReadRustImplementation reads the names of the Rust implementation crate
 // of service at dir: its Cargo.toml's package name and library name, or
-// the scaffold's when dir holds no Cargo.toml yet. The server's Cargo.toml
-// depends on the implementation by that name, so a Cargo.toml without one
-// fails.
+// the scaffold's when dir holds no Cargo.toml yet, and the Cargo.toml
+// itself. The server's Cargo.toml depends on the implementation's mirror
+// by that name, so a Cargo.toml without one fails.
 func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplementation, error) {
 	impl := RustImplementation{Dir: dir}
 	var manifest struct {
@@ -679,7 +686,11 @@ func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplement
 		} `toml:"lib"`
 	}
 	file := filepath.Join(dir, RustManifestFile)
-	_, err := toml.DecodeFile(file, &manifest)
+	data, err := os.ReadFile(file)
+	if err == nil {
+		impl.Manifest = data
+		_, err = toml.Decode(string(data), &manifest)
+	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		impl.Crate = n.OrDefault().RustImplementationCrate(service)

@@ -12,10 +12,11 @@
 #
 # Dockerfile.dockerignore beside this file cuts the context down to what the
 # image reads: the workspace's root and lockfile, the manifest and sources
-# of every crate a member of the workspace reaches by path, the server's own
-# implementations whole, and the checkouts of the HTTP runtime, the schema
-# runtime and superscalar the generated crates depend on. BuildKit, Docker's
-# default builder, reads it.
+# of every generated crate a member of the workspace reaches by path, the
+# mirrors of the implementations under {{ .Docker.Workspace }}/impl, which the build
+# copies there (D65), and the checkouts of the HTTP runtime, the schema
+# runtime and superscalar the crates depend on: no implementation's own
+# directory. BuildKit, Docker's default builder, reads it.
 #
 # The build stage builds the server with the Rust release tools.env pins,
 # frozen to the lockfile: cargo build --release --locked fails when the

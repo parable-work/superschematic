@@ -727,7 +727,9 @@ Under the output root, `schemas/dist` by default, the build writes:
   and a crate for each Rust server, holding `Cargo.toml`, `src/main.rs`, a
   `Dockerfile` and `Dockerfile.dockerignore`, a member of the output
   root's Cargo workspace, `Cargo.toml` beside `schemas/dist/Cargo.lock`
-  ([Rust servers](#rust-servers)).
+  ([Rust servers](#rust-servers));
+- `impl/<service>/`, a copy of each implementation a Rust server builds
+  against ([Rust servers](#rust-servers)).
 
 The build also scaffolds each implementation a TypeScript server serves
 that is missing, at the `typescript` template (`typescript/{service}`), as
@@ -1080,11 +1082,21 @@ schemas/dist/*
 
 The build says in one line when git ignores the lockfile, when cargo is
 not on `PATH`, and when cargo cannot resolve the workspace, as in a build
-of the stack before its services are built. The implementation's
-`Cargo.toml` names the API crate by its path under the output root the
-scaffold was written for, so the server builds in that output root alone:
-in another, as `stack dev --out` elsewhere would write it, cargo finds two
-crates of the API's name and refuses the workspace.
+of the stack before its services are built.
+
+The implementation's `Cargo.toml` names the API crate by its path under
+the output root the scaffold was written for, which your editor and the
+crate's own `cargo test` build against. The server builds against a copy:
+each build of the stack mirrors each implementation into
+`schemas/dist/impl/<service>/`, its path dependencies re-based there and
+the API crate's naming that output root's, so `stack dev --out` builds
+anywhere, and the image needs no implementation directory. The copy holds
+the crate's files but its `Cargo.lock`, `target/` and any crate inside it,
+and what its `.gitignore` files or `[package] exclude` leave out, and a
+build rewrites only the files that changed, so cargo rebuilds only what
+did. Edit the crate, not the copy: the next build, which `stack dev`
+runs, brings the copy up to date. A crate that inherits from a workspace
+(`workspace = true`) is refused, since the copy belongs to none.
 
 `examples/acme-shop`'s `shop-stock` is a Rust server. Its implementation,
 `rust-impl/shop-stock`, reads and writes `shop-db`'s `stock_level` table
