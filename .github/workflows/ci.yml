@@ -15,8 +15,8 @@ name: ci
 # engine's work-queue
 # package and the engine example, the
 # Python schema runtime, the Rust http runtime, the Rust engine's workspace
-# (D58), the engine's C ABI and Go binding (and a link check of the three
-# archives a Go server links), the version graph (the core
+# (D58), the engine's C ABI and Go binding (its corpus replay, and a link
+# check of the three archives a Go server links), the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
 # Python engines against Postgres), the Starlight docs build, and the
@@ -910,7 +910,7 @@ jobs:
         run: cargo test --workspace --all-features
 
   engine-go:
-    name: engine-go (the engine's C ABI, Go binding and link check)
+    name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -950,6 +950,22 @@ jobs:
             !third_party/superscalar/target
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
+      - name: Start Postgres
+        # The corpus replay runs on SQLite, and on this Postgres too through
+        # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each engine in a schema
+        # of its own.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
       - name: Link check (one binary over superscalar's, the version graph's and the engine's archives)
         # Builds the three archives, checks each defines its own C
         # functions alone (the version graph's vg_* is off in the engine's
@@ -969,6 +985,23 @@ jobs:
           export CGO_LDFLAGS
           cd runtime/engine/go
           go build ./... && go vet ./... && go test -count=1 ./...
+
+      - name: Corpus replay through enginehttp and Engine.Do (the test kit's archive, on SQLite and Postgres)
+        # The HTTP corpus, and the engine's own scenario files through the
+        # binding's calls, need the test kit's behaviors and the recorded
+        # policies, which the test kit's archive holds; ENGINE_REPLAY_ARCHIVE
+        # makes the replay fail rather than skip without it.
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+          ENGINE_REPLAY_ARCHIVE: "1"
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: |
+          replay="$RUNNER_TEMP/engine-replay"
+          scripts/engine-archive.sh --crate runtime/engine/rust/testkit-ffi --out "$replay" >/dev/null
+          export CGO_LDFLAGS="-L$replay"
+          cd runtime/engine/go
+          go test -count=1 -run Replay -v ./enginehttp/
 
       - name: golangci-lint (runtime/engine/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

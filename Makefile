@@ -28,6 +28,10 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # scripts/engine-archive.sh (make engine-archive) stages.
 export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print)
 
+# Where make engine-go stages the test kit's engine archive, which the corpus
+# replay links in place of the core's (it is never shipped).
+ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
+
 GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
@@ -257,9 +261,17 @@ engine-archive:
 	scripts/engine-archive.sh >/dev/null
 
 # The engine's Go binding (runtime/engine/go): build, vet and test over the
-# core's archive.
+# core's archive; then the HTTP corpus (runtime/engine/testdata/http)
+# through enginehttp, and the engine's own scenario files through
+# Engine.Do, over the test kit's archive, which has the test behaviors and
+# the recorded policies the corpora need, on SQLite and on the Postgres
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names, when it is set.
 engine-go: engine-archive
 	cd runtime/engine/go && go build ./... && go vet ./... && go test -count=1 ./...
+	scripts/engine-archive.sh --crate runtime/engine/rust/testkit-ffi --out $(ENGINE_REPLAY_LIB) >/dev/null
+	cd runtime/engine/go && CGO_LDFLAGS="-L$(ENGINE_REPLAY_LIB) $(CGO_LDFLAGS)" ENGINE_REPLAY_ARCHIVE=1 \
+		go test -count=1 -run Replay -v ./enginehttp/
+	scripts/engine-archive.sh >/dev/null
 
 # One Go binary that links superscalar's, the version graph's and the
 # engine's archives together and calls each (scripts/engine-link-check.sh),

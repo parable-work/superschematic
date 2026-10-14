@@ -122,10 +122,28 @@ func (e *Engine) release() {
 // after the principal, and, for an engine on a manual clock, the time to
 // set the clock to first.
 type Request struct {
-	Op        string            `json:"op"`
-	Principal *Principal        `json:"principal,omitempty"`
-	Args      []json.RawMessage `json:"args,omitempty"`
-	Now       *int64            `json:"now,omitempty"`
+	Op        string     `json:"op"`
+	Principal *Principal `json:"principal,omitempty"`
+	// RawPrincipal is the principal as JSON, written in place of Principal
+	// when set: one a host holds as JSON, passed as it is, which the engine
+	// checks as it checks any (a service that is no { deployable, serves,
+	// subject, standsIn } is invalid_argument).
+	RawPrincipal json.RawMessage   `json:"-"`
+	Args         []json.RawMessage `json:"args,omitempty"`
+	Now          *int64            `json:"now,omitempty"`
+}
+
+// MarshalJSON writes the request, its RawPrincipal in place of its
+// Principal when set.
+func (r Request) MarshalJSON() ([]byte, error) {
+	type plain Request
+	if len(r.RawPrincipal) == 0 {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Principal json.RawMessage `json:"principal"`
+	}{plain(r), r.RawPrincipal})
 }
 
 // Do makes a call and returns its result as JSON: nil where the TypeScript
@@ -335,16 +353,28 @@ func (e *Engine) Changed() <-chan struct{} {
 	defer e.mu.Unlock()
 	ch := e.changed
 	if !e.waiting && !e.ended {
+		// The epoch now, read before Changed returns, so a commit after it
+		// moves the epoch past what the waiter waits from.
+		epoch, c := engWait(e.handle, 0, 0)
+		if c != codeOK {
+			e.ended = c == codeClosed
+			close(e.changed)
+			e.changed = make(chan struct{})
+			if e.ended {
+				close(e.changed)
+			}
+			return ch
+		}
 		e.waiting = true
-		go e.wait()
+		go e.wait(epoch)
 	}
 	return ch
 }
 
-// wait blocks in the archive until the epoch moves, then wakes every
-// waiter and waits again, until the engine closes.
-func (e *Engine) wait() {
-	epoch, c := engWait(e.handle, 0, 0)
+// wait blocks in the archive until the epoch moves past epoch, then wakes
+// every waiter and waits again, until the engine closes.
+func (e *Engine) wait(epoch uint64) {
+	c := codeOK
 	for c == codeOK {
 		var moved uint64
 		moved, c = engWait(e.handle, epoch, 1000)
