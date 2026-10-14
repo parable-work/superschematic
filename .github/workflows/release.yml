@@ -11,10 +11,12 @@ name: release
 # tree does not carry (scripts/bump_version.py against versions.env).
 # build-archives, beside verify, packs per runner the static archives a
 # generated Go server links through cgo, which no module the module proxy
-# serves carries: superscalar's, built from the pinned checkout, and the
-# version graph's, both with tools.env's Rust, so they link into one binary
-# (scripts/release-archives.sh; docs/stack-model.md, section 8.2; D47,
-# amended). build produces, per runner, the superschematic CLI for its
+# serves carries: superscalar's, built from the pinned checkout, the
+# version graph's and the engine's (with its C ABI's header), all with
+# tools.env's Rust, so they link into one binary, which the runner's link
+# check proves on each of the four platforms (scripts/release-archives.sh,
+# scripts/engine-link-check.sh; docs/stack-model.md, section 8.2; D47,
+# amended; D58). build produces, per runner, the superschematic CLI for its
 # os/arch: the installed binary, cmd/superschematic, which links the core and
 # the official extensions (docs/stack-model.md, section 13). It links the
 # superscalar archive its platform's tarball holds, and every tarball's
@@ -149,7 +151,7 @@ jobs:
           - os: macos-15-intel
             name: darwin-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -159,7 +161,8 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
-        # The scripts read the platform from go env.
+        # The scripts read the platform from go env, and the link check
+        # builds a Go binary.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -183,6 +186,16 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
           NAME: ${{ matrix.name }}
         run: scripts/release-archives.sh "$VERSION" "$NAME" dist
+
+      - name: Link check (one binary over the three archives, on this platform)
+        # The archives the tarball packed, already built: each defines its
+        # own C functions alone, and one Go binary that imports the
+        # superscalar, version graph and engine bindings links them and
+        # runs.
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+        run: scripts/engine-link-check.sh
 
       - name: Upload the tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -609,11 +622,11 @@ jobs:
             echo "## Artifacts"
             echo
             echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
-            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's and the version graph's, under \`lib/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
+            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's and the engine's, under \`lib/\`, and the engine's C ABI header under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
-            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/engine/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
           } > notes.md
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi

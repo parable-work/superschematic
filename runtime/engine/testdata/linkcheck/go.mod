@@ -1,4 +1,4 @@
-module github.com/parable-work/superschematic/runtime/engine/linkcheck
+module github.com/parable-work/superschematic/runtime/engine/testdata/linkcheck
 
 go 1.26.4
 
@@ -10,6 +10,6 @@ require (
 
 require github.com/google/uuid v1.6.0 // indirect
 
-replace github.com/parable-work/superschematic/runtime/engine/go => ../go
+replace github.com/parable-work/superschematic/runtime/engine/go => ../../go
 
-replace github.com/parable-work/superschematic/runtime/versiongraph/go => ../../versiongraph/go
+replace github.com/parable-work/superschematic/runtime/versiongraph/go => ../../../versiongraph/go

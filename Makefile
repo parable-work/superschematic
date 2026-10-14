@@ -32,7 +32,7 @@ export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell script
 # replay links in place of the core's (it is never shipped).
 ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -83,13 +83,13 @@ $(CORE_BIN): FORCE
 
 FORCE:
 
-go-build: versiongraph
+go-build: versiongraph engine-archive
 	@for m in $(GO_MODULES); do echo "==> go build $$m"; (cd $$m && go build ./...) || exit 1; done
 
 go-vet:
 	@for m in $(GO_MODULES); do echo "==> go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
-go-test: versiongraph
+go-test: versiongraph engine-archive
 	@for m in $(GO_MODULES); do echo "==> go test $$m"; (cd $$m && go test -count=1 ./...) || exit 1; done
 
 go-fmt-check:
@@ -260,14 +260,14 @@ engine-rust:
 engine-archive:
 	scripts/engine-archive.sh >/dev/null
 
-# The engine's Go binding (runtime/engine/go): build, vet and test over the
-# core's archive; then the HTTP corpus (runtime/engine/testdata/http)
-# through enginehttp, and the engine's own scenario files through
-# Engine.Do, over the test kit's archive, which has the test behaviors and
-# the recorded policies the corpora need, on SQLite and on the Postgres
-# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names, when it is set.
+# The engine's Go binding (runtime/engine/go), whose own tests go-test runs
+# over the core's archive, replays the HTTP corpus
+# (runtime/engine/testdata/http) through enginehttp, and the engine's own
+# scenario files through Engine.Do, over the test kit's archive, which has
+# the test behaviors and the recorded policies the corpora need, on SQLite
+# and on the Postgres SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names, when it
+# is set.
 engine-go: engine-archive
-	cd runtime/engine/go && go build ./... && go vet ./... && go test -count=1 ./...
 	scripts/engine-archive.sh --crate runtime/engine/rust/testkit-ffi --out $(ENGINE_REPLAY_LIB) >/dev/null
 	cd runtime/engine/go && CGO_LDFLAGS="-L$(ENGINE_REPLAY_LIB) $(CGO_LDFLAGS)" ENGINE_REPLAY_ARCHIVE=1 \
 		go test -count=1 -run Replay -v ./enginehttp/

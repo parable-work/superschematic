@@ -933,7 +933,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
             runtime/engine/go/go.sum
-            runtime/engine/linkcheck/go.sum
+            runtime/engine/testdata/linkcheck/go.sum
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -969,8 +969,8 @@ jobs:
       - name: Link check (one binary over superscalar's, the version graph's and the engine's archives)
         # Builds the three archives, checks each defines its own C
         # functions alone (the version graph's vg_* is off in the engine's
-        # build), then builds runtime/engine/linkcheck, which imports all
-        # three bindings, and runs it.
+        # build), then builds runtime/engine/testdata/linkcheck, which
+        # imports all three bindings, and runs it.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

@@ -59,7 +59,10 @@ test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
 replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
 (`testdata/http`) through the engine's calls and routes, all on both
-databases.
+databases. `superschematic-engine-ffi` (`rust/ffi`) is the engine's C ABI,
+which `go/`, the Go binding, links as the static archive
+`libsuperschematic_engine.a`, and whose HTTP mount, `enginehttp`, serves
+the routes on chi ("The Go binding" below).
 
 Built: the storage layer and its migrations, namespaces, configured or
 made while the engine runs and archived when done, the schema registry
@@ -133,6 +136,49 @@ core `Branches` behavior runs over the version graph's wasm core; the
 package.json spec is a `file:` path into this checkout, as the TypeScript
 types tsgen writes for a graph depend on it, and the build replaces bun's
 copy with the package as `runtime/versiongraph/typescript` last built it.
+
+### The Go binding
+
+A Go server reaches the Rust engine through `go/`, the module
+`github.com/parable-work/superschematic/runtime/engine/go` (D58), which
+links the static archive `libsuperschematic_engine.a` through cgo, as the
+version graph's Go binding links its own. `go/README.md` is its guide.
+
+- The archive is `rust/ffi`, the engine's C ABI
+  (`go/include/superschematic_engine.h`): JSON in and out, output the
+  archive allocates and `eng_free` releases, and a panic caught at every
+  export. `eng_open` and `eng_close` hold an engine by handle; `eng_call`
+  makes any of the calls by name (`engine::calls`) and the binding's own
+  `deploy`, `health` and `abi`; `eng_http` serves one request through the
+  transport-neutral routes, an event stream a handle that
+  `eng_stream_poll` pulls without waiting; `eng_wait` blocks one thread
+  until a commit, for every stream of the engine; `eng_runner` starts,
+  stops and runs the runner. Each returns `ENG_OK`, `ENG_ERROR` with an
+  error document (this package's class, code, message and details),
+  `ENG_BAD_ARGUMENTS` or `ENG_CLOSED`.
+- `scripts/engine-archive.sh` builds the core's archive, the ABI over
+  `core()`, with `tools.env`'s Rust, and `--print` gives the `-L` flag for
+  `CGO_LDFLAGS`. A project whose schemas compose an extension's behavior
+  builds an archive of its own from a crate that exports the ABI over its
+  behaviors (`export_engine_c_abi!`), with `--crate`; the test kit's,
+  `rust/testkit-ffi`, is one, for the replays.
+- `engine.Open`, `Call`, `Deploy` (the server's schema documents, defined
+  and published as the engine's own principal, nothing written when the
+  live version has the hash), `Health` and `Ready`, `Runner` and `Close`
+  are the API; refusals are `*engine.Error`, with this package's class,
+  code and details.
+- `enginehttp.Handler(e, Options{Prefix, Caller, ...})` mounts the routes,
+  the event stream and MCP on chi, one chi route per route, the host's
+  timeout on every route but the stream's and MCP's.
+- The replay (`go/enginehttp/replay_test.go`) holds it to the HTTP corpus
+  through `enginehttp`, and to the engine's own scenario files through
+  `Engine.Do`, on SQLite and on Postgres, with the Rust replay's counts.
+- `scripts/engine-link-check.sh` links superscalar's, the version graph's
+  and the engine's archives into one Go binary and runs it: each archive
+  defines its own C functions alone (the version graph's `vg_*` is a
+  feature the engine's build leaves off), all three built with one Rust
+  release. The release ships the engine's archive and header in each
+  platform's archives tarball.
 
 ## Storage
 
@@ -4818,6 +4864,13 @@ docker run --detach --name engine-pg --env POSTGRES_PASSWORD=superschematic --pu
 SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable' make engine-rust
 docker rm -f engine-pg
 ```
+
+The Go binding (`go/`) builds and tests with `make engine-archive`, which
+stages the core's archive, then `go test ./...` in `go/` with
+`CGO_LDFLAGS="$(scripts/engine-archive.sh --print)"`; `make engine-go`
+replays the corpora through it over the test kit's archive, on the same
+databases; `make engine-link-check` links the three archives into one
+binary.
 
 ### The corpus a second engine replays
 

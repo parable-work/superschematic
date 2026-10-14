@@ -5,7 +5,7 @@
 # the others' (the version graph's vg_* behind its ffi feature, which the
 # engine leaves off, and superscalar's scalar_* in its ffi crate, which the
 # engine does not link), then builds one Go binary that imports all three
-# bindings (runtime/engine/linkcheck) and runs it.
+# bindings (runtime/engine/testdata/linkcheck) and runs it.
 #
 # Usage:
 #   scripts/engine-link-check.sh
@@ -60,6 +60,6 @@ BIN="$(mktemp -d)"
 trap 'rm -rf "$BIN"' EXIT
 export CGO_ENABLED=1
 export CGO_LDFLAGS="$superscalar $versiongraph $engine"
-(cd "$ROOT/runtime/engine/linkcheck" && go build -o "$BIN/linkcheck" .)
+(cd "$ROOT/runtime/engine/testdata/linkcheck" && go build -o "$BIN/linkcheck" .)
 "$BIN/linkcheck"
 echo "link check: one binary links superscalar's, the version graph's and the engine's archives on ${goos}/${goarch}" >&2

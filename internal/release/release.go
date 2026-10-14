@@ -132,9 +132,10 @@ func Platform(goos, goarch string) string {
 
 // ArchiveName is the file name of release version's archives tarball for
 // platform. It holds one directory, named as the file without `.tar.gz`,
-// whose lib/ holds libsuperscalar_ffi.a and
-// libsuperschematic_versiongraph.a, built with one Rust release, so the
-// two link into one binary.
+// whose lib/ holds libsuperscalar_ffi.a, libsuperschematic_versiongraph.a
+// and libsuperschematic_engine.a, built with one Rust release, so the three
+// link into one binary, and whose include/ holds the engine's C ABI,
+// superschematic_engine.h (D58).
 func ArchiveName(version, platform string) string {
 	return fmt.Sprintf("superschematic-archives_%s_%s.tar.gz", version, platform)
 }
