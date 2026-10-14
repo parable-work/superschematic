@@ -6112,7 +6112,13 @@ rows through the ORM, its Rust one pages in memory and over SQLite with
 `Page::from_rows`, `TestStackDevRunsTheShop` pages each list over Postgres,
 `rust-server/tests/shop.rs` in memory and over SQLite, and every
 language's client reads a page and iterates every item against the Go and
-the Rust server. Its Topcoat app follows the console's pager.
+the Rust server. Its Topcoat app pages the shopper's orders at `/orders`
+as the console pages a list: "Next page" and "First page" built from the
+filter's `query_pairs()`, and a forged cursor or a limit past 100 the
+route's 400 as the form's own message; its console pages the orders, the
+products and a product's reviews, a product's page shows their first page
+with a link to the next, and `call_order_list_orders` answers a page
+record, each in memory and over SQLite (`topcoat/tests/app.rs`).
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,
@@ -6145,8 +6151,8 @@ wrappers (`QueryParam`, `Validate`).
 | A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of its `listMax`, else the page's `maxLimit`, at most 10 calls; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
 | The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
 
-Status: the core, the Topcoat crate and acme's API are built; acme's
-Topcoat app follows in this batch. `RefersTo` and `RefersToConfig` come from `@superschematic/api`; the TypeScript
+Status: built: the core, the Topcoat crate, acme's API and its Topcoat
+app. `RefersTo` and `RefersToConfig` come from `@superschematic/api`; the TypeScript
 reader writes `ir.ReferenceDef` (`references: { type, options, value,
 label }`, `type` required and no member blank) on `FieldDef` after
 `relation` and on `ArgumentDef` after `encrypted`, as the JSON and YAML
@@ -6189,8 +6195,13 @@ generator. acme's `PlaceOrderLine.productId`,
 `OrderLineView.productId` and the `productId` path arguments refer to a
 `ProductView` that `shop-orders` lists in a new `listProducts`, with a
 lookup, and reads in `getProduct`, built in its Go and Rust
-implementations; its Topcoat app drops its hand-written catalog choices
-next, now that the console names references. Follows: the target derived from `@source` and a `Relation`; a
+implementations. Its Topcoat app has dropped its hand-written catalog
+choices: the new-order page's selects come from
+`references::place_order_input_form_choices` and an order's page names
+its lines' products through `references::order_view_labels`, both through
+`listProducts`, and its console, given no choices, does the same, lists
+the products to anyone, links each row to its page by `getProduct`'s
+reference and names a product in its trail. Follows: the target derived from `@source` and a `Relation`; a
 reference to another service's type; a picker that searches (D62) when the
 options do not fit a page; a vendor key in the OpenAPI and tool documents;
 and a breadcrumb step named by the reference of its route parameter.
@@ -6212,8 +6223,8 @@ console has no box to type into.
 | The console's filter form renders the search argument first, as `<input type="search">` labeled "Search", holding the text sent, with its rules as attributes, and gives the form `role="search"`. A submitted search starts at the first page. | Its argument's name in words as its label, "Q" |
 | SQLite keeps the scan. An FTS5 table with the trigram tokenizer stays for later, for the reasons D27, amended, gave: a virtual table and triggers that the model, the diff and the runner do not know. acme's reviews are few, and a Topcoat app over a SQLite file serves one process. | Building it now, ahead of a SQLite reader that needs search to be fast |
 
-Status: the core, the runtimes' helpers, the console's box and acme's
-API are built; acme's Topcoat app follows in this batch. `SearchQuery` comes from
+Status: built: the core, the runtimes' helpers, the console's box and
+acme. `SearchQuery` comes from
 `@superschematic/api`; the readers write `search: true` on `ArgumentDef`
 after `references`, with `isQuery` and without `required`, and `format`
 writes `SearchQuery<T>` back.
@@ -6239,7 +6250,10 @@ list's links carry it; `TestTheConsolePagesPicksAndSearches` searches
 any case, and pages a search. acme's
 `listReviews` takes `q`, matched against `Review`'s `search_text` in
 memory, over SQLite and over Postgres (`rust-server/tests/shop.rs`,
-`TestStackDevRunsTheShop`). Follows: FTS5; the search in the
+`TestStackDevRunsTheShop`), and its Topcoat app's console searches a
+product's reviews by it, the Search box first, by each word in any case,
+a `%` matching itself and a paged search's links carrying it, in memory
+and over SQLite (`the_console_searches_a_products_reviews`). Follows: FTS5; the search in the
 OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
 picker that searches a reference's options (D61).
 
@@ -6356,6 +6370,13 @@ record and its refusals. `TestAPagedOperationIsItsPageEverywhere`,
 `TestReferencesBuildWithFormsOrViewsAlone` and
 `TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api` and
 `fixture-refs-api` with their pages, check the generator, and the eight
-earlier goldens are unchanged. acme's pages follow in this batch.
+earlier goldens are unchanged. acme's Topcoat app gives the console no
+choices any more: its console and its own pages pick and name products
+through `references`, its `/orders` pages with the pager's links, and
+its tests, in memory and over SQLite, page the orders and the console's
+orders and products by their links, see a product's page show its
+reviews' first page and a link to the next, search a product's reviews,
+refuse a forged cursor and a limit out of range with the route's 400,
+and call the orders' procedure with a cursor and a limit.
 
 The rule is reversible until the first release.

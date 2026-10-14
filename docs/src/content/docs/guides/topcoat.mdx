@@ -22,10 +22,11 @@ The acme shop's `topcoat/` app is a small shop over `shop-orders`, on
 the implementations its [Rust server](/superschematic/guides/api-routes/#the-rust-server)
 serves, which keep the shop in memory or in a SQLite file, with the
 shop's users in SQLite. A shopper signs in with their password, writes a
-review at `/reviews`, places an order at `/orders/new`, filters their
-orders at `/orders` and cancels one from its page, `/orders/{id}`, each
-page's input taken through a form the crate builds. The crate also
-generates a console of the shop's resources at `/console`
+review at `/reviews`, places an order at `/orders/new`, picking each
+line's product from the catalog `shop-orders` lists, filters their orders
+at `/orders` and pages through them, and cancels one from its page,
+`/orders/{id}`, each page's input taken through a form the crate builds.
+The crate also generates a console of the shop's resources at `/console`
 ([Generated pages](#generated-pages)).
 
 ## Build the crate
@@ -269,8 +270,9 @@ is sent, so a blank form calls it without one.
 
 The acme orders page answers with the status `submit` keeps, as the JSON
 API would: a caller the route refuses gets its 401 and the sign-in
-button, and a refused filter, a limit past 100, say, gets 422 and the
-message at its control:
+button, and a filter the route's rules refuse gets 422 and the message
+at its control. `listOrders` pages, so the page shows the orders a page
+at a time ([A paged list and a search box](#a-paged-list-and-a-search-box)):
 
 <Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
 
@@ -285,22 +287,22 @@ renders a control for neither. `page()` reads them by the route's rules,
 so a cursor outside the base64url alphabet or a limit past the route's
 maximum is the router's 400, which `submit` answers with, and
 `query_pairs()` is the query the form holds, its filters and the limit
-but never the cursor, from which a page builds its links:
+but never the cursor, from which a page builds its links. The acme orders
+page links the next page with them and `cursor`, the page's `next`, and
+the first page with them alone, after a later page:
 
-```rust
-let pairs = filter.query_pairs();
-match filter.submit(cx).await {
-    Ok(page) => {
-        // page.items are the rows; page.next, when there is one, is the
-        // cursor the next link adds to pairs.
-    }
-    Err(refused) => { /* refused.status, 400 for a refused cursor or limit */ }
-}
-```
+<Snippet file="topcoat/src/lib.rs" symbol={['orders_href', 'pager']} />
+
+Its errors are the form's, so a cursor no page gave, `/orders?cursor=e30`,
+answers 400 with "cursor: not a cursor this operation returned" above the
+filter, and a limit past `listOrders`' 100 "limit: must be at most 100";
+the page still links the first page.
 
 A `SearchQuery` argument is its form's first control, an
 `<input type="search">` labeled "Search", with its rules' attributes, and
-a page that pages the list carries it in its links.
+a page that pages the list carries it in its links. `listReviews`' `q` is
+the first control of the console's reviews filter
+([Generated pages](#generated-pages)).
 
 ### Typed controls
 
@@ -329,20 +331,23 @@ the form's own messages, named by its field.
 
 ### Choices the app supplies
 
-An input type does not say which product a `productId` names. The page
-says, with `Choices`, which either kind of component takes and which
-turns the text or number fields it names into a `<select>`:
-`lines.productId` for every line's product, or `lines[0].productId` for
-one line's. The acme app's catalog, which also stocks the shop in memory
-and in SQLite, supplies each line's:
+A page can say what a field's value names with `Choices`, which either
+kind of component takes and which turns the text or number fields it
+names into a `<select>`: `lines.productId` for every line's product, or
+`lines[0].productId` for one line's:
 
-<Snippet file="topcoat/src/lib.rs" symbol="product_choices" />
+```rust
+let choices = Choices::new().with("lines.productId", [(anvil_id.to_string(), "Anvil")]);
+view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
+```
 
 A choice's value is the id as the API sends it, its compact text, which
 is what a record holds and what the select sends back. The display
-components take the same `Choices` and show a value's label in its place,
-so the order's page names each line's product ([Display
-components](#display-components)).
+components take the same `Choices` and show a value's label in its place
+([Display components](#display-components)). An API that declares what
+the id refers to, as `shop-orders` does, needs none of the app's: the
+crate lists the items itself, and the app's choices win where they name
+a field.
 
 ### Choices from references
 
@@ -360,12 +365,11 @@ its item's label, through the listing operation's lookup argument, the
 list argument that narrows it to given values, called once for a
 render's values, in chunks of its `listMax`, at most ten calls. Both
 answer under the app's choices, which win where they name a field, and
-for which no call is made:
+for which no call is made. The acme new-order page gives no choices of
+its own, so each line's product is a select of the products
+`listProducts` lists, each by its name:
 
-```rust
-let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
-view! { place_order_input_fields(form: form, errors: errors, choices: choices) }
-```
+<Snippet file="topcoat/src/lib.rs" from="let choices = references::place_order_input_form_choices" to="place_order_input_fields(form" />
 
 A caller the listing operation refuses gets a text input and the id, and
 the page renders as it did. A reference whose listing operation has no
@@ -427,18 +431,16 @@ heads each row. `plural` captions a table. `ReviewView` declares all four:
 `OrderView`'s summary fields are the orders table's columns: the order's
 id, when it was placed, its status and its total.
 
-An API type does not say which record an id names, so an order line's
-`productId` would show as its id. Both components take the `Choices` a
-form takes, and show the label they give a text or number value, else the
-value. The order's page passes the catalog's, so each line shows its
-product's name, "Anvil"; a nested record's component gets the choices
-under its field, `lines.productId` the lines table's `productId`:
+An id shows as its id unless the page names it. Both components take
+the `Choices` a form takes, and show the label they give a text or number
+value, else the value; a nested record's component gets the choices
+under its field, `lines.productId` the lines table's `productId`. A value
+declared `RefersTo` is named by the labels `references::<record>_labels`
+gives ([Choices from references](#choices-from-references)): the acme
+order's page looks its lines' products up through `listProducts`' `ids`,
+so each line shows its product's name, "Anvil":
 
-<Snippet file="topcoat/src/lib.rs" from="order_view_detail(record" to="order_view_detail(record" />
-
-A value declared `RefersTo` is named the same way, by the labels
-`references::<record>_labels` gives ([Choices from
-references](#choices-from-references)).
+<Snippet file="topcoat/src/lib.rs" from="let order = order.map(OrderViewRecord::from);" to="order_view_detail(record" />
 
 The markup is plain HTML and ships no styles. A stylesheet or a test finds
 it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
@@ -500,15 +502,19 @@ beside `orders`, is titled by its own words, Archived.
 | Page | Path |
 | --- | --- |
 | The index of the resources the shopper may list | `/console` |
-| The orders, with their filter and a link to each | `/console/orders` |
-| The new order, and the POST that places it | `/console/orders/new` |
+| The orders, a page at a time, with their filter and a link to each | `/console/orders` |
+| The new order, each line's product a select of the products, and the POST that places it | `/console/orders/new` |
 | An order: its detail, its lines by their products' names, and the cancel form | `/console/orders/{order_id}` |
 | The cancel's POST | `/console/orders/{order_id}/cancel` |
-| A product's reviews, with their filter | `/console/products/{product_id}/reviews` |
+| The products, a page at a time, their `ids` lookup a product select, and a link to each | `/console/products` |
+| A product: its detail and its reviews' first page, with a link to the next | `/console/products/{product_id}` |
+| A product's reviews, a page at a time, with their search box and filter | `/console/products/{product_id}/reviews` |
 | A new review, and the POST that writes it | `/console/products/{product_id}/reviews/new` |
 
-Nothing lists or reads a product, so the reviews have no section and no
-link in the nav: a page reaches them by the product's id. An API whose
+`listProducts` admits anyone, so the index and the nav list the products
+to a shopper who is not signed in too, and each row links to its
+product's page, which `getProduct` reads, since its `productId` refers to
+`ProductView`; the trail names a product by its title. An API whose
 operations edit or delete an item gets `/edit` and `/delete` pages under
 it too, the edit form filled from the item and the delete confirmed on a
 page of its own before its POST.
@@ -546,12 +552,13 @@ the display components' `ss-` classes and no styles.
 
 The app's `.discover()` registers the pages, as it registers the
 procedures. The app tells them its site's title, its sign-in page and
-its choices through `pages::Settings` in its app context. The acme app
-gives the console the catalog's products, so the new-order page offers
-each line's product in a select and an order's page names its lines'
-products, and adds a Console link to its own pages:
+any choices of its own through `pages::Settings` in its app context. The
+acme app gives its title and sign-in page and no choices: the console
+names what an order's lines refer to through `listProducts`, so the
+new-order page offers each line's product in a select and an order's
+page names its lines' products. It adds a Console link to its own pages:
 
-<Snippet file="topcoat/src/lib.rs" symbol={['console_settings', 'product_choices']} />
+<Snippet file="topcoat/src/lib.rs" symbol="console_settings" />
 
 The choices are the app's for every resource. `choices_for` scopes some
 to one resource's pages, named by its path below the prefix as
@@ -575,6 +582,14 @@ it through its form and goes back to it, and a second cancel is the
 operation's 409:
 
 <Snippet file="topcoat/tests/app.rs" symbol="the_console_lists_orders_and_cancels_one_from_its_page" />
+
+They page the products and the orders by their links, show a product's
+first 20 reviews on its page with a link to the next, and refuse a
+forged cursor with the route's 400, each over the shop in memory and
+over a SQLite file (`each_shop`). A product's reviews are searched by
+each word, in any case, and the links of a paged search carry it:
+
+<Snippet file="topcoat/tests/app.rs" symbol="the_console_searches_a_products_reviews" />
 
 ### Live lists
 
@@ -674,8 +689,8 @@ With `DATABASE_URL` set, the app opens that file, which must hold
 `shop-db`'s tables, its identity tables among them, and its reviews,
 orders, users and sessions outlive the process; without it, the shop and
 its users are in memory. Either way the app stocks the shop from its
-catalog, since an order's lines are priced from it, in SQLite from the
-product's row. `DATABASE_URL` is a `sqlite:`
+catalog, which `listProducts` lists and an order's lines are priced from,
+in SQLite from the product's row. `DATABASE_URL` is a `sqlite:`
 URL, a `file:` URI or a path. A URL of another database, such as a
 Postgres one already in the shell, stops the app with an error that names
 its scheme alone, since the URL may hold a password:
@@ -713,8 +728,11 @@ The orders tests place an order through its form: a row button adds a
 line and renders the form again without placing the order, a quantity of
 0 comes back 422 with the message at `lines[0].quantity` and the form as
 sent, and a valid form goes to the new order's page. `/orders?statuses=cancelled`
-lists the cancelled orders alone, its box checked, and a limit of 500
-comes back 422 at the limit. On an order's page, a reason past 500
+lists the cancelled orders alone, its box checked. `/orders?limit=2`
+lists the two oldest orders and links the next page, which links back to
+the first, both keeping the filter and the limit, and a forged cursor or
+a limit of 500 is the route's 400, the form's own message, in memory and
+over SQLite. On an order's page, a reason past 500
 characters is refused at the reason, the route's id is the order
 cancelled whatever the hidden input holds, and cancelling it again
 answers the operation's 409, its message the form's:
