@@ -72,6 +72,16 @@ type KindSpec struct {
 	Verify func(schema *ir.Schema, r VerifyReporter)
 }
 
+// MayReference reports whether a schema of this kind may reference the
+// types of a service of kind: by AllowedReferences when the kind has that
+// allowlist, else unless DeniedReferences names it.
+func (k KindSpec) MayReference(kind string) bool {
+	if k.AllowedReferences != nil {
+		return k.AllowedReferences[kind]
+	}
+	return !k.DeniedReferences[kind]
+}
+
 // VerifyReporter receives the findings of a KindSpec.Verify or
 // CheckSpec.Verify run. file is the schema source path the finding points
 // at, or "" for a schema-level finding.

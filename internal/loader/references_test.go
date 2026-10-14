@@ -89,6 +89,48 @@ func TestReferenceToADependencysType(t *testing.T) {
 	}
 }
 
+// TestAPIsReferringToEachOtherAreRefused: two APIs whose references name
+// each other's types are the import an API may not make, refused without
+// reading either again; and two whose configs call each other a General
+// service, which the loader then reads, are refused as a cycle, not read
+// without end (D61).
+func TestAPIsReferringToEachOtherAreRefused(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, contents string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api := func(self, other, own, theirs, kind string) {
+		write(self+"/schema.config.json", `{"name": "`+self+`", "kind": "API", "dependencies": [{"name": "`+other+`", "kind": "`+kind+`"}], "outputs": {}}`)
+		write(self+"/src/api.schema.json", `{"imports": [{"package": "@schemas/`+other+`", "types": ["`+theirs+`"]}],
+		"types": {"`+own+`": {"name": "`+own+`", "role": "EmbeddedStruct", "fields": [
+			{"name": "id", "typeRef": {"name": "string"}, "required": true},
+			{"name": "otherId", "typeRef": {"name": "string"}, "required": true, "references": {"type": "`+theirs+`"}}]}},
+		"operationSets": [{"name": "Items", "operations": [
+			{"name": "listOwn", "httpMethod": "GET", "restPath": "own", "typeRef": {"name": "`+own+`", "isArray": true}, "required": true},
+			{"name": "listTheirs", "httpMethod": "GET", "restPath": "theirs", "typeRef": {"name": "`+theirs+`", "isArray": true}, "required": true}]}]}`)
+	}
+	api("a-api", "b-api", "AView", "BView", "API")
+	api("b-api", "a-api", "BView", "AView", "API")
+	_, err := LoadService(filepath.Join(root, "a-api"))
+	if err == nil || !strings.Contains(err.Error(), `a API schema cannot reference types from API service "b-api"`) {
+		t.Fatalf("two APIs referring to each other: %v", err)
+	}
+
+	api("a-api", "b-api", "AView", "BView", "General")
+	api("b-api", "a-api", "BView", "AView", "General")
+	_, err = LoadService(filepath.Join(root, "a-api"))
+	if err == nil || !strings.Contains(err.Error(), "a-api is already being read for its references (a-api -> b-api -> a-api), a cycle") {
+		t.Fatalf("two APIs declared General referring to each other: %v", err)
+	}
+}
+
 // TestLoadServiceRefusesReferencesAndSearchesInTheDataForms: the verify
 // pass holds the data forms to the rules the TypeScript form meets.
 func TestLoadServiceRefusesReferencesAndSearchesInTheDataForms(t *testing.T) {

@@ -67,6 +67,10 @@ type loadOptions struct {
 	// sets, which reads no authDb of its own: an authDb is a DB schema,
 	// and one that is not fails its reader without a chain of loads.
 	authDBRead bool
+	// reading names the services whose loads are reading this one as a
+	// dependency whose type a RefersTo names, outermost first, so a cycle
+	// of such reads is refused instead of read again without end.
+	reading []string
 }
 
 // WithNaming supplies the superschematic.toml naming; the verification pass
@@ -206,7 +210,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				return nil, nil, err
 			}
 			vin.AuthDB = authDB
-			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, reg); err != nil {
+			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 				return nil, nil, err
 			}
 			var verified *ir.Schema
@@ -310,7 +314,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		return nil, nil, err
 	}
 	vin.AuthDB = authDB
-	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, reg); err != nil {
+	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 		return nil, nil, err
 	}
 
@@ -368,11 +372,17 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 // declare and one of its imports lists, from the service that import
 // names, through the dependency loader (WithDependencyLoader) or as the
 // service of that name beside this one. It reads nothing for any other
-// schema; ResolveReference refuses a target found in neither.
-func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, reg *registry.Registry) (map[string]*ir.Schema, error) {
+// schema, and no service the config does not declare as a dependency of
+// a kind the API may reference types from (an API's, say): the
+// verification pass refuses that import, and ResolveReference a target
+// found in neither. A service already being read for this load's chain of
+// references is refused, so a cycle of them is an error, not an endless
+// read.
+func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, dependencies map[string]ir.SchemaKind, reg *registry.Registry) (map[string]*ir.Schema, error) {
 	if schema.Kind != ir.SchemaKindAPI {
 		return nil, nil
 	}
+	kind, _ := reg.Kind(string(schema.Kind))
 	var names []string
 	for _, held := range ir.ReferencesOf(schema) {
 		target := held.Ref.Type
@@ -387,26 +397,35 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 			if i := strings.LastIndex(name, "/"); i >= 0 {
 				name = name[i+1:]
 			}
-			if name != schema.Name && !slices.Contains(names, name) {
-				names = append(names, name)
+			depKind, declared := dependencies[name]
+			if name == schema.Name || !declared || !kind.MayReference(string(depKind)) || slices.Contains(names, name) {
+				continue
 			}
+			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {
 		return nil, nil
 	}
+	reading := append(slices.Clone(o.reading), schema.Name)
 	load := o.loadDependency
 	if load == nil {
 		load = func(name string) (*ir.Schema, error) {
 			return LoadService(filepath.Join(servicePath, "..", name),
 				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
 				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache),
-				func(nested *loadOptions) { nested.authDBRead = true })
+				func(nested *loadOptions) {
+					nested.authDBRead = true
+					nested.reading = reading
+				})
 		}
 	}
 	sort.Strings(names)
 	deps := make(map[string]*ir.Schema, len(names))
 	for _, name := range names {
+		if slices.Contains(reading, name) {
+			return nil, fmt.Errorf("%s: reading the dependency %s, whose type a RefersTo names: %s is already being read for its references (%s), a cycle", schema.Name, name, name, strings.Join(append(reading, name), " -> "))
+		}
 		dep, err := load(name)
 		if err != nil {
 			return nil, fmt.Errorf("%s: reading the dependency %s, whose type a RefersTo names: %w", schema.Name, name, err)

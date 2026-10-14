@@ -6162,10 +6162,14 @@ derives the target, options, value, label and lookup and reports the
 first rule broken, and `ir.ReferencesOf` lists every reference with its
 holder. `internal/loader/verify/references.go` runs it after the display
 checks, adds the refusals of placement and of the value's type, and reads
-the dependency whose type a reference names when the schema imports it.
+the dependency whose type a reference names when the schema imports it:
+only a dependency its config declares, of a kind an API may reference
+types from, so two APIs that refer to each other get the import's own
+refusal, and a cycle of such reads is refused, not read without end.
 The tests: `ir/reference_test.go`, `verify/references_test.go`, the
 reader's `refers_to_test.go` with `broken-references`, the loader's
-`references_test.go` (a dependency's target among them), and
+`references_test.go` (a dependency's target and two APIs that refer to
+each other among them), and
 `fixture-refs-api` in TypeScript, JSON and YAML, which load to one IR and
 round-trip through every writer. No server, SDK or OpenAPI document
 changes. The Topcoat crate resolves each reference its forms and records
