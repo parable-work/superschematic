@@ -6061,8 +6061,8 @@ and the tool documents' parameters, page and sentence (`toolsutil`); Go's
 `paging`, TypeScript's `readPage` and Rust's `page` module, held to
 `page_parity.json`; each reads a parameter's first value and an empty one
 as absent. Each server and SDK generator refused a paged operation until
-it rendered it (`apigen.RefusePages`), and every one renders it now. The
-Go server's paged method takes `page paging.Request` last and returns
+it rendered it, and every one renders it now, so the refusal
+(`apigen.RefusePages`) and its test are gone. The Go server's paged method takes `page paging.Request` last and returns
 `paging.Page[T]`, its route reads the page with `paging.Read` after its
 own parameters and answers the page as `data`, and
 `TestPagedRoutesServePages` pages `fixture-paged-api` over httptest, its

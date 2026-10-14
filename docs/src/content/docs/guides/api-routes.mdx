@@ -193,8 +193,10 @@ Each runtime reads and builds a page: Go's `paging` package (`Read`,
 `pageFromRows`, `encodeCursor` and `decodeCursor`, and Rust's `page` module
 (`PageSpec`, `Page::from_rows`, `Cursor`). An implementation reads up to
 `limit + 1` rows after the cursor's position and builds the page from them.
-Until a server or an SDK renders the decorator, its generator refuses a
-paged operation, naming itself and the operation.
+Every server and SDK renders it: the implementation takes `page`, the
+page request, and returns the page, and each SDK's method takes `cursor`
+and `limit` and returns the page, beside `<operation>All`, which yields
+every item, asking for each page with the last one's `next`.
 
 ## Errors
 

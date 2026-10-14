@@ -71,33 +71,12 @@ func (e EndpointInfo) GoZeroResult() string {
 
 // HasPagedEndpoints reports whether an endpoint of the output pages.
 func (o *APIOutput) HasPagedEndpoints() bool {
-	_, found := firstPaged(o.Endpoints)
-	return found
-}
-
-func firstPaged(endpoints []EndpointInfo) (*PageInfo, bool) {
-	for _, endpoint := range endpoints {
+	for _, endpoint := range o.Endpoints {
 		if endpoint.Page != nil {
-			return endpoint.Page, true
+			return true
 		}
 	}
-	return nil, false
-}
-
-// RefusePages is the refusal of a generator that does not render
-// @paginated yet (D60), for an API with a paged operation: a server or SDK
-// that ignored the decorator would answer or read a list where the others
-// answer a page, so the build fails naming the generator and the first such
-// operation. Each server and SDK generator calls it from its entry until it
-// renders pages; nil when no endpoint pages.
-func RefusePages(generator string, output *APIOutput) error {
-	if output == nil {
-		return nil
-	}
-	if page, found := firstPaged(output.Endpoints); found {
-		return fmt.Errorf("%s does not render @paginated yet (D60): %s", generator, page.Operation)
-	}
-	return nil
+	return false
 }
 
 // pageOpenAPIParameters are a paged endpoint's two query parameters in the
