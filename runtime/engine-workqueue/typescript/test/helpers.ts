@@ -5,16 +5,50 @@
 // engines they open record the test's calls through the engine's recorder
 // (runtime/engine/typescript/test/recorder.ts), as the engine's own tests
 // do, into scenarios/workqueue-<file>.json: the corpus a second
-// implementation of the engine and these behaviors replays (D58).
+// implementation of the engine and these behaviors replays (D58). With
+// ENGINE_IMPL=rust they are the Rust engine, through the engine's Node-API
+// addon, which has this package's behaviors in Rust: an open names each
+// of this package's own objects by its declaration's name, and the addon
+// registers the Rust one; any other behavior (a fixture, a stand-in, a
+// wrapper of one of this package's) is written in TypeScript and waits
+// for the bridge (scripts/engine-napi.sh builds the addon, and the
+// engine's scripts/rust-ratchet.mjs runs this suite against
+// test/rust-pending.txt).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { allowAll, isBun, openEngine, type DriverName, type Engine, type EngineOptions, type Principal } from '@superschematic/engine';
+import { allowAll, isBun, openEngine as openDistEngine, type DriverName, type Engine, type EngineOptions, type Principal } from '@superschematic/engine';
 
 import { workQueueBehaviors } from '../dist/index.js';
+import { openNativeEngine } from '../../../engine/typescript/dist/native/index.js';
 import { endCase, recordOpen, recordPackage, registerDirectory, type TestContextLike } from '../../../engine/typescript/test/recorder.ts';
+
+/**
+ * The engine the tests open: the TypeScript engine, or with
+ * ENGINE_IMPL=rust the Rust engine, behind the same API.
+ */
+const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+
+function implementation(given: string | undefined): 'typescript' | 'rust' {
+  if (given === undefined || given === '' || given === 'typescript') {
+    return 'typescript';
+  }
+  if (given === 'rust') {
+    return 'rust';
+  }
+  throw new Error(`ENGINE_IMPL is typescript (the default) or rust, got ${given}`);
+}
+
+/** openNative opens the Rust engine, each of this package's behaviors by its name, the addon's. */
+function openNative(options: EngineOptions): Engine {
+  const behaviors = options.behaviors?.map((behavior) => (workQueueBehaviors.includes(behavior) ? behavior.declaration.name : behavior));
+  return openNativeEngine({ ...options, behaviors }) as unknown as Engine;
+}
+
+/** openEngine is the engine's openEngine, or with ENGINE_IMPL=rust the Rust engine's. */
+const openEngine: (options: EngineOptions) => Engine = engineImpl === 'rust' ? openNative : openDistEngine;
 
 // This package's behaviors are a replayer's to implement, as the core's
 // are: an open names them, and a scenario lists as test behaviors only

@@ -6,7 +6,10 @@
 //!
 //! - `NativeEngine.open(optionsJson, host?)` opens an engine on the
 //!   options [`EngineOptions::from_json`] reads, with the core's behaviors
-//!   this addon was built with ([`superschematic_engine_behaviors::core`]).
+//!   this addon was built with ([`superschematic_engine_behaviors::core`]),
+//!   then the work queue's its `behaviors` member names
+//!   ([`superschematic_engine_workqueue::behavior`]), in its order, as
+//!   the TypeScript engine registers a deployment's after the core's.
 //!   The options' `hosted` member, which the addon takes off first, lists
 //!   what the facade answers in JavaScript through `host(kind, json)`: a
 //!   `policy` written in TypeScript, which gets each question as the
@@ -229,8 +232,12 @@ impl PermissionMatcher for HostMatcher {
     }
 }
 
-// options_of reads the options the facade passes: the engine's, and what
-// it hosts.
+// What an engine's options may name in behaviors: the behaviors this
+// addon has beside the core's, by name.
+const BEHAVIORS: &str = "behaviors names the work queue's behaviors the addon is built with (Lease, Assignment, Queue, Presence, Blueprint, Budget, Retries); a behavior written in TypeScript needs the bridge";
+
+// options_of reads the options the facade passes: the engine's, the work
+// queue's behaviors they name, and what it hosts.
 fn options_of(
     text: &str,
     host: Option<HostFunction>,
@@ -249,8 +256,25 @@ fn options_of(
             ))
         }
     };
+    let named = match given
+        .as_object_mut()
+        .and_then(|members| members.remove("behaviors"))
+    {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(names)) => names,
+        Some(_) => return Err(Failure::usage(BEHAVIORS)),
+    };
     let mut options = EngineOptions::from_json(&given).map_err(|error| Failure::of(&error))?;
     options.behaviors = superschematic_engine_behaviors::core();
+    for name in named {
+        let set = name
+            .as_str()
+            .and_then(superschematic_engine_workqueue::behavior)
+            .ok_or_else(|| {
+                Failure::usage(format!("{BEHAVIORS}, not {}", json::stringify(&name)))
+            })?;
+        options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
+    }
     if hosted.is_empty() {
         return Ok((options, false));
     }

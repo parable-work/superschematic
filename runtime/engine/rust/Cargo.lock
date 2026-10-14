@@ -1544,6 +1544,7 @@ dependencies = [
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
+ "superschematic-engine-workqueue",
 ]
 
 [[package]]

@@ -7,8 +7,9 @@
 # of the addon are in src/native/addon.ts, so its build needs neither.
 #
 # The addon registers the core's behaviors the workspace has when it is
-# built (superschematic-engine-behaviors' core()), so rebuild it after
-# pulling a branch that ports more.
+# built (superschematic-engine-behaviors' core()), then the work queue's an
+# engine's options name (superschematic-engine-workqueue), so rebuild it
+# after pulling a branch that ports more or changes them.
 #
 # It builds with tools.env's RUST_VERSION and the napi CLI the package pins
 # (@napi-rs/cli, installed with the package's dependencies), --locked to

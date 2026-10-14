@@ -27,7 +27,8 @@
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "test": "bun run build && bun run test:node && bun run test:bun",
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
-    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
+    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test",
+    "test:rust": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node ../../engine/typescript/scripts/rust-ratchet.mjs --package ."
   },
   "peerDependencies": {
     "@superschematic/engine": "*"

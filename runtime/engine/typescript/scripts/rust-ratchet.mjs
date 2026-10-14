@@ -11,6 +11,13 @@
 //   node scripts/rust-ratchet.mjs test/events.test.ts --verbose
 //   node scripts/rust-ratchet.mjs --update         # drop what passes, add what fails
 //
+// --package names another package whose suite opens its engines through
+// this one with ENGINE_IMPL=rust, held to its own test/rust-pending.txt:
+// the work queue's (runtime/engine-workqueue/typescript, built after this
+// package; its `bun run test:rust`):
+//
+//   node ../../engine/typescript/scripts/rust-ratchet.mjs --package .
+//
 // A line of rust-pending.txt is a file under test/, then the runtimes it
 // is pending on when not both (`node`, `bun`), then a comment:
 //
@@ -28,20 +35,19 @@ import { availableParallelism, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const testDir = join(root, 'test');
-const pendingPath = join(testDir, 'rust-pending.txt');
+// The engine's package, whose dist/native and addon the suite runs on.
+const engineRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIMES = ['node', 'bun'];
 
 function usage(message) {
   if (message) {
     console.error(message);
   }
-  console.error('usage: node scripts/rust-ratchet.mjs [--runtime node|bun] [--jobs N] [--timeout seconds] [--update] [--verbose] [test/<file>.test.ts ...]');
+  console.error('usage: node scripts/rust-ratchet.mjs [--package dir] [--runtime node|bun] [--jobs N] [--timeout seconds] [--update] [--verbose] [test/<file>.test.ts ...]');
   process.exit(2);
 }
 
-const options = { runtimes: [...RUNTIMES], jobs: Math.max(1, Math.floor(availableParallelism() / 2)), timeout: 600, update: false, verbose: false, files: [] };
+const options = { root: engineRoot, runtimes: [...RUNTIMES], jobs: Math.max(1, Math.floor(availableParallelism() / 2)), timeout: 600, update: false, verbose: false, files: [] };
 const argv = process.argv.slice(2);
 for (let index = 0; index < argv.length; index += 1) {
   const arg = argv[index];
@@ -52,7 +58,9 @@ for (let index = 0; index < argv.length; index += 1) {
     }
     return argv[index];
   };
-  if (arg === '--runtime') {
+  if (arg === '--package') {
+    options.root = resolve(value());
+  } else if (arg === '--runtime') {
     const runtime = value();
     if (!RUNTIMES.includes(runtime)) {
       usage(`--runtime is node or bun, got ${runtime}`);
@@ -77,6 +85,14 @@ if (!(options.jobs >= 1) || !(options.timeout >= 1)) {
 }
 if (process.env.ENGINE_IMPL !== undefined && process.env.ENGINE_IMPL !== '' && process.env.ENGINE_IMPL !== 'rust') {
   usage(`the ratchet runs the suite with ENGINE_IMPL=rust; ENGINE_IMPL is ${process.env.ENGINE_IMPL}`);
+}
+
+// The package whose suite runs: the engine's, or the one --package names.
+const root = options.root;
+const testDir = join(root, 'test');
+const pendingPath = join(testDir, 'rust-pending.txt');
+if (!existsSync(pendingPath)) {
+  usage(`no ${pendingPath}: the package lists the files not passing yet there`);
 }
 
 // The suite's files, and the list's entries.
@@ -122,12 +138,12 @@ if (pending.problems.length > 0) {
   process.exit(1);
 }
 
-// The build this runs against: the package's dist and the addon.
-if (!existsSync(join(root, 'dist', 'native', 'index.js'))) {
-  usage('dist/native is missing: run `bun run build` first');
+// The build this runs against: the engine's dist and the addon.
+if (!existsSync(join(engineRoot, 'dist', 'native', 'index.js'))) {
+  usage(`${join(engineRoot, 'dist', 'native')} is missing: run \`bun run build\` in the engine's package first`);
 }
 try {
-  const native = await import(join(root, 'dist', 'native', 'index.js'));
+  const native = await import(join(engineRoot, 'dist', 'native', 'index.js'));
   native.loadAddon();
 } catch (error) {
   console.error(`the Rust engine's addon does not load (scripts/engine-napi.sh builds it): ${error instanceof Error ? error.message : String(error)}`);

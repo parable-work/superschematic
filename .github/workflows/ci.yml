@@ -919,9 +919,10 @@ jobs:
     # Node.js and Bun and held to runtime/engine/typescript/test/rust-pending.txt
     # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
     # file not on the list fails the job, and so does a listed file that
-    # passes. The setup is the typescript job's, which the engine's build
-    # needs.
-    name: engine-napi (the engine's TypeScript suite on the Rust engine)
+    # passes. The work queue's suite runs so too, its behaviors the addon's,
+    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. The
+    # setup is the typescript job's, which the engine's build needs.
+    name: engine-napi (the engine's and the work queue's TypeScript suites on the Rust engine)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -988,6 +989,13 @@ jobs:
       - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
         working-directory: runtime/engine/typescript
         run: bun run test:rust
+
+      - name: The work queue's suite on the Rust engine against its test/rust-pending.txt (Node.js and Bun)
+        working-directory: runtime/engine-workqueue/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run test:rust
 
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
