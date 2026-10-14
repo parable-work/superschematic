@@ -31,13 +31,19 @@
 //!
 //! The HTTP corpus (`runtime/engine/testdata/http`) replays through the
 //! same runner: its cases are scenarios whose `app`, exchange and stream
-//! steps go through the engine's routes ([`HTTP_FILES`]).
+//! steps go through the engine's routes ([`HTTP_FILES`]), called directly
+//! ([`Direct`]) or through a server runtime's adapter ([`Transport`]; the
+//! `axum` feature's [`AxumRouter`]), which [`replay_file_through`] takes.
 
+#[cfg(feature = "axum")]
+mod axum;
 pub mod behaviors;
 pub mod core_fixtures;
 mod http;
 
-pub use http::HTTP_FILES;
+#[cfg(feature = "axum")]
+pub use self::axum::AxumRouter;
+pub use http::{Answer, Answered, Direct, Frames, MountView, Transport, HTTP_FILES};
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -233,8 +239,21 @@ impl FileReport {
 }
 
 /// Replays every scenario of a file on a database. `repository` is the
-/// repository's root, which holds the open meta-schema's source.
+/// repository's root, which holds the open meta-schema's source. An HTTP
+/// case's requests reach the engine's routes directly ([`Direct`]).
 pub fn replay_file(file: &ScenarioFile, database: &Database, repository: &Path) -> FileReport {
+    replay_file_through(file, database, repository, &Direct)
+}
+
+/// Replays every scenario of a file on a database, an HTTP case's requests
+/// reaching the engine through `transport`, once the replayer's host steps
+/// let them through.
+pub fn replay_file_through(
+    file: &ScenarioFile,
+    database: &Database,
+    repository: &Path,
+    transport: &dyn Transport,
+) -> FileReport {
     let mut report = FileReport {
         file: file.name.clone(),
         scenarios: file.scenarios.len(),
@@ -257,7 +276,7 @@ pub fn replay_file(file: &ScenarioFile, database: &Database, repository: &Path) 
             continue;
         }
         report.replayed += 1;
-        let mut run = Run::new(database, repository, &file.name, scenario);
+        let mut run = Run::new(database, repository, &file.name, scenario, transport);
         for (index, step) in steps.iter().enumerate() {
             run.http.tail = steps[index + 1..]
                 .iter()
@@ -436,10 +455,18 @@ struct Run<'d> {
     unknown_questions: Arc<Mutex<Vec<String>>>,
     /// The apps a case serves, and its open streams (`http`).
     http: http::Served,
+    /// How an HTTP case's requests reach the engine.
+    transport: &'d dyn Transport,
 }
 
 impl<'d> Run<'d> {
-    fn new(database: &'d Database, repository: &'d Path, file: &'d str, scenario: &Value) -> Self {
+    fn new(
+        database: &'d Database,
+        repository: &'d Path,
+        file: &'d str,
+        scenario: &Value,
+        transport: &'d dyn Transport,
+    ) -> Self {
         Run {
             database,
             repository,
@@ -456,6 +483,7 @@ impl<'d> Run<'d> {
             counter: IdCounter::new(),
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
             http: http::Served::default(),
+            transport,
         }
     }
 
@@ -1657,7 +1685,7 @@ mod tests {
         };
         let postgres = Database::Postgres { url: String::new() };
         let repository = PathBuf::new();
-        let mut run = Run::new(&postgres, &repository, "f", &json!({}));
+        let mut run = Run::new(&postgres, &repository, "f", &json!({}), &Direct);
         run.matches(&page(&[1, 2], 2), &page(&[1, 2], 2), "")
             .expect("as recorded");
         // A rolled-back write took cursor 3: the recording's 3 and 4 read
@@ -1672,7 +1700,7 @@ mod tests {
         assert!(refused.is_err_and(|error| error.contains("out of the recorded order")));
         // On SQLite a cursor is compared as it is.
         let sqlite = Database::Sqlite;
-        let mut run = Run::new(&sqlite, &repository, "f", &json!({}));
+        let mut run = Run::new(&sqlite, &repository, "f", &json!({}), &Direct);
         assert!(run.matches(&page(&[3], 3), &page(&[4], 4), "").is_err());
     }
 }

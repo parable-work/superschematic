@@ -889,7 +889,8 @@ jobs:
       # The same commands as `make engine-rust`, inline: the Makefile runs
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
-      # neither), so a build that takes one database still compiles.
+      # neither, and the axum router over one database, as a Rust server
+      # takes it), so a build that takes one database still compiles.
       - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
@@ -898,10 +899,12 @@ jobs:
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings
 
       # The test kit's replay of the scenario corpus
       # (runtime/engine/testdata/scenarios) runs here too, on both
-      # databases; it fails when the corpus is missing.
+      # databases, and of the HTTP corpus through the engine's routes and
+      # its axum router; it fails when the corpus is missing.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:

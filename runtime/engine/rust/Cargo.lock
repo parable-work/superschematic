@@ -1542,9 +1542,13 @@ dependencies = [
 name = "superschematic-engine-testkit"
 version = "0.0.0"
 dependencies = [
+ "axum",
+ "futures-util",
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
