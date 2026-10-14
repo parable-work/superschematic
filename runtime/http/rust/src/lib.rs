@@ -7,6 +7,8 @@ pub use superschematic_schema_runtime as schema;
 
 mod auth;
 mod body;
+#[cfg(any(feature = "logging", feature = "postgres"))]
+mod civil;
 mod context;
 mod controls;
 // A site's CORS (D55), which a stack server answers for the APIs it serves.
@@ -29,13 +31,27 @@ mod path;
 // A stack server's database (D57), with the `postgres` feature.
 #[cfg(feature = "postgres")]
 pub mod postgres;
+// A queue's client (D53, D65), with the `postgres` feature.
+#[cfg(feature = "postgres")]
+pub mod queue;
 mod ratelimit;
 mod request_id;
 mod response;
 mod service_auth;
+// The cancellation a stack's job and worker stop on (D65).
+mod shutdown;
 // The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;
 mod token_source;
+#[cfg(any(feature = "identity", feature = "postgres"))]
+mod uuid62;
+// A worker's claim loop (D53, D65), with the `postgres` feature.
+#[cfg(feature = "postgres")]
+pub mod worker;
+
+/// The error a job's or a worker's method returns (D65), and any other
+/// error a generated crate passes on without naming its type.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub use auth::{admit, bearer_token, covers, has_any_permission, Authenticator, Principal};
 pub use body::{json_body, query_values};
@@ -71,6 +87,7 @@ pub use service_auth::{
     ServiceAuthConfig, ServiceAuthenticator, ServiceCaller, ServiceCallerConfig, ServiceIssuer,
     SERVICE_AUTHORIZATION,
 };
+pub use shutdown::{CancellationToken, Shutdown};
 pub use token_source::{
     GoogleIdTokenSource, HttpGetter, SignedKeySource, TokenFileSource, TokenFuture, TokenSource,
 };
