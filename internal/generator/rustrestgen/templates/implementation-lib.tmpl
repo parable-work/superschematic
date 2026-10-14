@@ -28,6 +28,9 @@ use async_trait::async_trait;
 {{- if .ChecksEndUsers }}
 use http::request::Parts;
 {{- end }}
+{{- if .HasPages }}
+use {{ .CrateIdent }}::runtime;
+{{- end }}
 {{- if .UsesTypes }}
 use {{ .CrateIdent }}::types;
 {{- end }}

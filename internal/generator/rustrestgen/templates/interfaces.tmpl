@@ -7,7 +7,8 @@
 
 #![allow(unused_imports)]
 
-use crate::types;
+{{ if .HasPages }}use crate::runtime;
+{{ end }}use crate::types;
 use async_trait::async_trait;
 {{- if .WebhookProviders }}
 use axum::extract::Request;
@@ -33,6 +34,13 @@ pub struct {{ .ArgsName }} {
     /// The `{{ .Name }}` query parameter.
     pub {{ .Field }}: {{ .RustType }},
 {{- end }}
+{{- if .Page }}
+    /// The page asked for (D60): the `cursor` and `limit` query parameters,
+    /// the limit's default filled in. `PageRequest::first(limit)` asks for
+    /// the first page and `PageRequest::after(next, limit)` for the one
+    /// after a page's `next`.
+    pub page: runtime::page::PageRequest,
+{{- end }}
 {{- with .Input }}
     /// The request body.
     pub input: {{ .RustType }},
@@ -55,6 +63,14 @@ pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
 {{- if eq .Namespace $namespace }}
     {{- if .Description }}
     /// {{ index (splitLines .Description) 0 }}
+    {{- end }}
+    {{- if .Page }}
+    {{- if .Description }}
+    ///
+    {{- end }}
+    /// It pages (D60): read up to `args.page.limit + 1` items after
+    /// `args.page.cursor` (`Cursor::decode`) in the operation's order, and
+    /// return `Page::from_rows`.
     {{- end }}
     async fn {{ .FunctionName }}(&self, ctx: RequestContext{{ if .HasArgs }}, args: {{ .ArgsName }}{{ end }}) -> Result<{{ .OutputRustType }}, ApiError>;
 {{- end }}
