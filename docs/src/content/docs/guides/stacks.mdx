@@ -37,10 +37,10 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server or job; a bucket on another provider |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server, job or worker; a bucket on another provider |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | a Rust worker; claims on SQLite and D1 |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -611,7 +611,9 @@ The build writes each job an entrypoint module beside the servers',
 API's `Deps`, calls your `NewJobs`, runs the job's method once with a
 context that SIGTERM cancels, and exits 1 when it returns an error. A
 TypeScript job's is a package with a `main.ts` that does the same on Bun
-with your `createJobs`. Its Dockerfile builds an image as a server's
+with your `createJobs`, and a Rust job's a crate whose `main.rs` does it
+on tokio with your `create_jobs` and a `Shutdown` that SIGTERM cancels
+([Rust servers](#rust-servers)). Its Dockerfile builds an image as a server's
 does, and `stack build` and `stack deploy` build and pin it beside the
 servers'.
 
@@ -637,8 +639,9 @@ superschematic stack run Dev shop-orders-ship-orders
 
 Locally it runs against the environment `stack dev` runs, with its
 values, secrets and keys. It builds no schema, but builds a Go job's
-binary again, or runs a TypeScript job's `main.ts` after an install, so
-a change to your job's code is in the run. It exits
+binary again, runs a TypeScript job's `main.ts` after an install, or
+builds a Rust job's crate again with cargo, so a change to your job's code
+is in the run. It exits
 non-zero when the run's last try fails, refuses an environment that is
 not running, and waits for no schedule: while its run goes on, the
 schedule skips the job's runs, and while a scheduled run goes on, it
@@ -671,7 +674,12 @@ method of the API's generated `Workers`, `FulfilOrders(ctx, msg)`, beside
 `NewWorkers(deps)`. In TypeScript it enqueues with the HTTP runtime's
 `enqueue(client, orderPlacedQueue, msg)`, over the definition the
 database's TypeScript types export from `./queues`, and implements
-`fulfilOrders(message, signal)` beside `createWorkers(deps)`. In a stack each worker is a deployable of its own,
+`fulfilOrders(message, signal)` beside `createWorkers(deps)`. In Rust it
+enqueues with the runtime's `queue::enqueue(&tx, &definition, &msg)`,
+over the descriptor the database's Rust types hold
+(`database_types::ORDER_PLACED_QUEUE`), and implements
+`fulfil_orders(message)` beside `create_workers(deps)`. In a stack each
+worker is a deployable of its own,
 named as a job is, `shop-orders-fulfil-orders`, with its API's edges,
 config and identity. It rolls out after its callees, and an environment
 sets how many instances run and how many messages each handles at a time:
@@ -1067,12 +1075,27 @@ each request to the API whose operations take it, answers the site CORS
 of an API a site calls, serves `/healthz` and `/readyz`, logs JSON lines,
 and drains for ten seconds on SIGTERM.
 
-Each Rust server's crate is a member of the Cargo workspace whose root,
-`schemas/dist/Cargo.toml`, the stack's build writes. Commit its lockfile,
-`schemas/dist/Cargo.lock`, beside `bun.lock`: each build of the stack
-brings it up to date with `cargo update --workspace`, which pins nothing
-afresh that it pinned already, and the image and the generated CI build
-with `--locked` from it.
+A Rust API's jobs and workers get crates beside it,
+`schemas/dist/server/<stack>/<job>/`, each named after its deployable
+and building a binary of that name (D65). A job's `main.rs` builds the
+API's `Deps` as the server's does, calls your `create_jobs(deps)`, runs
+the job's method once with a `Shutdown` that SIGTERM cancels, and exits 1
+when it fails; a worker's calls your `create_workers(deps)` and runs the
+runtime's claim loop over the queue's descriptor in the database's Rust
+types, with `WORKER_CONCURRENCY` or the decorator's concurrency, and on
+SIGTERM gives the running methods the worker's grace, then drops them and
+gives their messages back. Neither builds an identity service or a
+router, so neither is given the callers, identity or CORS field: they
+load the API's config with `load_background_env_config()`, which leaves
+the callers field without issuers, where the API has one. Their lines
+name them `"job"` or `"worker"`, as Go's and TypeScript's do.
+
+Each Rust server's, job's and worker's crate is a member of the Cargo
+workspace whose root, `schemas/dist/Cargo.toml`, the stack's build writes.
+Commit its lockfile, `schemas/dist/Cargo.lock`, beside `bun.lock`: each
+build of the stack brings it up to date with `cargo update --workspace`,
+which pins nothing afresh that it pinned already, and the image and the
+generated CI build with `--locked` from it.
 
 ```gitignore
 schemas/dist/*
@@ -1112,8 +1135,8 @@ crate with `cargo build --release --locked` on the Rust release
 `tools.env` pins, from the repository root, which holds the checkouts the
 naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust` and
 `scalar_rust` name, and runs the binary on distroless `cc` as a non-root
-user. Rust jobs, Rust workers and buckets from a Rust server are not
-built.
+user, and a job's and a worker's image runs theirs with no port.
+Buckets from a Rust server, job or worker are not built.
 
 No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
 `go mod tidy` can fail, because it also resolves the imports of the

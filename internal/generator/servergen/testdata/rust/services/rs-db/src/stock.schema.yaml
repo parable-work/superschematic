@@ -67,3 +67,15 @@ types:
       - name: quantity
         typeRef: { name: number }
         required: true
+  StockLow:
+    name: StockLow
+    comment: A product whose stock ran low, which rs-stock's worker reorders.
+    role: EmbeddedStruct
+    queue: { retries: 1, backoff: 1s }
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: quantity
+        typeRef: { name: number }
+        required: true

@@ -49,6 +49,12 @@ const (
 	rustMergedStack  = "rs-merged-stack"
 	rustMergedServer = "Warehouse"
 
+	// rustStockJob and rustStockWorker are rs-stock's job and worker
+	// (D65): the job enqueues a StockLow message of rs-db per product it
+	// is given, and the worker handles them.
+	rustStockJob    = "rs-stock-place-restock-orders"
+	rustStockWorker = "rs-stock-reorder-stock"
+
 	// rustGoldenRoot holds the Rust entrypoints as the output root lays
 	// them out, and the workspace's root.
 	rustGoldenRoot = "testdata/golden/rust"
@@ -95,7 +101,7 @@ func rustFakePaths(repoRoot string) naming.LocalPaths {
 func rustGenerated(repoRoot string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	files := map[string]string{servergen.RustWorkspaceFile: filepath.Join(out, servergen.RustWorkspaceFile)}
-	for _, server := range [][2]string{{rustStack, "rs-pricing"}, {rustStack, "rs-stock"}, {rustMergedStack, rustMergedServer}} {
+	for _, server := range [][2]string{{rustStack, "rs-pricing"}, {rustStack, "rs-stock"}, {rustStack, rustStockJob}, {rustStack, rustStockWorker}, {rustMergedStack, rustMergedServer}} {
 		for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 			files[filepath.Join("server", server[0], server[1], filepath.FromSlash(file))] = filepath.Join(servergen.ServerDir(out, server[0], server[1]), filepath.FromSlash(file))
 		}
@@ -177,17 +183,83 @@ impl QuotesImplementation for Quotes {
 // rustStockImplementation is rs-stock's implementation: a level in the
 // warehouse its setting names, priced by rs-pricing, which it calls with
 // its edge's credential; a slow level, which answers after a second; and a
-// reservation for the service that asks for it.
-const rustStockImplementation = `use std::sync::Arc;
+// reservation for the service that asks for it. Its job, PlaceRestockOrders,
+// enqueues a StockLow message per product RESTOCK_SKUS names, in a
+// transaction that commits, after one in a transaction that rolls back,
+// which leaves nothing; with no products it does nothing, and with
+// RESTOCK_FAIL set it fails, naming its warehouse. Its worker, ReorderStock,
+// handles each message: poison fails every time, flaky fails its first
+// time, and slow never finishes.
+const rustStockImplementation = `use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use schemas_rs_stock_api::database_types::{self, StockLow};
 use schemas_rs_stock_api::types;
 use schemas_rs_stock_api::{
-    Deps, Handlers, LevelsGetLevelArgs, LevelsImplementation, LevelsSetLevelArgs,
-    ReservationsImplementation, ReservationsReserveStockArgs,
+    BoxError, Deps, Handlers, Jobs, LevelsGetLevelArgs, LevelsImplementation, LevelsSetLevelArgs,
+    ReservationsImplementation, ReservationsReserveStockArgs, Workers,
 };
-use superschematic_http_runtime::{ApiError, RequestContext};
+use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
+use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
+
+pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
+    Ok(Arc::new(StockJobs { deps }))
+}
+
+pub struct StockJobs {
+    deps: Deps,
+}
+
+#[async_trait]
+impl Jobs for StockJobs {
+    async fn place_restock_orders(&self, _shutdown: Shutdown) -> Result<(), BoxError> {
+        if std::env::var_os("RESTOCK_FAIL").is_some() {
+            return Err(format!("the restock of {} failed", self.deps.config.warehouse).into());
+        }
+        let skus = std::env::var("RESTOCK_SKUS").unwrap_or_default();
+        if skus.is_empty() {
+            return Ok(());
+        }
+        let queue = QueueDefinition::parse(database_types::STOCK_LOW_QUEUE)?;
+        let mut client = self.deps.db.get().await?;
+        let rolled_back = client.transaction().await?;
+        enqueue(&rolled_back, &queue, &StockLow { sku: "ghost".to_string(), quantity: 1.0 }).await?;
+        rolled_back.rollback().await?;
+        let tx = client.transaction().await?;
+        for sku in skus.split(',') {
+            enqueue(&tx, &queue, &StockLow { sku: sku.to_string(), quantity: 1.0 }).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+pub async fn create_workers(deps: Deps) -> Result<Arc<dyn Workers>, BoxError> {
+    Ok(Arc::new(StockWorkers { _deps: deps, failed: Mutex::new(HashSet::new()) }))
+}
+
+pub struct StockWorkers {
+    _deps: Deps,
+    failed: Mutex<HashSet<String>>,
+}
+
+#[async_trait]
+impl Workers for StockWorkers {
+    async fn reorder_stock(&self, message: StockLow) -> Result<(), BoxError> {
+        let first = self.failed.lock().map(|mut failed| failed.insert(message.sku.clone())).unwrap_or(false);
+        match message.sku.as_str() {
+            "poison" => Err("poison every time".into()),
+            "flaky" if first => Err("flaky the first time".into()),
+            "slow" => {
+                std::future::pending::<()>().await;
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 pub async fn create(deps: Deps) -> Result<Handlers, Box<dyn std::error::Error + Send + Sync>> {
     let deps = Arc::new(deps);
@@ -377,13 +449,14 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	ordersBinary := filepath.Join(t.TempDir(), "rs-orders")
 	goCommand(t, servergen.ServerDir(out, rustStack, "rs-orders"), "build", "-mod=mod", "-o", ordersBinary, ".")
 	if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
-		for _, server := range [][2]string{{rustStack, "rs-pricing"}, {rustStack, "rs-stock"}, {rustMergedStack, rustMergedServer}} {
+		for _, server := range [][2]string{{rustStack, "rs-pricing"}, {rustStack, "rs-stock"}, {rustStack, rustStockJob}, {rustStack, rustStockWorker}, {rustMergedStack, rustMergedServer}} {
 			main := filepath.Join(servergen.ServerDir(out, server[0], server[1]), filepath.FromSlash(servergen.RustMainFile))
 			if diff, err := exec.Command(rustfmt, "--edition", "2021", "--check", main).CombinedOutput(); err != nil {
 				t.Errorf("rustfmt lays out %s's main.rs otherwise: %v\n%s", server[1], err, diff)
 			}
 		}
 	}
+	checkRustJobRuns(t, filepath.Join(bin, rustStockJob))
 
 	// Warehouse serves rs-catalog and rs-pricing on one port, and hands
 	// each request to the router of the API whose operations take it, and
@@ -531,6 +604,65 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	pricing.stop(t)
 }
 
+// checkRustJobRuns runs rs-stock's job, the binary at job, without a
+// database or a callee that answers (D65). It reads rs-stock's
+// configuration without the callers field, which no job is given, builds
+// its Deps and runs its method once: with no products to restock, the
+// method touches nothing, and the job logs job started and job done, its
+// lines naming the job, and exits 0. Told to fail, it logs job failed
+// with the error and exits 1, and without its configuration it fails at
+// once, naming each variable missing.
+func checkRustJobRuns(t *testing.T, job string) {
+	t.Helper()
+	env := append([]string{"RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1&sslmode=disable", "WAREHOUSE=north"},
+		variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"})...)
+	run := func(extra ...string) (string, int) {
+		t.Helper()
+		cmd := exec.Command(job)
+		cmd.Env = append(os.Environ(), append(slices.Clone(env), extra...)...)
+		output, err := cmd.CombinedOutput()
+		var exit *exec.ExitError
+		switch {
+		case err == nil:
+			return string(output), 0
+		case errors.As(err, &exit):
+			return string(output), exit.ExitCode()
+		}
+		t.Fatalf("run %s: %v\n%s", job, err, output)
+		return "", 0
+	}
+	output, code := run()
+	if code != 0 {
+		t.Fatalf("the job exited %d, want 0:\n%s", code, output)
+	}
+	for _, want := range []string{`"msg":"job started"`, `"api":"rs-stock","class":"PlaceRestockOrders"`, `"msg":"job done"`, `"job":"` + rustStockJob + `"`, `"took":`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the job's output lacks %s:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, `"server":`) {
+		t.Errorf("the job's lines name a server:\n%s", output)
+	}
+	output, code = run("RESTOCK_FAIL=1")
+	if code != 1 || !strings.Contains(output, `"msg":"job failed"`) || !strings.Contains(output, `"error":"the restock of north failed"`) {
+		t.Errorf("a failing job exited %d, want 1 with job failed and its error:\n%s", code, output)
+	}
+	cmd := exec.Command(job)
+	cmd.Env = os.Environ()
+	refused, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("the job ran without its configuration:\n%s", refused)
+	}
+	for _, want := range []string{`"msg":"job failed"`, "configuration of rs-stock: ", "RS_DB_DATABASE_URL", "RS_PRICING_SERVICE_URL"} {
+		if !strings.Contains(string(refused), want) {
+			t.Errorf("the job failed without saying %q:\n%s", want, refused)
+		}
+	}
+	if strings.Contains(string(refused), "RS_STOCK_CALLERS") {
+		t.Errorf("the job asks for the callers field, which no job is given:\n%s", refused)
+	}
+}
+
 // pgxModule is a Go module that requires pgx, in which identitySchema runs
 // its tool: the Rust fixture's servers are no Go module to run it in.
 func pgxModule(t *testing.T) string {
@@ -567,19 +699,13 @@ func libpqSearchPath(t *testing.T, databaseURL string) string {
 	return u.String()
 }
 
-// TestTheRustDockerfileBuildsAnImageThatServes: rs-stock's Dockerfile
-// builds from the context a deploy writes (stackdeploy.WriteContext) out of
-// a repository root holding the generated crates, the scaffolds, the
-// workspace's lockfile the stack's build wrote, and copies of the HTTP
-// runtime, the schema runtime and superscalar's crate, frozen to the
-// lockfile, and the image serves as a non-root user: /healthz, an API's
-// route, /readyz reporting its database down, and a clean stop on docker
-// stop. It needs Docker and the network, and runs only outside -short.
-func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
-	needDocker(t)
-	if _, err := exec.LookPath("cargo"); err != nil {
-		t.Skip("cargo not available: the stack's build writes the lockfile with it")
-	}
+// rustDockerFixture builds the Rust fixture into a repository root of its
+// own that holds copies of the HTTP runtime, the schema runtime and
+// superscalar's crate, which an image's context takes, with the scaffolds
+// and the workspace's lockfile the stack's build wrote, and returns the
+// root and its output root.
+func rustDockerFixture(t *testing.T) (string, string) {
+	t.Helper()
 	local := testpaths.Local(t)
 	repoRoot := testpaths.TempDir(t)
 	paths := rustFakePaths(repoRoot)
@@ -599,14 +725,21 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, servergen.RustLockfileName)); err != nil {
 		t.Fatalf("the stack's build wrote no lockfile: %v", err)
 	}
+	return repoRoot, out
+}
 
-	dockerfile := filepath.Join(servergen.ServerDir(out, rustStack, "rs-stock"), servergen.DockerFile)
+// buildRustImage builds the image of the Dockerfile of the crate at dir
+// from the context a deploy writes (stackdeploy.WriteContext) out of
+// repoRoot, checks it runs as a non-root user, and removes it when the test
+// ends.
+func buildRustImage(t *testing.T, repoRoot, dir string) string {
+	t.Helper()
 	archive := filepath.Join(t.TempDir(), "context.tar.gz")
 	file, err := os.Create(archive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	built, err := stackdeploy.WriteContext(file, repoRoot, dockerfile)
+	built, err := stackdeploy.WriteContext(file, repoRoot, filepath.Join(dir, servergen.DockerFile))
 	if cerr := file.Close(); err == nil {
 		err = cerr
 	}
@@ -619,7 +752,7 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 	}
 	defer context.Close()
 	image := fmt.Sprintf("superschematic-servergen-rust-test:%d", time.Now().UnixNano())
-	build := exec.Command("docker", "build", "-q", "-t", image, "-f", built.Dockerfile, "-")
+	build := exec.Command("docker", "build", "--progress=plain", "-t", image, "-f", built.Dockerfile, "-")
 	build.Stdin = context
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("docker build: %v\n%s", err, output)
@@ -628,6 +761,24 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 	if user := docker(t, "image", "inspect", "-f", "{{.Config.User}}", image); user == "" || user == "0" || user == "root" {
 		t.Errorf("the image runs as %q, want a non-root user", user)
 	}
+	return image
+}
+
+// TestTheRustDockerfileBuildsAnImageThatServes: rs-stock's Dockerfile
+// builds from the context a deploy writes (stackdeploy.WriteContext) out of
+// a repository root holding the generated crates, the scaffolds, the
+// workspace's lockfile the stack's build wrote, and copies of the HTTP
+// runtime, the schema runtime and superscalar's crate, frozen to the
+// lockfile, and the image serves as a non-root user: /healthz, an API's
+// route, /readyz reporting its database down, and a clean stop on docker
+// stop. It needs Docker and the network, and runs only outside -short.
+func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
+	needDocker(t)
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not available: the stack's build writes the lockfile with it")
+	}
+	repoRoot, out := rustDockerFixture(t)
+	image := buildRustImage(t, repoRoot, servergen.ServerDir(out, rustStack, "rs-stock"))
 
 	args := []string{"run", "-d", "-p", "127.0.0.1::8080",
 		"-e", "RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1",
@@ -660,6 +811,69 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 	}
 	if logs := docker(t, "logs", container); !strings.Contains(logs, `"msg":"stopped"`) {
 		t.Errorf("the container did not log its graceful stop:\n%s", logs)
+	}
+}
+
+// TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun: rs-stock's job's
+// and worker's Dockerfiles build from a deploy's context as a server's do
+// (D65), each image running its binary as a non-root user, with no port.
+// Given only the variables of rs-stock's edges, its database's and its
+// callee's, and none of the callers, identity or CORS fields only its
+// server is given, the job runs its scaffold's method, which fails, and
+// exits 1, logging job failed with the error; the worker starts, claims
+// from a database that does not answer, and on docker stop exits 0. It
+// needs Docker and the network, and runs only outside -short.
+func TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun(t *testing.T) {
+	needDocker(t)
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not available: the stack's build writes the lockfile with it")
+	}
+	repoRoot, out := rustDockerFixture(t)
+	args := []string{"-e", "RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1"}
+	for _, v := range variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}) {
+		args = append(args, "-e", v)
+	}
+	noPort := func(image string) {
+		t.Helper()
+		if ports := docker(t, "image", "inspect", "-f", "{{json .Config.ExposedPorts}}", image); ports != "null" && ports != "{}" {
+			t.Errorf("the image %s exposes %s, want no port", image, ports)
+		}
+		if env := docker(t, "image", "inspect", "-f", "{{json .Config.Env}}", image); strings.Contains(env, "PORT=") {
+			t.Errorf("the image %s sets %s, want no PORT", image, env)
+		}
+	}
+
+	job := buildRustImage(t, repoRoot, servergen.ServerDir(out, rustStack, rustStockJob))
+	noPort(job)
+	run := exec.Command("docker", append(append([]string{"run", "--rm"}, args...), job)...)
+	logs, err := run.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Errorf("the job's container = %v, want exit status 1:\n%s", err, logs)
+	}
+	for _, want := range []string{`"msg":"job started"`, `"msg":"job failed"`, `"error":"job PlaceRestockOrders is not implemented"`, `"job":"` + rustStockJob + `"`} {
+		if !strings.Contains(string(logs), want) {
+			t.Errorf("the job's container did not log %s:\n%s", want, logs)
+		}
+	}
+
+	worker := buildRustImage(t, repoRoot, servergen.ServerDir(out, rustStack, rustStockWorker))
+	noPort(worker)
+	container := docker(t, append(append([]string{"run", "-d"}, args...), worker)...)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(docker(t, "logs", container), `"msg":"worker started"`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker's container did not start:\n%s", docker(t, "logs", container))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	docker(t, "stop", container)
+	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
+		t.Errorf("the worker's container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
+	}
+	if logs := docker(t, "logs", container); !strings.Contains(logs, `"msg":"worker stopped"`) || !strings.Contains(logs, `"worker":"`+rustStockWorker+`"`) {
+		t.Errorf("the worker's container did not log its stop:\n%s", logs)
 	}
 }
 

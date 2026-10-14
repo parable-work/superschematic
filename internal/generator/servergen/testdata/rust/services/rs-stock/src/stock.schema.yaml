@@ -1,5 +1,8 @@
 name: rs-stock
 kind: API
+imports:
+  - package: "@schemas/rs-db"
+    types: [StockLow]
 types:
   StockConfig:
     name: StockConfig
@@ -69,3 +72,12 @@ operationSets:
           - name: sku
             typeRef: { name: string }
             required: true
+jobs:
+  - name: PlaceRestockOrders
+    comment: Asks for the products the run names to be restocked.
+workers:
+  - name: ReorderStock
+    comment: Reorders a product whose stock ran low.
+    queue: StockLow
+    concurrency: 2
+    grace: 2s

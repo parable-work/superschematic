@@ -41,15 +41,20 @@ func rustEnvOptions() envgen.Options {
 // TestRustEnvConfigGolden pins the Rust EnvConfig (D57): the settings of
 // the @envVars type, a field per edge, the callers field, the CORS field
 // and the identity config, each read through the runtime's readers with
-// every refusal reported together; and the EnvConfig of an API with no
-// @envVars type, which reads the .env file itself. Regenerate with:
+// every refusal reported together; the EnvConfig of an API with no
+// @envVars type, which reads the .env file itself; and that of an API with
+// a job, whose load_background_env_config, which the job's entrypoint
+// calls, leaves the callers field without issuers (D65). Regenerate with:
 //
 //	go test ./internal/generator/envgen -run TestRustEnvConfigGolden -update
 func TestRustEnvConfigGolden(t *testing.T) {
 	withoutSettings := rustEnvSchema()
 	withoutSettings.Types = nil
 	withoutSettings.Buckets = nil
-	for name, schema := range map[string]*ir.Schema{"rust-env-config": rustEnvSchema(), "rust-env-config-derived": withoutSettings} {
+	withJobs := rustEnvSchema()
+	withJobs.Types, withJobs.Buckets = nil, nil
+	withJobs.Jobs = []*ir.Job{{Name: "Reindex"}}
+	for name, schema := range map[string]*ir.Schema{"rust-env-config": rustEnvSchema(), "rust-env-config-derived": withoutSettings, "rust-env-config-background": withJobs} {
 		output, err := envgen.GenerateWithOptions(schema, rustEnvOptions())
 		if err != nil {
 			t.Fatal(err)

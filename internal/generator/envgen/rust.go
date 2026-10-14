@@ -250,6 +250,11 @@ type rustEnvConfig struct {
 	// identity config, which load_identity reads.
 	Stack    bool
 	Identity bool
+	// Background is true for an API with a callers field and a job or a
+	// worker: load_env_config and load_background_env_config, which leaves
+	// the callers field without issuers, share load, which reads it or
+	// not (D65).
+	Background bool
 }
 
 // UsesEnv reports whether config.rs reads std::env: the @envVars loader
@@ -269,6 +274,9 @@ type rustEnvField struct {
 	Read string
 	// Doc is its doc comment, one line per element.
 	Doc []string
+	// Callers is true for the callers field, which a job's and a worker's
+	// configuration leaves without issuers (rustEnvConfig.Background).
+	Callers bool
 }
 
 // Inline reports whether the field's read fits on one line, as rustfmt
@@ -318,11 +326,13 @@ func rustEnvConfigOf(output *ConfigOutput) *rustEnvConfig {
 		env.Stack = true
 		stackItems["self"], rootItems["ServiceAuthConfig"] = true, true
 		env.Fields = append(env.Fields, rustEnvField{
-			Name: toRustFieldName(output.CallersField),
-			Type: "ServiceAuthConfig",
-			Read: fmt.Sprintf("stackconfig::load_callers(%q).map_err(problems_of)", output.CallersField),
-			Doc:  wrapRustDoc(fmt.Sprintf("What the server verifies a calling service's credential against: the API's callers field, for its service clauses. No issuers means no server calls the API. It is read from %s_*.", output.CallersField)),
+			Name:    toRustFieldName(output.CallersField),
+			Type:    "ServiceAuthConfig",
+			Read:    fmt.Sprintf("stackconfig::load_callers(%q).map_err(problems_of)", output.CallersField),
+			Doc:     wrapRustDoc(fmt.Sprintf("What the server verifies a calling service's credential against: the API's callers field, for its service clauses. No issuers means no server calls the API. It is read from %s_*.", output.CallersField)),
+			Callers: true,
 		})
+		env.Background = output.Background
 	}
 	if output.CORSField != "" {
 		stack(output.CORSField, "load_cors", "Cors",

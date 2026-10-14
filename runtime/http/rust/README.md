@@ -113,7 +113,10 @@ runtimes' (D51):
   stdout at `info`, with the TypeScript `createLogger`'s members: `level`,
   `time` (RFC 3339 in UTC, to the millisecond) and `msg` first, then
   `stack` and `server`, the fields of the spans the event is in (`api`, in
-  an `api_span(api)`), and the event's own. It re-exports `tracing`.
+  an `api_span(api)`), and the event's own. A job's and a worker's
+  entrypoint install it with `init_json_as(stack, logging::JOB, name)` or
+  `logging::WORKER`, whose lines name the deployable `job` or `worker` in
+  place of `server`, as Go's and TypeScript's do. It re-exports `tracing`.
 - `Shutdown`, with no feature: the cancellation a job's method watches and
   a worker's loop stops on, tokio-util's `CancellationToken` (re-exported)
   under the name the generated code takes. `Shutdown::on_signals()`, inside
