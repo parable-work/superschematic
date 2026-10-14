@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 // Milestone 12a: Lease, Assignment, Presence and Retries.
+pub(crate) mod assignment;
 pub(crate) mod lease;
 pub(crate) mod presence;
 

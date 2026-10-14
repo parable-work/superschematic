@@ -40,9 +40,11 @@ mod moves;
 mod time;
 
 // Milestone 12a: Lease, Assignment, Presence and Retries.
+pub mod assignment;
 pub mod lease;
 pub mod presence;
 
+pub use assignment::{Assignment, AssignmentConfig};
 pub use lease::{Lease, LeaseConfig, LeaseDirectOn, LeaseTransition};
 pub use moves::StatusMove;
 pub use presence::{Presence, PresenceConfig, PresenceTransition};
@@ -71,6 +73,7 @@ type Register = fn(BehaviorSet) -> BehaviorSet;
 const PORTED: &[(&str, Register)] = &[
     // Milestone 12a.
     ("Lease", |set| set.with(Lease)),
+    ("Assignment", |set| set.with(Assignment)),
     ("Presence", |set| set.with(Presence)),
     // Milestone 12b.
 ];
