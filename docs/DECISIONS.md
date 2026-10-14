@@ -6016,3 +6016,33 @@ it.
 | `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
 
 Status: built in #334.
+
+## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
+
+D57 gave a Rust API a server and left out its jobs and workers: the
+resolver refuses them on `local.job` and `local.worker` ("Rust jobs and
+workers are not built (D57)"), `gcp.cloudrunworker` takes Go and
+TypeScript alone, and the generator logs that a Rust job or worker "gets
+no generated entrypoint yet". #348 gave TypeScript the same pieces Go has,
+and TypeScript workers claim without an ORM, through a queue descriptor
+the DB's types package carries and the SQL `sqlutil.PostgresQueueStatements`
+writes for both. D57 also left a defect: an implementation crate names the
+API crate by its path under the output root the scaffold saw, so a build
+into another output root holds two crates of one name, and Cargo refuses
+it. This entry finishes Rust's place in a stack, short of buckets.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust API's crate gains a `Jobs` trait, one `async fn <job>(&self, shutdown: Shutdown) -> Result<(), BoxError>` per `@job`, and a `Workers` trait, one `async fn <worker>(&self, message: <Queue>) -> Result<(), BoxError>` per `@worker`, with the message type from the DB's Rust types. `Shutdown` is the runtime's cancellation token. The implementation crate's scaffold adds `create_jobs(deps)` and `create_workers(deps)` beside `create`, and the build refuses an implementation that lacks one its API needs, naming what to add, as it refuses a TypeScript one without `createJobs`. | A context argument on every method, as Go's, which Rust's futures do not need: a worker's handler is dropped after the grace, and a job watches `Shutdown`. |
+| The DB's Rust types crate writes `queues.rs`: per queue, the message type and a constant holding its descriptor as JSON (name, table, retries, backoff, lease, each field's column and form, and the statements `PostgresQueueStatements` writes), as TypeScript's `queues.ts` holds it as data. A queue with a field the descriptor cannot carry (POINT, INTERVAL) is left out, and a Rust worker of it refused, as TypeScript's are. | Types that depend on the runtime, which the types crates never do. SQL written again in Rust, which would drift from Go's and TypeScript's. |
+| The Rust runtime gains `queue`, behind `postgres`: `QueueDefinition::parse`, `enqueue` in a caller's transaction, and a `PostgresQueue` that claims, extends, completes, fails and releases by the descriptor's statements, refusing a lost claim. It gains `worker`, Go's loop ported: concurrency from `WORKER_CONCURRENCY`, a claim per free slot, a second's wait when idle, a growing wait after a failed claim, an extension every third of the lease, a handler's panic as its failure, a cause capped at 4000 characters, and on SIGTERM the grace, then the handlers dropped and their messages released. ormgen's queue parity test, which has Go and TypeScript claim each other's messages on Postgres, takes Rust as the third side. | A queue client per API, generated, which the descriptor makes unnecessary. |
+| servergen writes a Rust job's and a Rust worker's crate beside a server's, `<prefix><stack>-<deployable>-job` and `-worker`, each a member of the output root's workspace, with a binary named after the deployable, a `main.rs` and a Dockerfile. A job loads its API's `EnvConfig`, opens its pools, builds its `Deps` and calls its method once, exiting 1 on a failure so the platform retries it; a worker runs the loop over its queue. Neither builds an identity service or a router, as D52 and D53 have it. `local.job`, `local.worker` and `gcp.cloudrunworker` take Rust, and the local provisioner builds them with cargo as it builds a Rust server. | One binary that takes a job or worker name, which would make every deployable's image hold every other's code. |
+| Each build mirrors each Rust implementation crate it builds against into `<output-root>/impl/<service>/`, copying only what changed, with the crate's path dependencies rewritten for where the mirror sits, and the server, job and worker crates depend on the mirror. So an output root is self-contained: `stack dev --out` anywhere builds against that root's own API crates, an image's build context needs no implementation directory, and the crate the project edits keeps its path to the default output root for its editor and its own `cargo test`. | Rewriting the project's `Cargo.toml` each build, a source change per `--out`. A symlink the build repoints, which two output roots building at once would race on. Refusing another output root. `[patch]`, which cannot patch a path source. |
+| acme-shop proves it: `shop-db` gains a `StockLow` queue and a `RestockRequest` table; `shop-stock`'s reservation enqueues `StockLow` in its transaction when a level falls below its threshold; a Rust worker, `ReorderStock`, files one open restock request per product; and a Rust job, `PlaceRestockOrders`, on a schedule, marks the open ones ordered. `TestStackDevRunsTheShop` places an order that runs a product low, sees the request filed, runs the job with `stack run`, and sees it ordered, and runs once more into an output root of its own. | A fixture alone, which nothing would run end to end. |
+
+Status: not built.
+
+Not built, and out of this entry: buckets from a Rust server, job or
+worker; and OpenTelemetry export.
+
+The rule is reversible until the first release.
