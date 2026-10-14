@@ -18,6 +18,7 @@
 //!   `test/core-dependencies.test.ts` composes [`Reader`] too;
 //! - `test/core-dependencies.test.ts`: [`Finisher`];
 //! - `test/core-numbering.test.ts`: [`Refuser`];
+//! - `test/core-reactions-changes.test.ts`: [`Score`] and [`WorkflowTally`];
 //! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
 //! A test file may define its own behavior under a name another file uses
@@ -26,10 +27,12 @@
 
 mod core_dependencies;
 mod core_numbering;
+mod core_reactions;
 mod core_revisions;
 
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
+pub use core_reactions::{Score, WorkflowTally};
 pub use core_revisions::RevisionHold;
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -1802,8 +1805,8 @@ impl Behavior for Dispatch {
 /// refuses a name already registered. `None` for one not ported yet.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, StateRules,
-        Timers, Variants, Workflow,
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
+        Rollups, StateRules, Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
@@ -1812,6 +1815,8 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Revisions" => set.with(Revisions),
         "Dependencies" => set.with(Dependencies),
         "Links" => set.with(Links),
+        "Rollups" => set.with(Rollups),
+        "Reactions" => set.with(Reactions),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
         "StateRules" => set.with(StateRules),
@@ -1835,6 +1840,8 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-revisions", "test.Hold") => set.with(RevisionHold),
         ("core-dependencies", "test.Finisher") => set.with(Finisher),
         ("core-numbering", "test.Refuser") => set.with(Refuser),
+        ("core-reactions-changes", "test.Score") => set.with(Score),
+        ("core-reactions-changes", "Workflow.Tally") => set.with(WorkflowTally),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),

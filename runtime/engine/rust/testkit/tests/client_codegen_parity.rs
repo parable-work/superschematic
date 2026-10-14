@@ -5,11 +5,10 @@
 //! describe document's, descriptions aside, and its behavior fields must
 //! be the ones the describe document names, by behavior — the first two
 //! cases of `test/client-codegen.test.ts`, on an engine with the core's
-//! behaviors ported so far, as `openTestEngine` opens one. A document that
-//! composes a behavior the engine does not run yet (milestones 10 and 11) is
-//! not published and its schema is counted as skipped: the vectors'
-//! `Project` waits for Rollups.
-//! The test fails if the vectors stop covering the shapes it checks.
+//! behaviors ported so far, as `openTestEngine` opens one, which runs
+//! every behavior the vectors' documents compose (the `Project` document's
+//! Rollups since milestone 10a). The test fails if the vectors stop
+//! covering the shapes it checks.
 
 mod support;
 
@@ -88,36 +87,22 @@ fn the_engines_describe_document_narrows_create_parameters_and_names_fields_as_t
     }
     for target in targets("client_codegen_parity") {
         let engine = target.open_core();
-        // The documents in order, each whose behaviors the engine runs.
-        let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
+        // The documents in order: the engine runs every behavior they
+        // compose.
         for document in documents {
             let missing: Vec<String> = composed(document)
                 .into_iter()
                 .filter(|name| !engine.behaviors().has(name))
                 .collect();
-            if missing.is_empty() {
-                publish(&engine, document, None);
-            } else {
-                let name = document["name"].as_str().expect("a document's name");
-                skipped.push((name.to_owned(), missing));
-            }
-        }
-        eprintln!(
-            "client_codegen_parity on {:?}: {} of {} schemas checked",
-            target.dialect,
-            schemas.len() - skipped.len(),
-            schemas.len()
-        );
-        for (name, missing) in &skipped {
-            eprintln!(
-                "    skipped {name}: composes behaviors this engine does not run yet ({})",
+            assert!(
+                missing.is_empty(),
+                "{} composes behaviors this engine does not run: {}",
+                document["name"],
                 missing.join(", ")
             );
+            publish(&engine, document, None);
         }
         for (name, expected) in schemas {
-            if skipped.iter().any(|(skip, _)| skip == name) {
-                continue;
-            }
             let described = engine
                 .tools()
                 .describe(&alice(), name, ToolTarget::default())

@@ -16,8 +16,8 @@
 //! finds the fire schedule once the schema is published; a sweep moves the
 //! clock at least the schedule's interval and runs what is due
 //! (`run_due`), and `status()` shows the schedule, its state and its
-//! failures. The case a Reactions rule hears a fire in waits for Reactions
-//! (wave 3). The guidance is held to the TypeScript text in
+//! failures; a Reactions rule hears a fire through its changes trigger.
+//! The guidance is held to the TypeScript text in
 //! `behaviors/tests/guidance.rs`, and the describe document that shows it
 //! to the recording (`core-timers.json`).
 
@@ -1122,6 +1122,74 @@ fn the_sweep_runs_per_schema_and_per_namespace_each_firing_its_own_deadlines() {
                 })
                 .collect::<Vec<_>>(),
             [json!("create"), json!("fireTimer")]
+        );
+    }
+}
+
+/// The core's behaviors with Rollups and Reactions, in the TypeScript
+/// engine's order, and this file's test.Bounce and test.Hold.
+fn with_reactions() -> BehaviorSet {
+    use superschematic_engine_behaviors::{
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
+        Rollups, StateRules, Timers, Variants, Workflow,
+    };
+    BehaviorSet::new()
+        .with(Workflow)
+        .with(Comments)
+        .with(Revisions)
+        .with(Dependencies)
+        .with(Links)
+        .with(Rollups)
+        .with(Reactions)
+        .with(Constants)
+        .with(Variants)
+        .with(StateRules)
+        .with(Approvals)
+        .with(Numbering)
+        .with(Timers)
+        .with(Bounce)
+        .with(FireHold)
+}
+
+#[test]
+fn a_reactions_rule_hears_a_deadline_fire_through_its_changes_trigger() {
+    for target in targets("timers_reactions") {
+        let t = opened_with(
+            &target,
+            json!({"deadlines": {"nudge": {"start": {"enters": "open"}, "afterMs": HOUR}}}),
+            &[
+                json!({"name": "Reactions", "config": {"rules": [{"when": {"changes": {"field": "Timers.deadlines.nudge.fired", "to": true}}, "then": {"transition": "escalated"}}]}}),
+            ],
+            flow(),
+            |options| options.behaviors = with_reactions(),
+        );
+        t.create("t1", json!({}));
+        t.advance(30 * MINUTE);
+        // t2's nudge is armed by its create, which moves fired from absent
+        // to false: no rule fires.
+        t.create("t2", json!({}));
+        t.sweep(30 * MINUTE).expect("sweep");
+        t.engine.runner().run_due().expect("run due");
+        assert_eq!(
+            (t.status("t1"), t.deadlines("t1")["nudge"]["fired"].clone()),
+            (json!("escalated"), json!(true))
+        );
+        let events = t.events("t1");
+        let moved = events.last().expect("an event");
+        assert_eq!(
+            (
+                moved.cause.as_ref().map(|cause| cause.behavior.as_str()),
+                moved.change["params"].clone()
+            ),
+            (Some("Reactions"), json!({"to": "escalated"}))
+        );
+        assert_eq!(
+            (
+                t.status("t2"),
+                t.deadlines("t2")["nudge"]["fired"].clone(),
+                t.events("t2").len()
+            ),
+            (json!("open"), json!(false), 1)
         );
     }
 }

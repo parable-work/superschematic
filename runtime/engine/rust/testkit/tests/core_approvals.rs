@@ -10,8 +10,8 @@
 //!
 //! The TypeScript file's operation `update()` is Revisions' approve (wave
 //! 2a); here test.Recorder's `update()` stands in for it, and the approval
-//! itself waits for Revisions. The move a Reactions rule makes on the
-//! runner waits for Reactions (wave 3). The guidance is held to the
+//! itself waits for Revisions. A Reactions rule's move on the runner meets
+//! the gate as any other move does. The guidance is held to the
 //! TypeScript text in `behaviors/tests/guidance.rs`, and the describe
 //! document that shows it to the recording (`core-approvals.json`).
 
@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 
 use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineErrorCode, Error,
-    InstanceRecord, Principal, ReadEvents, SchemaTarget, WriteOptions,
+    InstanceRecord, Principal, ReadEvents, RunnerOptions, SchemaTarget, WriteOptions,
 };
 use superschematic_engine_testkit::core_fixtures::Recorder;
 use support::{alice, issues_of, refusal, repository, schema_document, targets, veto, Target};
@@ -49,6 +49,29 @@ fn wes() -> Principal {
 /// The core's behaviors, as the TypeScript engine registers them.
 fn core() -> BehaviorSet {
     superschematic_engine_behaviors::core()
+}
+
+/// The core's behaviors with Rollups and Reactions, in the TypeScript
+/// engine's order.
+fn with_reactions() -> BehaviorSet {
+    use superschematic_engine_behaviors::{
+        Approvals, Comments, Constants, Dependencies, Links, Numbering, Reactions, Revisions,
+        Rollups, StateRules, Timers, Variants, Workflow,
+    };
+    BehaviorSet::new()
+        .with(Workflow)
+        .with(Comments)
+        .with(Revisions)
+        .with(Dependencies)
+        .with(Links)
+        .with(Rollups)
+        .with(Reactions)
+        .with(Constants)
+        .with(Variants)
+        .with(StateRules)
+        .with(Approvals)
+        .with(Numbering)
+        .with(Timers)
 }
 
 // A Doc moves from draft to review, then to approved or straight to
@@ -742,8 +765,77 @@ fn entering_a_gated_state_consumes_its_sign_offs_so_a_return_to_it_is_signed_aga
                 (json!("bob"), true)
             ]
         );
-        // The move a Reactions rule makes on the runner waits for Reactions
-        // (wave 3).
+    }
+}
+
+// The second half of the TypeScript case: a Reactions rule's move meets the
+// gate on the runner.
+#[test]
+fn a_reactions_move_on_the_runner_meets_the_gate_and_consumes_the_sign_offs() {
+    for target in targets("approvals_reactions") {
+        // Reactions moves a Doc that enters review on to approved, as the
+        // runner, after the commit: the gate holds the runner's move as any
+        // other, and the move consumes the sign-offs.
+        let reacting = target.open_core_with(|options| {
+            options.behaviors = with_reactions();
+            options.runner = Some(RunnerOptions::new(principal("runner", &[])));
+        });
+        let mut behaviors = standard();
+        behaviors.push(json!({"name": "Reactions", "config": {"rules": [{"when": {"enters": "review"}, "then": {"transition": "approved"}}]}}));
+        publish(&reacting, &behaviors);
+        create(&reacting, &alice(), "Plan", "d1");
+        create(&reacting, &alice(), "Unsigned", "d2");
+        invoke(&reacting, &ann(), "signOff", json!({"state": "approved"})).expect("signOff");
+        invoke(&reacting, &bob(), "signOff", json!({"state": "approved"})).expect("signOff");
+        invoke(&reacting, &alice(), "transition", json!({"to": "review"})).expect("review");
+        invoke_on(
+            &reacting,
+            &alice(),
+            "d2",
+            "transition",
+            json!({"to": "review"}),
+        )
+        .expect("review");
+        reacting.runner().run_due().expect("run due");
+        assert_eq!(
+            (status_of(&reacting, "d1"), gates_of(&reacting, "d1")),
+            (json!("approved"), json!({}))
+        );
+        let moved = reacting
+            .events()
+            .read(
+                &alice(),
+                &ReadEvents {
+                    schema: Some("Doc"),
+                    instance_id: Some("d1"),
+                    limit: Some(500),
+                    ..ReadEvents::default()
+                },
+            )
+            .expect("events")
+            .events
+            .pop()
+            .expect("an event");
+        // The move's patch carries the status and the consumed gate; its
+        // enteredAt only when the clock moved since the transition before.
+        let patch = &moved.change["patch"]["behaviors"];
+        assert_eq!(
+            (
+                moved.actor.as_str(),
+                moved.cause.as_ref().map(|cause| cause.behavior.as_str()),
+                patch["Workflow"]["status"].clone(),
+                patch["Approvals"].clone()
+            ),
+            (
+                "runner",
+                Some("Reactions"),
+                json!("approved"),
+                json!({"gates": {"approved": null}})
+            )
+        );
+        // d2 had no sign-off: the gate vetoed the runner's move, and it
+        // stays.
+        assert_eq!(status_of(&reacting, "d2"), "review");
     }
 }
 

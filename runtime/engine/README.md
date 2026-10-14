@@ -53,7 +53,8 @@ which a host passes in its options (`core()`): so far Workflow,
 Comments, Constants and Variants (wave 1), and Revisions, Dependencies,
 Links (with what a move of a link's target moves on), Numbering and
 D56's StateRules, Approvals and Timers, whose deadlines the runner fires
-(wave 2), with Rollups, Search, Reactions and Branches to come.
+(wave 2), and Rollups and Reactions, with D56's changes trigger (wave
+3), with Search and Branches to come.
 `superschematic-engine-testkit` (`rust/testkit`) ports this package's
 test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
