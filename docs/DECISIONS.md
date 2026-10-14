@@ -6072,6 +6072,11 @@ and returns `paging.Page[T]`, its route reads the page with `paging.Read`
 after its own parameters and answers the page as `data`, and
 `TestPagedRoutesServePages` pages `fixture-paged-api` over httptest, its
 filters on each page and every refusal as `page_parity.json` words it.
+The TypeScript server renders it: a paged route reads `cursor` and `limit`
+with `readPage` after the operation's own query parameters, the method
+takes `args.page` and returns a `Page`, and `fixture-paged-api`'s router
+answers `page_parity.json`'s reads and refused cursors over HTTP
+(`tsrestgen`'s `TestGeneratedPagedRouter`).
 Parity is built now because the work per generator is bounded, acme builds
 `shop-orders` on a Go server with all four SDKs, and a server that ignored
 the decorator would answer a list where the others answer a page (D35,

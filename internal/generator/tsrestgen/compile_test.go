@@ -204,10 +204,11 @@ func (tree *generatedTree) typeCheck(t *testing.T) {
 	}
 }
 
-// runTest stages testdata/<name> inside the generated package, so its
-// imports (hono, the runtime, the generated router) resolve like a
-// consumer's, and runs it under bun with API_DIR set to the package.
-func (tree *generatedTree) runTest(t *testing.T, name string) {
+// stage copies testdata/<name> into the generated package, so its imports
+// (hono, the runtime, the generated modules) resolve like a consumer's, and
+// returns its path there. A .ts file staged before typeCheck is checked
+// with the package.
+func (tree *generatedTree) stage(t *testing.T, name string) string {
 	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -217,10 +218,18 @@ func (tree *generatedTree) runTest(t *testing.T, name string) {
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
-	testFile := filepath.Join(tree.apiDir, name)
-	if err := os.WriteFile(testFile, source, 0o644); err != nil {
+	staged := filepath.Join(tree.apiDir, name)
+	if err := os.WriteFile(staged, source, 0o644); err != nil {
 		t.Fatalf("stage %s: %v", name, err)
 	}
+	return staged
+}
+
+// runTest stages testdata/<name> inside the generated package and runs it
+// under bun with API_DIR set to the package.
+func (tree *generatedTree) runTest(t *testing.T, name string) {
+	t.Helper()
+	testFile := tree.stage(t, name)
 	cmd := exec.Command(tree.bun, "test", testFile)
 	cmd.Dir = tree.apiDir
 	cmd.Env = append(append(os.Environ(), "API_DIR="+tree.apiDir), tree.env...)

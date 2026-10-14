@@ -24,7 +24,6 @@ func TestServersAndSDKsRefusePagesTheyDoNotRender(t *testing.T) {
 		api       string // the server, or "" for an SDK
 		generator string
 	}{
-		{"TypeScript server", LangTypeScript, APILanguageTypeScript, "the TypeScript server (tsrestgen)"},
 		{"Go SDK", LangGo, "", "the Go SDK (gosdkgen)"},
 		{"TypeScript SDK", LangTypeScript, "", "the TypeScript SDK (sdkgen)"},
 		{"Python SDK", LangPython, "", "the Python SDK (pysdkgen)"},

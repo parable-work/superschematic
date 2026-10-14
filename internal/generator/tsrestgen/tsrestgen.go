@@ -97,10 +97,19 @@ type EndpointInfo struct {
 	InputParser    string
 	InputRequired  bool
 
-	OutputType string // TypeScript type expression of the result
+	// OutputType is the TypeScript type expression of the result; a paged
+	// operation's is Page<T>, a page of its list's elements.
+	OutputType string
 	// OutputIsArrayOfArrays marks a T[][] result; the runtime sends a
 	// nullish inner list as [].
 	OutputIsArrayOfArrays bool
+	// Page is the operation's @paginated limits (D60), nil for an
+	// operation that does not page. The operation table carries them, and
+	// the router reads the request's cursor and limit with the runtime's
+	// readPage after the query parameters and hands them to the method as
+	// args.page, a PageRequest; the method answers a Page, which the
+	// router sends as data.
+	Page *apigen.PageInfo
 
 	PathParams  []ParamInfo
 	QueryParams []ParamInfo
@@ -184,9 +193,10 @@ func serviceCallersText(clause *ir.ServiceCallers, sep, none string) string {
 	return strings.Join(clause.From, sep)
 }
 
-// HasArgs reports whether the implementation method takes any argument.
+// HasArgs reports whether the implementation method takes any argument; a
+// paged operation's takes its page.
 func (e EndpointInfo) HasArgs() bool {
-	return e.HasInput || len(e.PathParams) > 0 || len(e.QueryParams) > 0 || len(e.BodyParams) > 0
+	return e.HasInput || len(e.PathParams) > 0 || len(e.QueryParams) > 0 || len(e.BodyParams) > 0 || e.Page != nil
 }
 
 // NamespaceInfo groups the implementable (non-manual) endpoints of one
@@ -248,6 +258,10 @@ type APIOutput struct {
 	// HasServiceCallers reports whether any endpoint has a service clause;
 	// the docs then name RouterOptions.authenticateService.
 	HasServiceCallers bool
+	// HasPages reports whether any endpoint is @paginated (D60): the
+	// interfaces import the runtime's Page and PageRequest, and the router
+	// its readPage and PageSpec.
+	HasPages bool
 	// Identity is the user model (D50), nil when the API's authDb has no
 	// User table.
 	Identity *IdentityInfo
@@ -335,11 +349,6 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
-	// Until this generator renders @paginated, it refuses a paged operation
-	// rather than answer a list where the other servers answer a page (D60).
-	if err := apigen.RefusePages("the TypeScript server (tsrestgen)", apiOutput); err != nil {
-		return nil, err
-	}
 
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
@@ -391,6 +400,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			return nil, err
 		}
 		output.Endpoints = append(output.Endpoints, endpoint)
+		output.HasPages = output.HasPages || endpoint.Page != nil
 		if endpoint.WebhookProvider != "" {
 			webhookProviders[endpoint.WebhookProvider] = struct{}{}
 		}
@@ -530,6 +540,10 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		PermsLiteral:            tsStringList(ep.RequiredPerms),
 		ManualRouteRegistration: ep.ManualRouteRegistration,
 		WebhookProvider:         ep.WebhookHMACProvider,
+	}
+	if ep.Page != nil {
+		page := *ep.Page
+		endpoint.Page = &page
 	}
 	if ep.ServiceCallers != nil {
 		clause := *ep.ServiceCallers
@@ -865,6 +879,11 @@ func (b *builder) outputType(ep apigen.EndpointInfo) (string, error) {
 			return "", fmt.Errorf("output type %s is not declared by the schema or its dependencies", name)
 		}
 	}
+	if ep.Page != nil {
+		// A paged operation answers a page of its list (D60), which the
+		// loader keeps to one level.
+		return "Page<" + tsListType(tsType, ep.OutputArrayDepth()-1) + ">", nil
+	}
 	return tsListType(tsType, ep.OutputArrayDepth()), nil
 }
 
@@ -961,6 +980,9 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, ep.Method+" "+ep.Path)
+	if ep.Page != nil {
+		lines = append(lines, "Paged (@paginated): answers the Page args.page asks for, whose next is null after the last page.")
+	}
 	if ep.WebhookProvider != "" {
 		lines = append(lines, "Webhook: the "+ep.WebhookProvider+" webhook verifier checks the request before every other step.")
 	}
