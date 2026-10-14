@@ -14,7 +14,8 @@
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
-//! when it was missing (section 8.6):
+//! when it was missing, and which each build copies into the output root's
+//! `impl/<service>`, the mirror this crate builds against (section 8.6):
 //!
 //! - rs-pricing: schemas-rs-pricing-implementation, at rust/rs-pricing
 

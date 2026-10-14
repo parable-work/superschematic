@@ -3,8 +3,9 @@
 # The Cargo workspace of the Rust servers of the stacks built into this
 # output root (D57; docs/stack-model.md, section 8.6): each member is a
 # server's crate, which each build of its stack writes. The generated
-# crates the servers depend on and the implementations are path
-# dependencies, so Cargo.lock beside this file pins every crate they reach.
+# crates the servers depend on and the implementations' mirrors under
+# impl/, which each build copies (D65), are path dependencies, so
+# Cargo.lock beside this file pins every crate they reach.
 # Commit Cargo.lock: the images and the generated CI build with --locked
 # from it, and the stack's build brings it up to date.
 [workspace]
@@ -14,5 +15,7 @@ members = [
     "server/rs-stack/rs-pricing",
     "server/rs-stack/rs-stock",
 ]
-# The generated crates under the output root build on their own too.
-exclude = ["api", "sdk", "types"]
+# The generated crates under the output root build on their own too, and
+# the mirrors are path dependencies, whose dev-dependencies the lockfile
+# leaves out.
+exclude = ["api", "impl", "sdk", "types"]

@@ -23,7 +23,7 @@ serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 schemas-rs-catalog-api = { path = "../../../api/rs-catalog" }
-schemas-rs-catalog-implementation = { path = "../../../../../rust/rs-catalog" }
+schemas-rs-catalog-implementation = { path = "../../../impl/rs-catalog" }
 schemas-rs-pricing-api = { path = "../../../api/rs-pricing" }
-schemas-rs-pricing-implementation = { path = "../../../../../rust/rs-pricing" }
+schemas-rs-pricing-implementation = { path = "../../../impl/rs-pricing" }
 superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging"] }

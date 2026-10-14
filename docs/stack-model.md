@@ -2202,16 +2202,45 @@ its jobs and workers stay Go's.
   them with what it builds through `Implementations::new`. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
   its own workspace, so no `Cargo.toml` above it claims it. The server's
-  crate depends on it by the package name its `Cargo.toml` gives it.
+  crate depends on its mirror by the package name its `Cargo.toml` gives
+  it.
+- **Mirror.** The crate names the API crate by its path under the output
+  root its scaffold was written for, which its editor and its own `cargo
+  test` build against. So each build of a stack copies each
+  implementation its Rust servers build against into
+  `<output-root>/impl/<service>/`, and the server crates depend on the
+  copy (D65): an output root builds against its own API crates alone,
+  `stack dev --out` builds anywhere, and two output roots build at once.
+  The copy's `Cargo.toml` is the crate's with every path dependency
+  re-based for the copy's directory: the API crate's names the current
+  output root's `api/<service>`, any other under the output root the
+  crate names its API crate under names the same place under the current
+  one, and the crate's `[workspace]` table and `package.workspace` go. A
+  crate that inherits a field or a dependency from a workspace
+  (`workspace = true`), or whose build script or targets lie outside it,
+  is refused. The copy holds the crate's other files as a package of it
+  would: not the root's `Cargo.lock` and `target/`, `.git`, or a
+  directory with a `Cargo.toml` of its own, nor what `[package] include`
+  leaves out when it is set, or else what `[package] exclude` and the
+  crate's `.gitignore` files leave out, so it holds what a fresh checkout
+  builds from. A build writes only the files whose content changed, so
+  Cargo's fingerprints keep a rebuild cheap, removes the files the crate
+  no longer has, and removes a mirror no server crate depends on. A change
+  to the crate reaches the servers with the next build of the stack, which
+  `stack dev` runs first; a source that includes a file outside its crate
+  by a relative path does not build from the copy.
 - **Workspace.** `<output-root>/Cargo.toml` is a virtual workspace whose
   members are the Rust server crates of every stack built into the output
   root, `server/<stack>/<server>`, listed by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
   `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
-  under the output root builds on its own, as before. The generated
-  crates the servers depend on and the implementations are path
-  dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
-  pins every crate they reach. The lockfile lies outside
+  under the output root builds on its own, as before, and `impl`, so a
+  mirror is no member, whose dev-dependencies Cargo would resolve. The
+  generated crates the servers depend on and the implementations' mirrors
+  are path dependencies, not members, and its lockfile,
+  `<output-root>/Cargo.lock`, pins every crate they reach, and names no
+  path crate's directory, so it holds in any output root. The lockfile
+  lies outside
   `server/<stack>`, which each build empties, and the project commits it
   as it commits `bun.lock` (D51, amended): `dist/*` and `!dist/Cargo.lock`
   take it back from an ignored output root, and the build says so in one
@@ -2267,21 +2296,18 @@ its jobs and workers stay Go's.
   by path to check the lockfile, so `Dockerfile.dockerignore` takes in,
   by pattern, every server crate's manifest and sources, every Rust API
   crate's manifest, sources and `openapi.json`, the Rust SDKs and types,
-  and every implementation's manifest and sources, then the server's own
-  implementations whole and the checkouts of the HTTP runtime, the schema
-  runtime and superscalar's crate with its workspace's root manifest,
-  whose lints the crate inherits. Without `[paths] scalar_rust` or
-  `schema_runtime_rust`, or with a checkout outside the build context, no
-  Dockerfile is written, and the build says why.
+  and every implementation's mirror under `impl/` whole, then the
+  checkouts of the HTTP runtime, the schema runtime and superscalar's
+  crate with its workspace's root manifest, whose lints the crate
+  inherits. No implementation's own directory goes in. Without `[paths]
+  scalar_rust` or `schema_runtime_rust`, or with a checkout outside the
+  build context, no Dockerfile is written, and the build says why.
 - **Local.** `stack dev` builds each Rust server's crate with `cargo build
   --release --locked` into the program directory's Cargo target
   directory and runs its binary (section 8.3). Its build of the stack has
-  brought the lockfile up to date first, so a manifest the engineer
-  changes reaches the lockfile through `stack dev`. The implementation's
-  `Cargo.toml` names the API crate by its path under the output root the
-  scaffold was written for, so the server builds in that output root
-  alone: with `--out` elsewhere, cargo finds two crates of the API's name
-  and refuses the workspace.
+  brought the mirrors and the lockfile up to date first, so a change the
+  engineer makes to an implementation, its manifest too, reaches the
+  servers and the lockfile through `stack dev`, with `--out` anywhere.
 - **CI.** The generated `check` sets up the Rust release before the build,
   refuses a lockfile git does not track or the build changed, and runs
   `cargo check --locked` in each Rust server's crate (section 11.3).

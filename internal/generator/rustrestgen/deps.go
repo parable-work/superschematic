@@ -305,9 +305,11 @@ var ImplementationLib = filepath.Join("src", "lib.rs")
 // crate that exists, so it never overwrites the engineer's code, and
 // reports whether it wrote. Its Cargo.toml depends on the API crate at
 // apiDir and on the HTTP runtime at paths.HTTPRuntimeRust, by paths
-// relative to dir, and its create(deps) returns the Handlers, each method
-// answering 501 Not Implemented. The output must have its Deps
-// (SetDeps).
+// relative to dir, for the crate's editor and its own `cargo test`; a
+// stack's server builds against the crate's mirror under its output root,
+// whose Cargo.toml names that root's API crate (D65). Its create(deps)
+// returns the Handlers, each method answering 501 Not Implemented. The
+// output must have its Deps (SetDeps).
 func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (bool, error) {
 	if output.Deps == nil {
 		return false, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)

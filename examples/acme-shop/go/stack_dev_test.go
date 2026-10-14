@@ -85,11 +85,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// stack dev builds into the example's output root, schemas/dist, as the
 	// tutorial's does, which build-all has just written: its build writes
 	// the same files again, and its install of the Bun workspace there
-	// leaves the committed bun.lock as it is. Only there does shop-stock's
-	// server build: the Cargo.toml of its implementation names the API
-	// crate by its path under schemas/dist, as the scaffold wrote it, so a
-	// server crate in another output root would reach a second crate of
-	// that name. It builds frozen to the committed Cargo.lock.
+	// leaves the committed bun.lock as it is. shop-stock's server builds
+	// frozen to the committed Cargo.lock, against the mirror of its
+	// implementation the build writes under schemas/dist/impl (D65), and
+	// reuses the crates an earlier run compiled there.
 	outputRoot := filepath.Join("..", "schemas", "dist")
 	output := &lockedBuffer{}
 	stack := exec.Command(binary, "stack", "dev", "--remove-data")
